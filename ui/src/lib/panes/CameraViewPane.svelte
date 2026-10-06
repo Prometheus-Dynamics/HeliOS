@@ -29,6 +29,10 @@
 
   function snapshot() {
     if (!camera) return;
+    if (!camera.feed.base) {
+      toasts.info("Snapshots need a camera preview, which the device does not stream yet");
+      return;
+    }
     const i = String(cluster.feedIndex(camera)).padStart(4, "0");
     const a = document.createElement("a");
     a.href = `${camera.feed.base}/${i}.jpg`;

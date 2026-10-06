@@ -1,12 +1,25 @@
 // The robot's geometry: where each camera is mounted, and an optional CAD
-// model to place them on. Placements persist; the model is loaded from a
-// file you pick (GLB, glTF, STL, OBJ, PLY or 3MF) and kept for the session.
+// model to place them on. Placements persist (on the device's camera mounts
+// when live, in the browser with mocks); the model is loaded from a file you
+// pick (GLB, glTF, STL, OBJ, PLY or 3MF) and kept for the session.
 
 import type * as THREE from "three";
+import { api, errorText } from "$lib/api/client";
+import type { CameraMount } from "$lib/api/types";
 import { loadRaw, save } from "$lib/core/persist";
 import { defaultPlacement, type Placement } from "$lib/three/mounts";
 import { cluster } from "./cluster.svelte";
+import { liveState } from "./live.svelte";
 import { toasts } from "./toasts.svelte";
+
+/** Device mounts use the robot-frame convention of exportTransforms (pitch positive down). */
+function toMount(p: Placement): CameraMount {
+  return { x: p.pos[0], y: p.pos[1], z: p.pos[2], roll: p.roll, pitch: -p.pitch, yaw: p.yaw };
+}
+
+function fromMount(m: CameraMount): Placement {
+  return { pos: [m.x, m.y, m.z], roll: m.roll, pitch: -m.pitch, yaw: m.yaw };
+}
 
 export interface ModelInfo {
   name: string;
@@ -34,8 +47,14 @@ class RobotStore {
   /** The camera waiting for a click on the model, if any. */
   picking = $state<string | null>(null);
 
+  #pushTimers = new Map<string, number>();
+
   placement(cameraId: string): Placement | null {
-    if (this.#placements[cameraId]) return this.#placements[cameraId];
+    if (cluster.mock) {
+      if (this.#placements[cameraId]) return this.#placements[cameraId];
+    } else if (liveState.mounts[cameraId]) {
+      return fromMount(liveState.mounts[cameraId]);
+    }
     const c = cluster.camera(cameraId);
     return c ? defaultPlacement(c) : null;
   }
@@ -50,18 +69,45 @@ class RobotStore {
   }
 
   isCustom(cameraId: string) {
-    return Boolean(this.#placements[cameraId]);
+    return cluster.mock ? Boolean(this.#placements[cameraId]) : Boolean(liveState.mounts[cameraId]);
+  }
+
+  /** Store a mount on the device (debounced while dragging). The CAD part is browser-only. */
+  #push(cameraId: string, mount: CameraMount | null) {
+    clearTimeout(this.#pushTimers.get(cameraId));
+    this.#pushTimers.set(
+      cameraId,
+      window.setTimeout(async () => {
+        try {
+          if (mount) await api.setMount(cameraId, mount);
+          else await api.clearMount(cameraId);
+        } catch (error) {
+          toasts.error(`Camera mount not saved: ${errorText(error)}`);
+        }
+      }, 400),
+    );
   }
 
   set(cameraId: string, patch: Partial<Placement>) {
     const base = this.placement(cameraId) ?? { pos: [0, 0, 0.3], yaw: 0, pitch: 15, roll: 0 };
-    this.#placements[cameraId] = { ...base, ...patch, pos: [...(patch.pos ?? base.pos)] as [number, number, number] };
-    save("placements", this.#placements);
+    const next: Placement = { ...base, ...patch, pos: [...(patch.pos ?? base.pos)] as [number, number, number] };
+    if (cluster.mock) {
+      this.#placements[cameraId] = next;
+      save("placements", this.#placements);
+      return;
+    }
+    liveState.mounts[cameraId] = toMount(next);
+    this.#push(cameraId, liveState.mounts[cameraId]);
   }
 
   reset(cameraId: string) {
-    delete this.#placements[cameraId];
-    save("placements", this.#placements);
+    if (cluster.mock) {
+      delete this.#placements[cameraId];
+      save("placements", this.#placements);
+      return;
+    }
+    delete liveState.mounts[cameraId];
+    this.#push(cameraId, null);
   }
 
   /** WPILib-style robot-to-camera transforms for robot code. */

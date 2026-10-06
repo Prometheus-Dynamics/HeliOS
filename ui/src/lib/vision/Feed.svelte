@@ -112,7 +112,14 @@
 
 <div class="feed" bind:this={host} style:--tint={tint}>
   <div class="frame" style:width="{fit.w}px" style:height="{fit.h}px">
-    <img bind:this={img} {src} alt="{camera.name} camera" draggable="false" onload={sample} />
+    {#if camera.feed.base}
+      <img bind:this={img} {src} alt="{camera.name} camera" draggable="false" onload={sample} />
+    {:else}
+      <div class="no-preview">
+        <b>No preview</b>
+        <span>The device does not stream camera previews yet.</span>
+      </div>
+    {/if}
     <svg
       viewBox="0 0 {fw} {fh}"
       class:tool={roiTool}
@@ -206,6 +213,21 @@
   }
   img {
     user-select: none;
+  }
+  .no-preview {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: 4px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    background: repeating-linear-gradient(135deg, #0b0d11 0 12px, #0e1116 12px 24px);
+  }
+  .no-preview b {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
   }
   svg.tool {
     cursor: crosshair;

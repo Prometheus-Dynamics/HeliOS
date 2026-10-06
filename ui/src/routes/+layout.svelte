@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import "../app.css";
   import "@xyflow/svelte/dist/style.css";
   import Toasts from "$lib/components/shell/Toasts.svelte";
@@ -34,12 +35,20 @@
   $effect(() => {
     prefs.apply();
     shell.fromHash();
+  });
+
+  $effect(() => {
     // Start with something to show in panes that follow the selection.
     if (!selection.current && cluster.cameras[0]) selection.select({ kind: "camera", id: cluster.cameras[0].resourceId });
     if (!selection.last.workload && cluster.workloads[0]) selection.last.workload = { kind: "workload", id: cluster.workloads[0].id };
     if (!selection.last.device && cluster.nodes[0]) selection.last.device = { kind: "device", id: cluster.nodes[0].id };
-    const stopCluster = cluster.start();
-    const stopSystem = system.start();
+  });
+
+  // Separate from the effects above, and untracked: those re-run as live data
+  // arrives, and restarting the stores on every change would refetch in a loop.
+  $effect(() => {
+    const stopCluster = untrack(() => cluster.start());
+    const stopSystem = untrack(() => system.start());
     return () => {
       stopCluster();
       stopSystem();

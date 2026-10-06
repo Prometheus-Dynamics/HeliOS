@@ -109,6 +109,11 @@ class CalibrationStore {
   }
 
   async solve(camera: Camera) {
+    if (cluster.live) {
+      // The device has no calibration service yet; the API says so (501).
+      await cluster.live.calibrate(camera.resourceId);
+      return;
+    }
     this.step = "solve";
     await new Promise((r) => setTimeout(r, 900));
     const cover = this.coveredFraction;
