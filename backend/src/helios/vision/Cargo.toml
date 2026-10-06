@@ -18,7 +18,8 @@ dylib = ["daedalus/dylib-plugins"]
 [dependencies]
 thiserror = { workspace = true }
 daedalus = { workspace = true, features = ["plugins"] }
-styx = { workspace = true, default-features = false }
+# `daedalus`: Styx registers its own frame types with Daedalus (StyxFramesPlugin).
+styx = { workspace = true, default-features = false, features = ["daedalus"] }
 eidos-aruco = { workspace = true, features = ["simd"] }
 eidos-core = { workspace = true }
 

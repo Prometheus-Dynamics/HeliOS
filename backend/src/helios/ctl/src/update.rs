@@ -89,6 +89,8 @@ async fn apply_update_async(args: ApplyUpdateArgs) -> Result<()> {
         .apply_mutations(MutationBatch {
             base_revision: snapshot.state.desired.revision,
             mutations: vec![DesiredStateMutation::PutNode(node), DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)],
+            // Unstamped: the node assigns HLC stamps on apply.
+            stamps: Vec::new(),
         })
         .await
         .context("failed to submit update artifact/workload to Orion")?;

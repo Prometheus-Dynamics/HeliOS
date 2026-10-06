@@ -10,10 +10,7 @@ use daedalus::{
 };
 
 use super::ExecutionError;
-use crate::{
-    model::{ExecutionWorkload, GraphRef, LoadedPlugin},
-    stream_io,
-};
+use crate::model::{ExecutionWorkload, GraphRef, LoadedPlugin};
 
 pub(crate) type ResidentHostGraph = HostGraph<HandlerRegistry>;
 
@@ -31,7 +28,6 @@ pub(crate) struct CompiledWorkloadGraph {
 /// `registry` with a host bridge of its own, so workloads never share host ports.
 pub(crate) fn compile_workload_graph(registry: &PluginRegistry, loaded_plugins: &[LoadedPlugin], workload: &ExecutionWorkload) -> Result<CompiledWorkloadGraph, ExecutionError> {
     validate_plugin_requirements(workload, loaded_plugins)?;
-    stream_io::register_framelease_type();
     let document = graph_document_for(workload)?;
     let host_alias = host_alias(&document);
     let engine = Engine::new(daedalus_engine_config()).map_err(|error| ExecutionError::Engine(error.to_string()))?;

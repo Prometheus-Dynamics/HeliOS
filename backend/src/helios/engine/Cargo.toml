@@ -23,7 +23,7 @@ notify = { workspace = true }
 orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
 daedalus = { workspace = true, features = ["engine", "dylib-plugins"] }
 # `facade` provides `styx::ipc::FrameClient`; no capture backends are needed.
-styx = { workspace = true, default-features = false, features = ["facade"] }
+styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

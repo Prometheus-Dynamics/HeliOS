@@ -118,22 +118,20 @@ tar = "0.4.44"
 tempfile = "3.27.0"
 
 # External repos
-# Prometheus Dynamics crates are pinned to sibling checkouts while the
-# stack is integrated locally; switch back to git revs before release.
-daedalus = { package = "daedalus-rs", version = "2.0.0", path = "../../Daedalus/crates/daedalus" }
-daedalus-data = { version = "2.0.0", path = "../../Daedalus/crates/data" }
-daedalus-macros = { version = "2.0.0", path = "../../Daedalus/crates/macros" }
-lemnos = { path = "../../lemnos/crates/lemnos", default-features = false }
-orion = { path = "../../Orion/crates/orion", default-features = false }
-styx = { version = "2.0.0", path = "../../Styx/crates/styx", default-features = false }
-eidos-aruco = { path = "../../Eidos/crates/aruco", default-features = false }
-eidos-core = { path = "../../Eidos/crates/core", default-features = false }
-
-# Eidos depends on Styx by git; send it to the same local checkout so there is
-# one FrameLease type.
-[patch."https://github.com/Prometheus-Dynamics/Styx.git"]
-styx = { path = "../../Styx/crates/styx" }
-styx-core-rs = { path = "../../Styx/crates/core" }
+# Declared exactly as Styx and Eidos declare them (git + branch): Cargo treats
+# `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
+# or Styx would mean two FrameLease and Payload types. The exact commits are
+# pinned by Cargo.lock (`cargo update -p <crate>` moves them):
+#   Daedalus v3.0.0 (e7e88fc), Styx 3ab3707, Eidos 47e9f1d, Orion v4 (main),
+#   Lemnos dev.
+daedalus = { package = "daedalus-rs", version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
+daedalus-data = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
+daedalus-macros = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
+lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
+orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "main", default-features = false }
+styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
+eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
+eidos-core = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 
 [profile.release]
 opt-level = "z"

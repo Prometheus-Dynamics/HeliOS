@@ -29,10 +29,11 @@ have been removed. Apply these rules to their replacements.
    - `FrameLease` is the only frame carrier between processes and between
      graph nodes. Wrap it with `Payload::shared_with`, without copying, and map
      its residency to `Residency` (dmabuf becomes `External`).
-   - Its Daedalus type key and registration live in HeliOS's engine
-     (`backend/src/helios/engine/src/stream_io.rs`). There is no shared
-     Styx/Daedalus crate, and neither library depends on the other. Keep the
-     glue there, and register it once, not per frame.
+   - Styx owns its Daedalus integration (`styx::core::daedalus`, feature
+     `daedalus`): the `styx:framelease` type key, zero-copy `frame_payload`, and
+     `StyxFramesPlugin`, which the engine installs once into every registry
+     (`backend/src/helios/engine/src/plugins/loader.rs`). Don't re-register the
+     frame type in HeliOS; `engine/src/stream_io.rs` only adapts it.
 2. **No decoded images at transport boundaries.** `DynamicImage` (or any other
    decoded image type) is never a runtime transport boundary, an Orion/IPC
    payload, or a graph input/output that is meant to be wired between

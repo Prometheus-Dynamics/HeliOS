@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use daedalus::{PluginLibrary, PluginLibraryError, PluginRegistry, runtime::plugins::PluginError};
+use styx::core::daedalus::StyxFramesPlugin;
 
 use crate::model::LoadedPlugin;
 use crate::plugins::builtin::install_builtin_plugins;
@@ -31,9 +32,10 @@ pub struct PluginLoadResult {
 }
 
 pub fn load_plugins(paths: &[PathBuf]) -> Result<PluginLoadResult, PluginLoadError> {
-    crate::stream_io::register_framelease_type();
     // Host bridges are per workload: each compiled graph gets its own `HostBridgeManager`.
     let mut registry = PluginRegistry::new();
+    // Styx frames first: every plugin taking a `FrameLease` relies on its type key.
+    registry.install(&StyxFramesPlugin::new())?;
     let builtins = install_builtin_plugins(&mut registry)?;
     let libraries = paths.iter().map(|path| load_plugin_library(path, &mut registry)).collect::<Result<Vec<_>, _>>()?;
 

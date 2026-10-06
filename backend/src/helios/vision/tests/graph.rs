@@ -1,24 +1,24 @@
 //! The ArUco graph, compiled from a versioned graph document and driven with
 //! a camera-like frame.
 
-use std::{num::NonZeroU32, str::FromStr, sync::Arc};
+use std::{num::NonZeroU32, str::FromStr};
 
 use daedalus::{
     engine::{Engine, EngineConfig},
     planner::GraphDocument,
     runtime::plugins::PluginRegistry,
-    transport::{Payload, Residency, TypeKey},
 };
 use helios_vision::{
     graphs::aruco_graph_document,
     image::GrayImage,
-    plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin},
+    plugin::{MarkerList, VisionPlugin},
     testing::{
         DICT_4X4_50,
         render::{paste_warped, render_marker},
     },
 };
 use styx::{
+    core::daedalus::{StyxFramesPlugin, frame_payload},
     core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
     imports::framelease::FrameLease,
 };
@@ -37,6 +37,7 @@ fn grey_frame(image: &GrayImage) -> FrameLease {
 fn aruco_graph_detects_marker_in_a_camera_frame() {
     let plugin = VisionPlugin::new();
     let mut registry = PluginRegistry::new();
+    registry.install(&StyxFramesPlugin::new()).expect("install styx frames");
     registry.install(&plugin).expect("install vision plugin");
 
     // Round-trip through the versioned JSON form the engine receives.
@@ -51,8 +52,7 @@ fn aruco_graph_detects_marker_in_a_camera_frame() {
     let marker = render_marker(&DICT_4X4_50, 17, 16, 1).unwrap();
     assert!(paste_warped(&mut scene, &marker, [[200.0, 120.0], [400.0, 140.0], [390.0, 330.0], [190.0, 310.0]]));
     let frame = grey_frame(&scene);
-    let bytes = frame.payload_bytes() as u64;
-    let payload = Payload::shared_with(TypeKey::new(FRAMELEASE_TYPE_KEY), Arc::new(frame), Residency::Cpu, None, Some(bytes));
+    let payload = frame_payload(frame);
     host.push_payload("frame", payload);
     host.tick().expect("tick");
 
@@ -69,6 +69,7 @@ fn aruco_graph_detects_marker_in_a_camera_frame() {
 fn aruco_graph_document_matches_golden_file() {
     let plugin = VisionPlugin::new();
     let mut registry = PluginRegistry::new();
+    registry.install(&StyxFramesPlugin::new()).expect("install styx frames");
     registry.install(&plugin).expect("install vision plugin");
     for dictionary in ["4x4_50", "36h11"] {
         let json = aruco_graph_document(&registry, &plugin, dictionary).expect("build graph").to_json().expect("serialize document");
@@ -87,6 +88,7 @@ fn aruco_graph_document_matches_golden_file() {
 fn apriltag_graph_detects_36h11() {
     let plugin = VisionPlugin::new();
     let mut registry = PluginRegistry::new();
+    registry.install(&StyxFramesPlugin::new()).expect("install styx frames");
     registry.install(&plugin).expect("install vision plugin");
     let document = aruco_graph_document(&registry, &plugin, "36h11").expect("build graph");
     let mut host = Engine::new(EngineConfig::default()).unwrap().compile_document(&registry, document).expect("compile");
@@ -94,8 +96,7 @@ fn apriltag_graph_detects_36h11() {
     let marker = render_marker(&helios_vision::testing::TAG_36H11, 586, 14, 1).unwrap();
     assert!(paste_warped(&mut scene, &marker, [[180.0, 100.0], [420.0, 110.0], [410.0, 360.0], [170.0, 350.0]]));
     let frame = grey_frame(&scene);
-    let bytes = frame.payload_bytes() as u64;
-    host.push_payload("frame", Payload::shared_with(TypeKey::new(FRAMELEASE_TYPE_KEY), Arc::new(frame), Residency::Cpu, None, Some(bytes)));
+    host.push_payload("frame", frame_payload(frame));
     host.tick().expect("tick");
     let markers: MarkerList = host.take("markers").expect("markers output");
     assert_eq!(markers.markers.iter().map(|m| (m.dictionary.as_str(), m.id)).collect::<Vec<_>>(), vec![("36h11", 586)]);

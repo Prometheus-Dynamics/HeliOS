@@ -29,8 +29,8 @@ use crate::geometry::Point;
 use crate::image::GrayView;
 use crate::refine::refine_corners;
 
-/// Key of the Styx frame carrier, shared with the engine's frame glue.
-pub const FRAMELEASE_TYPE_KEY: &str = "styx:framelease";
+/// Key of the Styx frame carrier (owned by Styx).
+pub const FRAMELEASE_TYPE_KEY: &str = styx::core::daedalus::FRAME_TYPE_KEY;
 pub const MASK_TYPE_KEY: &str = "eidos:mask";
 
 /// A binary mask on a graph edge (Eidos `MaskFrame`, 0 or 255 per pixel).
@@ -307,16 +307,9 @@ struct MaskSummary {
     height: i64,
 }
 
-/// Give `FrameLease` its stable key, so node ports taking a frame match the
-/// `styx:framelease` payloads the engine feeds (registration is global and
-/// idempotent; the engine's frame glue registers the same key).
-pub fn register_frame_type() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| daedalus::data::typing::register_type::<FrameLease>(daedalus::data::model::TypeExpr::opaque(FRAMELEASE_TYPE_KEY)));
-}
-
+/// Frame ports take `FrameLease`, whose type key (`styx:framelease`) comes from
+/// Styx's `StyxFramesPlugin`; hosts install that plugin before this one.
 fn install(registry: &mut PluginRegistry) -> daedalus::runtime::plugins::PluginResult<()> {
-    register_frame_type();
     registry.register_value_serializer::<Mask, _>(|mask| {
         let resolution = mask.0.as_frame().meta().format.resolution;
         MaskSummary { width: resolution.width.get() as i64, height: resolution.height.get() as i64 }.to_value()
