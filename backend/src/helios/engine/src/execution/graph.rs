@@ -5,8 +5,8 @@ use std::time::Instant;
 use daedalus::{
     data::model::Value,
     engine::{DEFAULT_FRAME_OVERHEAD_WINDOW, Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
-    planner::GraphDocument,
-    runtime::{BackpressureStrategy, HOST_HELD_INPUTS_KEY, HostBridgeManager, RuntimeEdgeExplanation, handler_registry::HandlerRegistry, plugins::PluginRegistry},
+    planner::{GraphDocument, HostInputPolicy},
+    runtime::{BackpressureStrategy, HostBridgeManager, RuntimeEdgeExplanation, handler_registry::HandlerRegistry, plugins::PluginRegistry},
 };
 
 use super::ExecutionError;
@@ -48,8 +48,9 @@ pub(crate) struct CompiledWorkloadGraph {
 /// `registry` with a host bridge of its own, so workloads never share host ports.
 ///
 /// `frame_inputs` are the host inputs camera frames go into; when there are any, every other
-/// host input is context and is declared held in the document before planning, so the planner
-/// can branch it for consumers that take it by value (a runtime-only `set_held_input` cannot).
+/// host input is context and is declared held in the document before planning
+/// (`GraphDocument::set_host_input_policy`), so the planner can branch it for consumers that
+/// take it by value (a runtime-only `set_held_input` cannot).
 pub(crate) fn compile_workload_graph(
     registry: &PluginRegistry,
     loaded_plugins: &[LoadedPlugin],
@@ -60,11 +61,11 @@ pub(crate) fn compile_workload_graph(
     validate_plugin_requirements(workload, loaded_plugins)?;
     let mut document = graph_document_for(workload)?;
     validate_document_requires(registry, &document)?;
+    let host_alias = host_alias(&document);
     if !frame_inputs.is_empty() {
-        declare_context_held(&mut document, frame_inputs);
+        declare_context_held(&mut document, &host_alias, frame_inputs)?;
     }
     let requires = serde_json::to_value(&document.requires).unwrap_or_default();
-    let host_alias = host_alias(&document);
     let engine = Engine::new(daedalus_engine_config(settings)).map_err(|error| ExecutionError::Engine(error.to_string()))?;
     let started_at = Instant::now();
     let host_graph = engine.compile_document_host_graph(registry, document, registry.handlers(), HostBridgeManager::new(), host_alias).map_err(|error| ExecutionError::Plan(error.to_string()))?;
@@ -135,27 +136,19 @@ fn validate_document_requires(registry: &PluginRegistry, document: &GraphDocumen
     Err(ExecutionError::GraphDocument(format!("`requires` does not list plugin(s) {} that provide its nodes; build documents with PluginRegistry::graph_document", missing.join(", "))))
 }
 
-/// Declare every host input of `document` except `frame_inputs` held (`HOST_HELD_INPUTS_KEY` on
-/// its host bridge node, as `GraphBuilder::held_input` records it), keeping what it declares.
-fn declare_context_held(document: &mut GraphDocument, frame_inputs: &[String]) {
-    let graph = &mut document.graph;
-    let Some(host) = graph.nodes.iter().position(|node| matches!(node.metadata.get("host_bridge"), Some(Value::Bool(true)))) else {
-        return;
+/// Declare every host input of `document`'s host bridge `host` except `frame_inputs` held, with
+/// Daedalus's `GraphDocument::set_host_input_policy` (kept in the document, as
+/// `GraphBuilder::held_input` records it).
+pub(super) fn declare_context_held(document: &mut GraphDocument, host: &str, frame_inputs: &[String]) -> Result<(), ExecutionError> {
+    let Ok(ports) = document.graph.host_input_ports(host) else {
+        // No host bridge: nothing to hold.
+        return Ok(());
     };
-    let mut context = graph.edges.iter().filter(|edge| edge.from.node.0 == host && !frame_inputs.contains(&edge.from.port)).map(|edge| edge.from.port.clone()).collect::<Vec<_>>();
-    context.sort();
-    context.dedup();
-    if context.is_empty() {
-        return;
+    let context = ports.into_iter().filter(|port| !frame_inputs.iter().any(|frame| frame == port)).map(str::to_string).collect::<Vec<_>>();
+    for port in context {
+        document.set_host_input_policy(host, &port, HostInputPolicy::Held).map_err(|error| ExecutionError::Plan(format!("host input '{port}': {error}")))?;
     }
-    let held = graph.nodes[host].metadata.entry(HOST_HELD_INPUTS_KEY.to_string()).or_insert_with(|| Value::List(Vec::new()));
-    if let Value::List(ports) = held {
-        for port in context {
-            if !ports.iter().any(|listed| listed.as_str() == Some(port.as_str())) {
-                ports.push(Value::String(port.into()));
-            }
-        }
-    }
+    Ok(())
 }
 
 /// The alias of the document's host bridge node (its label, else its id).

@@ -12,6 +12,7 @@ use daedalus::{
     engine::MetricsLevel,
     host_bridge::host_port,
     macros::node,
+    planner::HostInputPolicy,
     runtime::{NodeError, plugins::RegistryPluginExt},
 };
 use eidos_aruco::{ArucoDictionaryKind, BitGrid, dictionary};
@@ -406,6 +407,28 @@ fn frame_driver_pushes_context_with_each_frame() {
     wait_for("second frame", || driver.stats().ticks_processed == 2);
     let second = result(&mut driver);
     assert!(second.contains("imu-b") && second.contains("\"timestamp\":901"), "{second}");
+}
+
+/// Context inputs of a frame-driven graph are held in the document before it is planned
+/// (Daedalus's `GraphDocument::set_host_input_policy`); frame inputs stay queued.
+#[test]
+fn context_inputs_are_declared_held_before_planning() {
+    let plugins = TestPlugins::load();
+    let fusion = EngineTestPlugin::new().frame_context.clone().alias("fusion");
+    let graph = plugins
+        .registry()
+        .graph_builder()
+        .expect("graph builder")
+        .host_bridge("host")
+        .node(&fusion)
+        .connect(&host_port("host", "camera"), &fusion.inputs.frame)
+        .connect(&host_port("host", "imu"), &fusion.inputs.context)
+        .connect(&fusion.outputs.out, &host_port("host", "result"))
+        .build();
+    let mut document = plugins.registry().graph_document(graph);
+    graph::declare_context_held(&mut document, "host", &["camera".to_string()]).expect("declare held");
+    assert_eq!(document.host_input_policy("host", "imu").expect("imu policy"), HostInputPolicy::Held);
+    assert_eq!(document.host_input_policy("host", "camera").expect("camera policy"), HostInputPolicy::Queued);
 }
 
 /// A secondary camera's latest frame goes in one batch with each primary frame (the primary paces
