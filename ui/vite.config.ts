@@ -1,4 +1,6 @@
+import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
@@ -8,7 +10,17 @@ const env = (globalThis as { process?: { env: Record<string, string | undefined>
 const device = env.HELIOS_DEVICE ?? "http://127.0.0.1:5800";
 
 export default defineConfig({
-  plugins: [tailwindcss(), sveltekit()],
+  plugins: [
+    tailwindcss(),
+    // SvelteKit 3 reads its config here (svelte.config.js is no longer used).
+    sveltekit({
+      preprocess: vitePreprocess(),
+      // A static bundle the device serves; every route falls back to the app shell.
+      adapter: adapter({ fallback: "index.html", precompress: true }),
+      // SvelteKit 3 dropped the built-in `$lib` alias in favour of `#lib`; keep `$lib`.
+      alias: { $lib: "src/lib" },
+    }),
+  ],
   server: {
     port: 5810,
     strictPort: true,
