@@ -17,6 +17,9 @@ id = "helios-api"
 kind = "rust"
 package = "helios-api"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-api"
@@ -37,6 +40,9 @@ id = "helios-engine"
 kind = "rust"
 package = "helios-engine"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-engine"
@@ -57,6 +63,9 @@ id = "helios-updater"
 kind = "rust"
 package = "helios-updater"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-updater"
@@ -77,6 +86,9 @@ id = "helios-diagnostics"
 kind = "rust"
 package = "helios-diagnostics"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-diagnostics"
@@ -97,6 +109,9 @@ id = "heliosctl"
 kind = "rust"
 package = "heliosctl"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "heliosctl"
@@ -127,6 +142,9 @@ id = "helios-eidos-plugin"
 kind = "rust"
 package = "helios-eidos-plugin"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 target_name = "libhelios_eidos_plugin.so"
@@ -171,6 +189,9 @@ id = "helios-provision"
 kind = "rust"
 package = "helios-provision"
 source = "backend-workspace"
+# One cargo invocation for every backend package (Gaia build group), so shared
+# crates resolve the same features in the engine and its plugins.
+build_group = "helios-backend"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-provision"

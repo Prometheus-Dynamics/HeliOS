@@ -61,7 +61,7 @@ later layers, as that file describes:
   `@assets/runtime-services/core/etc/default/orion-node.env` (single-node
   appliance profile, `ORION_NODE_LOCAL_AUTH=same-user-or-group`, state in
   `/var/lib/helios/orion`), and adds `assets/buildroot/users.table` to
-  `BR2_ROOTFS_USERS_TABLES` for the `orion` user;
+  `BR2_ROOTFS_USERS_TABLES` pointing at Orion's `packaging/buildroot/orion-users.table` for the `orion` user;
 - `storage/squashfs-data.toml` adds the drop-in
   `orion-node.service.d/10-helios-state.conf` (state directory on the DATA
   partition);
