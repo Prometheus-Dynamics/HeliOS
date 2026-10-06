@@ -7,8 +7,9 @@ profile = "${input.profile}"
 # are matched against the build entrypoint's metadata.
 target = "raze"
 
-# Device support (kernel, OV9782 driver, libcamera/libpisp, boot overlays, USB
-# gadget, identity endpoint) comes from the Raze device package in Atlas
+# Device support (kernel, OV9782 driver, libcamera/libpisp, boot overlays, fan,
+# LED ring, USB gadget, identity endpoint, SSH keys from the boot partition,
+# hardware watchdog) comes from the Raze device package in Atlas
 # (devices/raze). HeliOS layers are imported after it, so they override its
 # defaults. Local development against an Atlas checkout:
 #   --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
@@ -20,12 +21,13 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package 1.0.6.
+# Raze device package 1.0.10 (Atlas branch dev): LED ring as 24-bit RGB, fan
+# at normal polarity with a 70 % floor, A/B update writer, hardware watchdog.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "a722abf9587cc3bc6ca7fbc2f166fed96d74bbda"
+rev = "f98489fa20f17fc626a3d0977073a71f6f559338"
 
 [inputs.profile]
 description = "Build profile"

@@ -1,0 +1,10 @@
+# HeliOS presets for Raze, applied when Buildroot runs `systemctl preset-all`
+# at image build time. They sort before the device package's
+# 70-pd-device.preset, so they win. Units no preset names are enabled.
+
+# The device package's A/B update writer (/usr/lib/pd-device/update) needs
+# its own disk layout (p1 autoboot.txt, p2/p3 boot, p5/p6 root). HeliOS still
+# uses its squashfs A/B layout with helios-updater and helios-ota-confirm, so
+# the device package's trial-boot confirmation has nothing to confirm; keep it
+# from mounting the boot partition on every boot.
+disable pd-device-update-confirm.service

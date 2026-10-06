@@ -9,7 +9,6 @@ arm_boost=1
 
 dtparam=i2c_csi_dsi0=on
 dtparam=i2c_csi_dsi1=on
-dtparam=watchdog=off
 
 dtoverlay=disable-wifi-pi5
 dtoverlay=disable-bt-pi5

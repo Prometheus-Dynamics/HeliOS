@@ -1,4 +1,4 @@
-description = "Shared identity/access layer: hostname, OS identity files, locale, timezone, SSH policy, and watchdog defaults."
+description = "Shared identity/access layer: hostname, OS identity files, locale, timezone and SSH policy. The hardware watchdog, SSH keys from the boot partition and the device identity endpoint come from the Raze device package."
 
 [stage]
 
@@ -81,12 +81,6 @@ dest = "/etc/systemd/system/sshd.service.d/10-helios.conf"
 origin = "static-asset"
 
 [[stage.files]]
-id = "identity-watchdog"
-src = "@assets/identity/etc/systemd/system.conf.d/50-helios-watchdog.conf"
-dest = "/etc/systemd/system.conf.d/50-helios-watchdog.conf"
-origin = "static-asset"
-
-[[stage.files]]
 id = "identity-set-build-time-script"
 src = "@assets/identity/usr/local/bin/helios-set-build-time.sh"
 dest = "/usr/local/bin/helios-set-build-time.sh"
@@ -116,7 +110,6 @@ stage_files = [
   "identity-timezone",
   "identity-sshd-config",
   "identity-sshd-service-dropin",
-  "identity-watchdog",
   "identity-set-build-time-script",
 ]
 stage_services = ["identity-set-build-time-service"]

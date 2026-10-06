@@ -1,9 +1,22 @@
-description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays; this file adds HeliOS's own boot files, kernel fragments, initramfs and image assembly."
+description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, and the device services; this file adds HeliOS's own boot files, kernel fragments, initramfs, unit presets and image assembly."
 target = "raze"
 
-imports = [
-  "../ops/usb-gadget-watchdog.toml",
-]
+# Presets that sort before the device package's 70-pd-device.preset (see the
+# file for what HeliOS turns off and why).
+[[stage.files]]
+id = "raze-helios-preset"
+src = "@assets/os/usr/lib/systemd/system-preset/50-helios.preset"
+dest = "/usr/lib/systemd/system-preset/50-helios.preset"
+origin = "static-asset"
+
+# The device package finds the boot partition (for SSH keys left in
+# pd-device/authorized_keys) from the root mount's source, which is an overlay
+# on HeliOS; name it instead.
+[[stage.files]]
+id = "raze-pd-device-ssh-keys-env"
+src = "@assets/os/etc/pd-device/ssh-keys.env"
+dest = "/etc/pd-device/ssh-keys.env"
+origin = "static-asset"
 
 [image]
 kind = "buildroot"
@@ -27,6 +40,9 @@ config_overrides = [
 name = "sdcard.img"
 format = "raw"
 required = true
+
+[image.feed]
+stage_files = ["raze-helios-preset", "raze-pd-device-ssh-keys-env"]
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
