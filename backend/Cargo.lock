@@ -1467,22 +1467,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "helios-vision"
-version = "1.0.0"
-dependencies = [
- "daedalus-rs",
- "eidos-aruco",
- "eidos-core",
- "styx",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "helios-vision-probe"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
- "helios-vision",
  "serde_json",
  "styx",
 ]

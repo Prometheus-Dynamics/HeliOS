@@ -17,7 +17,6 @@ members = [
     "src/helios/updater",
     "src/helios/diagnostics",
     "src/helios/ctl",
-    "src/helios/vision",
     "src/helios/eidos-plugin",
     "src/helios/vision-probe",
     "src/helios/provision",
@@ -147,9 +146,6 @@ panic = "unwind"
 # graph 4x slower) and the final artifact's (the engine and probe run the
 # graph; the Eidos plugin library links the stages).
 [profile.release.package.helios-eidos-plugin]
-opt-level = 3
-
-[profile.release.package.helios-vision]
 opt-level = 3
 
 [profile.release.package.helios-engine]

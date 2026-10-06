@@ -3,7 +3,7 @@ name = "helios-vision-probe"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "Run a HeliOS vision graph on a live camera and report detections and timings"
+description = "Run a HeliOS vision graph document on a live camera through the Eidos plugin library and report detections and timings"
 
 [lints]
 workspace = true
@@ -13,7 +13,6 @@ name = "helios-vision-probe"
 path = "src/main.rs"
 
 [dependencies]
-helios-vision = { path = "../vision" }
-daedalus = { workspace = true, features = ["engine", "plugins"] }
-styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders"] }
+daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"] }
+styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "daedalus"] }
 serde_json = { workspace = true }

@@ -46,7 +46,10 @@ too.
 - [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient + codec consumer of the peripherals CameraService.
 - [ ] Peripherals: move to the Lemnos APIs (async hotplug instead of the 250 ms poll, bind policy, typed errors, `Value::flatten_labels`, mock hwmon in tests).
 - [ ] Peripherals and engine: replace the duplicated FrameLease socket transport with Orion's `UnixFdLatestServer`/`Client`; drop the per-frame metadata file write; use `ResourceEndpoint::Custom` for `styx-frame-lease+unix`.
-- [ ] Engine: graphs as Daedalus `GraphDocument`, host port introspection, `inspect_payload`, input-driven `drive` instead of the 250 ms tick, and a stable FrameLease `TypeExpr` with an inspection path.
+- [x] Engine on Daedalus 3: graphs as `GraphDocument`s whose `requires` must cover their nodes, input-driven execution (a frame or a resource change ticks the graph; no timer), and per session `plan` (host ports, `explain_plan()`, adapter edges) and `metrics` (`HELIOS_ENGINE_METRICS_LEVEL`) artifacts. FrameLease's `TypeExpr` and inspection are Styx's (`styx.frames`).
+- [x] Vision nodes are Eidos's Daedalus plugin (`libhelios_eidos_plugin.so`); `helios-vision` removed; stored graphs are Eidos's templates.
+- [ ] Gaia: build and install `libhelios_eidos_plugin.so` into `/usr/lib/helios/plugins/daedalus`, in the same cargo invocation as `helios-engine` (Gaia builds one package per artifact today, which gives the plugin a different `FrameLease`).
+- [ ] Measure the Eidos plugin graph on the CM5 with `helios-vision-probe` (and `--metrics detailed` for per-node timings); use Daedalus's `FrameOverheadReport` in the engine's `metrics` artifact once Daedalus has it.
 - [ ] Engine: push typed resource values instead of JSON strings.
 - [ ] Fan: decide how helios-peripherals affects the fan alongside the kernel thermal governor (manual override via `fan.set_mode` today).
 - [ ] Read `sensors.toml`; nothing consumes it yet.
