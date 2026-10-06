@@ -31,6 +31,9 @@ export function resourceIcon(type: ResourceType): IconName {
     led: "bulb",
     power: "bolt",
     compute: "cpu-2",
+    bus: "route",
+    usb: "usb",
+    other: "plug-connected",
   };
   return map[type];
 }

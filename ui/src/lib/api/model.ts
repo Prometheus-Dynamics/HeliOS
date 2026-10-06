@@ -49,7 +49,7 @@ export interface Service {
   restarts: number;
 }
 
-export type ResourceType = "camera" | "stream" | "gpio" | "pwm" | "imu" | "fan" | "led" | "power" | "compute";
+export type ResourceType = "camera" | "stream" | "gpio" | "pwm" | "imu" | "fan" | "led" | "power" | "compute" | "bus" | "usb" | "other";
 export type Ownership = "exclusive" | "shared-read" | "shared-limited";
 
 export interface Resource {
@@ -106,6 +106,11 @@ export interface GraphEdge {
   to: { node: string; port: string };
 }
 
+/**
+ * The graph editor's form of a pipeline graph. It never travels or is stored
+ * as-is: `toDaedalus` (api/adapt.ts) turns it into the versioned Daedalus
+ * GraphDocument the device validates and runs, and `fromDaedalus` reads it back.
+ */
 export interface GraphDocument {
   format: "daedalus.graph";
   schema_version: 1;
