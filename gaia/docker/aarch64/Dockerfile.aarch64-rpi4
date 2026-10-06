@@ -18,7 +18,7 @@ RUN ln -sf /usr/bin/mold /usr/bin/aarch64-linux-gnu-ld.mold
 # 4. Install Rust and add the aarch64 target
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
-ARG RUST_TOOLCHAIN=1.97.1
+ARG RUST_TOOLCHAIN=1.99.0
 ENV RUST_TOOLCHAIN=${RUST_TOOLCHAIN}
 ENV PATH=/usr/local/rustup/toolchains/${RUST_TOOLCHAIN}-x86_64-unknown-linux-gnu/bin:/usr/local/cargo/bin:$PATH
 RUN curl https://sh.rustup.rs -sSf | sh /dev/stdin -y --profile minimal --default-toolchain ${RUST_TOOLCHAIN} --component rustfmt,clippy && \
