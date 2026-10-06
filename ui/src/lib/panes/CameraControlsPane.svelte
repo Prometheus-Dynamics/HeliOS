@@ -1,7 +1,7 @@
 <script lang="ts">
   // Every camera control, live. The everyday ones are open; sensor, ISP,
   // region and transport sit in closed "advanced" sections right below.
-  import type { Camera, CameraSettings } from "$lib/api/model";
+  import type { Camera, CameraControlInfo, CameraSettings } from "$lib/api/model";
   import { selection } from "$lib/core/selection.svelte";
   import Badge from "$lib/kit/Badge.svelte";
   import Choice from "$lib/kit/Choice.svelte";
@@ -34,6 +34,15 @@
   const active = $derived(camera ? guide.active(camera) : undefined);
   const cal = $derived(camera ? calibration.saved[calibration.key(camera)] : undefined);
   const place = $derived(camera ? robot.placement(camera.resourceId) : null);
+  // Live mode: the controls come from the camera's Styx camera service. Settings with no camera
+  // control behind them (sensor, ISP, transport, which the service plans per client) are hidden;
+  // resolution, format, pyramid and region are set per pipeline.
+  const live = !!cluster.live;
+  const controls = $derived(camera?.controls ?? []);
+  const std = (name: string): CameraControlInfo | undefined => controls.find((c) => c.standard === name);
+  const range = (c: CameraControlInfo | undefined, min: number, max: number) => ({ min: c?.min ?? min, max: c?.max ?? max });
+  const stepOf = (c: CameraControlInfo) => c.step ?? (c.kind === "float" ? Math.max(((c.max ?? 1) - (c.min ?? 0)) / 200, 0.001) : 1);
+  const sendControl = (c: CameraControlInfo, value: number | boolean) => camera && cluster.setCamera(camera.resourceId, {}, { [c.standard ?? c.name]: value } as Record<string, number | boolean>);
 
   const BASE: CameraSettings = { width: 1280, height: 800, fps: 60, format: "GREY", exposureUs: 2200, autoExposure: false, gain: 4, pyramid: true, roi: null };
   const EXTRA: Record<string, number | string | boolean> = {
@@ -109,7 +118,7 @@
     <span class="sep"></span>
     <IconButton icon="file-import" label="Import camera settings" size={24} onclick={() => importConfig(camera)} />
     <IconButton icon="file-export" label="Export camera settings" size={24} onclick={() => exportConfig(camera)} />
-    <IconButton icon="rotate-clockwise" label="Reset all to defaults" size={24} onclick={() => { cluster.setCamera(camera.resourceId, { ...BASE }); camera.extra = {}; toasts.info("Camera reset to defaults"); }} />
+    <IconButton icon="rotate-clockwise" label="Reset all to defaults" size={24} onclick={() => { if (cluster.live) { void cluster.live.resetCamera(camera.resourceId); return; } cluster.setCamera(camera.resourceId, { ...BASE }); camera.extra = {}; toasts.info("Camera reset to defaults"); }} />
   {/if}
 </PaneBar>
 
@@ -161,6 +170,18 @@
     </Section>
 
     <Section title="Capture" key="cam-capture">
+      {#if live}
+      <Prop label="Mode" help="What the camera service captures for its clients. Resolution, format and pyramid are set per pipeline (its camera binding).">
+        <span class="mono">{camera.settings.width}×{camera.settings.height} {camera.settings.format}</span>
+      </Prop>
+      {@const fps = std("fps")}
+      <Prop label="Frame rate" help={fps ? "Where the camera cannot change it while streaming, the camera service restarts the capture for every client." : "This camera has no frame rate control."}>
+        <Slider value={camera.settings.fps} {...range(fps, 1, 120)} unit="fps" label="Frame rate" disabled={!fps?.writable} onchange={(v) => set({ fps: v })} />
+      </Prop>
+      {#if camera.controlsError}
+        <Prop label="Controls"><span class="warn">{camera.controlsError}</span></Prop>
+      {/if}
+      {:else}
       <Prop label="Mode" changed={changed("width")} onreset={() => set({ width: BASE.width, height: BASE.height })}>
         <Choice
           label="Resolution"
@@ -178,25 +199,55 @@
       <Prop label="Format" changed={changed("format")} onreset={() => set({ format: BASE.format })} help="GREY is the sensor's 8-bit luma; tag detection needs nothing else.">
         <Seg label="Pixel format" value={camera.settings.format} options={[{ value: "GREY", label: "GREY" }, { value: "NV12", label: "NV12" }, { value: "MJPEG", label: "MJPEG" }]} onchange={(v) => set({ format: v })} />
       </Prop>
+      {/if}
     </Section>
 
     <Section title="Exposure" key="cam-exposure">
-      <Prop label="Auto exposure" changed={changed("autoExposure")} onreset={() => set({ autoExposure: BASE.autoExposure })}>
-        <Switch checked={camera.settings.autoExposure} label="Auto exposure" onchange={(v) => set({ autoExposure: v })} />
+      {@const ae = std("ae")}
+      {@const exposure = std("exposure_us")}
+      {@const gain = std("gain")}
+      <Prop label="Auto exposure" changed={!live && changed("autoExposure")} onreset={live ? undefined : () => set({ autoExposure: BASE.autoExposure })}>
+        <Switch checked={camera.settings.autoExposure} label="Auto exposure" disabled={live && !ae?.writable} onchange={(v) => set({ autoExposure: v })} />
       </Prop>
-      <Prop label="Exposure" changed={changed("exposureUs")} onreset={() => set({ exposureUs: BASE.exposureUs })} help="Short exposures stop motion blur on a moving robot.">
-        <Slider value={camera.settings.exposureUs} min={50} max={16000} step={50} unit="µs" label="Exposure" disabled={camera.settings.autoExposure} onchange={(v) => set({ exposureUs: v })} />
+      <Prop label="Exposure" changed={!live && changed("exposureUs")} onreset={live ? undefined : () => set({ exposureUs: BASE.exposureUs })} help="Short exposures stop motion blur on a moving robot.">
+        <Slider value={camera.settings.exposureUs} {...(live ? range(exposure, 10, 33000) : { min: 50, max: 16000 })} step={live ? 10 : 50} unit="µs" label="Exposure" disabled={camera.settings.autoExposure || (live && !exposure?.writable)} onchange={(v) => set({ exposureUs: v })} />
       </Prop>
-      <Prop label="Gain" changed={changed("gain")} onreset={() => set({ gain: BASE.gain })}>
-        <Slider value={camera.settings.gain} min={1} max={16} step={0.1} unit="×" label="Gain" disabled={camera.settings.autoExposure} onchange={(v) => set({ gain: v })} />
+      <Prop label="Gain" changed={!live && changed("gain")} onreset={live ? undefined : () => set({ gain: BASE.gain })}>
+        <Slider value={camera.settings.gain} {...(live ? range(gain, 1, 16) : { min: 1, max: 16 })} step={0.1} unit="×" label="Gain" disabled={camera.settings.autoExposure || (live && !gain?.writable)} onchange={(v) => set({ gain: v })} />
       </Prop>
+      {#if !live}
       <Prop label="Brightness" changed={changedX("brightness")} onreset={() => setX("brightness", EXTRA.brightness)}>
         <Slider value={x<number>("brightness")} min={-1} max={1} step={0.05} label="Brightness" onchange={(v) => setX("brightness", v)} />
       </Prop>
       <Prop label="Contrast" changed={changedX("contrast")} onreset={() => setX("contrast", EXTRA.contrast)}>
         <Slider value={x<number>("contrast")} min={0} max={3} step={0.05} label="Contrast" onchange={(v) => setX("contrast", v)} />
       </Prop>
+      {/if}
     </Section>
+
+    {#if live}
+    <Section title="All camera controls" key="cam-device-controls" count={controls.length}>
+      {#each controls as c (c.id)}
+        <Prop label={c.name} help={c.standard ? `Standard control: ${c.standard}` : undefined} changed={c.writable && c.default !== null && c.value !== null && c.value !== c.default} onreset={c.writable && c.default !== null ? () => sendControl(c, c.default as number | boolean) : undefined}>
+          {#if c.kind === "bool"}
+            <Switch checked={c.value === true} label={c.name} disabled={!c.writable} onchange={(v) => sendControl(c, v)} />
+          {:else if (c.kind === "menu" || c.kind === "int_menu") && c.menu}
+            <Choice label={c.name} value={String(c.value ?? 0)} options={c.menu.map((label, i) => ({ value: String(i), label }))} disabled={!c.writable} onchange={(v) => sendControl(c, Number(v))} />
+          {:else if (c.kind === "int" || c.kind === "uint" || c.kind === "float") && typeof c.value === "number"}
+            {#if c.min !== undefined && c.max !== undefined && c.max > c.min}
+              <Slider value={c.value} min={c.min} max={c.max} step={stepOf(c)} label={c.name} disabled={!c.writable} onchange={(v) => sendControl(c, v)} />
+            {:else}
+              <Num value={c.value} step={stepOf(c)} label={c.name} disabled={!c.writable} onchange={(v) => sendControl(c, v)} />
+            {/if}
+          {:else}
+            <span class="muted">{c.value === null ? "not readable" : String(c.value)}{c.writable ? "" : " · read only"}</span>
+          {/if}
+        </Prop>
+      {:else}
+        <Prop label="Controls"><span class="muted">{camera.controlsError ?? "The camera service lists no controls."}</span></Prop>
+      {/each}
+    </Section>
+    {:else}
 
     <Section title="Sensor" key="cam-sensor" advanced>
       <Prop label="Sensor mode" help="Binning trades resolution for light and speed." changed={changedX("sensorMode")} onreset={() => setX("sensorMode", EXTRA.sensorMode)}>
@@ -304,6 +355,8 @@
         <Seg label="Flash sync" value={x<string>("flash")} options={[{ value: "off", label: "Off" }, { value: "strobe", label: "Strobe" }, { value: "trigger", label: "Ext trigger" }]} onchange={(v) => setX("flash", v)} />
       </Prop>
     </Section>
+
+    {/if}
 
     <Section title="Device" key="cam-device" open={false}>
       <Prop label="Resource"><span class="mono">{camera.resourceId}</span></Prop>

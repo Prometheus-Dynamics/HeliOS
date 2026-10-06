@@ -2,7 +2,7 @@
 // versioned Daedalus GraphDocument that actually travels and is stored.
 
 import { CATALOG_BY_ID } from "./catalog";
-import type { Camera, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
 import type * as W from "./types";
 
 // --- Graphs ------------------------------------------------------------------
@@ -197,6 +197,46 @@ export function toCamera(camera: W.Camera): Camera {
     // No preview stream yet: an empty base tells the feed to show a placeholder.
     feed: { base: "", offset: 0 },
   };
+}
+
+const scalar = (value: W.ControlValue | null | undefined): number | boolean | null => (typeof value === "number" || typeof value === "boolean" ? value : null);
+const num = (value: W.ControlValue | null | undefined): number | undefined => (typeof value === "number" ? value : undefined);
+
+/** The camera service's control descriptors, for the camera pane's editors. */
+export function toControls(settings: W.CameraSettings): CameraControlInfo[] {
+  return settings.controls.map((c) => ({
+    id: c.id,
+    name: c.name,
+    kind: c.kind,
+    min: num(c.min),
+    max: num(c.max),
+    step: num(c.step),
+    menu: c.menu ?? undefined,
+    default: scalar(c.default),
+    value: scalar(c.current),
+    standard: c.standard,
+    writable: c.writable && !c.read_only,
+  }));
+}
+
+/** Set a control's value on the camera, and the settings fields its standard control feeds. */
+export function applyControlValue(camera: Camera, match: { id?: number; standard?: string | null; name?: string }, value: W.ControlValue | null) {
+  const control = camera.controls?.find((c) => (match.standard && c.standard === match.standard) || (match.id !== undefined && c.id === match.id) || (match.name !== undefined && c.name === match.name));
+  const v = scalar(value);
+  if (control) control.value = v;
+  const standard = match.standard ?? control?.standard;
+  if (v === null || !standard) return;
+  if (standard === "exposure_us" && typeof v === "number") camera.settings.exposureUs = v;
+  else if (standard === "gain" && typeof v === "number") camera.settings.gain = v;
+  else if (standard === "ae" && typeof v === "boolean") camera.settings.autoExposure = v;
+  else if (standard === "fps" && typeof v === "number") camera.settings.fps = v;
+}
+
+/** Take a `GET /v1/cameras/{id}/settings` answer into the camera. */
+export function applyCameraSettings(camera: Camera, settings: W.CameraSettings) {
+  camera.controls = toControls(settings);
+  camera.controlsError = undefined;
+  for (const control of camera.controls) if (control.standard) applyControlValue(camera, { standard: control.standard }, control.value);
 }
 
 // --- Pipelines ---------------------------------------------------------------

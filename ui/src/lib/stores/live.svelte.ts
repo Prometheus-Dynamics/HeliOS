@@ -3,7 +3,7 @@
 // turns the screens' actions into API calls. Features the device has no
 // backend for yet (501) are reported once, as "not available".
 
-import { fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "$lib/api/adapt";
+import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "$lib/api/adapt";
 import { api, ApiError, errorText, isNotAvailable } from "$lib/api/client";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "$lib/api/model";
 import type * as W from "$lib/api/types";
@@ -21,6 +21,14 @@ export interface ClusterData {
 }
 
 const DERIVED_TYPES = new Set(["execution.session", "execution.artifact", "system.update.execution"]);
+/** The camera pane's settings fields that are camera controls on the device, by API key. */
+const CONTROL_KEYS: Record<string, string> = { exposureUs: "exposure_us", autoExposure: "ae", gain: "gain", fps: "fps", colourTemp: "colour_temperature" };
+/** Styx's standard controls, which the API takes by these keys. */
+const STANDARD_KEYS = new Set(["exposure_us", "gain", "ae", "ev", "fps", "awb", "colour_temperature", "red_gain", "blue_gain", "af_mode", "af_trigger", "lens_position"]);
+/** Set per pipeline (its camera binding), not on the camera. */
+const PER_PIPELINE = new Set(["width", "height", "format", "pyramid", "roi"]);
+/** Control changes made while dragging are sent at most this often per camera. */
+const CONTROL_FLUSH_MS = 120;
 const LOG_CAP = 600;
 
 class LiveState {
@@ -42,6 +50,7 @@ export class LiveCluster {
   private unsubscribers: (() => void)[] = [];
   private pending = new Map<string, number>();
   private warned = new Set<string>();
+  private controlChanges = new Map<string, W.CameraControlChanges>();
 
   constructor(private data: ClusterData) {}
 
@@ -125,8 +134,30 @@ export class LiveCluster {
   async refreshCameras() {
     const cameras = await this.guard("cameras", () => api.cameras());
     if (!cameras) return;
-    this.data.cameras = cameras.map(toCamera);
+    const previous = new Map(this.data.cameras.map((c) => [c.resourceId, c]));
+    this.data.cameras = cameras.map((wire) => {
+      const camera = toCamera(wire);
+      const before = previous.get(camera.resourceId);
+      if (before?.controls) {
+        camera.controls = before.controls;
+        for (const control of camera.controls) if (control.standard) applyControlValue(camera, { standard: control.standard }, control.value);
+      }
+      return camera;
+    });
     liveState.mounts = Object.fromEntries(cameras.filter((c) => c.mount).map((c) => [c.id, c.mount!]));
+    await Promise.all(cameras.filter((c) => c.settings_writable).map((c) => this.refreshCameraControls(c.id)));
+  }
+
+  /** The camera's controls as its camera service lists them. */
+  async refreshCameraControls(id: string) {
+    try {
+      const settings = await api.cameraSettings(id);
+      const camera = this.data.cameras.find((c) => c.resourceId === id);
+      if (camera) applyCameraSettings(camera, settings);
+    } catch (error) {
+      const camera = this.data.cameras.find((c) => c.resourceId === id);
+      if (camera) camera.controlsError = errorText(error);
+    }
   }
 
   async refreshPipelines() {
@@ -182,9 +213,13 @@ export class LiveCluster {
         if (type === "camera.device") this.soon("cameras", () => this.refreshCameras());
         break;
       }
-      case "camera":
-        this.soon("cameras", () => this.refreshCameras());
+      case "camera": {
+        const data = event.data as W.CameraControlEvent | { id: string; change: string };
+        const camera = this.data.cameras.find((c) => c.resourceId === data.id);
+        if (data.change === "control" && camera?.controls) applyControlValue(camera, { id: (data as W.CameraControlEvent).control.id, standard: (data as W.CameraControlEvent).control.standard }, (data as W.CameraControlEvent).control.value);
+        else this.soon("cameras", () => this.refreshCameras());
         break;
+      }
       case "update":
         if ((event.data as W.UpdateStatus).phase !== undefined) {
           this.snapshot.update = event.data as W.UpdateStatus;
@@ -264,8 +299,65 @@ export class LiveCluster {
     return created?.id ?? "";
   }
 
-  async setCamera(id: string, settings: Partial<CameraSettings>) {
-    await this.act("Camera settings", () => api.setCameraSettings(id, settings));
+  /**
+   * Change camera controls from the camera pane's fields (and extra fields named like the
+   * device's controls). Changes made while dragging are merged and sent at most every
+   * CONTROL_FLUSH_MS; resolution, format, pyramid and ROI are per pipeline and are not sent.
+   */
+  async setCamera(id: string, settings: Partial<CameraSettings> & Record<string, unknown>) {
+    const camera = this.data.cameras.find((c) => c.resourceId === id);
+    const changes: W.CameraControlChanges = {};
+    let perPipeline = false;
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === undefined || value === null) continue;
+      if (PER_PIPELINE.has(key)) {
+        perPipeline = true;
+        continue;
+      }
+      if (key === "awb" && typeof value === "string") changes.awb = value === "auto";
+      else if (CONTROL_KEYS[key] && (typeof value === "number" || typeof value === "boolean")) changes[CONTROL_KEYS[key]] = value;
+      else if (STANDARD_KEYS.has(key) && (typeof value === "number" || typeof value === "boolean" || typeof value === "string")) changes[key] = value;
+      else if (camera?.controls?.some((c) => c.name === key) && (typeof value === "number" || typeof value === "boolean")) changes[key] = value;
+    }
+    if (perPipeline && !this.warned.has("per-pipeline")) {
+      this.warned.add("per-pipeline");
+      toasts.info("Resolution, format, pyramid and region are set per pipeline (its camera binding), not on the camera.");
+    }
+    if (Object.keys(changes).length === 0) return;
+    if (camera) for (const [key, value] of Object.entries(changes)) applyControlValue(camera, { standard: key, name: key }, typeof value === "string" ? null : value);
+    this.controlChanges.set(id, { ...(this.controlChanges.get(id) ?? {}), ...changes });
+    this.soon(`controls:${id}`, () => this.flushControls(id), CONTROL_FLUSH_MS);
+  }
+
+  private async flushControls(id: string) {
+    const changes = this.controlChanges.get(id);
+    this.controlChanges.delete(id);
+    if (!changes || Object.keys(changes).length === 0) return;
+    const result = await this.act("Camera settings", () => api.setCameraSettings(id, changes));
+    const camera = this.data.cameras.find((c) => c.resourceId === id);
+    if (!result) {
+      if (camera) await this.refreshCameraControls(id);
+      return;
+    }
+    for (const applied of result.applied) {
+      if (camera) applyControlValue(camera, { id: applied.id }, applied.value);
+      if (applied.restarted) toasts.info(`${camera?.name ?? id}: the capture restarted to apply ${applied.control}`);
+      else if (applied.deferred) toasts.info(`${camera?.name ?? id}: ${applied.control} applies when the camera starts`);
+    }
+  }
+
+  /** Put every writable control back to its default. */
+  async resetCamera(id: string) {
+    const camera = this.data.cameras.find((c) => c.resourceId === id);
+    if (!camera?.controls) return;
+    const changes: W.CameraControlChanges = {};
+    for (const c of camera.controls) {
+      if (!c.writable || c.default === null || c.standard === "af_trigger" || !["bool", "int", "uint", "float", "menu", "int_menu"].includes(c.kind)) continue;
+      changes[c.standard ?? c.name] = c.default;
+    }
+    if (Object.keys(changes).length === 0) return;
+    const result = await this.act("Reset camera", () => api.setCameraSettings(id, changes), () => `${camera.name} controls reset to defaults`);
+    if (result) await this.refreshCameraControls(id);
   }
 
   async reboot(nodeId: string) {
