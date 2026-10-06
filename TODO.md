@@ -50,7 +50,8 @@ too.
 - [ ] Engine: push typed resource values instead of JSON strings.
 - [ ] Fan: decide how helios-peripherals affects the fan alongside the kernel thermal governor (manual override via `fan.set_mode` today).
 - [ ] Read `sensors.toml`; nothing consumes it yet.
-- [ ] Application API for Atlas: identity, OTA upload/apply/status, update events. `helios-api` is only `/v1/health`, and Atlas's HTTP OTA path is broken without it.
+- [x] Application API for Atlas: identity, OTA upload/apply/status, update events (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`; docs/docs/api/http.md).
+- [ ] helios-api: the 501 endpoints (camera controls, preview, calibration, node catalog, fan/LEDs/IMU, safe mode, slot switch) need their backends; authentication for the API.
 - [ ] OTA: require sha256 in update manifests, optionally verify signatures (never required), report boot-confirm results over the API.
 
 ## Raze device package (Atlas `devices/raze`)
