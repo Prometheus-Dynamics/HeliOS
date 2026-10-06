@@ -33,7 +33,7 @@ session state, artifacts, and telemetry back into Orion.
 - local execution session lifecycle and failure reporting
 - resource binding injection into graph inputs
 - requesting frames from camera services for each workload (on the workload's graph
-  thread; no thread per camera)
+  thread, in its one `poll(2)` loop; no thread per camera)
 - input-driven execution of resident Daedalus graphs for assigned workloads
 - publication of executor/provider state back into Orion
 
@@ -83,32 +83,39 @@ session state, artifacts, and telemetry back into Orion.
   stays resident until the decoded workload changes or disappears.
 - **input-driven execution**: every workload graph runs serially on one thread of
   its own and ticks only when its input arrives (`execution::driver`), with
-  Daedalus's drive loops (`HostGraph::drive_blocking`, and its async twin
-  `HostGraph::drive` for cameras) and latest-only host inputs. No timer runs
-  graphs.
+  latest-only host inputs. No timer runs graphs. The thread is a plain blocking
+  loop around one `poll(2)` over its cameras' Styx `FrameClient` descriptors and
+  the graph's Daedalus inbound fd (`HostGraph::inbound_fd`; Daedalus
+  `docs/node-authoring.md`, "Waiting With poll(2) / epoll"); no async runtime.
+  When the inbound fd is readable the thread calls `HostGraph::tick_ready()`
+  (Daedalus clears and re-arms it; the engine never reads it).
+  `HostGraphStopHandle::stop()` makes the inbound fd readable, so a stop ends
+  the loop at once.
   - frame-driven workloads: a binding whose resource has a
-    `styx-frames+unix://` endpoint makes the workload frame-driven. The graph
-    thread keeps a reconnecting Styx `FrameClient` (luma at native size by
-    default; `binding.<input>.camera`, `.output_width`/`.output_height`,
-    `.pyramid` adjust the request) and awaits it and the graph's inbound wake
-    together on one `styx_graph::rt::block_on` (the client is pollable; Styx
-    `docs/frame-server.md`, "Without a thread per client"). Each frame goes
-    into the latest-only host input as a zero-copy `styx:framelease` payload
-    and the drive loop ticks once; frames that arrived during a tick are
-    drained to the newest, so a slow graph sees the newest frame and stale
-    ones are released. Leases are released when the tick returns. While the
-    camera service is not up, the thread backs off (100 ms to 2 s) waiting on
-    the graph's inbound waiter, so a stop still ends it at once.
+    `styx-frames+unix://` endpoint makes the workload frame-driven. Each camera
+    is a reconnecting, non-blocking Styx `FrameClient`
+    (`request_nonblocking`; luma at native size by default;
+    `binding.<input>.camera`, `.output_width`/`.output_height`, `.pyramid`
+    adjust the request), made without waiting for the service: a camera that
+    is not up, primary or secondary, never blocks the graph thread, and one
+    that comes up or restarts later is picked up by the client. When a
+    camera's descriptor is readable its frames are drained with `try_next()`
+    to the newest (older ones are released at once); the primary camera's
+    frame goes into the latest-only host input as a zero-copy
+    `styx:framelease` payload and the graph ticks once. Leases are released
+    when the tick returns.
   - context: in a frame-driven workload every other host input is declared
-    held in the document before planning (`daedalus.host_held_inputs`), so
-    the planner branches it for by-value consumers. The engine pushes a
+    held in the document before planning
+    (`GraphDocument::set_host_input_policy(host, port, HostInputPolicy::Held)`),
+    so the planner branches it for by-value consumers. The engine pushes a
     resource input when it changes; every tick sees its latest value and a
-    held push never ticks the graph. A secondary camera's latest frame goes in
-    one atomic batch (`HostGraph::batch`) with the primary frame, so both land
-    in the same tick.
+    held push never ticks the graph. A secondary camera's latest frame (at
+    most 500 ms old) goes in one atomic batch (`HostGraph::batch`) with the
+    primary frame, so both land in the same tick.
   - resource-driven workloads: the bound resources are pushed as one batch
-    into latest-only inputs whenever one changes, and `drive_blocking` ticks
-    once per batch. Graphs without bindings run once.
+    into latest-only inputs whenever one changes, which makes the inbound fd
+    readable; the same loop, with no cameras, ticks once per batch. Graphs
+    without bindings run once.
 - publication: the graph threads keep the latest outputs, stats and metrics
   and signal the engine, which publishes them to Orion at most every
   `HELIOS_ENGINE_PUBLISH_INTERVAL_MS` (default 250; the old
@@ -148,6 +155,4 @@ Known boundaries:
 - engine does not own camera decode/encode or preview publishing; peripherals
   owns the camera services.
 - graph `FrameLease` outputs are not re-served to other processes yet.
-- opening a camera service the first time blocks the graph thread for up to
-  its 2 s timeout (Styx's first `request` is blocking; only reconnecting is
-  not), including a secondary camera that is not up yet.
+- per-frame latency and CPU of the poll loop are not measured on the CM5 yet.
