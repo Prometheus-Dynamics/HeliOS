@@ -17,7 +17,13 @@ pub(crate) fn host_output_kind(port: &str) -> String {
     format!("host_output:{port}")
 }
 
+/// Driver stats: ticks, frame rate, camera connection, last error.
 pub(crate) const TELEMETRY_ARTIFACT_KIND: &str = "execution.telemetry";
+/// Host ports with their types, `explain_plan()` and the edges with adapter steps
+/// (`graph::PLAN_FORMAT`).
+pub(crate) const PLAN_ARTIFACT_KIND: &str = "execution.plan";
+/// Daedalus per-node and per-edge metrics (only with `HELIOS_ENGINE_METRICS_LEVEL` above `off`).
+pub(crate) const METRICS_ARTIFACT_KIND: &str = "execution.metrics";
 
 /// Render a host output payload as the JSON published in Orion.
 ///
@@ -55,12 +61,13 @@ pub(crate) fn output_artifact(workload: &ExecutionWorkload, port: &str, message:
     }
 }
 
-pub(crate) fn telemetry_artifact(workload: &ExecutionWorkload, message: String, observed_at_ms: u64) -> ExecutionArtifactRecord {
+/// A per-session artifact `<session>.<name>` of `kind` (telemetry, plan, metrics).
+pub(crate) fn session_artifact(workload: &ExecutionWorkload, name: &str, kind: &str, message: String, observed_at_ms: u64) -> ExecutionArtifactRecord {
     ExecutionArtifactRecord {
         workload_id: workload.workload_id.clone(),
         session_id: session_id_for(workload),
-        artifact_id: format!("{}.telemetry", session_id_for(workload)),
-        kind: TELEMETRY_ARTIFACT_KIND.into(),
+        artifact_id: format!("{}.{name}", session_id_for(workload)),
+        kind: kind.into(),
         observed_at_ms,
         message: Some(message),
         endpoints: Vec::new(),

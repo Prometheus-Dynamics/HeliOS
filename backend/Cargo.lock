@@ -1387,7 +1387,9 @@ name = "helios-engine"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
- "helios-vision",
+ "eidos-aruco",
+ "eidos-daedalus",
+ "helios-eidos-plugin",
  "memmap2",
  "notify",
  "orion",
