@@ -1,9 +1,13 @@
 use std::{
+    io::{Read, Write},
     num::NonZeroU32,
+    os::{
+        fd::{AsFd, BorrowedFd},
+        unix::net::UnixStream,
+    },
     path::PathBuf,
     str::FromStr,
     sync::Arc,
-    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -25,7 +29,7 @@ use styx::{
     core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
     imports::framelease::FrameLease,
 };
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::Notify;
 
 use super::{
     bindings::{FrameSourceSpec, ResourceInput},
@@ -68,25 +72,55 @@ fn frame_pair(primary: &FrameLease, secondary: Option<&FrameLease>) -> Result<St
 
 declare_plugin!(EngineTestPlugin, "engine.test", [source, echo, frame_passthrough, frame_context, frame_pair]);
 
-/// Frames handed over in-process, standing in for a camera service socket (pollable like a
-/// Styx `FrameClient`).
-struct ChannelFrameSource(mpsc::UnboundedReceiver<FrameLease>);
+/// Frames handed over in-process, standing in for a camera service socket: a descriptor that is
+/// readable while frames wait, like a Styx `FrameClient`'s.
+struct ChannelFrameSource {
+    frames: std::sync::mpsc::Receiver<FrameLease>,
+    wake: UnixStream,
+}
+
+/// The sending side of a [`ChannelFrameSource`].
+struct TestCamera {
+    frames: std::sync::mpsc::Sender<FrameLease>,
+    wake: UnixStream,
+}
+
+impl TestCamera {
+    fn send(&self, frame: FrameLease) -> std::io::Result<()> {
+        self.frames.send(frame).map_err(|_| std::io::Error::other("test camera closed"))?;
+        (&self.wake).write_all(&[1])
+    }
+}
+
+fn test_camera() -> (TestCamera, ChannelFrameSource) {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let (wake_tx, wake_rx) = UnixStream::pair().expect("socket pair");
+    wake_rx.set_nonblocking(true).expect("non-blocking");
+    (TestCamera { frames: sender, wake: wake_tx }, ChannelFrameSource { frames: receiver, wake: wake_rx })
+}
 
 impl FrameSource for ChannelFrameSource {
-    fn connect(&mut self) -> Result<(), (String, Duration)> {
-        Ok(())
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.wake.as_fd()
     }
 
-    fn poll_frame(&mut self, cx: &mut Context<'_>) -> Poll<FrameReceive> {
-        self.0.poll_recv(cx).map(|frame| frame.map_or_else(|| FrameReceive::Closed("test channel closed".into()), FrameReceive::Frame))
-    }
-
-    fn try_frame(&mut self) -> FrameReceive {
-        self.0.try_recv().map_or(FrameReceive::Idle, FrameReceive::Frame)
+    fn try_frame(&self) -> FrameReceive {
+        if let Ok(frame) = self.frames.try_recv() {
+            return FrameReceive::Frame(frame);
+        }
+        // Clear readiness, then look again: a frame sent meanwhile is taken now or leaves the
+        // descriptor readable.
+        let mut buf = [0_u8; 64];
+        while (&self.wake).read(&mut buf).is_ok_and(|read| read > 0) {}
+        self.frames.try_recv().map_or(FrameReceive::Idle, FrameReceive::Frame)
     }
 
     fn status(&self) -> FrameSourceStatus {
         FrameSourceStatus { connected: true, ..FrameSourceStatus::default() }
+    }
+
+    fn reopen(&mut self) -> Result<(), String> {
+        Ok(())
     }
 }
 
@@ -228,10 +262,10 @@ fn frame_spec(input: &str) -> FrameSourceSpec {
 }
 
 /// Start a driver for `workload` fed through the returned sender.
-fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, input: &str, settings: GraphSettings) -> (WorkloadDriver, mpsc::UnboundedSender<FrameLease>) {
+fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, input: &str, settings: GraphSettings) -> (WorkloadDriver, TestCamera) {
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[input.to_string()], settings).expect("compile graph");
-    let (sender, receiver) = mpsc::unbounded_channel();
-    let driver = WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(ChannelFrameSource(receiver)) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("start driver");
+    let (sender, receiver) = test_camera();
+    let driver = WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("start driver");
     (driver, sender)
 }
 
@@ -450,10 +484,9 @@ fn secondary_camera_frames_pair_with_the_primary_frame() {
     let document = plugins.registry().graph_document(graph).to_json().expect("document json");
     let workload = workload("workload.pair", document, Vec::new());
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &["front".to_string(), "side".to_string()], GraphSettings::default()).expect("compile graph");
-    let (front, front_frames) = mpsc::unbounded_channel();
-    let (side, side_frames) = mpsc::unbounded_channel();
-    let sources =
-        vec![(frame_spec("front"), Box::new(ChannelFrameSource(front_frames)) as Box<dyn FrameSource>), (frame_spec("side"), Box::new(ChannelFrameSource(side_frames)) as Box<dyn FrameSource>)];
+    let (front, front_frames) = test_camera();
+    let (side, side_frames) = test_camera();
+    let sources = vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), (frame_spec("side"), Box::new(side_frames) as Box<dyn FrameSource>)];
     let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new())).expect("start driver");
     let result = |driver: &mut WorkloadDriver| artifact_json(&driver.snapshot().1, "host_output:result");
 
@@ -599,4 +632,151 @@ fn camera_service_drives_workload_through_resource_endpoint() {
     assert!(removed.sessions.is_empty());
     assert!(stopped_at.elapsed() < Duration::from_secs(2));
     wait_for("the camera client to disconnect", || service.stats().clients == 0);
+}
+
+fn passthrough_document(plugins: &TestPlugins) -> String {
+    let pass = EngineTestPlugin::new().frame_passthrough.clone().alias("pass");
+    let graph = plugins
+        .registry()
+        .graph_builder()
+        .expect("graph builder")
+        .host_bridge("host")
+        .node(&pass)
+        .connect(&host_port("host", "camera"), &pass.inputs.frame)
+        .connect(&pass.outputs.frame, &host_port("host", "processed"))
+        .build();
+    plugins.registry().graph_document(graph).to_json().expect("document json")
+}
+
+/// A camera whose service is not there (a socket path nobody serves), as a real Styx source.
+fn missing_camera(dir: &tempfile::TempDir, input: &str) -> (FrameSourceSpec, Box<dyn FrameSource>) {
+    let spec = FrameSourceSpec { socket_path: dir.path().join(format!("{input}.sock")), ..frame_spec(input) };
+    let source = frame_source::StyxFrameSource::open(spec.clone()).expect("non-blocking camera client");
+    (spec, Box::new(source))
+}
+
+/// The graph thread's one `poll(2)` covers the camera's descriptor and the graph's inbound fd: a
+/// camera frame ticks the graph, and so does input pushed straight into the host bridge, which
+/// only makes the inbound fd readable.
+#[test]
+fn poll_loop_ticks_on_the_camera_fd_and_the_inbound_fd() {
+    let plugins = TestPlugins::load();
+    let (mut driver, camera) = spawn_channel_driver(&plugins, workload("workload.poll", passthrough_document(&plugins), Vec::new()), "camera", GraphSettings::default());
+    let processed = |driver: &mut WorkloadDriver| artifact_json(&driver.snapshot().1, "host_output:processed")["timestamp"].clone();
+
+    camera.send(flat_frame(4, 2, 1)).expect("send frame");
+    wait_for("the camera frame", || driver.stats().ticks_processed == 1);
+    assert_eq!(processed(&mut driver), 1);
+
+    driver.host().feed_payload("camera", crate::stream_io::framelease_payload(flat_frame(4, 2, 2)));
+    wait_for("the pushed frame", || driver.stats().ticks_processed == 2);
+    assert_eq!(processed(&mut driver), 2);
+    // Only the camera's frames count as received; nothing ticks without input.
+    std::thread::sleep(Duration::from_millis(50));
+    let stats = driver.stats();
+    assert_eq!((stats.frames_received, stats.ticks_processed, stats.ticks_failed), (1, 2, 0));
+}
+
+/// A secondary camera whose service is not up never holds up the graph thread: the primary
+/// camera's frames tick the graph at once, without a secondary frame.
+#[test]
+fn missing_secondary_camera_does_not_block_the_graph() {
+    let plugins = TestPlugins::load();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pair = EngineTestPlugin::new().frame_pair.clone().alias("pair");
+    let graph = plugins
+        .registry()
+        .graph_builder()
+        .expect("graph builder")
+        .host_bridge("host")
+        .node(&pair)
+        .connect(&host_port("host", "front"), &pair.inputs.primary)
+        .connect(&host_port("host", "side"), &pair.inputs.secondary)
+        .connect(&pair.outputs.out, &host_port("host", "result"))
+        .build();
+    let document = plugins.registry().graph_document(graph).to_json().expect("document json");
+    let workload = workload("workload.missing-side", document, Vec::new());
+    let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &["front".to_string(), "side".to_string()], GraphSettings::default()).expect("compile graph");
+    let (front, front_frames) = test_camera();
+
+    let started = Instant::now();
+    let mut driver = WorkloadDriver::start(workload, compiled, vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), missing_camera(&dir, "side")], Arc::new(Notify::new()))
+        .expect("start driver");
+    for timestamp in 1..=3 {
+        front.send(flat_frame(4, 4, timestamp)).expect("send front");
+        wait_for("the primary frame", || driver.stats().ticks_processed == timestamp);
+    }
+    assert!(started.elapsed() < Duration::from_secs(1), "the missing camera held the graph thread for {:?}", started.elapsed());
+    assert_eq!(artifact_json(&driver.snapshot().1, "host_output:result"), serde_json::json!({ "primary": 3, "secondary": null }));
+}
+
+/// Stopping a driver ends its loop at once: while its camera service is not up (the client keeps
+/// retrying in the background) and for a resource-driven graph waiting on its inbound fd only.
+#[test]
+fn stop_ends_the_poll_loop_promptly() {
+    let plugins = TestPlugins::load();
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let frames = workload("workload.stop-frames", passthrough_document(&plugins), Vec::new());
+    let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &frames, &["camera".to_string()], GraphSettings::default()).expect("compile graph");
+    let started = Instant::now();
+    let driver = WorkloadDriver::start(frames, compiled, vec![missing_camera(&dir, "camera")], Arc::new(Notify::new())).expect("start driver");
+    assert!(started.elapsed() < Duration::from_millis(500), "starting waited for the camera: {:?}", started.elapsed());
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!driver.stats().source.connected);
+    let stopping = Instant::now();
+    drop(driver);
+    assert!(stopping.elapsed() < Duration::from_millis(500), "stop took {:?}", stopping.elapsed());
+
+    let echo_node = EngineTestPlugin::new().echo.clone().alias("echo");
+    let graph = plugins
+        .registry()
+        .graph_builder()
+        .expect("graph builder")
+        .host_bridge("host")
+        .node(&echo_node)
+        .connect(&host_port("host", "sensor"), &echo_node.inputs.inp)
+        .connect(&echo_node.outputs.out, &host_port("host", "result"))
+        .build();
+    let document = plugins.registry().graph_document(graph).to_json().expect("document json");
+    let resources = workload("workload.stop-resources", document, vec![binding("sensor", "gpio_line.node-local.0")]);
+    let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &resources, &[], GraphSettings::default()).expect("compile graph");
+    let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new())).expect("start driver");
+    driver.update_context(vec![ResourceInput { input: "sensor".into(), revision: "1".into(), payload: "on".into() }]);
+    wait_for("the resource tick", || driver.stats().ticks_processed == 1);
+    std::thread::sleep(Duration::from_millis(50));
+    let stopping = Instant::now();
+    drop(driver);
+    assert!(stopping.elapsed() < Duration::from_millis(500), "stop took {:?}", stopping.elapsed());
+}
+
+/// A camera service that comes up after the workload started is picked up by the graph thread's
+/// non-blocking reconnecting client, without restarting the driver.
+#[test]
+fn camera_service_started_after_the_workload_is_picked_up() {
+    use styx::{
+        capture_api::{CaptureRequest, VirtualSourceConfig},
+        ipc::CameraService,
+    };
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let socket = temp.path().join("camera.sock");
+    let plugins = TestPlugins::load();
+    let mut camera_resource = ResourceRecord::builder("camera.node-local.front", "camera.device", "provider.peripherals.node-local").build();
+    camera_resource.endpoints = vec![format!("{STYX_FRAMES_ENDPOINT_SCHEME}://{}", socket.display())];
+    let state = state_with(vec![camera_resource]);
+    let workloads = [workload("workload.late-camera", passthrough_document(&plugins), vec![binding("camera", "camera.node-local.front")])];
+    let execution = plugins.execution();
+    let mut resident = ResidentExecutionSet::default();
+
+    let started = Instant::now();
+    let first = resident.sync_workloads(&execution, &workloads, Some(&state), 1);
+    assert!(started.elapsed() < Duration::from_millis(500), "sync waited for the camera: {:?}", started.elapsed());
+    assert_eq!(first.sessions[0].status, ExecutionSessionStatus::Starting);
+
+    let camera = CaptureRequest::virtual_source(VirtualSourceConfig::new().name("virtual-front").format(FourCc::GREY).resolution(64, 48).fps(60)).into_device();
+    let _service = CameraService::new(camera).serve(&socket).expect("serve camera");
+    let last = sync_until(&mut resident, &execution, &workloads, Some(&state), "frames from the late camera", |snapshot| snapshot.sessions[0].status == ExecutionSessionStatus::Running);
+    let telemetry = artifact_json(&last.artifacts, "execution.telemetry");
+    assert_eq!(telemetry["source_connected"], true, "{telemetry}");
 }

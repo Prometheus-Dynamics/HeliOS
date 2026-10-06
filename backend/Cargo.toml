@@ -135,7 +135,6 @@ daedalus-planner = { version = "3.0.0", git = "https://github.com/Prometheus-Dyn
 lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
 orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "main", default-features = false }
 styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
-styx-graph = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev" }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-core = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-daedalus = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }

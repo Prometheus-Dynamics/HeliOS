@@ -131,7 +131,12 @@ impl ResidentExecutionSet {
         if !self.drivers.contains_key(id) {
             let frame_inputs = resolved.frames.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
             let graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload, &frame_inputs, self.settings)?;
-            let frames = resolved.frames.iter().map(|spec| (spec.clone(), Box::new(StyxFrameSource::new(spec.clone())) as Box<dyn FrameSource>)).collect();
+            // Non-blocking: a camera service that is not up yet does not hold up this call.
+            let frames = resolved
+                .frames
+                .iter()
+                .map(|spec| StyxFrameSource::open(spec.clone()).map(|source| (spec.clone(), Box::new(source) as Box<dyn FrameSource>)).map_err(ExecutionError::Execute))
+                .collect::<Result<Vec<_>, _>>()?;
             let driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone())?;
             self.drivers.insert(id.to_string(), driver);
         }
