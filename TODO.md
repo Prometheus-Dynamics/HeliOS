@@ -1,71 +1,60 @@
 # HeliOS TODO
 
-Status of the architecture overhaul and the Raze device work, as of
-2026-10-02. Checked items are done and committed; open items are what is
-left.
+State of HeliOS and the Raze work as of 2026-10-06.
 
 ## Where things stand
 
-HeliOS is a Raze-only OS (CM5 + OV9782) built with Gaia. Device-level
-support no longer lives here: it comes from the **Raze device package** in
-Atlas Hardware Manager (`devices/raze`), which PhotonVision's Raze image uses
-too.
+HeliOS is a Raze-only OS (CM5 + OV9782) built with Gaia. Device support comes
+from the Raze device package in Atlas (`devices/raze`), shared with the
+PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
-| Piece | Repo / branch | State |
+| Piece | Where | State |
 |---|---|---|
-| HeliOS | `dev` (merged from `architecture-overhaul`) | builds validate; no image built since the migration |
-| Raze device package | Atlas-Hardware-Manager `rebuild` (`devices/raze`, 1.0.6) | pinned by HeliOS and PhotonVision at `a722abf` |
-| PhotonVision Raze image | photon-image-modifier `2027` / `gaia-build-fix` | first image built; rebuild with exact-size rootfs in progress |
-| Orion | `helios-integration` @ `59f91ed` | local only |
-| Lemnos | `helios-integration` @ `0e706c0` | local only |
-| Daedalus | `helios-integration` @ `ac5fd56` | local only |
-| Gaia | `dev` @ `826c5b0` (2.1.0) | local only; installed in `~/.cargo/bin` |
+| HeliOS | branch `architecture-overhaul` | recipe validates (`gaia validate`, both profiles); no image built since the migration |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (e7e88fc), Styx `dev` (3ab3707), Eidos `main` (47e9f1d), Orion v4 `main` (98bb58a), Lemnos `dev` (9102681) |
+| UI | `ui/` (SvelteKit) | new UI on mock data; the image still stages the old `frontend/` |
+| Raze device package | Atlas `dev`, 1.0.10 (f98489f) | pinned by HeliOS and PhotonVision |
+| PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
+| Gaia | `dev` (2.1.0) | installed in `~/.cargo/bin` |
 
-## Done
+## Next: a HeliOS image on hardware
 
-- [x] Removed lib-cv, lib-net and the Daedalus CV/AI/NT4 plugins; lib-ai kept as excluded reference code.
-- [x] Restored the cross-build Dockerfile; Gaia now builds the image from it.
-- [x] Pinned every git dependency by exact rev (Cargo and Gaia), with `gaia lock` for Buildroot.
-- [x] Bumped to Daedalus 2.0 (dylib plugin loader, feed_payload/push), Orion with the versioned control protocol, Lemnos with the async hotplug/bind-policy APIs available.
-- [x] orion-node runs as an IPC-only appliance: no HTTP/TCP/QUIC, 2 worker threads, `MALLOC_ARENA_MAX=2`, smaller history and queue caps.
-- [x] Cleared the clippy `-D warnings` backlog, repo-policy guardrails and the shared-owner readiness checks.
-- [x] Raze device package (contract 1): kernel and OV9782 driver, libcamera/libpisp, fan curve as a kernel overlay, LEDs, USB power, USB gadget networking (serial-derived MACs, never bridged to Ethernet), identity endpoint on :5899 plus `_pd-device._tcp` mDNS, EEPROM files.
-- [x] HeliOS imports the package: cm4 and generic targets removed, cm5 is now `raze`, duplicated device assets deleted.
-- [x] Docs: BUILD.md, gaia/configs/README.md, AGENTS.md (Daedalus 2.0), cutover plan.
+- [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) on a free machine. First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
+- [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `pd-device/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
+- [ ] Check that helios-engine installs `libhelios_vision.so` on the Rust-ABI path. Gaia builds the plugin in a separate cargo invocation from the engine, so a different `styx` feature set can give a boundary type conflict on `styx:framelease`.
+- [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, HeliOS services connect with `Group=orion`. `heliosctl` from a root shell has gid 0 and is refused; decide how operators reach the node.
+- [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
+- [ ] Hostname: HeliOS keeps `helios` on every board, so several boards collide on `helios.local`. Consider letting the package's `raze-{serial8}` apply.
 
-## Next: get images onto hardware
+## HeliOS image
 
-- [ ] Push the pinned dependencies: Orion `59f91ed`, Lemnos `0e706c0`, Daedalus `ac5fd56`, Gaia, and Atlas `rebuild`. Until then, builds need the local overrides (`--set sources.atlas.path=$PWD/../Atlas-Hardware-Manager`, and git `insteadOf` for Cargo).
-- [ ] Push PhotonVision: photon-image-modifier `2027`, photonvision `ov9782`, photon-libcamera-gl-driver `gaia-build-fix` (pinned at `661f90e`).
-- [ ] Finish the PhotonVision Raze image (exact-size rootfs, first-boot grow, `.img.xz`), flash it with Atlas, and test on a Raze: boot, camera, fan under load, LEDs, USB power, USB gadget (172.31.250.1), `/.well-known/pd-device`, Atlas discovery and recovery.
-- [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) and run the same hardware checks.
-- [ ] Measure memory on the device. Check transparent huge pages (`AnonHugePages` vs `RssAnon` for orion-node); if they dominate, set `transparent_hugepage=madvise`.
+- [ ] Move to the device package's A/B layout and update writer (p1 autoboot, p2/p3 boot, p5/p6 root, p7 data) once Gaia can assemble it; then drop the squashfs A/B storage, helios-ota-confirm and the `50-helios.preset` that disables `pd-device-update-confirm.service`, and add an `/etc/pd-device/update-health`.
+- [ ] Stage the new `ui/` instead of `frontend/` once it talks to the API.
+- [ ] Generate `os-release`, `/etc/helios/version` and `build-id` from `version` in `builds/raze.toml` instead of keeping static copies.
 
-## HeliOS backend
+## Backend
 
-- [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient + codec consumer of the peripherals CameraService.
-- [ ] Peripherals: move to the Lemnos APIs (async hotplug instead of the 250 ms poll, bind policy, typed errors, `Value::flatten_labels`, mock hwmon in tests).
-- [ ] Peripherals and engine: replace the duplicated FrameLease socket transport with Orion's `UnixFdLatestServer`/`Client`; drop the per-frame metadata file write; use `ResourceEndpoint::Custom` for `styx-frame-lease+unix`.
-- [ ] Engine: graphs as Daedalus `GraphDocument`, host port introspection, `inspect_payload`, input-driven `drive` instead of the 250 ms tick, and a stable FrameLease `TypeExpr` with an inspection path.
-- [ ] Engine: push typed resource values instead of JSON strings.
-- [ ] Fan: decide how helios-peripherals affects the fan alongside the kernel thermal governor (manual override via `fan.set_mode` today).
-- [ ] Read `sensors.toml`; nothing consumes it yet.
-- [ ] Application API for Atlas: identity, OTA upload/apply/status, update events. `helios-api` is only `/v1/health`, and Atlas's HTTP OTA path is broken without it.
-- [ ] OTA: require sha256 in update manifests, optionally verify signatures (never required), report boot-confirm results over the API.
+- [ ] Fan: helios-peripherals exposes the `raze-fan` hwmon device with raw `pwm1`/`pwm1_enable` writes, which fight the kernel thermal governor and bypass the package's 70 % floor. Read-only by default, or an explicit override that restores automatic mode. Its driver also matches every hwmon device, not only fans.
+- [ ] LEDs: nothing drives the ring yet; use the package's `raze-leds` (status, locate) rather than writing `/dev/leds0`.
+- [ ] Per-service releases in `/var/lib/helios/bin` no longer reach orion-node (it runs `/usr/bin/orion-node`); update Orion with the image.
+- [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient plus codec consumer of the peripherals CameraService.
+- [ ] Engine: input-driven `drive` instead of the 250 ms tick, `inspect_payload`, typed resource values instead of JSON strings.
+- [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
+- [ ] Application API for Atlas: identity, OTA upload/apply/status, update events (`helios-api` only has `/v1/health`).
+- [ ] OTA: require sha256 in update manifests, optional signatures, report boot-confirm results over the API.
 
-## Raze device package (Atlas `devices/raze`)
+## Upstream
 
-- [ ] Revision marker for future boards (OTP or EEPROM config); unmarked boards stay `gen1`.
-- [ ] Optional identity fields Atlas can use: `endpoints`, `actions`, `camera_stream`.
-- [ ] Confirm on hardware: LED colour order (RGBW), USB power GPIOs, `bcm2712d0` overlay need, fan polarity and levels.
+- [ ] Orion: an optional `orionctl` in `packaging/gaia/`; a way to admit root clients (or supplementary groups) under `same-user-or-group`.
+- [ ] Atlas: `pd-device-ssh-keys` cannot find the boot partition on an overlay root (HeliOS sets `SSH_KEYS_BOOT_PARTITION`); `PD_DEVICE_PACKAGE_COMMIT` stays empty for git-source imports (Gaia now exposes `${source.atlas.commit}`).
+- [ ] Gaia: the A/B disk layout; `@source:` inside quoted Buildroot values (HeliOS keeps its own copy of Orion's users table); building related rust artifacts in one cargo invocation (engine and plugins).
+- [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 
 ## PhotonVision image
 
-- [ ] Commit the exact-size rootfs and first-boot grow once the rebuild succeeds.
-- [ ] Trim after the first hardware test: jlink JRE (~60 MB), unused kernel modules (~20 MB), udev hwdb (~20 MB).
-- [ ] Only one of NetworkManager-wait-online / networkd-wait-online should be enabled.
+- [ ] A/B updates once the Gaia disk layout lands.
+- [ ] Trim: jlink JRE (~60 MB), unused kernel modules (~20 MB), udev hwdb (~20 MB).
 
 ## Product
 
-- [ ] Rethink HeliOS goals and scope now that Styx, Orion, Lemnos, Daedalus, Gaia and Atlas own most of the platform: what HeliOS itself owns, the product API, and how PhotonVision fits the ecosystem.
-- [ ] The frontend will be remade; the current one targets the removed API.
+- [ ] Rethink HeliOS goals and scope now that Styx, Orion, Lemnos, Daedalus, Eidos, Gaia and Atlas own most of the platform: what HeliOS owns, the product API, and how PhotonVision fits.
