@@ -216,6 +216,7 @@ export function toControls(settings: W.CameraSettings): CameraControlInfo[] {
     value: scalar(c.current),
     standard: c.standard,
     writable: c.writable && !c.read_only,
+    persisted: c.persisted ?? false,
   }));
 }
 

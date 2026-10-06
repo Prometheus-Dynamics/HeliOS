@@ -93,6 +93,8 @@ export interface CameraControlInfo {
   standard: string | null;
   /** The device lets the UI change it. */
   writable: boolean;
+  /** A value set through the UI is kept across reboots. */
+  persisted: boolean;
 }
 
 export interface Camera {

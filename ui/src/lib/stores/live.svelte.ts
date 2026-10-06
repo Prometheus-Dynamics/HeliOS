@@ -346,17 +346,11 @@ export class LiveCluster {
     }
   }
 
-  /** Put every writable control back to its default. */
+  /** Put every writable control back to its default and forget the values kept across reboots. */
   async resetCamera(id: string) {
     const camera = this.data.cameras.find((c) => c.resourceId === id);
-    if (!camera?.controls) return;
-    const changes: W.CameraControlChanges = {};
-    for (const c of camera.controls) {
-      if (!c.writable || c.default === null || c.standard === "af_trigger" || !["bool", "int", "uint", "float", "menu", "int_menu"].includes(c.kind)) continue;
-      changes[c.standard ?? c.name] = c.default;
-    }
-    if (Object.keys(changes).length === 0) return;
-    const result = await this.act("Reset camera", () => api.setCameraSettings(id, changes), () => `${camera.name} controls reset to defaults`);
+    this.controlChanges.delete(id);
+    const result = await this.act("Reset camera", () => api.resetCameraSettings(id), () => `${camera?.name ?? id} controls reset to defaults`);
     if (result) await this.refreshCameraControls(id);
   }
 

@@ -228,6 +228,8 @@ export interface CameraControl {
   standard: CameraStandardControl | null;
   /** The camera service lets the API change it. */
   writable: boolean;
+  /** A value set through the API is stored for it and re-applied after a reboot. */
+  persisted: boolean;
 }
 
 export interface CameraSettings {
@@ -240,6 +242,14 @@ export interface CameraSettings {
   digital_gain: number | null;
   ae_state: string | null;
   live_error: string | null;
+  /** The values set through the API, kept across reboots (standard keys or control names). */
+  persisted: Record<string, ControlValue>;
+}
+
+/** `PATCH`/`DELETE /v1/cameras/{id}/settings` answer: what was applied, and the values kept now. */
+export interface CameraSettingsApplied {
+  applied: AppliedCameraControl[];
+  persisted: Record<string, ControlValue>;
 }
 
 /** `PATCH /v1/cameras/{id}/settings` body: standard keys, or a control's `name` or `id`. */
