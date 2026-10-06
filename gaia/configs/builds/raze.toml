@@ -27,13 +27,14 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package 1.0.10 (Atlas branch dev): LED ring as 24-bit RGB, fan
-# at normal polarity with a 70 % floor, A/B update writer, hardware watchdog.
+# Raze device package 1.1.0 (Atlas branch dev): Buildroot 2026.08 (must match
+# base.toml), kernel 7.2, firmware 1.20260915, libcamera 0.7.2, vcgencmd from
+# rpi-utils instead of the removed rpi-userland.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "f98489fa20f17fc626a3d0977073a71f6f559338"
+rev = "fd52491d21bd8a4a6c783df8ff066cf7624bec06"
 
 # Orion v4 (main). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node and the HeliOS services speak the same control protocol.

@@ -4,7 +4,7 @@ description = "Shared base OS layer: Buildroot source, init system, and the core
 id = "buildroot-source"
 kind = "git"
 repo = "https://github.com/buildroot/buildroot"
-tag = "2025.11.3"
+tag = "2026.08"
 refresh = "never"
 pin = "locked"
 
