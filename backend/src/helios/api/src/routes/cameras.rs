@@ -1,6 +1,6 @@
 //! Cameras: the `camera.device` resources helios-peripherals publishes, with live facts from
 //! each camera's Styx camera service (its sources, clients, frame rate, latency and current 3A
-//! exposure/gain) and the robot mount the API stores.
+//! exposure/gain), their controls (`camera_controls`) and the robot mount the API stores.
 
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::{
     SharedState,
+    camera_controls::{AppliedCameraControl, CameraControl, ControlClient},
     error::{ApiError, ApiResult},
     orion::{StateView, enum_name, label_map},
     store::CameraMount,
@@ -78,7 +79,8 @@ pub struct Camera {
     /// Live facts from the camera service; `null` with `live_error` when it did not answer.
     pub live: Option<CameraLive>,
     pub live_error: Option<String>,
-    /// Whether settings can be changed through the API (they cannot yet: 501).
+    /// Whether settings can be changed through the API: the camera has a Styx camera service
+    /// (which controls are writable is in its settings).
     pub settings_writable: bool,
     pub preview_available: bool,
 }
@@ -104,7 +106,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         backend: labels.get("helios.label.styx.backend").cloned(),
         labels: labels.iter().filter_map(|(k, v)| k.strip_prefix("helios.label.").map(|k| (k.to_string(), v.clone()))).collect(),
         preview_available: false,
-        settings_writable: false,
+        settings_writable: frames_endpoint.is_some(),
         used_by: pipelines::pipelines_using(view, &id),
         mount: mounts.get(&id).copied(),
         frames_endpoint,
@@ -186,40 +188,67 @@ pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -
     Ok(Json(with_live(base_camera(&record, &view, &state.config.node_id, &mounts), &record).await))
 }
 
-/// Current sensor settings as the camera reports them (read-only).
+/// A camera's settings: its controls as the camera service lists them (range, default, value
+/// now, the standard control each answers, whether the API may change it) and the capture's
+/// mode and measured 3A from its live metrics.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CameraSettings {
+    /// At least one control can be changed.
     pub writable: bool,
+    pub controls: Vec<CameraControl>,
     pub mode: Option<String>,
     pub fps: Option<f64>,
     pub exposure_us: Option<f64>,
     pub analogue_gain: Option<f64>,
     pub digital_gain: Option<f64>,
     pub ae_state: Option<String>,
+    /// Why `mode`..`ae_state` are missing (the camera service's metrics did not answer).
+    pub live_error: Option<String>,
+}
+
+/// What `PATCH /v1/cameras/{id}/settings` did, in the order applied.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SettingsApplied {
+    pub applied: Vec<AppliedCameraControl>,
+}
+
+/// The API's client of the camera's service, and its socket.
+async fn control_client(state: &SharedState, id: &str) -> ApiResult<(std::sync::Arc<ControlClient>, PathBuf)> {
+    let (_, record) = find(state, id).await?;
+    let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
+    Ok((state.cameras.client(id, &socket, state.events.clone()).await?, socket))
 }
 
 pub async fn get_settings(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<CameraSettings>> {
-    let (_, record) = find(&state, &id).await?;
-    let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
-    let live = live_facts(socket).await.map_err(ApiError::backend)?;
-    let capture = live.captures.first();
+    let (client, socket) = control_client(&state, &id).await?;
+    let (controls, live) = tokio::join!(client.controls(), live_facts(socket));
+    let controls = controls?;
+    let (capture, live_error) = match &live {
+        Ok(live) => (live.captures.first(), None),
+        Err(error) => (None, Some(error.clone())),
+    };
     Ok(Json(CameraSettings {
-        writable: false,
+        writable: controls.iter().any(|control| control.writable),
         mode: capture.map(|c| c.mode.clone()),
         fps: capture.and_then(|c| c.fps_configured),
         exposure_us: capture.and_then(|c| c.exposure_us),
         analogue_gain: capture.and_then(|c| c.analogue_gain),
         digital_gain: capture.and_then(|c| c.digital_gain),
         ae_state: capture.and_then(|c| c.ae_state.clone()),
+        live_error,
+        controls,
     }))
 }
 
-pub async fn set_settings(Path(id): Path<String>) -> ApiResult<ApiError> {
-    check_id(&id)?;
-    Ok(ApiError::not_available(
-        "camera settings cannot be changed through the API yet",
-        "Styx CameraService control requests (exposure, gain, auto-exposure, frame rate) over its IPC socket; resolution and pyramid levels are per pipeline (binding output_width/output_height/pyramid)",
-    ))
+/// Change camera controls: `{"ae": false, "exposure_us": 8000, "gain": 4}` (standard keys, or
+/// a control's listed `name` or `id`). Modes go first; a refusal stops there.
+pub async fn set_settings(State(state): State<SharedState>, Path(id): Path<String>, Json(request): Json<serde_json::Value>) -> ApiResult<Json<SettingsApplied>> {
+    let serde_json::Value::Object(request) = request else {
+        return Err(ApiError::bad_request("the body is an object of controls: {\"exposure_us\": 8000, ...}"));
+    };
+    let (client, _) = control_client(&state, &id).await?;
+    let changes = client.resolve(&request).await?;
+    Ok(Json(SettingsApplied { applied: client.apply(changes).await? }))
 }
 
 pub async fn get_mount(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Option<CameraMount>>> {
