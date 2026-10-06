@@ -8,7 +8,8 @@ use clap::{Parser, Subcommand};
 use helios_diagnostics::{collect_failure_snapshot, collect_health_report, config::DiagnosticsConfig, model::HealthStatus};
 
 mod local;
-mod update;
+
+use heliosctl::update;
 
 #[derive(Debug, Parser)]
 #[command(name = "heliosctl")]
