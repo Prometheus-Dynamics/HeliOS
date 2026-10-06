@@ -3,3 +3,5 @@ ID=helios
 VERSION_ID="v2026.2.0"
 BUILD_ID="v2026.2.0"
 PRETTY_NAME="Helios v2026.2.0"
+IMAGE_ID="helios-raze"
+IMAGE_VERSION="v2026.2.0"
