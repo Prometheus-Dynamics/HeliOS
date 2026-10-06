@@ -18,6 +18,10 @@ target = "raze"
 imports = [
   "../layers/base-os.toml",
   { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },
+  # Mesa (EGL/GLES/GBM) and Vulkan (loader + v3dv) for the CM5 GPU: Daedalus's
+  # GPU path (wgpu, dmabuf import, fence waits) needs Vulkan.
+  { source = "atlas", path = "devices/raze/gaia/gpu.toml", when = { profile = "full" } },
+  { source = "atlas", path = "devices/raze/gaia/gpu-vulkan.toml", when = { profile = "full" } },
   # Builds and installs orion-node and stages its unit, env file, sysusers
   # entry and preset. The app layer redeclares `orion-node-env` with HeliOS's
   # appliance settings; the release layer adds a drop-in for its state.
@@ -27,14 +31,14 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package 1.1.0 (Atlas branch dev): Buildroot 2026.08 (must match
-# base.toml), kernel 7.2, firmware 1.20260915, libcamera 0.7.2, vcgencmd from
-# rpi-utils instead of the removed rpi-userland.
+# Raze device package 1.2.0 (Atlas branch dev): Buildroot 2026.08 (must match
+# base.toml), Bootlin bleeding-edge toolchain, kernel 7.2, firmware 1.20260915,
+# libcamera 0.7.2, vcgencmd from rpi-utils, optional Vulkan layer.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "fd52491d21bd8a4a6c783df8ff066cf7624bec06"
+rev = "e5f90877ed4d4fdb9d017c291ce373645b12cee3"
 
 # Orion v4 (main). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node and the HeliOS services speak the same control protocol.
@@ -42,7 +46,7 @@ rev = "fd52491d21bd8a4a6c783df8ff066cf7624bec06"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "98bb58affa9a8863417304af841bdfb727e0a5ca"
+rev = "aa134992b7209800d085573e0540799c9f92b4cf"
 
 [inputs.profile]
 description = "Build profile"
