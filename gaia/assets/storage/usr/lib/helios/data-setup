@@ -23,7 +23,7 @@
 # Everything else that changes at runtime is in /run or the /var tmpfs.
 # If p7 is missing or will not mount, /data is a tmpfs: the board still boots
 # (and can be updated or reflashed), but nothing persists, and
-# `heliosctl doctor` reports it as failed.
+# `helios-diagnostics doctor` reports it as failed.
 set -eu
 
 DATA_DEV=${HELIOS_DATA_DEV:-/dev/mmcblk0p7}
