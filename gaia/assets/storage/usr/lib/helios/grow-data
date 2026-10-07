@@ -1,0 +1,85 @@
+#!/bin/sh
+# Grow /data (p7, the last partition) and its ext4 filesystem to the end of the
+# eMMC: grow-data [<mountpoint>] (default /data). Called by data-setup on every
+# boot; both steps are idempotent and do nothing once /data fills the disk.
+#
+#   1. If the partition is the last one and at least 16 MiB are unused after
+#      it, extend the extended partition (p4) and then it to the end of the
+#      disk (sfdisk), and tell the kernel its new size.
+#   2. If the filesystem is at least 1 MiB smaller than the partition as the
+#      kernel sees it, grow it online (resize2fs).
+#
+# If the kernel cannot be told about a grown partition, it reads the new table
+# on the next boot and step 2 finishes then. (The same steps as the
+# PhotonVision Raze image's grow-rootfs.sh, for one mountpoint.)
+set -eu
+
+mnt=${1:-/data}
+min_grow_sectors=32768
+min_fs_slack_bytes=1048576
+
+log() { echo "grow-data: $*"; }
+
+mountpoint -q "$mnt" || {
+	log "$mnt is not mounted"
+	exit 0
+}
+majmin=$(mountpoint -d "$mnt" | tr -d ' ')
+sys=/sys/dev/block/$majmin
+[ -r "$sys/partition" ] || {
+	log "$mnt ($majmin) is not on a partition"
+	exit 0
+}
+part=$(cat "$sys/partition")
+part_dev=/dev/$(basename "$(readlink -f "$sys")")
+disk_name=$(basename "$(readlink -f "$sys/..")")
+disk_dev=/dev/$disk_name
+
+# Step 1: the partition.
+disk_sectors=$(cat "/sys/block/$disk_name/size")
+part_start=$(cat "$sys/start")
+part_sectors=$(cat "$sys/size")
+last=1
+for other in /sys/block/"$disk_name"/"$disk_name"*; do
+	[ -r "$other/start" ] || continue
+	# The extended partition's own entry (p4) is a small placeholder.
+	[ "$(cat "$other/partition")" = 4 ] && [ "$part" -ge 5 ] && continue
+	[ "$(cat "$other/start")" -gt "$part_start" ] && last=0
+done
+if [ "$last" = 0 ]; then
+	log "$part_dev is not the last partition on $disk_dev"
+elif [ $((disk_sectors - part_start - part_sectors)) -ge "$min_grow_sectors" ]; then
+	if [ "$part" -ge 5 ]; then
+		echo ", +" | sfdisk --no-reread --no-tell-kernel -N 4 "$disk_dev"
+	fi
+	log "growing $part_dev to the end of $disk_dev"
+	echo ", +" | sfdisk --no-reread --no-tell-kernel -N "$part" "$disk_dev"
+	new_sectors=$(sfdisk -l -o Device,Sectors "$disk_dev" 2>/dev/null | awk -v dev="$part_dev" '$1 == dev { print $2 }')
+	if [ -n "$new_sectors" ] && [ "$new_sectors" -gt "$part_sectors" ]; then
+		# The partition is mounted, so the table cannot be re-read; BLKPG
+		# resizes a busy partition in place.
+		if command -v resizepart >/dev/null 2>&1; then
+			resizepart "$disk_dev" "$part" "$new_sectors" || true
+		elif command -v partx >/dev/null 2>&1; then
+			partx -u -n "$part" "$disk_dev" || true
+		elif command -v partprobe >/dev/null 2>&1; then
+			partprobe "$disk_dev" || true
+		fi
+		[ "$(cat "$sys/size")" -eq "$new_sectors" ] ||
+			log "the kernel still sees the old size of $part_dev; the filesystem grows on the next boot"
+	fi
+fi
+
+# Step 2: the filesystem.
+part_bytes=$(($(cat "$sys/size") * 512))
+info=$(tune2fs -l "$part_dev" 2>/dev/null) || {
+	log "could not read the filesystem on $part_dev"
+	exit 1
+}
+blocks=$(echo "$info" | awk -F: '/^Block count:/ { gsub(/ /, "", $2); print $2 }')
+block_size=$(echo "$info" | awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }')
+fs_bytes=$((blocks * block_size))
+if [ $((part_bytes - fs_bytes)) -ge "$min_fs_slack_bytes" ]; then
+	log "growing the filesystem on $part_dev from $((fs_bytes / 1048576)) MiB to $((part_bytes / 1048576)) MiB"
+	resize2fs "$part_dev"
+fi

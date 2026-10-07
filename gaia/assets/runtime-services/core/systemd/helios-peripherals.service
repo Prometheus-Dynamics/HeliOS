@@ -10,7 +10,11 @@ Type=simple
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/peripherals
 Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0
 EnvironmentFile=-/etc/default/helios-peripherals.env
-ExecStart=/var/lib/helios/bin/helios-peripherals
+ExecStart=/usr/bin/helios-peripherals
+# A manual fan override (fan.override) always ends in automatic mode: if the
+# service stops or dies during one, hand the fan back to the kernel's thermal
+# control (pwm1_enable=2).
+ExecStopPost=-/bin/sh -c 'for f in /sys/class/hwmon/hwmon*/pwm1_enable; do [ "$$(cat "$$f" 2>/dev/null)" = 1 ] && echo 2 > "$$f"; done; true'
 Restart=always
 RestartSec=2
 TimeoutStopSec=30

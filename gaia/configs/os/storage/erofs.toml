@@ -1,0 +1,95 @@
+description = "Read-only EROFS root and the /data partition: the root slot image (LZMA, large pclusters), /var on tmpfs, /data (p7) mounted early with the persistent state bound into place, sshd host keys and the machine ID on /data, and the device hostname."
+
+# The root filesystem is one A/B slot (p5/p6, 512 MiB, targets/raze.toml) that
+# the device package's writer replaces wholesale, so it is read-only: EROFS,
+# mounted by the kernel (rootfstype=erofs ro; the Raze package builds EROFS
+# in). Nothing writes to / at runtime: what changes lives on /data (kept
+# across updates) or in /run and the /var tmpfs. gaia/configs/README.md
+# ("Read-only root") lists every runtime write and where it goes.
+
+[[stage.files]]
+id = "data-setup-script"
+src = "@assets/storage/usr/lib/helios/data-setup"
+dest = "/usr/lib/helios/data-setup"
+origin = "static-asset"
+mode = 493
+
+[[stage.files]]
+id = "data-grow-script"
+src = "@assets/storage/usr/lib/helios/grow-data"
+dest = "/usr/lib/helios/grow-data"
+origin = "static-asset"
+mode = 493
+
+# Mounts /data before local-fs.target (so before the device package's SSH
+# keys, hostname and USB gadget services) and binds /var/lib/helios,
+# /var/log/helios, /var/log/journal, timesync, /root and the machine ID.
+[[stage.services]]
+id = "data-setup-service"
+name = "helios-data-setup.service"
+unit_path = "@assets/storage/systemd/helios-data-setup.service"
+
+# sshd: the device package's sshd_config.d (keys from the boot partition, in
+# /run) and host keys on /data; no `ssh-keygen -A` into the read-only /etc.
+[[stage.files]]
+id = "sshd-config"
+src = "@assets/os/etc/ssh/sshd_config"
+dest = "/etc/ssh/sshd_config"
+origin = "static-asset"
+
+[[stage.files]]
+id = "sshd-service-dropin"
+src = "@assets/os/etc/systemd/system/sshd.service.d/10-helios.conf"
+dest = "/etc/systemd/system/sshd.service.d/10-helios.conf"
+origin = "static-asset"
+
+# The device package's hostname default with a HeliOS prefix: helios-{serial8}.
+[[stage.files]]
+id = "pd-device-hostname-env"
+src = "@assets/os/etc/pd-device/hostname.env"
+dest = "/etc/pd-device/hostname.env"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_TARGET_ROOTFS_EXT2", "n"],
+  ["BR2_TARGET_ROOTFS_SQUASHFS", "n"],
+  ["BR2_TARGET_ROOTFS_EROFS", "y"],
+  # LZMA with 256 KiB physical clusters ("big pclusters"), tail packing,
+  # fragments and deduplication: the smallest image (the update download and
+  # the slot), decompressed by the kernel on demand.
+  ["BR2_TARGET_ROOTFS_EROFS_LZMA", "y"],
+  ["BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL", "6"],
+  ["BR2_TARGET_ROOTFS_EROFS_PCLUSTERSIZE", "262144"],
+  ["BR2_TARGET_ROOTFS_EROFS_ZTAILPACKING", "y"],
+  ["BR2_TARGET_ROOTFS_EROFS_FRAGMENTS", "y"],
+  ["BR2_TARGET_ROOTFS_EROFS_DEDUPE", "y"],
+  # Read-only root: no remount, and /var a tmpfs populated from a factory copy
+  # by systemd-tmpfiles (helios-data-setup binds the persistent parts into it).
+  ["BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW", "n"],
+  ["BR2_INIT_SYSTEMD_VAR_FACTORY", "y"],
+  # mkfs.ext4 for the empty /data image (post-image.sh).
+  ["BR2_PACKAGE_HOST_E2FSPROGS", "y"],
+]
+
+[[image.expected_images]]
+name = "rootfs.erofs"
+format = "erofs"
+required = true
+
+[image.feed]
+stage_files = [
+  "data-setup-script",
+  "data-grow-script",
+  "sshd-config",
+  "sshd-service-dropin",
+  "pd-device-hostname-env",
+]
+stage_services = ["data-setup-service"]
+
+[image.output]
+# Keep provider work/output collection isolated per build, but place release
+# compressed raw disk images in a repo-level output folder for flashing/distribution.
+# The same .img.xz updates a running board (the device package's writer).
+archive_name = "${project.root_dir}/output/${build.name}-${build.version}.img.xz"

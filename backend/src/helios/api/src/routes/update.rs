@@ -1,18 +1,18 @@
-//! OS updates (OTA): upload an image, apply it, follow it.
+//! OS updates (OTA): upload an image, stage and apply it, follow it.
 //!
-//! Applying hands the image to helios-updater exactly as `heliosctl update apply` does (an Orion
-//! artifact + `helios.system.update.v1` workload); the updater stages it into the spare slot,
-//! trial-boots it and confirms or rolls back. Status comes from the updater's Orion resources and
-//! the boot scripts' files under `/var/lib/helios/ota`.
+//! HeliOS has no updater of its own. The Raze device package's A/B writer
+//! (`/usr/lib/pd-device/update`, Atlas `docs/ota.md`) takes the same `.img.xz` that is flashed:
+//! `stage` checks its SHA-256 and copies its boot and root slot A into the board's inactive
+//! slot, `apply` runs the image's pre-reboot hook and trial-boots that slot, and
+//! `pd-device-update-confirm.service` keeps it once `/etc/pd-device/update-health` passes (or
+//! the board falls back by itself). This module is a thin adapter: it stores uploads on the data
+//! partition, runs `stage` and `apply` through `systemd-run` (outside helios-api's cgroup: the
+//! pre-reboot hook stops helios-api), and reports the writer's `/run/pd-device/update.json`.
 //!
 //! `/v1/ota/*` is the contract Atlas Hardware Manager's HTTP OTA client speaks (multipart
 //! upload, `image_url` apply, lenient state polling).
 
-use std::{
-    collections::BTreeMap,
-    convert::Infallible,
-    path::{Path as FsPath, PathBuf},
-};
+use std::{convert::Infallible, path::PathBuf, sync::Arc};
 
 use axum::{
     Json,
@@ -22,6 +22,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::{Stream, StreamExt, TryStreamExt};
+use heliosctl::pd_update::{self, PdUpdateStatus};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -32,11 +33,8 @@ use crate::{
     error::{ApiError, ApiResult},
     events::{ApiEvent, sse_stream},
     host::now_ms,
-    orion::{StateView, label_map},
 };
 
-const UPDATER_RUNTIME_PREFIX: &str = "updater.runtime.";
-const EXECUTION_TYPE: &str = "system.update.execution";
 const META_FILE: &str = "upload.json";
 
 // --- uploads -------------------------------------------------------------------
@@ -53,11 +51,17 @@ pub struct Upload {
     pub version: Option<String>,
 }
 
+impl Upload {
+    fn path(&self, config: &ApiConfig) -> PathBuf {
+        config.upload_dir.join(&self.id).join(&self.filename)
+    }
+}
+
 pub fn sanitize_filename(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let clean: String = base.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' }).collect();
     let clean = clean.trim_start_matches('.').to_string();
-    if clean.is_empty() { "helios-update.img".into() } else { clean.chars().take(128).collect() }
+    if clean.is_empty() { "helios-update.img.xz".into() } else { clean.chars().take(128).collect() }
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -172,7 +176,7 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// `POST /v1/update/uploads`: the image as the raw request body (`application/octet-stream`).
 pub async fn upload_raw(State(state): State<SharedState>, Query(params): Query<UploadParams>, headers: HeaderMap, body: Body) -> ApiResult<(StatusCode, Json<Upload>)> {
-    let filename = params.filename.or_else(|| header(&headers, "x-helios-filename")).unwrap_or_else(|| "helios-update.img".into());
+    let filename = params.filename.or_else(|| header(&headers, "x-helios-filename")).unwrap_or_else(|| "helios-update.img.xz".into());
     let sha256 = params.sha256.or_else(|| header(&headers, "x-helios-sha256"));
     let version = params.version.or_else(|| header(&headers, "x-helios-version"));
     let upload = store_upload(&state.config, &filename, sha256.as_deref(), version, body.into_data_stream()).await?;
@@ -190,24 +194,42 @@ pub async fn delete_upload(State(state): State<SharedState>, Path(id): Path<Stri
     Ok(StatusCode::NO_CONTENT)
 }
 
-// --- apply ---------------------------------------------------------------------
+// --- stage and apply -----------------------------------------------------------
+
+/// What helios-api is doing with the device package's writer right now (or did last).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct UpdateTask {
+    pub update_id: String,
+    pub upload_id: String,
+    pub version: String,
+    pub sha256: String,
+    /// staging, staged (no reboot asked), applying (`update apply` started: the board reboots
+    /// into the staged slot on trial), failed.
+    pub step: String,
+    pub reboot: bool,
+    pub error: Option<String>,
+    pub started_at_ms: u64,
+}
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyRequest {
     pub upload_id: Option<String>,
     pub image_url: Option<String>,
+    /// Informational; the writer takes the version from the new root's os-release.
     pub version: Option<String>,
     pub sha256: Option<String>,
+    /// Reboot into the staged slot once staged (default). `false` stops after staging.
+    pub reboot: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct ApplyResponse {
     pub update_id: String,
-    pub artifact_id: String,
     pub version: String,
     pub sha256: String,
     pub image_url: String,
+    pub reboot: bool,
     pub message: String,
 }
 
@@ -215,42 +237,154 @@ pub fn version_for(upload: &Upload, requested: Option<String>) -> String {
     requested
         .filter(|v| !v.trim().is_empty())
         .or_else(|| upload.version.clone())
-        .or_else(|| heliosctl::update::infer_version_from_path(FsPath::new(&upload.filename)))
+        .or_else(|| pd_update::infer_version_from_path(std::path::Path::new(&upload.filename)))
         .unwrap_or_else(|| format!("upload-{}", &upload.sha256[..12]))
 }
 
-async fn apply_upload(state: &SharedState, upload: Upload, version: Option<String>, sha256: Option<String>) -> ApiResult<ApplyResponse> {
+fn tool_installed(config: &ApiConfig) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(&config.pd_update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// `update <args>`, through `systemd-run` on the device so the command lives in its own unit.
+/// `wait`: block until it ends (stage); otherwise only start it (apply, which reboots).
+fn pd_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> tokio::process::Command {
+    let mut command;
+    if config.pd_update_systemd_run {
+        command = tokio::process::Command::new("systemd-run");
+        command.args(["--quiet", "--collect", "--description=HeliOS OS update (device package writer)"]);
+        if wait {
+            command.args(["--wait", "--pipe"]);
+        }
+        command.arg("--").arg(&config.pd_update_tool);
+    } else {
+        command = tokio::process::Command::new(&config.pd_update_tool);
+    }
+    command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(false);
+    command
+}
+
+/// The writer's last words on stderr (it logs `pd-device: <reason>`), else the exit status.
+fn command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.trim_start_matches("pd-device:").trim().to_string())
+        .unwrap_or_else(|| format!("the device package updater exited with {}", output.status))
+}
+
+fn set_task(state: &SharedState, task: UpdateTask) {
+    *state.update_task.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task);
+}
+
+fn publish_status(state: &SharedState, change: &str) {
+    let status = status_from(&state.config, current_task(state));
+    let mut data = serde_json::to_value(status).unwrap_or_default();
+    if let Some(object) = data.as_object_mut() {
+        object.insert("change".into(), change.into());
+    }
+    state.events.publish("update", data);
+}
+
+async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTask, _guard: tokio::sync::OwnedMutexGuard<()>) {
+    let image = upload.path(&state.config).display().to_string();
+    let result = pd_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true).output().await;
+    match result {
+        Ok(output) if output.status.success() => {
+            tracing::info!(version = %task.version, "update staged");
+            // The slot holds the image now; free the data partition.
+            let _ = tokio::fs::remove_dir_all(state.config.upload_dir.join(&upload.id)).await;
+            task.step = if task.reboot { "applying".into() } else { "staged".into() };
+        }
+        Ok(output) => {
+            task.step = "failed".into();
+            task.error = Some(command_error(&output));
+        }
+        Err(error) => {
+            task.step = "failed".into();
+            task.error = Some(format!("could not run the device package updater: {error}"));
+        }
+    }
+    set_task(&state, task.clone());
+    publish_status(&state, if task.step == "failed" { "failed" } else { "staged" });
+    if task.step != "applying" {
+        if let Some(error) = &task.error {
+            tracing::warn!(%error, "update stage failed");
+        }
+        return;
+    }
+    // `update apply` runs the pre-reboot hook (which stops helios-api, among others) and
+    // reboots into the staged slot on trial; it is started in its own unit and not awaited.
+    match pd_update_command(&state.config, &["apply"], false).output().await {
+        Ok(output) if output.status.success() => tracing::info!(version = %task.version, "update applied; rebooting into the staged slot on trial"),
+        Ok(output) => {
+            task.step = "failed".into();
+            task.error = Some(command_error(&output));
+        }
+        Err(error) => {
+            task.step = "failed".into();
+            task.error = Some(format!("could not run the device package updater: {error}"));
+        }
+    }
+    if task.step == "failed" {
+        set_task(&state, task);
+        publish_status(&state, "failed");
+    }
+}
+
+async fn apply_upload(state: &SharedState, upload: Upload, version: Option<String>, sha256: Option<String>, reboot: bool) -> ApiResult<ApplyResponse> {
     if let Some(expected) = sha256.filter(|s| !s.is_empty())
         && !expected.eq_ignore_ascii_case(&upload.sha256)
     {
         return Err(ApiError::unprocessable(format!("checksum mismatch: expected {expected}, upload has {}", upload.sha256)));
     }
-    let _guard = state.update_lock.try_lock().map_err(|_| ApiError::conflict("another update is being prepared"))?;
+    if !tool_installed(&state.config) {
+        return Err(ApiError::not_available(
+            format!("the device package updater ({}) is not installed", state.config.pd_update_tool.display()),
+            "the Raze device package's A/B updater (Atlas devices/raze 1.4.0 or newer) and an A/B disk layout",
+        ));
+    }
+    if let Some(current) = read_pd_status(&state.config) {
+        if current.state == "trying" {
+            return Err(ApiError::conflict("the last update is still on trial; wait for it to be confirmed or rolled back"));
+        }
+        if current.state == "staging" {
+            return Err(ApiError::conflict("an update is being staged"));
+        }
+        if !current.on_ab_layout() {
+            return Err(ApiError::unprocessable("this board is not on the A/B layout; reflash it over USB with an A/B image first"));
+        }
+    }
+    let guard = state.update_lock.clone().try_lock_owned().map_err(|_| ApiError::conflict("another update is being staged"))?;
     let version = version_for(&upload, version);
-    let image = state.config.upload_dir.join(&upload.id).join(&upload.filename);
-    let options = heliosctl::update::PrepareUpdateOptions {
-        image,
-        version: Some(version),
-        artifact_id: None,
-        workload_id: None,
-        node_id: state.config.node_id.clone(),
-        known_sha256: Some(upload.sha256.clone()),
+    let task = UpdateTask {
+        update_id: format!("{}-{}", upload.id, now_ms()),
+        upload_id: upload.id.clone(),
+        version: version.clone(),
+        sha256: upload.sha256.clone(),
+        step: "staging".into(),
+        reboot,
+        error: None,
+        started_at_ms: now_ms(),
     };
-    let prepared = tokio::task::spawn_blocking(move || heliosctl::update::prepare_update(options))
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
-        .map_err(|error| ApiError::unprocessable(format!("image cannot be applied: {error:#}")))?;
-    let client = state.orion.raw_client()?;
-    let summary = heliosctl::update::submit_update(&client, prepared).await.map_err(|error| ApiError::backend(format!("{error:#}")))?;
+    set_task(state, task.clone());
+    publish_status(state, "staging");
     let response = ApplyResponse {
-        message: format!("update {} submitted; helios-updater stages it into the spare slot and trial-boots it", summary.version),
-        update_id: summary.workload_id,
-        artifact_id: summary.artifact_id,
-        version: summary.version,
-        sha256: summary.sha256,
-        image_url: summary.image_url,
+        update_id: task.update_id.clone(),
+        version,
+        sha256: upload.sha256.clone(),
+        image_url: upload.image_url.clone(),
+        reboot,
+        message: if reboot {
+            "staging the image into the inactive slot; the board then reboots into it on trial and keeps it once healthy".into()
+        } else {
+            "staging the image into the inactive slot; apply it later with `update apply` or POST /v1/update/apply".into()
+        },
     };
-    state.events.publish("update", serde_json::json!({ "change": "submitted", "update_id": response.update_id, "version": response.version }));
+    tokio::spawn(stage_and_apply(state.clone(), upload, task, guard));
     Ok(response)
 }
 
@@ -260,146 +394,88 @@ pub async fn apply(State(state): State<SharedState>, Json(request): Json<ApplyRe
         (None, Some(url)) => upload_for_url(&state.config, url).await?,
         (None, None) => return Err(ApiError::bad_request("upload_id or image_url is required")),
     };
-    Ok((StatusCode::ACCEPTED, Json(apply_upload(&state, upload, request.version, request.sha256).await?)))
+    Ok((StatusCode::ACCEPTED, Json(apply_upload(&state, upload, request.version, request.sha256, request.reboot.unwrap_or(true)).await?)))
 }
 
 pub async fn switch_slot() -> ApiError {
-    ApiError::not_available(
-        "switching boot slots without an update is not available",
-        "helios-updater accepting a slot-switch request (trial boot of the reserve slot with the same confirm/rollback path)",
-    )
+    ApiError::not_available("switching boot slots without an update is not available", "the device package's writer offering a trial boot of the other slot without staging an image")
 }
 
 // --- status --------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct UpdateExecution {
-    pub update_id: String,
-    pub artifact_id: Option<String>,
-    pub version: Option<String>,
-    pub artifact_class: Option<String>,
-    pub phase: String,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Slots {
+    /// A or B: the slot this system booted from; `unknown` off the A/B layout.
     pub active: Option<String>,
-    pub reserve: Option<String>,
-    pub pending: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BootConfirm {
-    pub request_id: Option<String>,
-    pub status: Option<String>,
-    pub selector: Option<String>,
+    /// The slot holding a staged (or on-trial) update.
+    pub staged: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UpdateStatus {
-    /// helios-updater's phase: idle, preflight, downloading, staging, switching_boot,
-    /// awaiting_boot_success, finalizing, rolling_back, completed, failed; `unknown` without Orion.
+    /// The device package writer's state: idle, staging, staged, trying, confirmed,
+    /// rolled-back, error; `unknown` when it has published none.
     pub phase: String,
     /// The same, in Atlas's stage vocabulary.
     pub stage: String,
     pub progress_percent: Option<u8>,
     pub last_error: Option<String>,
-    pub orion_reachable: bool,
-    pub updater_running: bool,
-    pub active: Option<UpdateExecution>,
-    pub executions: Vec<UpdateExecution>,
+    /// `/usr/lib/pd-device/update` is installed.
+    pub updater_available: bool,
     pub slots: Slots,
-    pub boot_confirm: BootConfirm,
-    pub repartition: BTreeMap<String, Option<String>>,
+    pub version_active: Option<String>,
+    pub version_staged: Option<String>,
+    /// What helios-api last asked the writer to do.
+    pub task: Option<UpdateTask>,
 }
 
-pub fn atlas_stage(phase: &str) -> &'static str {
-    match phase {
-        "preflight" => "verifying",
-        "downloading" => "downloading",
-        "staging" => "installing",
-        "switching_boot" => "committing",
-        "awaiting_boot_success" => "rebooting",
-        "finalizing" => "finalizing",
-        "completed" => "complete",
-        "rolling_back" => "rolled_back",
-        "failed" => "failed",
-        "idle" => "idle",
-        _ => "unknown",
-    }
+fn read_pd_status(config: &ApiConfig) -> Option<PdUpdateStatus> {
+    pd_update::read_status_at(&config.pd_update_status, &config.pd_update_progress)
 }
 
-pub fn progress_for(phase: &str) -> Option<u8> {
-    match phase {
-        "preflight" => Some(5),
-        "downloading" => Some(20),
-        "staging" => Some(50),
-        "switching_boot" => Some(80),
-        "awaiting_boot_success" => Some(90),
-        "finalizing" => Some(95),
-        "completed" => Some(100),
-        _ => None,
-    }
+fn current_task(state: &SharedState) -> Option<UpdateTask> {
+    state.update_task.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
-fn is_terminal(phase: &str) -> bool {
-    matches!(phase, "completed" | "failed" | "idle")
-}
-
-pub fn status_from(config: &ApiConfig, view: Option<&StateView>) -> UpdateStatus {
-    let summary = heliosctl::ota_state::update_summary_at(&config.ota_dir, &config.updater_dir).unwrap_or_default();
-    let runtime = view.and_then(|v| v.resources.get(&format!("{UPDATER_RUNTIME_PREFIX}{}", config.node_id)));
-    let runtime_phase = runtime.and_then(|r| label_map(&r.labels).get("helios.updater.phase").cloned());
-    let executions: Vec<UpdateExecution> = view
-        .map(|v| {
-            v.resources
-                .values()
-                .filter(|r| r.resource_type.as_str() == EXECUTION_TYPE)
-                .map(|r| {
-                    let labels = label_map(&r.labels);
-                    let field = |key: &str| r.state.as_ref().and_then(|s| s.config.as_ref()).and_then(|c| c.payload.get(key)).and_then(|v| v.as_str()).map(str::to_string);
-                    UpdateExecution {
-                        update_id: r.realized_for_workload_id.as_ref().map(ToString::to_string).unwrap_or_else(|| r.resource_id.to_string()),
-                        artifact_id: field("artifact_id"),
-                        version: labels.get("helios.update.version").cloned(),
-                        artifact_class: labels.get("helios.update.artifact_class").cloned(),
-                        phase: field("phase").unwrap_or_else(|| "unknown".into()),
-                        message: field("message"),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let active = executions.iter().find(|e| !is_terminal(&e.phase)).or_else(|| executions.last()).cloned();
-    let phase = match (&active, view) {
-        (Some(execution), _) if !is_terminal(&execution.phase) => execution.phase.clone(),
-        (_, Some(_)) => runtime_phase.clone().or_else(|| active.as_ref().map(|e| e.phase.clone())).unwrap_or_else(|| "idle".into()),
-        (_, None) => "unknown".into(),
+pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus {
+    let pd = read_pd_status(config);
+    let running = task.as_ref().is_some_and(|t| t.step == "staging");
+    let (phase, stage, progress_percent) = match &pd {
+        // Staging asked for, but the writer has not written its first state yet.
+        Some(pd) if running && !matches!(pd.state.as_str(), "staging" | "error") => ("staging".to_string(), "verifying".to_string(), Some(0)),
+        Some(pd) => (pd.state.clone(), pd.atlas_stage().to_string(), pd.percent()),
+        None if running => ("staging".to_string(), "verifying".to_string(), Some(0)),
+        None => ("unknown".to_string(), "unknown".to_string(), None),
     };
-    let last_error = active
-        .as_ref()
-        .filter(|e| e.phase == "failed" || e.phase == "rolling_back")
-        .and_then(|e| e.message.clone())
-        .or_else(|| summary.confirm_status.as_deref().filter(|s| s.contains("fail") || s.contains("rollback") || s.contains("rolled")).map(|s| format!("boot confirm: {s}")));
+    let task_error = task.as_ref().filter(|t| t.step == "failed").and_then(|t| t.error.clone());
+    let last_error = pd.as_ref().filter(|pd| matches!(pd.state.as_str(), "error" | "rolled-back") || pd.error.is_some()).and_then(|pd| pd.error.clone()).or(task_error);
     UpdateStatus {
-        stage: atlas_stage(&phase).to_string(),
-        progress_percent: progress_for(&phase),
         phase,
+        stage,
+        progress_percent,
         last_error,
-        orion_reachable: view.is_some(),
-        updater_running: runtime.is_some(),
-        active,
-        executions,
-        slots: Slots { active: summary.active, reserve: summary.reserve, pending: summary.pending },
-        boot_confirm: BootConfirm { request_id: summary.confirm_request_id, status: summary.confirm_status, selector: summary.confirm_selector },
-        repartition: BTreeMap::from([("request_id".to_string(), summary.repartition_request_id), ("status".to_string(), summary.repartition_status)]),
+        updater_available: tool_installed(config),
+        slots: Slots { active: pd.as_ref().and_then(|pd| pd.slot_active.clone()), staged: pd.as_ref().and_then(|pd| pd.slot_staged.clone()) },
+        version_active: pd.as_ref().and_then(|pd| pd.version_active.clone()),
+        version_staged: pd.as_ref().and_then(|pd| pd.version_staged.clone()),
+        task,
     }
 }
 
-async fn current_status(state: &SharedState) -> UpdateStatus {
-    let view = state.orion.view().await.ok();
-    status_from(&state.config, view.as_ref())
+/// Before the writer has run on this boot `/run/pd-device/update.json` may be missing;
+/// `update status` writes it (it reads the state kept on p1).
+async fn ensure_pd_status(config: &ApiConfig) {
+    if config.pd_update_status.exists() || !tool_installed(config) {
+        return;
+    }
+    let mut command = tokio::process::Command::new(&config.pd_update_tool);
+    command.arg("status").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command.status()).await;
+}
+
+pub async fn current_status(state: &SharedState) -> UpdateStatus {
+    ensure_pd_status(&state.config).await;
+    status_from(&state.config, current_task(state))
 }
 
 pub async fn status(State(state): State<SharedState>) -> Json<UpdateStatus> {
@@ -429,7 +505,7 @@ pub async fn atlas_upload(State(state): State<SharedState>, mut multipart: Multi
         if field.name() != Some("file") {
             continue;
         }
-        let filename = field.file_name().map(str::to_string).unwrap_or_else(|| "helios-update.img".into());
+        let filename = field.file_name().map(str::to_string).unwrap_or_else(|| "helios-update.img.xz".into());
         let stream = field.map_err(|error| error.to_string());
         let upload = store_upload(&state.config, &filename, None, None, Box::pin(stream)).await?;
         state.events.publish("update", serde_json::json!({ "change": "uploaded", "upload": upload }));
@@ -465,7 +541,7 @@ pub async fn atlas_apply(State(state): State<SharedState>, Json(request): Json<A
     if let Some(by) = &request.requested_by {
         tracing::info!(requested_by = %by, image = %request.image_url, "OTA apply requested");
     }
-    let response = apply_upload(&state, upload, None, request.checksum).await?;
+    let response = apply_upload(&state, upload, None, request.checksum, true).await?;
     Ok(Json(AtlasApplyResponse { update_id: response.update_id, message: response.message }))
 }
 
@@ -474,23 +550,39 @@ pub async fn atlas_state(State(state): State<SharedState>) -> Json<serde_json::V
     let status = current_status(&state).await;
     Json(serde_json::json!({
         "state": {
-            "update_id": status.active.as_ref().map(|a| a.update_id.clone()),
+            "update_id": status.task.as_ref().map(|t| t.update_id.clone()),
             "stage": status.stage,
             "phase": status.phase,
             "progress_percent": status.progress_percent,
             "last_error": status.last_error,
         },
         "slots": status.slots,
-        "boot_confirm": status.boot_confirm,
+        "version_active": status.version_active,
+        "version_staged": status.version_staged,
     }))
+}
+
+/// Shared by the API state: one stage at a time from helios-api (the writer has its own lock).
+pub fn new_update_lock() -> Arc<tokio::sync::Mutex<()>> {
+    Arc::new(tokio::sync::Mutex::new(()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
-    fn config(dir: &FsPath) -> ApiConfig {
-        ApiConfig { upload_dir: dir.join("uploads"), ota_dir: dir.join("ota"), updater_dir: dir.join("updater"), max_upload_bytes: 64, ..ApiConfig::default() }
+    fn config(dir: &std::path::Path) -> ApiConfig {
+        ApiConfig {
+            upload_dir: dir.join("uploads"),
+            pd_update_tool: dir.join("pd-update"),
+            pd_update_status: dir.join("update.json"),
+            pd_update_progress: dir.join("progress"),
+            pd_update_systemd_run: false,
+            ui_dir: None,
+            max_upload_bytes: 64,
+            ..ApiConfig::default()
+        }
     }
 
     fn chunks(parts: &[&'static [u8]]) -> impl Stream<Item = Result<Bytes, Infallible>> + Unpin {
@@ -501,9 +593,9 @@ mod tests {
     async fn uploads_hash_verify_and_list() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
-        let upload = store_upload(&config, "../helios-raze-v2026.4.0.img", None, None, chunks(&[b"hello ", b"world"])).await.expect("upload");
+        let upload = store_upload(&config, "../helios-full-raze-v2026.4.0.img.xz", None, None, chunks(&[b"hello ", b"world"])).await.expect("upload");
         assert_eq!(upload.sha256, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
-        assert_eq!(upload.filename, "helios-raze-v2026.4.0.img");
+        assert_eq!(upload.filename, "helios-full-raze-v2026.4.0.img.xz");
         assert_eq!(upload.size_bytes, 11);
         assert!(upload.image_url.starts_with("file://"));
         assert_eq!(read_uploads(&config).await, vec![upload.clone()]);
@@ -518,48 +610,131 @@ mod tests {
     }
 
     #[test]
-    fn status_without_orion_reads_ota_files() {
+    fn status_without_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let config = config(dir.path());
-        std::fs::create_dir_all(&config.ota_dir).expect("mkdir");
-        std::fs::write(config.ota_dir.join("active"), "A").expect("write");
-        std::fs::write(config.ota_dir.join("confirm-result.env"), "HELIOS_UPDATE_CONFIRM_STATUS=rolled-back\n").expect("write");
-        let status = status_from(&config, None);
+        let status = status_from(&config(dir.path()), None);
         assert_eq!(status.phase, "unknown");
-        assert!(!status.orion_reachable);
-        assert_eq!(status.slots.active.as_deref(), Some("A"));
-        assert!(status.last_error.expect("error").contains("rolled-back"));
+        assert!(!status.updater_available);
+        assert_eq!(status.slots.active, None);
     }
 
     #[test]
-    fn status_follows_updater_executions() {
-        use orion::control_plane::{ResourceConfigState, ResourceRecord, ResourceState, TypedConfigValue};
+    fn status_follows_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
-        let mut view = StateView::default();
-        view.resources.insert(
-            "updater.runtime.node-local".into(),
-            ResourceRecord::builder("updater.runtime.node-local", "system.update.runtime", "provider.updater.node-local").label("helios.updater.phase=idle").build(),
-        );
-        let execution = ResourceRecord::builder("update.execution.update.node-local.v2", EXECUTION_TYPE, "provider.updater.node-local")
-            .label("helios.update.version=v2")
-            .state(
-                ResourceState::new(0)
-                    .with_config(ResourceConfigState::new().field("phase", TypedConfigValue::String("staging".into())).field("message", TypedConfigValue::String("writing slot B".into()))),
-            )
-            .build();
-        view.resources.insert("update.execution.update.node-local.v2".into(), execution);
-        let status = status_from(&config, Some(&view));
+        std::fs::write(&config.pd_update_status, r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#).expect("write");
+        std::fs::write(&config.pd_update_progress, "1000").expect("write");
+        let status = status_from(&config, None);
         assert_eq!(status.phase, "staging");
         assert_eq!(status.stage, "installing");
-        assert_eq!(status.progress_percent, Some(50));
-        assert!(status.updater_running);
-        assert_eq!(status.active.expect("active").version.as_deref(), Some("v2"));
+        assert_eq!(status.progress_percent, Some(95));
+        assert_eq!(status.slots.staged.as_deref(), Some("B"));
+
+        std::fs::write(
+            &config.pd_update_status,
+            r#"{"state":"rolled-back","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":"the health check failed on v2"}"#,
+        )
+        .expect("write");
+        let status = status_from(&config, None);
+        assert_eq!(status.stage, "rolled_back");
+        assert_eq!(status.last_error.as_deref(), Some("the health check failed on v2"));
+    }
+
+    /// A stand-in for `/usr/lib/pd-device/update` that records its arguments and writes the
+    /// writer's state file as the real one does.
+    fn fake_writer(dir: &std::path::Path, stage_ok: bool) -> PathBuf {
+        let log = dir.join("calls.log");
+        let status = dir.join("update.json");
+        let stage = if stage_ok {
+            format!(r#"printf '%s\n' '{{"state":"staged","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}}' > {}"#, status.display())
+        } else {
+            "echo 'pd-device: the image failed its SHA-256 check (damaged or incomplete copy)' >&2; exit 1".to_string()
+        };
+        let script = format!(
+            "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$1\" in\nstage) {stage} ;;\napply) printf '%s\\n' '{{\"state\":\"trying\",\"slot_active\":\"A\",\"slot_staged\":\"B\",\"version_active\":\"v1\",\"version_staged\":\"v2\",\"progress\":1000,\"error\":\"\"}}' > {status} ;;\nesac\n",
+            log = log.display(),
+            status = status.display(),
+        );
+        let path = dir.join("pd-update");
+        std::fs::write(&path, script).expect("write");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        std::fs::write(&status, r#"{"state":"idle","slot_active":"A","slot_staged":"","version_active":"v1","version_staged":"","progress":0,"error":""}"#).expect("write");
+        path
+    }
+
+    async fn wait_for_step(state: &SharedState, step: &str) -> UpdateTask {
+        for _ in 0..200 {
+            if let Some(task) = current_task(state)
+                && task.step == step
+            {
+                return task;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("task never reached {step}: {:?}", current_task(state));
+    }
+
+    #[tokio::test]
+    async fn apply_stages_then_applies_through_the_writer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.pd_update_tool = fake_writer(dir.path(), true);
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "helios-full-raze-v2.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
+        let response = apply_upload(&state, upload.clone(), None, Some(upload.sha256.clone()), true).await.expect("apply");
+        assert_eq!(response.version, "v2");
+        wait_for_step(&state, "applying").await;
+        for _ in 0..200 {
+            if std::fs::read_to_string(dir.path().join("calls.log")).unwrap_or_default().lines().count() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let calls = std::fs::read_to_string(dir.path().join("calls.log")).expect("calls");
+        let image = upload.path(&config).display().to_string();
+        assert_eq!(calls, format!("stage {image} --sha256 {}\napply\n", upload.sha256));
+        assert!(!upload.path(&config).exists(), "a staged upload is removed");
+        let status = status_from(&config, current_task(&state));
+        assert_eq!(status.phase, "trying");
+        assert_eq!(status.stage, "rebooting");
+    }
+
+    #[tokio::test]
+    async fn a_failed_stage_is_reported_and_not_applied() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.pd_update_tool = fake_writer(dir.path(), false);
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
+        apply_upload(&state, upload.clone(), None, None, true).await.expect("apply");
+        let task = wait_for_step(&state, "failed").await;
+        assert_eq!(task.error.as_deref(), Some("the image failed its SHA-256 check (damaged or incomplete copy)"));
+        let calls = std::fs::read_to_string(dir.path().join("calls.log")).expect("calls");
+        assert!(!calls.contains("apply"));
+        assert!(upload.path(&config).exists(), "a failed upload is kept");
+        assert_eq!(status_from(&config, Some(task)).last_error.as_deref(), Some("the image failed its SHA-256 check (damaged or incomplete copy)"));
+    }
+
+    #[tokio::test]
+    async fn apply_refuses_without_the_writer_or_during_a_trial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = config(dir.path());
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
+        let error = apply_upload(&state, upload.clone(), None, None, true).await.expect_err("no writer");
+        assert_eq!(error.code, crate::error::ErrorCode::NotAvailable);
+
+        let mut config = config.clone();
+        config.pd_update_tool = fake_writer(dir.path(), true);
+        std::fs::write(&config.pd_update_status, r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("write");
+        let state = crate::AppState::new(config);
+        let error = apply_upload(&state, upload, None, None, true).await.expect_err("on trial");
+        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
     }
 
     #[test]
     fn filenames_are_sanitized() {
         assert_eq!(sanitize_filename("/tmp/../evil name.img"), "evil_name.img");
-        assert_eq!(sanitize_filename(".."), "helios-update.img");
+        assert_eq!(sanitize_filename(".."), "helios-update.img.xz");
     }
 }

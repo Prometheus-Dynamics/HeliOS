@@ -1,0 +1,12 @@
+#!/bin/sh
+# Device package updater hook, run by `update apply` just before the trial
+# reboot: stop the HeliOS services cleanly, so the engine releases the camera
+# and helios-api and orion-node flush their state to /data.
+#
+# helios-api starts `update apply` through systemd-run, outside its own
+# cgroup, so stopping helios-api here does not stop the update. A unit that
+# does not stop in time is logged but does not hold the update back: the
+# reboot that follows stops everything anyway.
+systemctl stop helios-engine.service helios-peripherals.service helios-api.service orion-node.service ||
+	echo "pre-reboot: some HeliOS services did not stop cleanly; rebooting anyway" >&2
+exit 0

@@ -1,6 +1,6 @@
-description = "Aggregated full payload layer: frontend bundle and peripherals binary."
+description = "Aggregated full payload layer: the UI's static build and the peripherals binary."
 
 imports = [
-  "./frontend.toml",
+  "./ui.toml",
   "./peripherals.toml",
 ]

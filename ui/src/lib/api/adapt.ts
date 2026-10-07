@@ -104,8 +104,10 @@ export function toService(unit: W.UnitStatus): Service {
 function slotsFrom(status: W.UpdateStatus | null, version: string): Slot[] {
   const active = status?.slots.active?.toUpperCase();
   if (active !== "A" && active !== "B") return [];
-  const confirmed = !status?.boot_confirm.status || /confirm/.test(status.boot_confirm.status);
-  return (["A", "B"] as const).map((name) => ({ name, version: name === active ? version : (status?.active?.version ?? ""), active: name === active, confirmed: name === active ? confirmed : false }));
+  // On a trial boot the running slot is not confirmed until update-health passes.
+  const confirmed = status?.phase !== "trying" || status.slots.staged?.toUpperCase() !== active;
+  const other = status?.slots.staged?.toUpperCase() !== active ? (status?.version_staged ?? "") : "";
+  return (["A", "B"] as const).map((name) => ({ name, version: name === active ? (status?.version_active ?? version) : other, active: name === active, confirmed: name === active ? confirmed : false }));
 }
 
 function clockSource(source: string | undefined): ClusterNode["clock"]["source"] {

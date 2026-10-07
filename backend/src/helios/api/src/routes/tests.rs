@@ -14,8 +14,11 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
         state_dir: dir.join("state"),
-        ota_dir: dir.join("ota"),
-        updater_dir: dir.join("updater"),
+        pd_update_tool: dir.join("no-pd-update"),
+        pd_update_status: dir.join("update.json"),
+        pd_update_progress: dir.join("update-progress"),
+        pd_update_systemd_run: false,
+        ui_dir: None,
         upload_dir: dir.join("uploads"),
         pd_identity_path: dir.join("identity.json"),
         auth_file: dir.join("auth").join("auth.json"),
@@ -119,7 +122,7 @@ async fn identity_falls_back_to_system_facts() {
 }
 
 #[tokio::test]
-async fn update_status_works_without_orion() {
+async fn update_status_works_without_the_writer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
     let (status, body) = call(&state, "GET", "/v1/update/status", None).await;
@@ -131,7 +134,7 @@ async fn update_status_works_without_orion() {
 }
 
 #[tokio::test]
-async fn raw_upload_then_apply_reaches_orion() {
+async fn raw_upload_then_apply_needs_the_device_package_writer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
     let request = Request::builder().method("POST").uri("/v1/update/uploads?filename=helios-raze-v9.img").body(Body::from(vec![7u8; 1024])).expect("request");
@@ -142,12 +145,33 @@ async fn raw_upload_then_apply_reaches_orion() {
     let (status, list) = call(&state, "GET", "/v1/update/uploads", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list.as_array().map(Vec::len), Some(1));
-    // Not a disk image: preparing it fails before Orion is contacted... unless it is a raw image,
-    // in which case submission fails on the missing Orion socket. Either way it is not accepted.
-    let (status, _) = call(&state, "POST", "/v1/update/apply", Some(serde_json::json!({ "upload_id": upload["id"] }))).await;
-    assert!(status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::SERVICE_UNAVAILABLE, "{status}");
+    // No /usr/lib/pd-device/update here: applying is not available, and the upload stays.
+    let (status, body) = call(&state, "POST", "/v1/update/apply", Some(serde_json::json!({ "upload_id": upload["id"] }))).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
+    assert_eq!(body["error"]["code"], "not_available");
     let (status, _) = call(&state, "DELETE", &format!("/v1/update/uploads/{}", upload["id"].as_str().expect("id")), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn ui_is_served_outside_v1() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ui = dir.path().join("ui");
+    std::fs::create_dir_all(&ui).expect("mkdir");
+    std::fs::write(ui.join("index.html"), "<!doctype html><title>HeliOS</title>").expect("write");
+    let mut config = test_state(dir.path()).config.clone();
+    config.ui_dir = Some(ui);
+    let state = AppState::new(config);
+    for path in ["/", "/pipelines/42"] {
+        let response = router(state.clone()).oneshot(Request::builder().uri(path).body(Body::empty()).expect("request")).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert!(response.headers()["content-type"].to_str().expect("type").starts_with("text/html"));
+    }
+    let (status, body) = call(&state, "GET", "/v1/nope", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "not_found");
+    let (status, _) = call(&state, "GET", "/missing.js", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

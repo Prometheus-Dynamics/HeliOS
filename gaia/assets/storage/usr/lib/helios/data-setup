@@ -1,0 +1,124 @@
+#!/bin/sh
+# Mount /data and put the persistent state where the system expects it, early
+# in boot (helios-data-setup.service, before local-fs.target).
+#
+# The root filesystem is a read-only EROFS slot (p5 or p6) that an A/B update
+# replaces wholesale. /data (p7) is the one partition both slots share and
+# updates never touch, so everything a board must keep lives there:
+#
+#   /data/helios      -> /var/lib/helios   HeliOS state: Orion (orion/), the API
+#                                          (api/, auth/, updates/), engine state,
+#                                          diagnostics
+#   /data/log/helios  -> /var/log/helios   service logs
+#   /data/journal     -> /var/log/journal  persistent journal (16 MiB cap)
+#   /data/timesync    -> /var/lib/systemd/timesync
+#                                          the clock floor across reboots
+#   /data/root        -> /root             root's home (shell history, keys)
+#   /data/identity/machine-id              bound over /etc/machine-id
+#   /data/ssh/                             sshd host keys (HostKey lines in
+#                                          /etc/ssh/sshd_config)
+#   /data/pd-device/                       user overrides for the device
+#                                          package (*.env, read by it directly)
+#
+# Everything else that changes at runtime is in /run or the /var tmpfs.
+# If p7 is missing or will not mount, /data is a tmpfs: the board still boots
+# (and can be updated or reflashed), but nothing persists, and
+# `heliosctl doctor` reports it as failed.
+set -eu
+
+DATA_DEV=${HELIOS_DATA_DEV:-/dev/mmcblk0p7}
+DATA=/data
+
+log() { echo "data-setup: $*"; }
+
+mounted() { mountpoint -q "$1"; }
+
+# --- /data ----------------------------------------------------------------------
+
+if ! mounted "$DATA"; then
+	i=0
+	while [ ! -b "$DATA_DEV" ] && [ "$i" -lt 150 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if [ -b "$DATA_DEV" ]; then
+		# -p repairs what is safe to repair; 4 and above means it could not.
+		rc=0
+		e2fsck -p "$DATA_DEV" || rc=$?
+		[ "$rc" -lt 4 ] || log "e2fsck could not repair $DATA_DEV (exit $rc); trying to mount it anyway"
+		mount -t ext4 -o noatime "$DATA_DEV" "$DATA" || log "could not mount $DATA_DEV"
+	else
+		log "$DATA_DEV does not exist"
+	fi
+fi
+if mounted "$DATA"; then
+	# The image ships a small /data; grow it (and its partition) to the end of
+	# the eMMC. Idempotent, so an interrupted grow finishes on a later boot.
+	/usr/lib/helios/grow-data "$DATA" || log "growing $DATA failed; continuing at its current size"
+else
+	log "/data is not persistent on this boot: using a tmpfs"
+	mount -t tmpfs -o mode=0755,size=256m tmpfs "$DATA"
+fi
+
+# --- bind mounts ------------------------------------------------------------------
+
+bind() {
+	src=$1
+	dst=$2
+	mode=$3
+	mkdir -p "$src" "$dst"
+	chmod "$mode" "$src"
+	mounted "$dst" || mount --bind "$src" "$dst"
+}
+
+bind "$DATA/helios" /var/lib/helios 0755
+bind "$DATA/log/helios" /var/log/helios 0755
+bind "$DATA/timesync" /var/lib/systemd/timesync 0755
+bind "$DATA/root" /root 0700
+mkdir -p "$DATA/journal"
+chown root:systemd-journal "$DATA/journal" 2>/dev/null || true
+chmod 2755 "$DATA/journal"
+mounted /var/log/journal || { mkdir -p /var/log/journal && mount --bind "$DATA/journal" /var/log/journal; }
+
+# --- machine ID -------------------------------------------------------------------
+# Orion's host facts, networkd's DHCP client ID and the journal use it: it must
+# survive reboots and updates. systemd put a transient one over the empty
+# /etc/machine-id; the first boot keeps that one, later boots bind it back.
+
+mkdir -p "$DATA/identity"
+running=$(cat /etc/machine-id 2>/dev/null || true)
+kept=$(cat "$DATA/identity/machine-id" 2>/dev/null || true)
+valid_id() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{32}$'; }
+if ! valid_id "$kept"; then
+	kept=$running
+	valid_id "$kept" || kept=$(tr -d '-' </proc/sys/kernel/random/uuid)
+	printf '%s\n' "$kept" >"$DATA/identity/machine-id.tmp"
+	mv "$DATA/identity/machine-id.tmp" "$DATA/identity/machine-id"
+	chmod 0444 "$DATA/identity/machine-id"
+	log "kept machine ID $kept"
+fi
+if [ "$running" != "$kept" ]; then
+	mount --bind "$DATA/identity/machine-id" /etc/machine-id
+	# journald read the transient ID when it started; it would file the
+	# persistent journal under that one. It has not flushed to /var yet.
+	systemctl restart --no-block systemd-journald.service || true
+fi
+
+# --- SSH host keys ----------------------------------------------------------------
+# sshd reads them from /data/ssh (HostKey in /etc/ssh/sshd_config), so a board
+# keeps its host key across updates.
+
+mkdir -p "$DATA/ssh"
+chmod 0700 "$DATA/ssh"
+for type in ed25519 ecdsa rsa; do
+	key="$DATA/ssh/ssh_host_${type}_key"
+	if [ ! -s "$key" ] || [ ! -s "$key.pub" ]; then
+		rm -f "$key" "$key.pub"
+		ssh-keygen -q -t "$type" -N '' -C "root@$(hostname)" -f "$key"
+		log "generated the $type SSH host key"
+	fi
+done
+
+# --- the device package -------------------------------------------------------------
+
+mkdir -p "$DATA/pd-device"

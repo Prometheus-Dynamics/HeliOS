@@ -107,7 +107,7 @@
             <Icon name="cloud-download" size={14} />
             <span>
               {#if update && update.phase !== "idle" && update.phase !== "unknown"}
-                <b>{update.active?.version ?? "Update"}</b>: {update.phase.replaceAll("_", " ")}{#if update.progress_percent != null} · {update.progress_percent}%{/if}{#if update.active?.message} · {update.active.message}{/if}
+                <b>{update.version_staged ?? update.task?.version ?? "Update"}</b>: {update.phase.replaceAll("_", " ")}{#if update.progress_percent != null} · {update.progress_percent}%{/if}{#if update.last_error} · {update.last_error}{/if}
               {:else if update?.last_error}
                 Last update: {update.last_error}
               {:else}

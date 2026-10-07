@@ -52,7 +52,10 @@ REQUIRES_SSH="0"
 usage() {
   cat <<EOF
 Build + deploy Helios CM5 binaries and frontend assets to a device.
-Binary deploys upload over SSH and activate through helios-updater-managed service revisions.
+Binary deploys upload over SSH to /data/helios-dev/<revision> and point the services at them
+with runtime drop-ins (/run/systemd/system/<unit>.d/50-dev.conf): the root filesystem is a
+read-only EROFS slot, and a reboot returns to the image's own binaries. Ship for real with an
+image (the device package's A/B updater).
 
 Usage:
   ./tools/deploy-live.sh [options]
@@ -508,7 +511,6 @@ if [[ "$BUILD" == "1" ]]; then
       "helios-engine:helios-engine"
       "helios-api:helios-api"
       "helios-peripherals:helios-peripherals"
-      "helios-updater:helios-updater"
     )
     spec=""
     for spec in "${bin_specs[@]}"; do
@@ -630,7 +632,7 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   if [[ "$do_binaries" == "1" ]]; then
-    bins=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
+    bins=("helios-engine" "helios-api" "helios-peripherals")
     b=""
     for b in "${bins[@]}"; do
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"
@@ -639,7 +641,7 @@ if [[ "$UPLOAD" == "1" ]]; then
     bins_to_upload=( "${bins[@]}" )
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for live updater activation..."
+      echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for a runtime (until reboot) deploy..."
     else
       echo "Binaries unchanged; skipping binary upload."
     fi
@@ -664,7 +666,7 @@ if [[ "$UPLOAD" == "1" ]]; then
       if [[ -z "${revision// }" ]]; then
         revision="dev-$(date +%Y%m%d-%H%M%S)"
       fi
-      remote_incoming="/var/lib/helios/releases/incoming/$revision"
+      remote_incoming="/data/helios-dev/$revision"
       echo "Uploading ${#bins_to_upload[@]} binary artifact(s) -> $SSH_TARGET:$remote_incoming"
       ssh_exec "install -d -m0755 '$remote_incoming'"
       ssh_upload_tar "$BINS_DIR" "$remote_incoming" "${bins_to_upload[@]}"
@@ -675,13 +677,14 @@ if [[ "$UPLOAD" == "1" ]]; then
       )"
 
       for b in "${bins_to_upload[@]}"; do
-        echo "Activating $b -> revision $revision"
-        activate_cmd="helios-updater service activate --name \"$b\" --revision \"$revision\""
-        if [[ "$RESTART_SERVICES" == "0" ]]; then
-          activate_cmd="$activate_cmd --restart false"
-        fi
-        ssh_exec "sh -lc 'helios-updater service stage --name \"$b\" --revision \"$revision\" --binary \"$remote_incoming/$b\" && $activate_cmd'"
+        echo "Activating $b -> $remote_incoming/$b (until the next reboot)"
+        dropin_dir="/run/systemd/system/$b.service.d"
+        ssh_exec "install -d -m0755 '$dropin_dir' && printf '[Service]\nExecStart=\nExecStart=%s\n' '$remote_incoming/$b' > '$dropin_dir/50-dev.conf'"
       done
+      ssh_exec "systemctl daemon-reload"
+      if [[ "$RESTART_SERVICES" == "1" ]]; then
+        ssh_exec "systemctl restart $(printf '%s.service ' "${bins_to_upload[@]}")"
+      fi
     fi
   fi
 fi

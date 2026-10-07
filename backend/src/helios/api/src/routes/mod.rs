@@ -90,15 +90,11 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/ota/apply", post(update::atlas_apply))
         .route("/v1/ota/state", get(update::atlas_state))
         .merge(uploads)
-        .fallback(not_found)
+        .fallback(crate::ui::fallback)
         // CORS is outermost so preflights are answered before auth.
         .layer(middleware::from_fn_with_state(state.clone(), auth::middleware))
         .layer(middleware::from_fn_with_state(state.clone(), cors))
         .with_state(state)
-}
-
-async fn not_found(request: Request) -> ApiError {
-    ApiError::not_found(format!("no route for {} {}", request.method(), request.uri().path()))
 }
 
 /// Optional CORS for a UI served from another origin (`HELIOS_API_CORS_ORIGIN`).

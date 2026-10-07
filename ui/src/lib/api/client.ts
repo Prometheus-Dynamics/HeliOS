@@ -207,7 +207,7 @@ export const api = {
     request<Upload>("POST", "/v1/update/uploads", { query: { filename: options.filename ?? (file instanceof File ? file.name : undefined), sha256: options.sha256, version: options.version }, raw: file, headers: { "Content-Type": "application/octet-stream" } }),
   uploads: () => request<Upload[]>("GET", "/v1/update/uploads"),
   deleteUpload: (id: string) => request<void>("DELETE", `/v1/update/uploads/${enc(id)}`),
-  applyUpdate: (body: { upload_id?: string; image_url?: string; version?: string; sha256?: string }) => request<ApplyResponse>("POST", "/v1/update/apply", { body }),
+  applyUpdate: (body: { upload_id?: string; image_url?: string; version?: string; sha256?: string; reboot?: boolean }) => request<ApplyResponse>("POST", "/v1/update/apply", { body }),
   updateStatus: () => request<UpdateStatus>("GET", "/v1/update/status"),
   switchSlot: () => request<never>("POST", "/v1/update/slots/switch"),
 };

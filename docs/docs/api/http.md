@@ -11,7 +11,10 @@ description: The HeliOS application API served by helios-api, for the HeliOS UI 
 `helios-api` is the application API of a HeliOS device. The HeliOS UI and Atlas Hardware
 Manager use it. Everything lives under `/v1`; breaking changes get a new prefix.
 
-- **Address**: `HELIOS_API_BIND` (the image sets `0.0.0.0:5801`; the default is `127.0.0.1:5800`).
+- **Address**: `HELIOS_API_BIND` (the image sets `0.0.0.0:5800`; the default is `127.0.0.1:5800`).
+- **UI**: the same port serves the HeliOS UI's static build (`HELIOS_API_UI_DIR`, the image's
+  `/usr/share/helios/ui`): every path outside `/v1` is a UI file or the app shell. The device
+  identity's `manage_url` is `http://<hostname>.local:5800/`.
 - **Format**: JSON with `snake_case` fields. Timestamps are `*_ms` (Unix milliseconds).
 - **Events**: Server-Sent Events. See [Event stream](./websockets.md).
 - **Auth**: off by default (the device is **open**). One switch secures it with a device password
@@ -29,7 +32,7 @@ The API keeps very little state of its own. It reads other parts of the device a
 | Services, reboot, logs | **systemd** and the **journal** |
 | CPU, temperature, disk, processes | the **kernel** (`/proc`, `/sys`). Memory, load and uptime come from Orion's host metrics |
 | Identity | the **Raze device package** (`/run/pd-device/identity.json`) |
-| OS updates | **helios-updater**, through the same path as `heliosctl update apply` |
+| OS updates | the Raze device package's A/B writer (`/usr/lib/pd-device/update`) |
 
 The API stores only two things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`):
 pipeline revision history (used for rollback) and camera mounts. The device security file is
@@ -313,45 +316,57 @@ gets a 409.
 
 ### Updates (OTA)
 
+OS updates go through the Raze device package's A/B writer (`/usr/lib/pd-device/update`, Atlas
+`docs/ota.md`); HeliOS has no updater of its own. The writer takes the same `.img.xz` that is
+flashed over USB: `stage` checks its SHA-256 and copies the image's boot slot A (p2) and root slot
+A (p5) into the board's inactive slot, `apply` runs the image's pre-reboot hook (which stops the
+HeliOS services) and reboots into that slot on trial, and `pd-device-update-confirm.service`
+keeps it once `/etc/pd-device/update-health` passes (orion-node, helios-engine and helios-api
+active, the API answering). Otherwise the board restarts into the previous slot by itself.
+
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/v1/update/uploads` | Raw image body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to disk and hashed; returns 201 with an upload |
-| `GET` | `/v1/update/uploads` | Staged uploads, newest first |
-| `DELETE` | `/v1/update/uploads/{id}` | Delete a staged upload |
-| `POST` | `/v1/update/apply` | `{upload_id \| image_url, version?, sha256?}`. Answers 202 `{update_id, artifact_id, version, sha256, image_url, message}` |
+| `POST` | `/v1/update/uploads` | Raw image body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/var/lib/helios/updates` (on `/data`) and hashed; returns 201 with an upload |
+| `GET` | `/v1/update/uploads` | Uploads, newest first |
+| `DELETE` | `/v1/update/uploads/{id}` | Delete an upload |
+| `POST` | `/v1/update/apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Starts staging and answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot` (default `true`) applies the update once staged; `false` stops after staging |
 | `GET` | `/v1/update/status` | Update status (below) |
 | `GET` | `/v1/update/events` | SSE `update` events, starting with the current status |
 | `POST` | `/v1/update/slots/switch` | **501** |
 
 An upload: `{id, filename, size_bytes, sha256, image_url, uploaded_at_ms, version}`. The `id` is
 the first 16 hex digits of the sha256, and `image_url` is a `file://` URL inside the upload
-directory. Apply accepts only images that were uploaded here.
+directory. Apply accepts only images that were uploaded here, checks `sha256` against the upload
+when given, and refuses with 409 while an update is staging or on trial, with 422 off the A/B
+layout, and with 501 when the device package's writer is not installed.
 
-When you apply, the image goes to helios-updater exactly as `heliosctl update apply` sends it:
-the API hashes it, records the rootfs size, stages the boot assets, and writes one Orion batch
-(node, artifact `artifact.os.<version>`, workload `update.<node>.<version>`). The version is the
-first of these that is set: the requested `version`, the upload's `version`, the `v…` part of the
-file name, or `upload-<sha256 prefix>`.
+The API runs `update stage <image> --sha256 <hex>` and then `update apply` through
+`systemd-run`, so they live in their own units: the pre-reboot hook stops helios-api, and that
+must not stop the update. A staged upload is deleted (the slot holds the image now); a failed
+one is kept. The version shown is the first of these that is set: the requested `version`, the
+upload's `version`, the `v…` part of the file name, or `upload-<sha256 prefix>`; the writer
+itself takes the version from the new root's os-release.
 
-Update status:
+Update status (from the writer's `/run/pd-device/update.json`):
 
 ```json
 {
-  "phase": "staging", "stage": "installing", "progress_percent": 50, "last_error": null,
-  "orion_reachable": true, "updater_running": true,
-  "active": { "update_id": "update.node-local.v2026.4.0", "artifact_id": "artifact.os.v2026.4.0",
-              "version": "v2026.4.0", "artifact_class": "os-image", "phase": "staging", "message": "writing slot B" },
-  "executions": [],
-  "slots": { "active": "A", "reserve": "B", "pending": null },
-  "boot_confirm": { "request_id": null, "status": "confirmed", "selector": "A" },
-  "repartition": { "request_id": null, "status": null }
+  "phase": "staging", "stage": "installing", "progress_percent": 52, "last_error": null,
+  "updater_available": true,
+  "slots": { "active": "A", "staged": "B" },
+  "version_active": "v2026.2.0", "version_staged": null,
+  "task": { "update_id": "1f2e3d4c5b6a7980-1791345524926", "upload_id": "1f2e3d4c5b6a7980",
+            "version": "v2026.3.0", "sha256": "…", "step": "staging", "reboot": true,
+            "error": null, "started_at_ms": 1791345524926 }
 }
 ```
 
-`phase` is helios-updater's phase: `idle`, `preflight`, `downloading`, `staging`,
-`switching_boot`, `awaiting_boot_success`, `finalizing`, `rolling_back`, `completed` or
-`failed`. It is `unknown` while Orion is unreachable. `stage` is the same phase in Atlas's
-vocabulary. `progress_percent` is a coarse per-phase estimate.
+`phase` is the writer's state: `idle`, `staging`, `staged`, `trying` (the trial boot, before and
+after the reboot), `confirmed`, `rolled-back` or `error`; `unknown` when it has published none.
+`stage` is the same in Atlas's vocabulary, `progress_percent` the writer's own progress (0 to 10
+% is the SHA-256 check, then the slot copy). `task` is what helios-api last asked the writer to
+do: its `step` is `staging`, `staged`, `applying` (rebooting into the new slot) or `failed`, with
+the writer's reason in `error`.
 
 #### Atlas's HTTP OTA path
 
@@ -360,14 +375,14 @@ These routes speak the contract of Atlas Hardware Manager's HTTP OTA client:
 | Method | Path | Contract |
 |---|---|---|
 | `POST` | `/v1/ota/upload` | `multipart/form-data`, with the image in a part named `file`. Returns `{image_url, filename, size_bytes, sha256}` |
-| `POST` | `/v1/ota/apply` | `{requested_by, image_url, size_bytes, checksum}`. Returns `{update_id, message}`. Size and checksum are verified against the upload |
-| `GET` | `/v1/ota/state` | `{"state": {update_id, stage, phase, progress_percent, last_error}, "slots": ..., "boot_confirm": ...}` |
+| `POST` | `/v1/ota/apply` | `{requested_by, image_url, size_bytes, checksum}`. Returns `{update_id, message}`. Size and checksum are verified against the upload; the update is staged and applied |
+| `GET` | `/v1/ota/state` | `{"state": {update_id, stage, phase, progress_percent, last_error}, "slots": ..., "version_active", "version_staged"}` |
 | `GET` | `/v1/health`, `/v1/device/os` | Reconnect probes after the reboot |
 
-Stage mapping: `preflight` becomes `verifying`, `downloading` stays `downloading`, `staging`
-becomes `installing`, `switching_boot` becomes `committing`, `awaiting_boot_success` becomes
-`rebooting`, `finalizing` stays `finalizing`, `completed` becomes `complete`, `rolling_back`
-becomes `rolled_back`, and `failed` stays `failed`.
+Stage mapping: `idle` stays `idle`; `staging` is `verifying` during the SHA-256 check and
+`installing` during the copy; `staged` becomes `committing`; `trying` is `rebooting` until the
+board runs the new slot and `finalizing` until it is confirmed; `confirmed` becomes `complete`,
+`rolled-back` becomes `rolled_back`, and `error` becomes `failed`.
 
 ## Device security
 
@@ -416,7 +431,7 @@ Requests with a bearer token need no CSRF header.
 ### How a tool authenticates (Atlas, scripts)
 
 1. Make a token in the UI (Settings, Security, **New token**) or with
-   `curl -X POST http://raze.local:5801/v1/auth/tokens -H 'authorization: Bearer <existing token>' -H 'content-type: application/json' -d '{"label":"Atlas"}'`.
+   `curl -X POST http://helios-abcdef01.local:5800/v1/auth/tokens -H 'authorization: Bearer <existing token>' -H 'content-type: application/json' -d '{"label":"Atlas"}'`.
 2. Send it on every request: `Authorization: Bearer helios_<64 hex digits>`. This includes the SSE
    streams, so the client must be able to set headers (a browser `EventSource` cannot; the UI
    uses its cookie instead).
@@ -473,7 +488,7 @@ possible later step and is not built.
 {
   "contract": 1, "model": "raze", "rev": "gen1", "serial": "10000000abcdef01", "hostname": "raze-abcdef01",
   "os": { "name": "helios", "version": "2026.4.0" }, "device_package": { "version": "1.0.10", "commit": null },
-  "update_methods": ["image-write", "ab-tryboot", "helios-ota"], "manage_url": "http://raze-abcdef01.local:5800/",
+  "update_methods": ["image-write", "ab-tryboot", "helios-ota"], "manage_url": "http://helios-abcdef01.local:5800/",
   "macs": { "eth0": "2c:cf:67:00:00:01" },
   "helios": { "source": "pd-device", "api_version": "v1", "version": "1.0.0", "node_id": "node-local",
               "endpoints": { "health": "/v1/health", "metrics": "/v1/metrics", "logs": "/v1/logs", "events": "/v1/events",
@@ -494,9 +509,9 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_NODE_ID` | `node-local` |
 | `HELIOS_ORION_IPC_SOCKET`, `HELIOS_ORION_IPC_STREAM_SOCKET` | `/run/orion/control.sock`, `/run/orion/control-stream.sock` |
 | `HELIOS_API_STATE_DIR` | `/var/lib/helios/api` |
-| `HELIOS_OTA_DIR` | `/var/lib/helios/ota` (uploads go in `uploads/` inside it) |
-| `HELIOS_API_UPLOAD_DIR` | `$HELIOS_OTA_DIR/uploads` |
-| `HELIOS_UPDATER_STATE_DIR` | `/var/lib/helios/updater` |
+| `HELIOS_API_UPLOAD_DIR` | `/var/lib/helios/updates` (on `/data`) |
+| `HELIOS_PD_UPDATE_TOOL` | `/usr/lib/pd-device/update` (the device package's A/B writer) |
+| `HELIOS_API_UI_DIR` | `/usr/share/helios/ui`; `off` serves the API only |
 | `HELIOS_PD_IDENTITY_PATH` | `/run/pd-device/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |
 | `HELIOS_API_CORS_ORIGIN` | unset (no CORS headers) |
