@@ -1,0 +1,20 @@
+# HeliOS sshd configuration. The root filesystem is read-only.
+
+# The device package's drop-in (50-pd-device.conf) adds the keys left on the
+# boot partition, from /run/pd-device/ssh/authorized_keys. It must come before
+# any AuthorizedKeysFile line: sshd keeps the first value it reads.
+Include /etc/ssh/sshd_config.d/*.conf
+
+Port 22
+Protocol 2
+
+# Host keys live on /data (generated there by helios-data-setup on first
+# boot), so a board keeps its host key across A/B updates.
+HostKey /data/ssh/ssh_host_ed25519_key
+HostKey /data/ssh/ssh_host_ecdsa_key
+HostKey /data/ssh/ssh_host_rsa_key
+
+PermitRootLogin yes
+PasswordAuthentication yes
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no

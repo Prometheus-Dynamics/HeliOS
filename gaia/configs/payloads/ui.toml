@@ -1,0 +1,19 @@
+description = "UI payload layer: the HeliOS UI's static build (ui/, SvelteKit with adapter-static, built with bun by tools/build-os.sh), served by helios-api on :5800 next to the API."
+
+[stage]
+
+# Build it first: `cd ui && bun install --frozen-lockfile && bun run build`
+# (tools/build-os.sh does this when ui/ changed).
+[[stage.files]]
+id = "ui-static-build"
+src = "ui/build"
+dest = "/usr/share/helios/ui"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "ui-static-build",
+]

@@ -1,6 +1,5 @@
-description = "Aggregated full runtime-service layer: frontend and peripherals runtime wiring."
+description = "Aggregated full runtime-service layer: peripherals runtime wiring. The UI is served by helios-api (no web server)."
 
 imports = [
-  "./frontend.toml",
   "./peripherals.toml",
 ]

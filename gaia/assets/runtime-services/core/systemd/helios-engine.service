@@ -11,7 +11,6 @@ ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/engine
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/state
-ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
 Environment=ENGINE_SOCKET=/run/helios/engine.sock
 Environment=ENGINE_JOURNAL_PATH=/var/log/helios/engine/engine.log
@@ -24,7 +23,7 @@ Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
 Environment=DAEDALUS_METRICS_LEVEL=detailed
 EnvironmentFile=-/etc/default/helios-engine.env
-ExecStart=/var/lib/helios/bin/helios-engine
+ExecStart=/usr/bin/helios-engine
 Restart=always
 RestartSec=2
 TimeoutStopSec=45

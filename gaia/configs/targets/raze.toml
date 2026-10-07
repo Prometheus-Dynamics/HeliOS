@@ -1,22 +1,5 @@
-description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, and the device services; this file adds HeliOS's own boot files, kernel fragments, initramfs, unit presets and image assembly."
+description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, the device services and the A/B update writer; this file adds HeliOS's own boot files, kernel options, image scripts and the A/B disk assembly shared with the PhotonVision Raze image."
 target = "raze"
-
-# Presets that sort before the device package's 70-pd-device.preset (see the
-# file for what HeliOS turns off and why).
-[[stage.files]]
-id = "raze-helios-preset"
-src = "@assets/os/usr/lib/systemd/system-preset/50-helios.preset"
-dest = "/usr/lib/systemd/system-preset/50-helios.preset"
-origin = "static-asset"
-
-# The device package finds the boot partition (for SSH keys left in
-# pd-device/authorized_keys) from the root mount's source, which is an overlay
-# on HeliOS; name it instead.
-[[stage.files]]
-id = "raze-pd-device-ssh-keys-env"
-src = "@assets/os/etc/pd-device/ssh-keys.env"
-dest = "/etc/pd-device/ssh-keys.env"
-origin = "static-asset"
 
 [image]
 kind = "buildroot"
@@ -26,14 +9,19 @@ kind = "buildroot"
 external_tree = "@source:atlas/devices/raze/gaia/buildroot-external:gaia/assets/buildroot"
 external_tree_mode = "required"
 # defconfig, kernel tarball and hash, OV9782 extension, rpi-firmware overlays,
-# rpi-userland and host-dtc come from the device package.
+# rpi-utils and host-dtc come from the device package.
 config_overrides = [
-  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"board/raspberrypi/linux-4k-page-size.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-squashfs-initramfs.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-no-wireless.fragment\""],
-  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
-  ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/config.txt\""],
-  ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/cmdline.txt\""],
+  # The device package's raze.config first (its trims and the built-in EROFS
+  # the root needs), then the 4 KiB page size HeliOS has always run with (the
+  # CM5 defconfig's fragment, which the package's list replaces).
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"$(BR2_EXTERNAL_RAZE_DEVICE_PATH)/linux/raze.config board/raspberrypi/linux-4k-page-size.fragment\""],
+  # post-build: the read-only root's fstab, mount points and /run links.
+  # post-image: checks rootfs.erofs fits its 512 MiB slot, makes data.ext4.
+  ["BR2_ROOTFS_POST_BUILD_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-build.sh\""],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-image.sh\""],
+  ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/config.txt\""],
+  ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/cmdline.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4", "y"],
-  ["BR2_TARGET_ROOTFS_EXT2", "n"],
 ]
 
 [[image.expected_images]]
@@ -41,37 +29,54 @@ name = "sdcard.img"
 format = "raw"
 required = true
 
-[image.feed]
-stage_files = ["raze-helios-preset", "raze-pd-device-ssh-keys-env"]
-
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
 out_dir = "$provider.images"
 
+# --- p1: autoboot --------------------------------------------------------------
+# autoboot.txt only. The bootloader reads it first: boot A (p2) by default,
+# boot B (p3) once on a tryboot. The device package's writer rewrites it,
+# keeps its state there (pd-update.env), and reads opt-in SSH keys from
+# pd-device/authorized_keys on it, so p1 is shared by both slots.
+[[image.assembly.trees]]
+id = "autoboot"
+path = "$assembly.work/autoboot"
+
+[[image.assembly.files]]
+tree = "autoboot"
+src = "@assets/buildroot/boards/raze/autoboot.txt"
+dest = "autoboot.txt"
+
+[[image.assembly.filesystems]]
+id = "autoboot"
+kind = "vfat"
+source_tree = "autoboot"
+output = "$assembly.work/autoboot.vfat"
+size = "16M"
+
+# --- p2/p3: boot A/B -----------------------------------------------------------
 # The device package adds raze-device.txt, its overlays (ov9782, raze-fan,
 # raze-usb-power) and the stock overlays it loads (dwc2, i2c1-pi5, i2c-gpio,
-# ws2812-pio, vc4-kms-v3d-pi5) to this tree; config.txt includes it.
+# ws2812-pio, vc4-kms-v3d-pi5) to this tree; config.txt includes it. One boot
+# image serves both slots: the writer rewrites root= in the slot it writes
+# (cmdline.txt here says root A, /dev/mmcblk0p5).
 [[image.assembly.trees]]
 id = "boot"
 path = "$assembly.work/boot"
 
-[[image.assembly.trees]]
-id = "initramfs"
-path = "$assembly.work/initramfs"
-
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/helios-pi-squashfs/config.txt"
+src = "@assets/buildroot/boards/raze/config.txt"
 dest = "config.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/helios-pi-squashfs/cmdline.txt"
+src = "@assets/buildroot/boards/raze/cmdline.txt"
 dest = "cmdline.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/helios-pi-squashfs/os_config.json"
+src = "@assets/buildroot/boards/raze/os_config.json"
 dest = "os_config.json"
 
 [[image.assembly.files]]
@@ -128,85 +133,10 @@ src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/overlays/hat_ma
 dest = "overlays/hat_map.dtb"
 optional = true
 
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "dev"
-
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "proc"
-
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "sys"
-
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "mnt/data"
-
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "mnt/lower"
-
-[[image.assembly.dirs]]
-tree = "initramfs"
-path = "newroot"
-
-[[image.assembly.symlinks]]
-tree = "initramfs"
-path = "lib64"
-target = "lib"
-
-[[image.assembly.symlinks]]
-tree = "initramfs"
-path = "usr/lib64"
-target = "../lib"
-
-[[image.assembly.files]]
-tree = "initramfs"
-src = "@assets/buildroot/boards/helios-pi-squashfs/init-overlay-root.sh"
-dest = "init"
-mode = "0755"
-
-[[image.assembly.files]]
-tree = "initramfs"
-src = "$provider.target/etc/helios/storage-layout.env"
-dest = "etc/helios/storage-layout.env"
-optional = true
-
-[[image.assembly.files]]
-tree = "initramfs"
-src = "$provider.target/lib/ld-linux-aarch64.so.1"
-dest = "lib/ld-linux-aarch64.so.1"
-mode = "0755"
-
-[[image.assembly.files]]
-tree = "initramfs"
-src = "$provider.target/lib/libc.so.6"
-dest = "lib/libc.so.6"
-
-[[image.assembly.files]]
-tree = "initramfs"
-src = "$provider.target/lib/libresolv.so.2"
-dest = "lib/libresolv.so.2"
-
 [[image.assembly.transforms]]
 kind = "gzip"
 src = "$provider.buildroot_output/images/Image"
 dest = "$assembly.tree.boot/kernel8.img"
-deterministic = true
-
-[[image.assembly.busybox_initramfs]]
-tree = "initramfs"
-busybox = "$provider.target/bin/busybox"
-include_runtime_libs = false
-applets = ["sh", "mount", "mkdir", "sleep", "sync", "switch_root", "cat", "umount", "insmod"]
-
-[[image.assembly.filesystems]]
-id = "initramfs8"
-kind = "cpio-gzip"
-source_tree = "initramfs"
-output = "$assembly.tree.boot/initramfs8"
 deterministic = true
 
 [[image.assembly.filesystems]]
@@ -214,23 +144,56 @@ id = "boot"
 kind = "vfat"
 source_tree = "boot"
 output = "$provider.images/boot.vfat"
-size = "18M"
+size = "128M"
 
+# --- the disk ------------------------------------------------------------------
+# The A/B layout of the device package's writer (Atlas docs/ota.md), the same
+# as the PhotonVision Raze image's: p1 autoboot, p2/p3 boot A/B, p4 extended
+# (added by Gaia), p5/p6 root A/B (512 MiB each, read-only EROFS), p7 /data
+# (64 MiB here, grown to fill the eMMC on first boot). Slot B's root ships
+# empty. Unwritten space stays sparse, so the .img.xz stays small. The writer
+# updates a running board from this same image: it copies p2 and p5 into the
+# inactive slot.
 [[image.assembly.disks]]
 id = "sdcard"
 output = "$provider.images/sdcard.img"
 partition_table = "mbr"
 signature = "0x48454c49"
-first_lba = 1
-alignment_lba = 1
+first_lba = 2048
+alignment_lba = 2048
 
 [[image.assembly.disks.partitions]]
-name = "boot"
+name = "autoboot"
 type_alias = "fat32-lba"
 bootable = true
-image = "$provider.images/boot.vfat"
+image = "$assembly.work/autoboot.vfat"
+size = "16M"
 
 [[image.assembly.disks.partitions]]
-name = "rootfs"
+name = "boot-a"
+type_alias = "fat32-lba"
+image = "$provider.images/boot.vfat"
+size = "128M"
+
+[[image.assembly.disks.partitions]]
+name = "boot-b"
+type_alias = "fat32-lba"
+image = "$provider.images/boot.vfat"
+size = "128M"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-a"
 type_alias = "linux"
-image = "$provider.images/rootfs.squashfs"
+image = "$provider.images/rootfs.erofs"
+size = "512M"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-b"
+type_alias = "linux"
+size = "512M"
+wipe = true
+
+[[image.assembly.disks.partitions]]
+name = "data"
+type_alias = "linux"
+image = "$provider.images/data.ext4"

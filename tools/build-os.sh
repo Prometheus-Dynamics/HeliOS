@@ -22,22 +22,27 @@ at the rev pinned in $BUILDS_DIR/raze.toml. To use a local Atlas checkout:
   tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 
 Env:
-  FORCE_FRONTEND_BUILD=1
-                    Rebuild the frontend bundle even if its inputs are unchanged
+  FORCE_UI_BUILD=1  Rebuild the UI (ui/build) even if its inputs are unchanged
 EOF
 }
 
 if ! command -v gaia >/dev/null 2>&1; then
   echo "error: gaia CLI not found in PATH" >&2
   echo "Install it with:" >&2
-  echo "  cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --branch dev gaia" >&2
+  echo "  cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --branch main gaia" >&2
   exit 1
 fi
 
-# The full profile stages frontend/build as-is; rebuild it first when its inputs changed.
-ensure_frontend_bundle() {
-  command -v bun >/dev/null 2>&1 || { echo "error: bun is required to build the frontend bundle" >&2; exit 1; }
-  bun frontend/scripts/build-if-changed.mjs
+# The full profile stages ui/build (served by helios-api) as-is; rebuild it first
+# when it is missing or older than any of its inputs.
+ensure_ui_build() {
+  command -v bun >/dev/null 2>&1 || { echo "error: bun is required to build the UI (ui/)" >&2; exit 1; }
+  local stamp=ui/build/index.html
+  if [[ "${FORCE_UI_BUILD:-0}" != 1 && -f "$stamp" ]] &&
+    [[ -z "$(find ui/src ui/static ui/package.json ui/bun.lock ui/vite.config.ts ui/tsconfig.json -newer "$stamp" -print -quit 2>/dev/null)" ]]; then
+    return
+  fi
+  (cd ui && bun install --frozen-lockfile && bun run build)
 }
 
 cd "$ROOT_DIR"
@@ -47,7 +52,7 @@ case "${1:-}" in
     usage
     ;;
   "")
-    ensure_frontend_bundle
+    ensure_ui_build
     exec gaia tui --builds-dir "$BUILDS_DIR"
     ;;
   *)
@@ -61,7 +66,7 @@ case "${1:-}" in
       shift
     fi
     if [[ "$profile" == "full" ]]; then
-      ensure_frontend_bundle
+      ensure_ui_build
     fi
     exec gaia run "$build_file" --set "input.profile=$profile" "$@"
     ;;

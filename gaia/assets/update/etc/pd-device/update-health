@@ -1,0 +1,23 @@
+#!/bin/sh
+# Health check for the device package's A/B updater (pd-device-update-confirm,
+# on a trial boot, after UPDATE_CONFIRM_DELAY): exit 0 keeps the new slot,
+# anything else restarts into the previous one.
+#
+# HeliOS is healthy when orion-node, helios-engine and helios-api are active
+# and the API answers on :5800. The check does not depend on a camera.
+units="orion-node.service helios-engine.service helios-api.service"
+url=http://127.0.0.1:5800/v1/health
+
+i=0
+while [ "$i" -lt 60 ]; do
+	if systemctl is-active --quiet $units && wget -q -T 3 -O /dev/null "$url" 2>/dev/null; then
+		exit 0
+	fi
+	i=$((i + 1))
+	sleep 2
+done
+for unit in $units; do
+	echo "update-health: $unit is $(systemctl is-active "$unit")" >&2
+done
+echo "update-health: HeliOS not healthy after 120 s (units above, $url)" >&2
+exit 1

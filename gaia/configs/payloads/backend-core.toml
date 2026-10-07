@@ -59,29 +59,6 @@ dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
 [[artifacts]]
-id = "helios-updater"
-kind = "rust"
-package = "helios-updater"
-source = "backend-workspace"
-# One cargo invocation for every backend package (Gaia build group), so shared
-# crates resolve the same features in the engine and its plugins.
-build_group = "helios-backend"
-target = "aarch64-unknown-linux-gnu"
-profile = "release"
-install_name = "helios-updater"
-install_class = "binary"
-install_dest_hint = "/usr/bin/helios-updater"
-output_path = "gaia/output/${build.name}/artifacts/helios-updater"
-
-[artifacts.execution]
-backend = "docker"
-
-[artifacts.execution.docker]
-image = "helios-cross"
-dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
-context = "gaia/docker"
-
-[[artifacts]]
 id = "helios-diagnostics"
 kind = "rust"
 package = "helios-diagnostics"
@@ -184,29 +161,6 @@ image = "orion-aarch64-cross"
 dockerfile = "@source:orion/packaging/gaia/docker/aarch64-cross.Dockerfile"
 context = "@source:orion/packaging/gaia/docker"
 
-[[artifacts]]
-id = "helios-provision"
-kind = "rust"
-package = "helios-provision"
-source = "backend-workspace"
-# One cargo invocation for every backend package (Gaia build group), so shared
-# crates resolve the same features in the engine and its plugins.
-build_group = "helios-backend"
-target = "aarch64-unknown-linux-gnu"
-profile = "release"
-install_name = "helios-provision"
-install_class = "binary"
-install_dest_hint = "/usr/local/bin/helios-provision"
-output_path = "gaia/output/${build.name}/artifacts/helios-provision"
-
-[artifacts.execution]
-backend = "docker"
-
-[artifacts.execution.docker]
-image = "helios-cross"
-dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
-context = "gaia/docker"
-
 [[install]]
 id = "install-helios-api"
 artifact = "helios-api"
@@ -220,15 +174,6 @@ group = "root"
 id = "install-helios-engine"
 artifact = "helios-engine"
 dest = "/usr/bin/helios-engine"
-replace = true
-mode = 493
-owner = "root"
-group = "root"
-
-[[install]]
-id = "install-helios-updater"
-artifact = "helios-updater"
-dest = "/usr/bin/helios-updater"
 replace = true
 mode = 493
 owner = "root"
@@ -270,15 +215,6 @@ mode = 493
 owner = "root"
 group = "root"
 
-[[install]]
-id = "install-helios-provision"
-artifact = "helios-provision"
-dest = "/usr/local/bin/helios-provision"
-replace = true
-mode = 493
-owner = "root"
-group = "root"
-
 [image]
 kind = "buildroot"
 
@@ -286,10 +222,8 @@ kind = "buildroot"
 install_entries = [
   "install-helios-api",
   "install-helios-engine",
-  "install-helios-updater",
   "install-helios-diagnostics",
   "install-heliosctl",
   "install-helios-eidos-plugin",
   "install-orionctl",
-  "install-helios-provision",
 ]

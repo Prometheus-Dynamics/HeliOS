@@ -1,3 +1,4 @@
 127.0.0.1	localhost
 ::1	localhost ip6-localhost ip6-loopback
-127.0.1.1	helios
+# The board's own name (helios-<serial8>, set at boot) resolves through
+# nss-myhostname (/etc/nsswitch.conf).

@@ -19,7 +19,6 @@ DEFAULT_PROCESSES = [
     "helios-engine",
     "helios-api",
     "helios-peripherals",
-    "helios-updater",
 ]
 
 
@@ -186,7 +185,7 @@ def main() -> int:
             restart_services(
                 args.ssh,
                 args.password,
-                ["helios-engine", "helios-api", "helios-peripherals", "helios-updater"],
+                ["helios-engine", "helios-api", "helios-peripherals"],
             )
             wait_for_http_ok(f"{api_url}/v1/health", args.api_ready_timeout_seconds)
 

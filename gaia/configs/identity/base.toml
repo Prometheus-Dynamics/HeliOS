@@ -1,12 +1,6 @@
-description = "Shared identity/access layer: hostname, OS identity files, locale, timezone and SSH policy. The hardware watchdog, SSH keys from the boot partition and the device identity endpoint come from the Raze device package."
+description = "Shared identity layer: OS identity files, locale, timezone, and the UI address for the device identity (manage_url). The hostname (helios-{serial8}), sshd and its host keys are set up in os/storage/erofs.toml; the hardware watchdog, SSH keys from the boot partition and the device identity endpoint come from the Raze device package."
 
 [stage]
-
-[[stage.files]]
-id = "identity-hostname"
-src = "@assets/identity/etc/hostname"
-dest = "/etc/hostname"
-origin = "static-asset"
 
 [[stage.files]]
 id = "identity-hosts"
@@ -68,17 +62,20 @@ src = "@assets/identity/etc/timezone"
 dest = "/etc/timezone"
 origin = "static-asset"
 
+# manage_url for Atlas ("Web UI"): http://<hostname>.local:5800/, written to
+# /run at boot because the hostname is per board (/etc/pd-device/manage-url
+# links there, gaia/assets/buildroot/scripts/post-build.sh).
 [[stage.files]]
-id = "identity-sshd-config"
-src = "@assets/identity/etc/ssh/sshd_config"
-dest = "/etc/ssh/sshd_config"
+id = "identity-manage-url-script"
+src = "@assets/identity/usr/lib/helios/manage-url"
+dest = "/usr/lib/helios/manage-url"
 origin = "static-asset"
+mode = 493
 
-[[stage.files]]
-id = "identity-sshd-service-dropin"
-src = "@assets/identity/etc/systemd/system/sshd.service.d/10-helios.conf"
-dest = "/etc/systemd/system/sshd.service.d/10-helios.conf"
-origin = "static-asset"
+[[stage.services]]
+id = "identity-manage-url-service"
+name = "helios-manage-url.service"
+unit_path = "@assets/identity/etc/systemd/system/helios-manage-url.service"
 
 [[stage.files]]
 id = "identity-set-build-time-script"
@@ -116,7 +113,6 @@ kind = "buildroot"
 [image.feed]
 stage_env_sets = ["identity-image-version"]
 stage_files = [
-  "identity-hostname",
   "identity-hosts",
   "identity-nsswitch",
   "identity-os-release",
@@ -127,8 +123,7 @@ stage_files = [
   "identity-locale-conf",
   "identity-default-locale",
   "identity-timezone",
-  "identity-sshd-config",
-  "identity-sshd-service-dropin",
+  "identity-manage-url-script",
   "identity-set-build-time-script",
 ]
-stage_services = ["identity-set-build-time-service"]
+stage_services = ["identity-set-build-time-service", "identity-manage-url-service"]

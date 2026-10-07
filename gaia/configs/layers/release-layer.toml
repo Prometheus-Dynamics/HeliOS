@@ -1,9 +1,9 @@
-description = "Release layer: product identity, defaults, env policy, writable-state policy, diagnostics, maintenance, and release-specific service policy. Fan, LED ring and sensor description come from the Raze device package."
+description = "Release layer: product identity, defaults, env policy, the A/B update hooks and Orion's state on /data, diagnostics, maintenance, and release-specific service policy. Fan, LED ring and sensor description come from the Raze device package."
 target = "aarch64-linux"
 
 imports = [
   "../identity/base.toml",
-  "../storage/squashfs-data.toml",
+  "../storage/update.toml",
   "../runtime-config/base.toml",
   "../ops/base.toml",
 ]

@@ -1,0 +1,21 @@
+[Unit]
+Description=Mount /data and bind the persistent state into place
+Documentation=file:/usr/lib/helios/data-setup
+DefaultDependencies=no
+Conflicts=shutdown.target
+# /var is a tmpfs on the read-only root (Buildroot's var.mount); the binds go
+# into it. Everything that reads /data comes after local-fs.target, including
+# the device package's SSH keys, hostname and USB gadget services.
+RequiresMountsFor=/var
+After=systemd-udevd.service systemd-udev-trigger.service var.mount
+Before=local-fs.target shutdown.target systemd-journal-flush.service systemd-tmpfiles-setup.service sshd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/lib/helios/data-setup
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=local-fs.target

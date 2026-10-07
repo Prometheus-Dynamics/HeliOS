@@ -17,9 +17,9 @@ config_overrides = [
   ["BR2_INIT_SYSTEMD", "y"],
   ["BR2_INIT_BUSYBOX", "n"],
   ["BR2_INIT_NONE", "n"],
-  # HeliOS names its devices itself; a stock hostname would let the device
-  # package apply raze-{serial8}. The full profile also stages /etc/hostname.
-  ["BR2_TARGET_GENERIC_HOSTNAME", "\"helios\""],
+  # No static hostname (no /etc/hostname): the device package applies
+  # helios-{serial8} at boot (/etc/pd-device/hostname.env, os/storage/erofs.toml).
+  ["BR2_TARGET_GENERIC_HOSTNAME", "\"\""],
   ["BR2_TARGET_ENABLE_ROOT_LOGIN", "y"],
   ["BR2_TARGET_GENERIC_ROOT_PASSWD", "\"root\""],
   ["BR2_PACKAGE_BASH", "y"],

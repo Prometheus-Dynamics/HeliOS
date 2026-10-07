@@ -1,4 +1,4 @@
-gaia_version = ">=2.3.0"
+gaia_version = ">=2.0.0"
 build_name = "helios-${input.profile}-raze"
 version = "v2026.2.0"
 description = "HeliOS image for the Raze (CM5 + OV9782). Use the profile input to switch between base OS and full appliance builds."
@@ -9,8 +9,8 @@ target = "raze"
 
 # Device support (kernel, OV9782 driver, libcamera/libpisp, boot overlays, fan,
 # LED ring, USB gadget, identity endpoint, SSH keys from the boot partition,
-# hardware watchdog) comes from the Raze device package in Atlas
-# (devices/raze), and orion-node from Orion's own Gaia layer. HeliOS layers are
+# hardware watchdog, the A/B update writer) comes from the Raze device package
+# in Atlas (devices/raze), and orion-node from Orion's own Gaia layer. HeliOS layers are
 # imported after both, so they override their defaults. Local development
 # against checkouts:
 #   --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
@@ -31,14 +31,17 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package 1.2.0 (Atlas branch dev): Buildroot 2026.08 (must match
-# base.toml), Bootlin bleeding-edge toolchain, kernel 7.2, firmware 1.20260915,
-# libcamera 0.7.2, vcgencmd from rpi-utils, optional Vulkan layer.
+# Raze device package 1.5.0 (Atlas branch dev): Buildroot 2026.08 (must match
+# base.toml), Bootlin bleeding-edge toolchain, kernel 7.2 with the Raze trims
+# and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915, libcamera 0.7.2, the
+# A/B update writer (/usr/lib/pd-device/update, pd-image-slots) for the same
+# .img.xz that is flashed, read-only-root-safe device services, no udev hwdb,
+# optional Vulkan layer.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "e5f90877ed4d4fdb9d017c291ce373645b12cee3"
+rev = "695d172fd943da1b6e2bc570a7b5e89d11b1a444"
 
 # Orion v4 (main). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node and the HeliOS services speak the same control protocol.
@@ -46,7 +49,7 @@ rev = "e5f90877ed4d4fdb9d017c291ce373645b12cee3"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "aa134992b7209800d085573e0540799c9f92b4cf"
+rev = "154fab0611ebe4b29fef7bde1f900e715ea11503"
 
 [inputs.profile]
 description = "Build profile"

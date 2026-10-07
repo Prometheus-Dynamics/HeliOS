@@ -8,12 +8,6 @@ src = "@assets/runtime-config/etc/helios/user.env"
 dest = "/etc/helios/user.env"
 origin = "static-asset"
 
-[[stage.files]]
-id = "runtime-image-owned-overlay-paths"
-src = "@assets/runtime-config/etc/helios/image-owned-overlay-paths"
-dest = "/etc/helios/image-owned-overlay-paths"
-origin = "static-asset"
-
 [[stage.env_sets]]
 id = "runtime-helios-api"
 name = "helios-api"
@@ -35,10 +29,10 @@ entries = [
   ["LOG_GUARD_HEADROOM_BYTES", "262144"],
   ["LOG_TRUNCATION_HEADER", "[helios] log truncated because it exceeded configured limit"],
   ["LOG_FOLDER", "/var/log/helios"],
-  ["HELIOS_API__SERVER__BIND", "0.0.0.0:5801"],
-  ["HELIOS_API__GRPC__BIND", "0.0.0.0:5802"],
-  ["HELIOS_API__METRICS__BIND", "0.0.0.0:5803"],
-  ["METRICS_BIND_ADDR", "0.0.0.0:5803"],
+  # The UI and the API on one port, the one the device identity's manage_url
+  # names (helios-manage-url.service): http://<hostname>.local:5800/.
+  ["HELIOS_API_BIND", "0.0.0.0:5800"],
+  ["HELIOS_API_UI_DIR", "/usr/share/helios/ui"],
   ["LD_LIBRARY_PATH", "/usr/lib/edgetpu:/usr/lib"],
 ]
 
@@ -87,7 +81,6 @@ kind = "buildroot"
 [image.feed]
 stage_files = [
   "runtime-user-env",
-  "runtime-image-owned-overlay-paths",
 ]
 stage_env_sets = [
   "runtime-helios-api",

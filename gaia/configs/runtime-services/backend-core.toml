@@ -16,7 +16,7 @@ origin = "static-asset"
 # (imported before this one). HeliOS replaces only the environment file, by
 # redeclaring its id with the same dest, as that layer documents: the
 # single-node appliance profile, plus group access for the HeliOS services
-# and state on the data partition.
+# and state on the data partition (/var/lib/helios is bound from /data/helios).
 [[stage.files]]
 id = "orion-node-env"
 src = "@assets/runtime-services/core/etc/default/orion-node.env"
@@ -39,20 +39,10 @@ id = "helios-engine-socket"
 name = "helios-engine.socket"
 unit_path = "@assets/runtime-services/core/systemd/helios-engine.socket"
 
-[[stage.services]]
-id = "helios-updater-service"
-name = "helios-updater.service"
-unit_path = "@assets/runtime-services/core/systemd/helios-updater.service"
-
-[[stage.services]]
-id = "helios-updater-socket"
-name = "helios-updater.socket"
-unit_path = "@assets/runtime-services/core/systemd/helios-updater.socket"
-
 [image]
 kind = "buildroot"
 # orion-node.service runs as the `orion` user. The root filesystem is a
-# read-only squashfs, so the user is created at build time rather than by
+# read-only EROFS slot, so the user is created at build time rather than by
 # systemd-sysusers (Orion packaging/README.md, "The orion user"), from Orion's
 # own users table.
 config_overrides = [
@@ -68,6 +58,4 @@ stage_services = [
   "helios-api-service",
   "helios-engine-service",
   "helios-engine-socket",
-  "helios-updater-service",
-  "helios-updater-socket",
 ]

@@ -1,4 +1,4 @@
-description = "Shared ops layer: diagnostics, journald policy, self-check, and other non-target-specific field operations."
+description = "Shared ops layer: diagnostics, journald policy (the persistent journal is on /data, bound by helios-data-setup), CPU governor, login banner, and other non-target-specific field operations."
 
 [[stage.files]]
 id = "ops-journald-memory-conf"
@@ -31,22 +31,9 @@ dest = "/etc/systemd/system/helios-peripherals.service.d/diagnostics.conf"
 origin = "static-asset"
 
 [[stage.files]]
-id = "ops-updater-diagnostics-conf"
-src = "@assets/ops/core/etc/systemd/system/helios-updater.service.d/diagnostics.conf"
-dest = "/etc/systemd/system/helios-updater.service.d/diagnostics.conf"
-origin = "static-asset"
-
-[[stage.files]]
 id = "ops-set-governor-script"
 src = "@assets/ops/core/usr/local/bin/set-governor.sh"
 dest = "/opt/set-governor.sh"
-origin = "static-asset"
-mode = 493
-
-[[stage.files]]
-id = "ops-os-self-check-script"
-src = "@assets/ops/core/usr/local/bin/helios-os-self-check.sh"
-dest = "/usr/local/bin/helios-os-self-check.sh"
 origin = "static-asset"
 mode = 493
 
@@ -63,24 +50,9 @@ name = "helios-diagnostics@.service"
 unit_path = "@assets/ops/core/systemd/helios-diagnostics@.service"
 
 [[stage.services]]
-id = "ops-journal-prepare-service"
-name = "helios-journal-prepare.service"
-unit_path = "@assets/ops/core/systemd/helios-journal-prepare.service"
-
-[[stage.services]]
-id = "ops-var-log-journal-mount"
-name = "var-log-journal.mount"
-unit_path = "@assets/ops/core/systemd/var-log-journal.mount"
-
-[[stage.services]]
 id = "ops-set-governor-service"
 name = "helios-set-governor.service"
 unit_path = "@assets/ops/core/systemd/helios-set-governor.service"
-
-[[stage.services]]
-id = "ops-os-self-check-service"
-name = "helios-os-self-check.service"
-unit_path = "@assets/ops/core/systemd/helios-os-self-check.service"
 
 [[stage.services]]
 id = "ops-login-banner-service"
@@ -97,16 +69,11 @@ stage_files = [
   "ops-api-diagnostics-conf",
   "ops-engine-diagnostics-conf",
   "ops-peripherals-diagnostics-conf",
-  "ops-updater-diagnostics-conf",
   "ops-set-governor-script",
-  "ops-os-self-check-script",
   "ops-login-banner-script",
 ]
 stage_services = [
   "ops-diagnostics-service",
-  "ops-journal-prepare-service",
-  "ops-var-log-journal-mount",
   "ops-set-governor-service",
-  "ops-os-self-check-service",
   "ops-login-banner-service",
 ]
