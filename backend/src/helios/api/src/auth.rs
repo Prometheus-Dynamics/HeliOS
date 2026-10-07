@@ -4,10 +4,10 @@
 //! - Secured: a device password for people (an HttpOnly, SameSite=Strict session cookie plus a
 //!   per-session CSRF token for mutations) and API tokens for tools (`Authorization: Bearer`).
 //!
-//! The state is one JSON file on the data partition ([`heliosctl::auth_state`]): an argon2id
+//! The state is one JSON file on the data partition ([`crate::auth_state`]): an argon2id
 //! password hash and the SHA-256 of each API token (tokens are 256-bit random values, shown
 //! once). Sessions live in memory only, so a restart of helios-api signs browsers out.
-//! `heliosctl auth reset` removes the file; the change is picked up on the next request.
+//! `helios-api auth reset` removes the file; the change is picked up on the next request.
 
 use std::{
     collections::HashMap,
@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 
-pub use heliosctl::auth_state::AuthMode;
+pub use crate::auth_state::AuthMode;
 
 use crate::{
     error::{ApiError, ApiResult},
@@ -133,7 +133,7 @@ enum Loaded {
     Open,
     Secured(AuthFile),
     /// The file exists but cannot be used. Fail closed: nothing authenticates until
-    /// `heliosctl auth reset`.
+    /// `helios-api auth reset`.
     Unreadable(String),
 }
 
@@ -178,7 +178,7 @@ pub struct AuthStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<usize>,
     /// Set when the auth file is unreadable: every protected request is refused until
-    /// `heliosctl auth reset` on the device.
+    /// `helios-api auth reset` on the device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
 }
@@ -195,7 +195,7 @@ impl Auth {
         let path = path.into();
         let (loaded, signature) = load(&path);
         if let Loaded::Unreadable(problem) = &loaded {
-            tracing::error!(path = %path.display(), %problem, "auth file is unreadable; refusing protected requests until `heliosctl auth reset`");
+            tracing::error!(path = %path.display(), %problem, "auth file is unreadable; refusing protected requests until `helios-api auth reset`");
         }
         Self { path, inner: Mutex::new(Inner { loaded, signature, sessions: HashMap::new(), failures: HashMap::new(), token_last_used: HashMap::new() }), hashing: Semaphore::new(2) }
     }
@@ -206,7 +206,7 @@ impl Auth {
         inner
     }
 
-    /// Reload the file when something else (`heliosctl auth reset`) changed it.
+    /// Reload the file when something else (`helios-api auth reset`) changed it.
     fn refresh(&self, inner: &mut Inner) {
         let signature = signature(&self.path);
         if signature == inner.signature {
@@ -269,7 +269,7 @@ impl Auth {
             _ => (None, None),
         };
         let problem = match &inner.loaded {
-            Loaded::Unreadable(problem) => Some(format!("the device's auth file is unreadable ({problem}); run `heliosctl auth reset` on the device")),
+            Loaded::Unreadable(problem) => Some(format!("the device's auth file is unreadable ({problem}); run `helios-api auth reset` on the device")),
             _ => None,
         };
         let (csrf_token, session_expires_at_ms) = match caller {
@@ -310,7 +310,7 @@ impl Auth {
         let hash = match &self.lock().loaded {
             Loaded::Secured(file) => file.password_hash.clone(),
             Loaded::Open => return Err(ApiError::conflict("the device is open; there is no password")),
-            Loaded::Unreadable(_) => return Err(ApiError::unauthorized("the device's auth file is unreadable; run `heliosctl auth reset` on the device")),
+            Loaded::Unreadable(_) => return Err(ApiError::unauthorized("the device's auth file is unreadable; run `helios-api auth reset` on the device")),
         };
         let ok = {
             let _permit = self.hashing.acquire().await.map_err(|_| ApiError::internal("password hashing is shut down"))?;
@@ -610,7 +610,7 @@ mod tests {
         let path = dir.path().join("auth.json");
         let auth = Auth::new(&path);
         let session = auth.enable("correct horse").await.expect("enable");
-        assert!(heliosctl::auth_state::reset(&path).expect("reset"));
+        assert!(crate::auth_state::reset(&path).expect("reset"));
         assert_eq!(auth.mode(), AuthMode::Open);
         assert_eq!(auth.identify(None, Some(&session.cookie_value)), Caller::Open);
 

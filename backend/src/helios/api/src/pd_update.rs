@@ -3,16 +3,14 @@
 //! HeliOS has no updater of its own: the device package's writer copies boot slot A and root
 //! slot A of the same `.img.xz` that is flashed into the board's inactive slot, trial-boots it
 //! with the Pi bootloader's tryboot and keeps it once `/etc/pd-device/update-health` passes.
-//! This module reads the state it publishes in `/run/pd-device/update.json`; helios-api and
-//! `heliosctl update` drive the CLI itself.
+//! This module reads the state it publishes in `/run/pd-device/update.json`; helios-api drives
+//! the CLI itself (`/v1/update/*`, `/v1/ota/*`).
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use serde::{Deserialize, Serialize};
+
+use crate::host::read_trimmed;
 
 /// The device package's update CLI.
 pub const PD_UPDATE_TOOL: &str = "/usr/lib/pd-device/update";
@@ -102,14 +100,6 @@ pub fn read_status_at(status_path: &Path, copy_progress_path: &Path) -> Option<P
     Some(status)
 }
 
-pub fn read_status() -> Option<PdUpdateStatus> {
-    read_status_at(Path::new(PD_UPDATE_STATUS), Path::new(PD_UPDATE_COPY_PROGRESS))
-}
-
-pub fn tool_path() -> PathBuf {
-    std::env::var_os("HELIOS_PD_UPDATE_TOOL").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(PD_UPDATE_TOOL))
-}
-
 /// The `v…` component of an image file name (`helios-full-raze-v2026.4.0.img.xz` -> `v2026.4.0`).
 pub fn infer_version_from_path(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
@@ -119,29 +109,6 @@ pub fn infer_version_from_path(path: &Path) -> Option<String> {
     }
     let stem = stem.strip_suffix(".img").unwrap_or(stem);
     stem.rsplit('-').find(|part| part.starts_with('v') && part.len() > 1 && part[1..].starts_with(|c: char| c.is_ascii_digit())).map(str::to_string)
-}
-
-/// `KEY=value` lines (os-release, `/etc/default/*`), quotes stripped.
-pub fn parse_env_file(path: &Path) -> BTreeMap<String, String> {
-    let mut values = BTreeMap::new();
-    let Ok(contents) = fs::read_to_string(path) else {
-        return values;
-    };
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        values.insert(key.trim().to_string(), value.trim().trim_matches('\'').trim_matches('"').to_string());
-    }
-    values
-}
-
-pub fn read_trimmed(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok().map(|content| content.trim().to_string()).filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

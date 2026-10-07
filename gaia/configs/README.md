@@ -76,8 +76,8 @@ helios-engine, helios-peripherals, helios-api and orion-node) and reboots into
 it on trial, and `pd-device-update-confirm` keeps it once `update-health`
 passes (orion-node, helios-engine and helios-api active, `GET /v1/health` on
 :5800 answering within 120 s); otherwise the board restarts into the old slot.
-helios-api drives the writer for `/v1/update/*` and `/v1/ota/*`; `heliosctl
-update` forwards to it. Moving a board from the old squashfs layout to this
+helios-api drives the writer for `/v1/update/*` and `/v1/ota/*`; on the board,
+run `/usr/lib/pd-device/update` directly. Moving a board from the old squashfs layout to this
 one is a USB reflash.
 
 ## Read-only root

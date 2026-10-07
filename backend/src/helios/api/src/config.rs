@@ -57,15 +57,15 @@ impl Default for ApiConfig {
             orion_stream_socket: DEFAULT_ORION_STREAM_SOCKET.into(),
             state_dir: DEFAULT_STATE_DIR.into(),
             upload_dir: DEFAULT_UPLOAD_DIR.into(),
-            pd_update_tool: heliosctl::pd_update::PD_UPDATE_TOOL.into(),
-            pd_update_status: heliosctl::pd_update::PD_UPDATE_STATUS.into(),
-            pd_update_progress: heliosctl::pd_update::PD_UPDATE_COPY_PROGRESS.into(),
+            pd_update_tool: crate::pd_update::PD_UPDATE_TOOL.into(),
+            pd_update_status: crate::pd_update::PD_UPDATE_STATUS.into(),
+            pd_update_progress: crate::pd_update::PD_UPDATE_COPY_PROGRESS.into(),
             pd_update_systemd_run: true,
             ui_dir: Some(DEFAULT_UI_DIR.into()),
             pd_identity_path: DEFAULT_PD_IDENTITY_PATH.into(),
             cors_origin: None,
             max_upload_bytes: 8 << 30,
-            auth_file: heliosctl::auth_state::DEFAULT_AUTH_FILE.into(),
+            auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
         }
     }
 }
@@ -116,7 +116,7 @@ impl ApiConfig {
         if let Some(value) = env.get("HELIOS_API_MAX_UPLOAD_BYTES") {
             config.max_upload_bytes = value.parse()?;
         }
-        if let Some(value) = env.get(heliosctl::auth_state::AUTH_FILE_ENV) {
+        if let Some(value) = env.get(crate::auth_state::AUTH_FILE_ENV) {
             config.auth_file = value.into();
         }
         Ok(config)

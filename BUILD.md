@@ -100,9 +100,8 @@ A running board updates from the same `.img.xz`:
   `POST /v1/update/apply` (docs/docs/api/http.md, "Updates");
 - from Atlas, over SSH or HTTP (`/v1/ota/*`);
 - on the board: copy it to `/data`, then
-  `heliosctl update stage /data/<image>.img.xz --sha256 <hex>` and
-  `heliosctl update apply` (`heliosctl update` forwards to the device
-  package's `/usr/lib/pd-device/update`).
+  `/usr/lib/pd-device/update stage /data/<image>.img.xz --sha256 <hex>` and
+  `/usr/lib/pd-device/update apply` (the device package's A/B writer).
 
 The board reboots into the new slot on trial and keeps it once
 `/etc/pd-device/update-health` passes; otherwise it falls back to the previous

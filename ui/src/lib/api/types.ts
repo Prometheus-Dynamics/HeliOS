@@ -28,7 +28,7 @@ export interface AuthStatus {
   session_expires_at_ms?: number;
   password_set_at_ms?: number;
   tokens?: number;
-  /** The device's auth file is unreadable; only `heliosctl auth reset` on the device fixes it. */
+  /** The device's auth file is unreadable; only `helios-api auth reset` on the device fixes it. */
   problem?: string;
 }
 

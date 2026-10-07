@@ -22,7 +22,6 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::{Stream, StreamExt, TryStreamExt};
-use heliosctl::pd_update::{self, PdUpdateStatus};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -33,6 +32,7 @@ use crate::{
     error::{ApiError, ApiResult},
     events::{ApiEvent, sse_stream},
     host::now_ms,
+    pd_update::{self, PdUpdateStatus},
 };
 
 const META_FILE: &str = "upload.json";

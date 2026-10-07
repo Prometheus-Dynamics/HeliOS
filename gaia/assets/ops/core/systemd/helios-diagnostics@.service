@@ -19,7 +19,7 @@ ExecStartPre=/bin/mkdir -p /run/helios-diagnostics
 ExecStartPre=/bin/chmod 0755 /var/lib/helios/diagnostics /run/helios-diagnostics
 # Stamp to avoid repeated snapshots for the same unit within a boot
 ExecStartPre=/bin/sh -c 'touch /run/helios-diagnostics/once-%i'
-ExecStart=/bin/sh -c "exec /usr/bin/heliosctl diagnostics onfailure --unit %i --trigger failure"
+ExecStart=/usr/bin/helios-diagnostics onfailure --unit %i --trigger failure
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
