@@ -2053,7 +2053,7 @@ dependencies = [
 [[package]]
 name = "orion"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-auth",
  "orion-client",
@@ -2069,7 +2069,7 @@ dependencies = [
 [[package]]
 name = "orion-auth"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2081,7 +2081,7 @@ dependencies = [
 [[package]]
 name = "orion-client"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2095,7 +2095,7 @@ dependencies = [
 [[package]]
 name = "orion-cluster"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2106,7 +2106,7 @@ dependencies = [
 [[package]]
 name = "orion-control-plane"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-core",
  "rkyv",
@@ -2119,7 +2119,7 @@ dependencies = [
 [[package]]
 name = "orion-core"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "rkyv",
  "serde",
@@ -2129,7 +2129,7 @@ dependencies = [
 [[package]]
 name = "orion-data-plane"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-core",
  "rkyv",
@@ -2140,7 +2140,7 @@ dependencies = [
 [[package]]
 name = "orion-macros"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "quote",
  "syn 3.0.6",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "orion-runtime"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2159,7 +2159,7 @@ dependencies = [
 [[package]]
 name = "orion-transport-common"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "tokio",
 ]
@@ -2167,7 +2167,7 @@ dependencies = [
 [[package]]
 name = "orion-transport-ipc"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#154fab0611ebe4b29fef7bde1f900e715ea11503"
+source = "git+https://github.com/Prometheus-Dynamics/Orion.git?branch=main#7f9c88aff861235c61e985220090bb5000c5c646"
 dependencies = [
  "libc",
  "orion-control-plane",
