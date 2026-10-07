@@ -9,7 +9,7 @@ use helios_diagnostics::{collect_failure_snapshot, collect_health_report, config
 
 mod local;
 
-use heliosctl::{auth_state, update};
+use heliosctl::{auth_state, pd_update};
 
 #[derive(Debug, Parser)]
 #[command(name = "heliosctl")]
@@ -24,9 +24,11 @@ enum Command {
     Doctor,
     Status,
     Version,
+    /// The device package's A/B updater (/usr/lib/pd-device/update): `status` (default),
+    /// `stage <image.img.xz> --sha256 <hex>`, `apply`, `confirm`, `rollback`.
     Update {
-        #[command(subcommand)]
-        command: Option<UpdateCommand>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     Storage,
     Services,
@@ -43,23 +45,6 @@ enum Command {
     Orion {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum UpdateCommand {
-    Apply {
-        image: PathBuf,
-        #[arg(long)]
-        version: Option<String>,
-        #[arg(long)]
-        artifact_id: Option<String>,
-        #[arg(long)]
-        workload_id: Option<String>,
-        #[arg(long, default_value = "node-local")]
-        node_id: String,
-        #[arg(long, default_value = "/run/orion/control.sock")]
-        socket: PathBuf,
     },
 }
 
@@ -118,16 +103,12 @@ fn run() -> Result<ExitCode> {
             local::print_version()?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Update { command } => match command {
-            Some(UpdateCommand::Apply { image, version, artifact_id, workload_id, node_id, socket }) => {
-                update::apply_update(update::ApplyUpdateArgs { image, version, artifact_id, workload_id, node_id, socket })?;
-                Ok(ExitCode::SUCCESS)
+        Command::Update { mut args } => {
+            if args.is_empty() {
+                args.push("status".into());
             }
-            None => {
-                local::print_update()?;
-                Ok(ExitCode::SUCCESS)
-            }
-        },
+            forward(&pd_update::tool_path().display().to_string(), &args)
+        }
         Command::Storage => {
             local::print_storage(&config)?;
             Ok(ExitCode::SUCCESS)
@@ -171,19 +152,19 @@ fn run() -> Result<ExitCode> {
                 Ok(ExitCode::SUCCESS)
             }
         },
-        Command::Orion { args } => forward_to_orionctl(&args),
+        Command::Orion { args } => forward("orionctl", &args),
     }
 }
 
-fn forward_to_orionctl(args: &[String]) -> Result<ExitCode> {
-    let status = ProcessCommand::new("orionctl")
+fn forward(program: &str, args: &[String]) -> Result<ExitCode> {
+    let status = ProcessCommand::new(program)
         .args(args)
         .status()
-        .with_context(|| if args.is_empty() { "failed to launch orionctl".to_string() } else { format!("failed to launch orionctl with args: {}", args.join(" ")) })?;
+        .with_context(|| if args.is_empty() { format!("failed to launch {program}") } else { format!("failed to launch {program} with args: {}", args.join(" ")) })?;
 
     if let Some(code) = status.code() {
         return Ok(ExitCode::from(code as u8));
     }
 
-    bail!("orionctl terminated by signal");
+    bail!("{program} terminated by signal");
 }

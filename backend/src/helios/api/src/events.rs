@@ -61,7 +61,6 @@ impl EventHub {
 pub struct Digest {
     pub pipelines: BTreeMap<String, serde_json::Value>,
     pub resources: BTreeMap<String, serde_json::Value>,
-    pub update: Option<serde_json::Value>,
 }
 
 /// The events that turn `before` into `after`.
@@ -69,11 +68,6 @@ pub fn diff(before: &Digest, after: &Digest) -> Vec<(&'static str, serde_json::V
     let mut out = Vec::new();
     diff_maps("pipeline", &before.pipelines, &after.pipelines, &mut out);
     diff_maps("resource", &before.resources, &after.resources, &mut out);
-    if before.update != after.update
-        && let Some(update) = &after.update
-    {
-        out.push(("update", update.clone()));
-    }
     out
 }
 
@@ -88,10 +82,12 @@ fn diff_maps(kind: &'static str, before: &BTreeMap<String, serde_json::Value>, a
     }
 }
 
-/// Poll Orion while there are subscribers and publish the changes.
+/// Poll Orion and the device package updater's state while there are subscribers and publish
+/// the changes.
 pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last: Option<Digest> = None;
+        let mut last_update: Option<serde_json::Value> = None;
         let mut orion_up: Option<bool> = None;
         let mut tick: u32 = 0;
         let mut interval = tokio::time::interval(POLL_INTERVAL);
@@ -101,6 +97,7 @@ pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
             if state.events.subscribers() == 0 {
                 // Start from a fresh baseline when someone subscribes again.
                 last = None;
+                last_update = None;
                 orion_up = None;
                 continue;
             }
@@ -110,17 +107,22 @@ pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
             {
                 state.events.publish("metrics", metrics);
             }
+            // OS updates do not go through Orion: the writer's state file is read directly.
+            let update = serde_json::to_value(routes::update::current_status(&state).await).ok();
+            if last_update.is_some()
+                && last_update != update
+                && let Some(update) = &update
+            {
+                state.events.publish("update", update.clone());
+            }
+            last_update = update;
             match state.orion.view().await {
                 Ok(view) => {
                     if orion_up != Some(true) {
                         state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
                         orion_up = Some(true);
                     }
-                    let digest = Digest {
-                        pipelines: routes::pipelines::digest(&view),
-                        resources: routes::resources::digest(&view),
-                        update: serde_json::to_value(routes::update::status_from(&state.config, Some(&view))).ok(),
-                    };
+                    let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view) };
                     if let Some(before) = &last {
                         for (kind, data) in diff(before, &digest) {
                             state.events.publish(kind, data);
@@ -186,17 +188,12 @@ mod tests {
     #[test]
     fn diff_reports_added_updated_removed() {
         let before = Digest { pipelines: BTreeMap::from([("a".into(), serde_json::json!("running")), ("b".into(), serde_json::json!("running"))]), ..Digest::default() };
-        let after = Digest {
-            pipelines: BTreeMap::from([("a".into(), serde_json::json!("stopped")), ("c".into(), serde_json::json!("starting"))]),
-            update: Some(serde_json::json!({"phase": "idle"})),
-            ..Digest::default()
-        };
+        let after = Digest { pipelines: BTreeMap::from([("a".into(), serde_json::json!("stopped")), ("c".into(), serde_json::json!("starting"))]), ..Digest::default() };
         let events = diff(&before, &after);
         let changes: Vec<_> = events.iter().map(|(kind, data)| format!("{kind}:{}:{}", data["id"].as_str().unwrap_or("-"), data["change"].as_str().unwrap_or("-"))).collect();
         assert!(changes.contains(&"pipeline:a:updated".to_string()));
         assert!(changes.contains(&"pipeline:c:added".to_string()));
         assert!(changes.contains(&"pipeline:b:removed".to_string()));
-        assert!(events.iter().any(|(kind, _)| *kind == "update"));
     }
 
     #[test]

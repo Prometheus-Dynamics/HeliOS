@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -10,50 +10,47 @@ use chrono::Utc;
 
 use crate::config::DiagnosticsConfig;
 use crate::model::{
-    CameraReport, DynamicLinkReport, ExecutableFileReport, HealthReport, HealthStatus, IdentityReport, JournalReport, LoadAverageReport, ManagedBinEntry, ManagedBinsReport, MemoryReport, MountReport,
-    OrionReport, OtaReport, OverlayReport, PluginReport, ProcessRuntimeReport, RuntimeReport, ServiceReport,
+    CameraReport, DynamicLinkReport, ExecutableFileReport, HealthReport, HealthStatus, IdentityReport, JournalReport, LoadAverageReport, MemoryReport, MountReport, OrionReport, PluginReport,
+    ProcessRuntimeReport, RuntimeReport, ServiceReport, UpdateReport,
 };
 
-const EXPECTED_MANAGED_BINS: &[&str] = &["orion-node", "orionctl", "helios-engine", "helios-peripherals", "helios-api", "helios-updater"];
+/// Service binaries on the read-only root.
+const EXPECTED_BINARIES: &[&str] = &["/usr/bin/orion-node", "/usr/bin/orionctl", "/usr/bin/helios-engine", "/usr/bin/helios-peripherals", "/usr/bin/helios-api"];
 
-const EXPECTED_SERVICES: &[&str] =
-    &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "helios-updater.service", "sshd.service", "helios-set-governor.service"];
+const EXPECTED_SERVICES: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
 
-const EXPECTED_EXECUTABLE_FILES: &[&str] = &["/usr/local/bin/helios-os-self-check.sh", "/opt/set-governor.sh", "/opt/helios-update-issue.sh"];
-const LOCAL_OTA_DIR: &str = "/var/lib/helios/ota";
-const UPDATER_SOCKET: &str = "/run/helios/updater.sock";
-const BOOT_MOUNT: &str = "/boot";
-const STORAGE_LAYOUT_ENV: &str = "/etc/helios/storage-layout.env";
+const EXPECTED_EXECUTABLE_FILES: &[&str] = &["/usr/lib/helios/data-setup", "/opt/set-governor.sh", "/opt/helios-update-issue.sh", "/etc/pd-device/update-health", "/etc/pd-device/update.d/pre-reboot"];
+const PD_UPDATE_TOOL: &str = "/usr/lib/pd-device/update";
+const PD_UPDATE_HEALTH: &str = "/etc/pd-device/update-health";
+const SSH_HOST_KEYS: &[&str] = &["ssh_host_ecdsa_key", "ssh_host_ed25519_key", "ssh_host_rsa_key"];
 
 pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport> {
+    let root = collect_mount_report(Path::new("/"))?;
+    let data = collect_mount_report(&config.data_mount)?;
     let writable_store = collect_mount_report(&config.writable_store_mount)?;
-    let journal = collect_journal_report(config)?;
+    let journal = collect_journal_report(config, &data)?;
     let identity = collect_identity_report(config);
     let camera = collect_camera_report(config)?;
-    let overlay = collect_overlay_report(&config.overlay_root)?;
     let runtime = collect_runtime_report()?;
-    let managed_bins = collect_managed_bins(&config.managed_bin_dir)?;
     let executable_files = collect_executable_files();
-    let dynamic_links = collect_dynamic_links(&config.managed_bin_dir);
+    let dynamic_links = EXPECTED_BINARIES.iter().map(|binary| inspect_dynamic_links(Path::new(binary))).collect::<Vec<_>>();
     let plugins = collect_plugins(&config.plugin_dir)?;
     let orion = collect_orion(&config.orion_run_dir);
-    let ota = collect_ota_report()?;
+    let update = collect_update_report(&config.update_status_path);
     let services = collect_services()?;
-    let writable_store_is_tmpfs = writable_store.fs_type.as_deref() == Some("tmpfs");
-    let journal_is_tmpfs = journal.source.as_deref().is_some_and(|source| source.starts_with("tmpfs"));
+    let data_is_tmpfs = data.fs_type.as_deref() == Some("tmpfs");
+    let store_on_data = on_mount(&writable_store, &data);
 
     let mut status = HealthStatus::Ok;
-    if !writable_store.mounted
-        || writable_store_is_tmpfs
-        || !managed_bins.exists
-        || managed_bins.entries.iter().any(|entry| !entry.exists || !entry.executable)
+    if !data.mounted
+        || data_is_tmpfs
+        || !store_on_data
         || executable_files.iter().any(|file| !file.exists || !file.executable)
         || dynamic_links.iter().any(|link| !link.ok)
         || !orion.control_socket
         || !orion.control_stream_socket
         || !journal.mounted
         || !journal.on_writable_store
-        || journal_is_tmpfs
         || services.iter().any(|service| service.active_state == "failed")
         || services.iter().any(|service| service.unit == "orion-node.service" && !service_is_healthy(service))
     {
@@ -62,17 +59,22 @@ pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport>
         || !identity.machine_id_persisted
         || !identity.ssh_host_keys_persisted
         || (camera.startup_preset_declares_camera && camera.discovered_camera_resources == 0)
-        || !overlay.slot_dirs_present
-        || overlay.image_owned_override_count > 0
-        || !ota.os_image_ready
+        || !update.issues.is_empty()
         || runtime.processes.iter().any(|process| process.process_count > 1)
-        || services.iter().any(|service| service.unit.starts_with("helios-") && !service.uses_managed_bin && service.exec_start.iter().any(|exec| exec.contains("/usr/bin/helios-")))
         || services.iter().any(|service| !service_is_healthy(service))
     {
         status = HealthStatus::Degraded;
     }
 
-    Ok(HealthReport { generated_at: Utc::now(), status, writable_store, journal, identity, camera, overlay, runtime, managed_bins, executable_files, dynamic_links, plugins, orion, ota, services })
+    Ok(HealthReport { generated_at: Utc::now(), status, root, data, writable_store, journal, identity, camera, runtime, executable_files, dynamic_links, plugins, orion, update, services })
+}
+
+/// `mount` is bind-mounted from `store` (findmnt prints the source as `/dev/mmcblk0p7[/helios]`).
+fn on_mount(mount: &MountReport, store: &MountReport) -> bool {
+    match (&mount.source, &store.source) {
+        (Some(source), Some(store_source)) => mount.mounted && (source == store_source || source.starts_with(&format!("{store_source}["))),
+        _ => false,
+    }
 }
 
 fn collect_runtime_report() -> Result<RuntimeReport> {
@@ -221,15 +223,11 @@ fn collect_mount_report(path: &Path) -> Result<MountReport> {
     Ok(MountReport { path: path.display().to_string(), mounted: true, fs_type, source })
 }
 
-fn collect_journal_report(config: &DiagnosticsConfig) -> Result<JournalReport> {
+fn collect_journal_report(config: &DiagnosticsConfig, data: &MountReport) -> Result<JournalReport> {
     let mount = collect_mount_report(&config.journal_mount)?;
-    let store_mount = collect_mount_report(&config.writable_store_mount)?;
-    let on_writable_store = match (&mount.source, &store_mount.source) {
-        (Some(journal_source), Some(store_source)) => journal_source == store_source || journal_source.starts_with(&format!("{store_source}[")),
-        _ => false,
-    };
+    let on_writable_store = on_mount(&mount, data) && data.fs_type.as_deref() != Some("tmpfs");
     let has_files = mount.mounted && journal_has_files(&config.journal_mount)?;
-    Ok(JournalReport { path: mount.path, mounted: mount.mounted, source: mount.source, persistent_dir: config.persistent_journal_dir.display().to_string(), on_writable_store, has_files })
+    Ok(JournalReport { path: mount.path, mounted: mount.mounted, source: mount.source, on_writable_store, has_files })
 }
 
 fn journal_has_files(path: &Path) -> Result<bool> {
@@ -252,10 +250,9 @@ fn journal_has_files(path: &Path) -> Result<bool> {
 }
 
 fn collect_identity_report(config: &DiagnosticsConfig) -> IdentityReport {
-    let machine_id_persisted = symlink_points_to(&config.machine_id_path, &config.persistent_machine_id_path);
-    let ssh_host_keys_persisted = ["ssh_host_rsa_key", "ssh_host_rsa_key.pub", "ssh_host_ecdsa_key", "ssh_host_ecdsa_key.pub", "ssh_host_ed25519_key", "ssh_host_ed25519_key.pub"]
-        .iter()
-        .all(|name| symlink_points_to(&config.ssh_host_key_dir.join(name), &config.persistent_ssh_host_key_dir.join(name)));
+    let persistent = read_trimmed(&config.persistent_machine_id_path);
+    let machine_id_persisted = persistent.is_some() && read_trimmed(&config.machine_id_path) == persistent;
+    let ssh_host_keys_persisted = SSH_HOST_KEYS.iter().all(|name| config.ssh_host_key_dir.join(name).is_file() && config.ssh_host_key_dir.join(format!("{name}.pub")).is_file());
     IdentityReport { machine_id_persisted, ssh_host_keys_persisted }
 }
 
@@ -283,63 +280,6 @@ fn count_camera_resources(orion_run_dir: &Path) -> Result<usize> {
     Ok(stdout.lines().filter(|line| line.contains(" type=camera.device") || line.contains("type: camera.device")).count())
 }
 
-fn collect_overlay_report(path: &Path) -> Result<OverlayReport> {
-    let slot_dirs_present = path.join("root-a/upper").is_dir() && path.join("root-a/work").is_dir() && path.join("root-b/upper").is_dir() && path.join("root-b/work").is_dir();
-    let image_owned_overrides = collect_overlay_image_overrides(path)?;
-    Ok(OverlayReport { path: path.display().to_string(), slot_dirs_present, image_owned_override_count: image_owned_overrides.len(), image_owned_overrides })
-}
-
-fn collect_overlay_image_overrides(path: &Path) -> Result<Vec<String>> {
-    let mut overrides = Vec::new();
-    if !path.exists() {
-        return Ok(overrides);
-    }
-
-    for slot in ["root-a", "root-b"] {
-        let upper = path.join(slot).join("upper");
-        if !upper.is_dir() {
-            continue;
-        }
-
-        for rel in [
-            "usr/bin/helios-api",
-            "usr/bin/helios-engine",
-            "usr/bin/helios-peripherals",
-            "usr/bin/helios-updater",
-            "usr/bin/heliosctl",
-            "usr/bin/helios-provision",
-            "usr/bin/orion-node",
-            "usr/bin/orionctl",
-            "usr/local/bin/helios-provision-squashfs.sh",
-        ] {
-            let candidate = upper.join(rel);
-            if candidate.exists() {
-                overrides.push(candidate.display().to_string());
-            }
-        }
-    }
-
-    overrides.sort();
-    Ok(overrides)
-}
-
-fn symlink_points_to(path: &Path, expected_target: &Path) -> bool {
-    fs::read_link(path).ok().map(|target| target == expected_target).unwrap_or(false)
-}
-
-fn collect_managed_bins(path: &Path) -> Result<ManagedBinsReport> {
-    let exists = path.exists();
-    let mut entries = Vec::new();
-
-    for name in EXPECTED_MANAGED_BINS {
-        let full = path.join(name);
-        let target = fs::read_link(&full).ok().map(|target| target.display().to_string());
-        entries.push(ManagedBinEntry { name: (*name).to_string(), exists: full.exists(), executable: is_executable(&full), target });
-    }
-
-    Ok(ManagedBinsReport { path: path.display().to_string(), exists, entries })
-}
-
 fn collect_executable_files() -> Vec<ExecutableFileReport> {
     EXPECTED_EXECUTABLE_FILES
         .iter()
@@ -352,17 +292,6 @@ fn collect_executable_files() -> Vec<ExecutableFileReport> {
                 executable: metadata.as_ref().is_some_and(|metadata| metadata.is_file() && executable_mode(metadata)),
                 mode: metadata.as_ref().map(mode_string),
             }
-        })
-        .collect()
-}
-
-fn collect_dynamic_links(managed_bin_dir: &Path) -> Vec<DynamicLinkReport> {
-    EXPECTED_MANAGED_BINS
-        .iter()
-        .map(|name| {
-            let managed = managed_bin_dir.join(name);
-            let binary = if managed.exists() { managed } else { PathBuf::from(format!("/usr/bin/{name}")) };
-            inspect_dynamic_links(&binary)
         })
         .collect()
 }
@@ -413,51 +342,45 @@ fn collect_orion(path: &Path) -> OrionReport {
     OrionReport { run_dir: path.display().to_string(), control_socket: path.join("control.sock").exists(), control_stream_socket: path.join("control-stream.sock").exists() }
 }
 
-fn collect_ota_report() -> Result<OtaReport> {
-    let local_ota_dir = Path::new(LOCAL_OTA_DIR);
-    let updater_socket = Path::new(UPDATER_SOCKET);
-    let boot_mount = collect_mount_report(Path::new(BOOT_MOUNT))?;
-    let active_slot = read_trimmed(local_ota_dir.join("active"));
-    let reserve_slot = read_trimmed(local_ota_dir.join("reserve"));
-    let boot_device = boot_device_from_layout().map(|path| path.display().to_string());
-    let boot_device_exists = boot_device.as_deref().is_some_and(|path| Path::new(path).exists());
-    let confirm_service_installed = systemd_unit_load_state("helios-ota-confirm.service").is_some_and(|state| state == "loaded");
-
+fn collect_update_report(status_path: &Path) -> UpdateReport {
+    let status = fs::read_to_string(status_path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next().unwrap_or_default()).ok());
+    let field = |key: &str| status.as_ref().and_then(|s| s.get(key)).and_then(|v| v.as_str()).map(str::to_string).filter(|v| !v.is_empty());
+    let tool_installed = is_executable(Path::new(PD_UPDATE_TOOL));
+    let confirm_service_loaded = systemd_unit_load_state("pd-device-update-confirm.service").is_some_and(|state| state == "loaded");
+    let health_check_installed = is_executable(Path::new(PD_UPDATE_HEALTH));
+    let slot_active = field("slot_active");
+    let ab_layout = matches!(slot_active.as_deref(), Some("A" | "B"));
+    let state = field("state");
     let mut issues = Vec::new();
-    if !local_ota_dir.is_dir() {
-        issues.push("local_ota_dir_missing".to_string());
+    if !tool_installed {
+        issues.push("update_tool_missing".to_string());
     }
-    if active_slot.is_none() {
-        issues.push("active_slot_marker_missing".to_string());
+    if !confirm_service_loaded {
+        issues.push("update_confirm_service_missing".to_string());
     }
-    if reserve_slot.is_none() {
-        issues.push("reserve_slot_marker_missing".to_string());
+    if !health_check_installed {
+        issues.push("update_health_check_missing".to_string());
     }
-    if !updater_socket.exists() {
-        issues.push("updater_socket_missing".to_string());
+    if status.is_none() {
+        issues.push("update_status_missing".to_string());
+    } else if !ab_layout {
+        issues.push("not_on_ab_layout".to_string());
     }
-    if !boot_device_exists {
-        issues.push("boot_device_missing".to_string());
+    if matches!(state.as_deref(), Some("error" | "rolled-back")) {
+        issues.push(format!("last_update_{}", state.as_deref().unwrap_or_default()));
     }
-    if !confirm_service_installed {
-        issues.push("ota_confirm_service_missing".to_string());
-    }
-
-    let os_image_ready = issues.is_empty();
-    Ok(OtaReport {
-        local_ota_dir: LOCAL_OTA_DIR.to_string(),
-        local_ota_dir_exists: local_ota_dir.is_dir(),
-        active_slot,
-        reserve_slot,
-        updater_socket: UPDATER_SOCKET.to_string(),
-        updater_socket_exists: updater_socket.exists(),
-        boot_mount,
-        boot_device,
-        boot_device_exists,
-        confirm_service_installed,
-        os_image_ready,
+    UpdateReport {
+        tool_installed,
+        confirm_service_loaded,
+        health_check_installed,
+        state,
+        slot_active,
+        slot_staged: field("slot_staged"),
+        version_active: field("version_active"),
+        error: field("error"),
+        ab_layout,
         issues,
-    })
+    }
 }
 
 fn collect_services() -> Result<Vec<ServiceReport>> {
@@ -472,9 +395,8 @@ fn collect_services() -> Result<Vec<ServiceReport>> {
         let sub_state = systemctl_property(&values, "SubState").unwrap_or("unknown").to_string();
         let main_pid = systemctl_property(&values, "MainPID").unwrap_or("0").parse::<u32>().ok().filter(|pid| *pid > 0);
         let exec_start = collect_service_exec_start(unit);
-        let uses_managed_bin = exec_start.iter().any(|line| line.contains("/var/lib/helios/bin/"));
         let recent_errors = collect_recent_service_errors(unit);
-        reports.push(ServiceReport { unit: (*unit).to_string(), active_state, sub_state, main_pid, exec_start, uses_managed_bin, recent_errors });
+        reports.push(ServiceReport { unit: (*unit).to_string(), active_state, sub_state, main_pid, exec_start, recent_errors });
     }
     Ok(reports)
 }
@@ -503,74 +425,6 @@ fn systemd_unit_load_state(unit: &str) -> Option<String> {
 
 fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
     fs::read_to_string(path).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
-}
-
-fn boot_device_from_layout() -> Option<PathBuf> {
-    let layout = parse_shell_env_file(Path::new(STORAGE_LAYOUT_ENV));
-    let boot_label = layout.get("HELIOS_LAYOUT_BOOT_LABEL").filter(|value| !value.is_empty()).cloned().unwrap_or_else(|| "BOOT".to_string());
-    let boot_partition = layout.get("HELIOS_LAYOUT_BOOT_PARTITION").and_then(|value| value.parse::<u32>().ok()).unwrap_or(1);
-    let labeled = PathBuf::from(format!("/dev/disk/by-label/{boot_label}"));
-    if labeled.exists() {
-        return fs::canonicalize(&labeled).ok().or(Some(labeled));
-    }
-
-    let data_source = mount_source(Path::new(LOCAL_OTA_DIR).parent().unwrap_or(Path::new("/var/lib/helios")))?;
-    let base = partition_base(&data_source);
-    Some(partition_device(&base, boot_partition))
-}
-
-fn parse_shell_env_file(path: &Path) -> std::collections::BTreeMap<String, String> {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return std::collections::BTreeMap::new();
-    };
-    contents
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return None;
-            }
-            let (key, value) = trimmed.split_once('=')?;
-            Some((key.trim().to_string(), value.trim().trim_matches('\'').trim_matches('"').to_string()))
-        })
-        .collect()
-}
-
-fn mount_source(path: &Path) -> Option<PathBuf> {
-    let target = path.display().to_string();
-    fs::read_to_string("/proc/mounts").ok()?.lines().find_map(|line| {
-        let mut parts = line.split_whitespace();
-        let source = parts.next()?;
-        let mountpoint = parts.next()?;
-        if mountpoint == target { Some(PathBuf::from(source)) } else { None }
-    })
-}
-
-fn partition_base(device: &Path) -> PathBuf {
-    let dev = device.display().to_string();
-    if let Some(base) = strip_partition_suffix(&dev) { PathBuf::from(base) } else { device.to_path_buf() }
-}
-
-fn strip_partition_suffix(device: &str) -> Option<String> {
-    if let Some(prefix) = device.strip_prefix("/dev/") {
-        if let Some(index) = prefix.rfind('p') {
-            let (base, suffix) = prefix.split_at(index);
-            if suffix[1..].chars().all(|ch| ch.is_ascii_digit()) && base.chars().last().is_some_and(|ch| ch.is_ascii_digit()) {
-                return Some(format!("/dev/{base}"));
-            }
-        }
-        let trimmed = prefix.trim_end_matches(|ch: char| ch.is_ascii_digit());
-        if trimmed.len() != prefix.len() {
-            return Some(format!("/dev/{trimmed}"));
-        }
-    }
-    None
-}
-
-fn partition_device(base: &Path, partition: u32) -> PathBuf {
-    let base = base.display().to_string();
-    let suffix = if base.chars().last().is_some_and(|ch| ch.is_ascii_digit()) { format!("p{partition}") } else { partition.to_string() };
-    PathBuf::from(format!("{base}{suffix}"))
 }
 
 fn collect_service_exec_start(unit: &str) -> Vec<String> {
@@ -643,15 +497,7 @@ mod tests {
     use super::*;
 
     fn service(unit: &str, active_state: &str, sub_state: &str, main_pid: Option<u32>) -> ServiceReport {
-        ServiceReport {
-            unit: unit.to_string(),
-            active_state: active_state.to_string(),
-            sub_state: sub_state.to_string(),
-            main_pid,
-            exec_start: Vec::new(),
-            uses_managed_bin: false,
-            recent_errors: Vec::new(),
-        }
+        ServiceReport { unit: unit.to_string(), active_state: active_state.to_string(), sub_state: sub_state.to_string(), main_pid, exec_start: Vec::new(), recent_errors: Vec::new() }
     }
 
     #[test]

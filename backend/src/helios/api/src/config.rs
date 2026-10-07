@@ -1,23 +1,22 @@
 //! Runtime configuration from the environment (`/etc/default/helios-api.env` on the device).
 
-use std::{
-    collections::BTreeMap,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeMap, net::SocketAddr, path::PathBuf};
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:5800";
 pub const DEFAULT_NODE_ID: &str = "node-local";
 pub const DEFAULT_ORION_SOCKET: &str = "/run/orion/control.sock";
 pub const DEFAULT_ORION_STREAM_SOCKET: &str = "/run/orion/control-stream.sock";
 pub const DEFAULT_STATE_DIR: &str = "/var/lib/helios/api";
-pub const DEFAULT_OTA_DIR: &str = "/var/lib/helios/ota";
-pub const DEFAULT_UPDATER_DIR: &str = "/var/lib/helios/updater";
+/// OTA uploads: on the data partition (`/var/lib/helios` is bind-mounted from `/data/helios`),
+/// since `/run` is RAM and the device package's writer reads the image from a file.
+pub const DEFAULT_UPLOAD_DIR: &str = "/var/lib/helios/updates";
+/// The UI's static build (`ui/`), served next to the API on the same port.
+pub const DEFAULT_UI_DIR: &str = "/usr/share/helios/ui";
 /// Written by the Raze device package (`pd-device identity --write`).
 pub const DEFAULT_PD_IDENTITY_PATH: &str = "/run/pd-device/identity.json";
 
 /// systemd units the API reports and may restart.
-pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "helios-updater.service"];
+pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -27,10 +26,19 @@ pub struct ApiConfig {
     pub orion_stream_socket: PathBuf,
     /// Pipeline revision history and camera mounts.
     pub state_dir: PathBuf,
-    pub ota_dir: PathBuf,
-    pub updater_dir: PathBuf,
-    /// Where OTA uploads are staged before they are applied.
+    /// Where OTA uploads are kept until they are staged.
     pub upload_dir: PathBuf,
+    /// The device package's update CLI (`/usr/lib/pd-device/update`).
+    pub pd_update_tool: PathBuf,
+    /// Its state file (`/run/pd-device/update.json`).
+    pub pd_update_status: PathBuf,
+    /// Its live copy progress while staging (`/run/pd-device/update/progress`).
+    pub pd_update_progress: PathBuf,
+    /// Run the update CLI through `systemd-run`, outside helios-api's cgroup, so that stopping
+    /// helios-api (the pre-reboot hook does) cannot kill it. Off runs it directly (tests).
+    pub pd_update_systemd_run: bool,
+    /// The UI's static files; `None` (or a missing directory) serves the API only.
+    pub ui_dir: Option<PathBuf>,
     pub pd_identity_path: PathBuf,
     /// `Access-Control-Allow-Origin` value; `None` sends no CORS headers.
     pub cors_origin: Option<String>,
@@ -48,9 +56,12 @@ impl Default for ApiConfig {
             orion_socket: DEFAULT_ORION_SOCKET.into(),
             orion_stream_socket: DEFAULT_ORION_STREAM_SOCKET.into(),
             state_dir: DEFAULT_STATE_DIR.into(),
-            ota_dir: DEFAULT_OTA_DIR.into(),
-            updater_dir: DEFAULT_UPDATER_DIR.into(),
-            upload_dir: Path::new(DEFAULT_OTA_DIR).join("uploads"),
+            upload_dir: DEFAULT_UPLOAD_DIR.into(),
+            pd_update_tool: heliosctl::pd_update::PD_UPDATE_TOOL.into(),
+            pd_update_status: heliosctl::pd_update::PD_UPDATE_STATUS.into(),
+            pd_update_progress: heliosctl::pd_update::PD_UPDATE_COPY_PROGRESS.into(),
+            pd_update_systemd_run: true,
+            ui_dir: Some(DEFAULT_UI_DIR.into()),
             pd_identity_path: DEFAULT_PD_IDENTITY_PATH.into(),
             cors_origin: None,
             max_upload_bytes: 8 << 30,
@@ -87,15 +98,14 @@ impl ApiConfig {
         if let Some(value) = env.get("HELIOS_API_STATE_DIR") {
             config.state_dir = value.into();
         }
-        if let Some(value) = env.get("HELIOS_OTA_DIR") {
-            config.ota_dir = value.into();
-            config.upload_dir = config.ota_dir.join("uploads");
-        }
-        if let Some(value) = env.get("HELIOS_UPDATER_STATE_DIR") {
-            config.updater_dir = value.into();
-        }
         if let Some(value) = env.get("HELIOS_API_UPLOAD_DIR") {
             config.upload_dir = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_PD_UPDATE_TOOL") {
+            config.pd_update_tool = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_API_UI_DIR") {
+            config.ui_dir = if value == "off" { None } else { Some(value.into()) };
         }
         if let Some(value) = env.get("HELIOS_PD_IDENTITY_PATH") {
             config.pd_identity_path = value.into();
@@ -119,10 +129,18 @@ mod tests {
 
     #[test]
     fn env_overrides_defaults() {
-        let config = ApiConfig::from_vars([("HELIOS_API_BIND", "0.0.0.0:5801"), ("HELIOS_NODE_ID", "raze-1"), ("HELIOS_OTA_DIR", "/data/ota"), ("HELIOS_API_CORS_ORIGIN", "")]).expect("config");
-        assert_eq!(config.bind.port(), 5801);
+        let config = ApiConfig::from_vars([
+            ("HELIOS_API_BIND", "0.0.0.0:5800"),
+            ("HELIOS_NODE_ID", "raze-1"),
+            ("HELIOS_API_UPLOAD_DIR", "/data/updates"),
+            ("HELIOS_API_CORS_ORIGIN", ""),
+            ("HELIOS_API_UI_DIR", "off"),
+        ])
+        .expect("config");
+        assert_eq!(config.bind.port(), 5800);
         assert_eq!(config.node_id, "raze-1");
-        assert_eq!(config.upload_dir, PathBuf::from("/data/ota/uploads"));
+        assert_eq!(config.upload_dir, PathBuf::from("/data/updates"));
         assert_eq!(config.cors_origin, None);
+        assert_eq!(config.ui_dir, None);
     }
 }

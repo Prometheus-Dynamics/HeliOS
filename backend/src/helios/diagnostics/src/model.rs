@@ -5,18 +5,21 @@ use serde::Serialize;
 pub struct HealthReport {
     pub generated_at: DateTime<Utc>,
     pub status: HealthStatus,
+    /// The root filesystem: a read-only EROFS slot (p5 or p6).
+    pub root: MountReport,
+    /// The data partition (p7), kept across updates; tmpfs when it could not be mounted.
+    pub data: MountReport,
+    /// HeliOS state (`/var/lib/helios`), bind-mounted from the data partition.
     pub writable_store: MountReport,
     pub journal: JournalReport,
     pub identity: IdentityReport,
     pub camera: CameraReport,
-    pub overlay: OverlayReport,
     pub runtime: RuntimeReport,
-    pub managed_bins: ManagedBinsReport,
     pub executable_files: Vec<ExecutableFileReport>,
     pub dynamic_links: Vec<DynamicLinkReport>,
     pub plugins: PluginReport,
     pub orion: OrionReport,
-    pub ota: OtaReport,
+    pub update: UpdateReport,
     pub services: Vec<ServiceReport>,
 }
 
@@ -41,14 +44,16 @@ pub struct JournalReport {
     pub path: String,
     pub mounted: bool,
     pub source: Option<String>,
-    pub persistent_dir: String,
+    /// Bind-mounted from the data partition.
     pub on_writable_store: bool,
     pub has_files: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IdentityReport {
+    /// `/etc/machine-id` is the one kept on the data partition.
     pub machine_id_persisted: bool,
+    /// sshd's host keys exist on the data partition.
     pub ssh_host_keys_persisted: bool,
 }
 
@@ -56,14 +61,6 @@ pub struct IdentityReport {
 pub struct CameraReport {
     pub startup_preset_declares_camera: bool,
     pub discovered_camera_resources: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OverlayReport {
-    pub path: String,
-    pub slot_dirs_present: bool,
-    pub image_owned_override_count: usize,
-    pub image_owned_overrides: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,21 +105,6 @@ pub struct ProcessRuntimeReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ManagedBinsReport {
-    pub path: String,
-    pub exists: bool,
-    pub entries: Vec<ManagedBinEntry>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ManagedBinEntry {
-    pub name: String,
-    pub exists: bool,
-    pub executable: bool,
-    pub target: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct ExecutableFileReport {
     pub path: String,
     pub exists: bool,
@@ -151,19 +133,19 @@ pub struct OrionReport {
     pub control_stream_socket: bool,
 }
 
+/// The device package's A/B updater (`/usr/lib/pd-device/update`).
 #[derive(Debug, Clone, Serialize)]
-pub struct OtaReport {
-    pub local_ota_dir: String,
-    pub local_ota_dir_exists: bool,
-    pub active_slot: Option<String>,
-    pub reserve_slot: Option<String>,
-    pub updater_socket: String,
-    pub updater_socket_exists: bool,
-    pub boot_mount: MountReport,
-    pub boot_device: Option<String>,
-    pub boot_device_exists: bool,
-    pub confirm_service_installed: bool,
-    pub os_image_ready: bool,
+pub struct UpdateReport {
+    pub tool_installed: bool,
+    pub confirm_service_loaded: bool,
+    pub health_check_installed: bool,
+    /// From `/run/pd-device/update.json`.
+    pub state: Option<String>,
+    pub slot_active: Option<String>,
+    pub slot_staged: Option<String>,
+    pub version_active: Option<String>,
+    pub error: Option<String>,
+    pub ab_layout: bool,
     pub issues: Vec<String>,
 }
 
@@ -174,7 +156,6 @@ pub struct ServiceReport {
     pub sub_state: String,
     pub main_pid: Option<u32>,
     pub exec_start: Vec<String>,
-    pub uses_managed_bin: bool,
     pub recent_errors: Vec<String>,
 }
 

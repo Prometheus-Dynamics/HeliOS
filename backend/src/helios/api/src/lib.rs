@@ -1,7 +1,7 @@
 //! helios-api: the HeliOS application API (`/v1`), for the HeliOS UI and Atlas.
 //!
-//! The API owns little state of its own. It reads and writes Orion (pipelines, resources, the
-//! updater), asks the Styx camera services for camera facts and controls, and reads systemd, the journal and
+//! The API owns little state of its own. It reads and writes Orion (pipelines, resources), drives
+//! the device package's A/B updater for OS updates, serves the UI's static build, asks the Styx camera services for camera facts and controls, and reads systemd, the journal and
 //! the kernel for device facts. Features without a backend answer 501 with
 //! `{"error": {"code": "not_available", "needs": "..."}}`. See `docs/docs/api/http.md`.
 
@@ -14,6 +14,7 @@ pub mod host;
 pub mod orion;
 pub mod routes;
 pub mod store;
+pub mod ui;
 
 use std::sync::Arc;
 
@@ -34,8 +35,10 @@ pub struct AppState {
     pub cameras: camera_controls::CameraControls,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
-    /// Held while an OTA image is being prepared and submitted.
-    pub update_lock: Mutex<()>,
+    /// Held while helios-api has the device package's writer stage an image.
+    pub update_lock: Arc<Mutex<()>>,
+    /// The last stage/apply helios-api started, for `/v1/update/status`.
+    pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -51,7 +54,8 @@ impl AppState {
             cpu: host::CpuSampler::default(),
             events,
             auth: auth::Auth::new(config.auth_file.clone()),
-            update_lock: Mutex::new(()),
+            update_lock: routes::update::new_update_lock(),
+            update_task: std::sync::Mutex::new(None),
             config,
         })
     }

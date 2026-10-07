@@ -96,8 +96,8 @@ fn collect_file_copies(out_dir: &Path) -> Result<()> {
     let files_out = out_dir.join("files");
     let _ = try_glob_copy(
         &[
-            "/etc/hostname",
             "/etc/os-release",
+            "/etc/default/helios-image.env",
             "/var/lib/helios/hostname",
             "/var/lib/helios/team",
             "/var/lib/helios/peers.json",
@@ -106,6 +106,7 @@ fn collect_file_copies(out_dir: &Path) -> Result<()> {
             "/var/lib/helios/sensors.toml",
             "/var/lib/helios/networkd/*.network",
             "/run/pd-device/identity.json",
+            "/run/pd-device/update.json",
             "/usr/lib/pd-device/device-package.env",
             "/etc/pd-device/*",
             "/etc/pd-device/*/*",

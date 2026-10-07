@@ -14,12 +14,10 @@ members = [
     "src/helios/api",
     "src/helios/engine",
     "src/helios/peripherals",
-    "src/helios/updater",
     "src/helios/diagnostics",
     "src/helios/ctl",
     "src/helios/eidos-plugin",
     "src/helios/vision-probe",
-    "src/helios/provision",
     "tools/xtask",
 ]
 
@@ -127,7 +125,7 @@ tempfile = "3.27.0"
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
 #   Daedalus 3.0 dev (c77c6ce, plugin ABI 9), Styx dev (cff5233),
-#   Eidos main (306fea6), Orion v4 main (aa13499), Lemnos dev (10269f9).
+#   Eidos main (306fea6), Orion v4 main (154fab0), Lemnos dev (10269f9).
 daedalus = { package = "daedalus-rs", version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-macros = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
