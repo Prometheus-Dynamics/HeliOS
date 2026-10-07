@@ -22,7 +22,7 @@ The highest-priority concerns are:
 - Keep Styx as the media/capture/codec owner.
 - Keep Orion as the control-plane/resource/state owner.
 - Keep API application-level; it should not become an Orion control client.
-- Do not duplicate generic Orion commands in `heliosctl`; use `orionctl` for Orion-native operations.
+- HeliOS has no CLI of its own: use `orionctl` for Orion operations, `systemctl` for services, `helios-diagnostics` for health and the device package's `/usr/lib/pd-device/update` for updates; password recovery is `helios-api auth reset`.
 
 ## Latest Device Memory Snapshot
 
@@ -394,24 +394,6 @@ Tasks:
 - Add missing capture if needed: smaps rollups, fd lists, loaded libs, Orion state file sizes, stream metadata, capture settings, encoder settings, recent timings, service logs, binary hashes/build mode.
 - Add a mode specifically for stream demo/performance triage.
 - Keep diagnostics as read-only collection.
-
-## `heliosctl`
-
-Current role:
-
-- HeliOS-specific local CLI.
-
-Current concerns:
-
-- Should not duplicate generic Orion workload/resource commands.
-- If `orionctl` owns an operation, use `orionctl`.
-
-Tasks:
-
-- Audit existing `heliosctl` commands.
-- Keep only HeliOS-specific convenience commands.
-- Remove or avoid adding generic workload/resource control that belongs in `orionctl`.
-- If demo setup needs Orion operations, script them through `orionctl` or add missing capability to `orionctl`.
 
 ## `helios-provision`
 

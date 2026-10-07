@@ -37,7 +37,7 @@
   <input type="password" autocomplete="new-password" placeholder="Device password" aria-label="Device password" bind:value={password} disabled={busy} />
   <input type="password" autocomplete="new-password" placeholder="Same password again" aria-label="Confirm device password" bind:value={confirm} disabled={busy} />
   {#if problem || error}<p class="err">{error ?? problem}</p>{/if}
-  <p class="note">Everyone who opens HeliOS on this device will need it. Tools like Atlas use API tokens, made in Settings. If it is lost, <code>heliosctl auth reset</code> from a root shell on the device opens it again.</p>
+  <p class="note">Everyone who opens HeliOS on this device will need it. Tools like Atlas use API tokens, made in Settings. If it is lost, <code>helios-api auth reset</code> from a root shell on the device opens it again.</p>
   <div class="row">
     <button type="submit" class="primary" disabled={!canSubmit}><Icon name="lock" size={13} />{busy ? "Securing…" : "Secure this device"}</button>
     {#if oncancel}<button type="button" onclick={oncancel}>Cancel</button>{/if}

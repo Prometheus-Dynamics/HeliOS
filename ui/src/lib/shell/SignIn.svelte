@@ -44,7 +44,7 @@
   <button type="submit" class="primary" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button>
   <details>
     <summary>Lost the password?</summary>
-    <p>Open a root shell on the device (the USB serial console, or SSH) and run <code>heliosctl auth reset</code>. The device becomes open again, with no password and no API tokens; secure it again from Settings.</p>
+    <p>Open a root shell on the device (the USB serial console, or SSH) and run <code>helios-api auth reset</code>. The device becomes open again, with no password and no API tokens; secure it again from Settings.</p>
   </details>
 </form>
 

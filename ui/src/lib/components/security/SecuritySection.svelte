@@ -184,7 +184,7 @@
       </div>
     {/if}
 
-    <p class="hint">Lost the password? From a root shell on the device (USB serial console or SSH) run <code>heliosctl auth reset</code>: the device becomes open again. HeliOS uses plain HTTP on the robot network; anyone who can watch that network can see the traffic.</p>
+    <p class="hint">Lost the password? From a root shell on the device (USB serial console or SSH) run <code>helios-api auth reset</code>: the device becomes open again. HeliOS uses plain HTTP on the robot network; anyone who can watch that network can see the traffic.</p>
   {:else}
     <p class="hint">{auth.error ? `Security status unavailable: ${auth.error}` : "Reading security status…"}</p>
   {/if}

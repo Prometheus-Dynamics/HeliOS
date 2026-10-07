@@ -76,7 +76,7 @@ as unavailable and not retry.
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
 | `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature, throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
-| `GET` | `/v1/system/health` | helios-diagnostics | The full `heliosctl doctor` report |
+| `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |
 | `GET` | `/v1/system/services` | systemd | `[{unit, active_state, sub_state, main_pid, memory_bytes, restarts}]` for the HeliOS units |
 | `POST` | `/v1/system/services/{unit}/restart` | systemd | Only HeliOS units (`helios-engine`, `orion-node`, ...). Restarting `helios-api` answers 202 before it happens |
 | `POST` | `/v1/system/reboot` | systemd | 202, then reboots |
@@ -459,11 +459,11 @@ From a root shell on the device (the USB serial console on `ttyGS0`, or SSH with
 `pd-device/authorized_keys`):
 
 ```sh
-heliosctl auth status   # mode: open | secured, and the token count
-heliosctl auth reset    # back to open: forgets the password, all API tokens and all sessions
+helios-api auth status   # mode: open | secured, and the token count
+helios-api auth reset    # back to open: forgets the password, all API tokens and all sessions
 ```
 
-`reset` removes the auth file; helios-api notices on its next request (no restart needed). Secure
+`reset` removes the auth file; the running helios-api notices on its next request (no restart needed). Secure
 the device again from the UI afterwards.
 
 ### Transport
@@ -515,4 +515,4 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_PD_IDENTITY_PATH` | `/run/pd-device/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |
 | `HELIOS_API_CORS_ORIGIN` | unset (no CORS headers) |
-| `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `heliosctl auth` reads the same variable |
+| `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `helios-api auth` reads the same variable |
