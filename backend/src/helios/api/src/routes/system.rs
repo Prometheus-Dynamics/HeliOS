@@ -17,6 +17,7 @@ use crate::{
     host::{self, DiskUsage, UnitStatus, now_ms, read_trimmed},
     orion::{enum_name, label_map},
 };
+use orion::control_plane::{HostMetricsSnapshot, TypedConfigValue};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Health {
@@ -280,12 +281,13 @@ pub struct Reading {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Metrics {
     pub at_ms: u64,
-    /// Busy fraction of all cores, 0..1, since the previous sample.
+    /// Busy fraction of all cores, 0..1, over Orion's latest CPU window.
     pub cpu: Option<f64>,
     pub cpu_cores: Vec<f64>,
     pub load: Option<[f64; 3]>,
     pub memory_total_bytes: Option<u64>,
     pub memory_available_bytes: Option<u64>,
+    /// The hottest sensor Orion reports, degrees Celsius.
     pub temperature_c: Option<f64>,
     pub throttled: Option<u32>,
     pub disk: Option<DiskUsage>,
@@ -294,17 +296,89 @@ pub struct Metrics {
     pub metrics: Vec<Reading>,
 }
 
+/// Orion's host metrics, as the API reads them: from an observability snapshot for
+/// `GET /v1/metrics`, or from the node's `host.*` status keys for the event stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HostSample {
+    /// Busy share of all CPUs, per mille.
+    pub cpu_busy_milli: Option<u32>,
+    /// The same per CPU, in kernel CPU order.
+    pub cpu_core_busy_milli: Vec<u32>,
+    /// 1, 5 and 15 minute load averages x 1000.
+    pub load_milli: Option<[u64; 3]>,
+    pub memory_total_bytes: Option<u64>,
+    pub memory_available_bytes: Option<u64>,
+    pub uptime_seconds: Option<u64>,
+    /// Every sensor's reading, millidegrees Celsius.
+    pub temperatures_milli_c: Vec<i32>,
+}
+
+impl HostSample {
+    pub fn from_snapshot(host: &HostMetricsSnapshot) -> Self {
+        Self {
+            cpu_busy_milli: host.cpu_busy_milli,
+            cpu_core_busy_milli: host.cpu_core_busy_milli.clone(),
+            load_milli: host.load_1_milli.zip(host.load_5_milli).zip(host.load_15_milli).map(|((one, five), fifteen)| [one, five, fifteen]),
+            memory_total_bytes: host.memory_total_bytes,
+            memory_available_bytes: host.memory_available_bytes,
+            uptime_seconds: host.uptime_seconds,
+            temperatures_milli_c: host.temperatures.iter().map(|t| t.millidegrees_c).collect(),
+        }
+    }
+
+    /// From the `host.*` keys orion-node publishes under `node/<id>` (Orion `docs/host-facts.md`).
+    pub fn from_status(keys: &BTreeMap<String, TypedConfigValue>) -> Self {
+        let uint = |key: &str| match keys.get(key) {
+            Some(TypedConfigValue::UInt(value)) => Some(*value),
+            Some(TypedConfigValue::Int(value)) => u64::try_from(*value).ok(),
+            _ => None,
+        };
+        let cores: BTreeMap<usize, u32> = keys
+            .iter()
+            .filter_map(|(key, value)| {
+                let index = key.strip_prefix("host.cpu")?.strip_suffix("_busy_milli")?.parse().ok()?;
+                let TypedConfigValue::UInt(milli) = value else { return None };
+                Some((index, u32::try_from(*milli).ok()?))
+            })
+            .collect();
+        let temperatures_milli_c = keys
+            .iter()
+            .filter(|(key, _)| key.starts_with("host.temperature."))
+            .filter_map(|(_, value)| match value {
+                TypedConfigValue::Int(milli) => i32::try_from(*milli).ok(),
+                TypedConfigValue::UInt(milli) => i32::try_from(*milli).ok(),
+                _ => None,
+            })
+            .collect();
+        Self {
+            cpu_busy_milli: uint("host.cpu_busy_milli").and_then(|milli| u32::try_from(milli).ok()),
+            cpu_core_busy_milli: cores.into_values().collect(),
+            load_milli: uint("host.load1_milli").zip(uint("host.load5_milli")).zip(uint("host.load15_milli")).map(|((one, five), fifteen)| [one, five, fifteen]),
+            memory_total_bytes: uint("host.memory_total_bytes"),
+            memory_available_bytes: uint("host.memory_available_bytes"),
+            uptime_seconds: uint("host.uptime_seconds"),
+            temperatures_milli_c,
+        }
+    }
+}
+
+/// `GET /v1/metrics`: Orion's host metrics (a fresh observability snapshot), plus the firmware
+/// throttle flags and disk usage, which HeliOS reads itself.
 pub async fn metrics_now(state: &SharedState) -> Metrics {
-    let host_metrics = state.orion.observability().await.ok().map(|snapshot| snapshot.host);
-    let (cpu, cpu_cores) = match state.cpu.sample() {
-        Some((total, cores)) => (Some(total), cores),
-        None => (None, Vec::new()),
-    };
-    let load = host_metrics.as_ref().and_then(|h| Some([h.load_1_milli? as f64 / 1000.0, h.load_5_milli? as f64 / 1000.0, h.load_15_milli? as f64 / 1000.0]));
-    let memory_total_bytes = host_metrics.as_ref().and_then(|h| h.memory_total_bytes);
-    let memory_available_bytes = host_metrics.as_ref().and_then(|h| h.memory_available_bytes);
-    let uptime_s = host_metrics.as_ref().and_then(|h| h.uptime_seconds);
-    let temperature_c = host::temperature_c();
+    let host = state.orion.observability().await.ok().map(|snapshot| HostSample::from_snapshot(&snapshot.host));
+    metrics_from(host.as_ref())
+}
+
+/// The metrics object for a host sample (`None` when Orion is not reachable).
+pub fn metrics_from(host: Option<&HostSample>) -> Metrics {
+    let cpu = host.and_then(|h| h.cpu_busy_milli).map(|milli| f64::from(milli) / 1000.0);
+    let cpu_cores = host.map(|h| h.cpu_core_busy_milli.iter().map(|milli| f64::from(*milli) / 1000.0).collect()).unwrap_or_default();
+    let load = host.and_then(|h| h.load_milli).map(|load| load.map(|milli| milli as f64 / 1000.0));
+    let memory_total_bytes = host.and_then(|h| h.memory_total_bytes);
+    let memory_available_bytes = host.and_then(|h| h.memory_available_bytes);
+    let uptime_s = host.and_then(|h| h.uptime_seconds);
+    // The hottest sensor.
+    let temperature_c = host.and_then(|h| h.temperatures_milli_c.iter().copied().max()).map(|milli| f64::from(milli) / 1000.0);
     let disk = host::disk_usage("/var/lib/helios").or_else(|| host::disk_usage("/"));
     let mut readings = Vec::new();
     if let Some(cpu) = cpu {

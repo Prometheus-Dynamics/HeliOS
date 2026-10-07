@@ -28,7 +28,7 @@ Restart=always
 RestartSec=2
 TimeoutStopSec=45
 User=root
-# Primary group orion: orion-node admits it (ORION_NODE_LOCAL_AUTH=same-user-or-group).
+# Primary group orion: orion-node admits the orion group (ORION_NODE_LOCAL_AUTH in orion-node.env).
 Group=orion
 WorkingDirectory=/var/lib/helios
 StateDirectory=helios helios/state

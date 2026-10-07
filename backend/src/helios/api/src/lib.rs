@@ -31,7 +31,6 @@ pub struct AppState {
     pub config: ApiConfig,
     pub orion: orion::Orion,
     pub store: Arc<store::Store>,
-    pub cpu: host::CpuSampler,
     pub events: Arc<events::EventHub>,
     /// One Styx control client per camera, for camera controls and their persisted values.
     pub cameras: camera_controls::CameraControls,
@@ -53,7 +52,6 @@ impl AppState {
             orion: orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone()),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             store,
-            cpu: host::CpuSampler::default(),
             events,
             auth: auth::Auth::new(config.auth_file.clone()),
             update_lock: routes::update::new_update_lock(),

@@ -116,12 +116,15 @@ no fsck.
 `orion-node` is built, installed and run as Orion packages it:
 `packaging/gaia/orion-node.toml` from the git source `orion`, pinned by `rev`
 in `builds/raze.toml` at the commit `backend/Cargo.lock` pins for the `orion`
-crate. Orion's unit runs the node as the `orion` user. HeliOS overrides it in
-later layers:
+crate. Orion's unit runs the node as the `orion` user. `orionctl` comes from
+Orion's `packaging/gaia/orionctl.toml`, imported right after it from the same
+source. HeliOS overrides them in later layers:
 
 - `runtime-services/backend-core.toml` redeclares `orion-node-env` with
   `@assets/runtime-services/core/etc/default/orion-node.env` (single-node
-  appliance profile, `ORION_NODE_LOCAL_AUTH=same-user-or-group`, state in
+  appliance profile, `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` so
+  helios-api and operators in a root shell reach the node,
+  `ORION_NODE_HOST_FACTS_REFRESH_MS=2000` for the UI's live metrics, state in
   `/var/lib/helios/orion`), and adds Orion's
   `packaging/buildroot/orion-users.table` to `BR2_ROOTFS_USERS_TABLES` for the
   `orion` user (the read-only root has no runtime sysusers);
@@ -160,8 +163,7 @@ the port the device identity's `manage_url` names
 - `payloads/` – what gets built and installed: the HeliOS services and tools
   from the backend workspace (built in the `helios-cross` Docker image), the
   Eidos Daedalus plugin (`helios-eidos-plugin`, in
-  `/usr/lib/helios/plugins/daedalus`), `orionctl` from the `orion` source, and
-  the UI build.
+  `/usr/lib/helios/plugins/daedalus`), and the UI build.
 - `runtime-services/` – systemd units, sockets and service assets for those payloads.
 
 Non-TOML inputs (HeliOS's Buildroot external tree with its own packages,

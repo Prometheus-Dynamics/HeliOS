@@ -30,7 +30,8 @@ The API keeps very little state of its own. It reads other parts of the device a
 | Pipelines, resources, peripheral actions, update requests | **Orion**, over its local IPC socket (`HELIOS_ORION_IPC_SOCKET`) |
 | Camera sources, live camera metrics and camera controls | each camera's **Styx camera service** (the `styx-frames+unix://` endpoint on its resource) |
 | Services, reboot, logs | **systemd** and the **journal** |
-| CPU, temperature, disk, processes | the **kernel** (`/proc`, `/sys`). Memory, load and uptime come from Orion's host metrics |
+| CPU (total and per core), temperatures, memory, load, uptime | **Orion**'s host metrics (`orion-node` samples `/proc` and `/sys`) |
+| Firmware throttling, disk, processes | the **kernel** (`/proc`, `/sys`) |
 | Identity | the **Raze device package** (`/run/pd-device/identity.json`) |
 | OS updates | the Raze device package's A/B writer (`/usr/lib/pd-device/update`) |
 
@@ -75,7 +76,7 @@ as unavailable and not retry.
 | `GET` | `/v1/device` | Orion, kernel | node id, hostname, model, serial, OS, uptime, Orion revisions and peers, clock sync |
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
-| `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature, throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
+| `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature (the hottest sensor), throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
 | `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |
 | `GET` | `/v1/system/services` | systemd | `[{unit, active_state, sub_state, main_pid, memory_bytes, restarts}]` for the HeliOS units |
 | `POST` | `/v1/system/services/{unit}/restart` | systemd | Only HeliOS units (`helios-engine`, `orion-node`, ...). Restarting `helios-api` answers 202 before it happens |

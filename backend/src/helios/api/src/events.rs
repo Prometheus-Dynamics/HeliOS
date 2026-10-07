@@ -1,13 +1,18 @@
 //! The event stream (`GET /v1/events`, Server-Sent Events).
 //!
-//! While anyone is subscribed, a watcher reads Orion once a second and publishes what changed:
-//! `pipeline`, `resource` and `update` events, plus `metrics` every two seconds and `orion` when
-//! Orion becomes reachable or unreachable. Each SSE message has the event type as its `event:`
-//! name and an [`ApiEvent`] JSON object as its data.
+//! A watcher follows Orion on one event stream (desired-state changes and this node's `host.*`
+//! metrics; Orion pushes both), from the first subscriber on, and while anyone is subscribed
+//! publishes what changed: `pipeline` and `resource` events (observed changes within one
+//! host-metrics sample, see [`follow`]), `metrics` with every host-facts sample
+//! (`ORION_NODE_HOST_FACTS_REFRESH_MS`, 2 s on the image) and `orion` when Orion becomes reachable
+//! or unreachable. The device package updater's state is a local file, read once a second for
+//! `update` events. Each SSE message has the event type as its `event:` name and an [`ApiEvent`]
+//! JSON object as its data.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::Infallible,
+    sync::Arc,
     time::Duration,
 };
 
@@ -16,14 +21,26 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::{Stream, StreamExt};
+use orion::control_plane::{ClientEventKind, StateSnapshot, StatusChange, TypedConfigValue};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::{SharedState, host::now_ms, routes};
+use crate::{
+    SharedState,
+    host::now_ms,
+    orion::{Orion, StateView},
+    routes::{
+        self,
+        system::{HostSample, metrics_from},
+    },
+};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(1);
-const METRICS_EVERY: u32 = 2;
+/// How often the updater's state file is read (and, while Orion is down, metrics published).
+const UPDATE_INTERVAL: Duration = Duration::from_secs(1);
+const METRICS_WHILE_DOWN_EVERY: u32 = 2;
+/// Wait between attempts to reach Orion's event stream.
+const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ApiEvent {
@@ -35,11 +52,12 @@ pub struct ApiEvent {
 
 pub struct EventHub {
     tx: broadcast::Sender<ApiEvent>,
+    subscribed: Notify,
 }
 
 impl EventHub {
     pub fn new(capacity: usize) -> Self {
-        Self { tx: broadcast::channel(capacity).0 }
+        Self { tx: broadcast::channel(capacity).0, subscribed: Notify::new() }
     }
 
     pub fn publish(&self, kind: &str, data: serde_json::Value) {
@@ -48,11 +66,20 @@ impl EventHub {
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ApiEvent> {
-        self.tx.subscribe()
+        let receiver = self.tx.subscribe();
+        self.subscribed.notify_one();
+        receiver
     }
 
     pub fn subscribers(&self) -> usize {
         self.tx.receiver_count()
+    }
+
+    /// Returns once someone is subscribed.
+    pub async fn wait_for_subscriber(&self) {
+        while self.subscribers() == 0 {
+            self.subscribed.notified().await;
+        }
     }
 }
 
@@ -82,60 +109,240 @@ fn diff_maps(kind: &'static str, before: &BTreeMap<String, serde_json::Value>, a
     }
 }
 
-/// Poll Orion and the device package updater's state while there are subscribers and publish
-/// the changes.
+/// What the Orion feed hands the watcher.
+#[derive(Debug)]
+enum OrionFeed {
+    /// The desired/observed state after a change (the first one on every connection).
+    State(Box<StateSnapshot>),
+    /// Changed `host.*` keys of this node (the first one on every connection is a bootstrap).
+    Host(StatusChange),
+    /// Orion is not reachable, or the stream ended; the feed reconnects.
+    Down(String),
+}
+
+/// The task following Orion's event stream. Dropping it disconnects.
+///
+/// It stays connected while nobody is subscribed (the node pushes one small host sample per
+/// interval), so subscribers coming and going do not leave disconnected sessions on the node.
+struct Feed {
+    task: tokio::task::JoinHandle<()>,
+    rx: mpsc::Receiver<OrionFeed>,
+}
+
+impl Feed {
+    fn spawn(orion: Orion, hub: Arc<EventHub>) -> Self {
+        let (tx, rx) = mpsc::channel(64);
+        let task = tokio::spawn(async move {
+            loop {
+                let message = match follow(&orion, &hub, &tx).await {
+                    Ok(()) => return, // The watcher is gone.
+                    Err(message) => message,
+                };
+                if tx.send(OrionFeed::Down(message)).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(RECONNECT_DELAY).await;
+            }
+        });
+        Self { task, rx }
+    }
+}
+
+/// One connection to Orion's event stream: forwards state snapshots and host changes until the
+/// stream fails (`Err`) or the watcher goes away (`Ok`).
+///
+/// Orion's state watch fires on desired-state changes only; observed changes (a pipeline's
+/// session state, resource health and leases) are not pushed. So the state is also read once
+/// when the stream connects (the baseline, and `orion` reachable at once) and again with every
+/// host-metrics sample the node pushes (`ORION_NODE_HOST_FACTS_REFRESH_MS`), which bounds how
+/// late an observed change shows up. Nobody subscribed, nothing is re-read.
+async fn follow(orion: &Orion, hub: &EventHub, tx: &mpsc::Sender<OrionFeed>) -> Result<(), String> {
+    let mut events = orion.state_and_host_events().await.map_err(|error| error.message)?;
+    let snapshot = orion.snapshot().await.map_err(|error| error.message)?;
+    if tx.send(OrionFeed::State(Box::new(snapshot))).await.is_err() {
+        return Ok(());
+    }
+    loop {
+        let batch = events.next_events().await.map_err(|error| format!("Orion's event stream ended: {error}"))?;
+        let mut saw_state = false;
+        let mut saw_host = false;
+        for event in batch {
+            let item = match event.event {
+                ClientEventKind::StateSnapshot(snapshot) => {
+                    saw_state = true;
+                    OrionFeed::State(snapshot)
+                }
+                ClientEventKind::Status(change) => {
+                    saw_host = true;
+                    OrionFeed::Host(change)
+                }
+                _ => continue,
+            };
+            if tx.send(item).await.is_err() {
+                return Ok(());
+            }
+        }
+        if saw_host && !saw_state && hub.subscribers() > 0 {
+            let snapshot = orion.snapshot().await.map_err(|error| error.message)?;
+            if tx.send(OrionFeed::State(Box::new(snapshot))).await.is_err() {
+                return Ok(());
+            }
+        }
+    }
+}
+
+impl Drop for Feed {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// The watcher's state.
+#[derive(Default)]
+struct Watch {
+    feed: Option<Feed>,
+    /// What subscribers were last told; reset when the last one leaves, so the next one starts
+    /// from a fresh baseline (and an `orion` event).
+    seen: Seen,
+    /// Desired revision of the newest state applied on this connection.
+    desired_revision: Option<u64>,
+    /// The node's current `host.*` status keys.
+    host: BTreeMap<String, TypedConfigValue>,
+    ticks: u32,
+}
+
+#[derive(Default)]
+struct Seen {
+    active: bool,
+    last: Option<Digest>,
+    last_update: Option<serde_json::Value>,
+    orion_up: Option<bool>,
+}
+
+impl Watch {
+    fn on_orion(&mut self, state: &SharedState, item: OrionFeed) {
+        let active = self.seen.active;
+        match item {
+            OrionFeed::State(snapshot) => {
+                // The baseline read and a queued watch event can cross at connect: keep the newer.
+                let revision = snapshot.state.desired.revision.get();
+                if self.desired_revision.is_some_and(|newest| revision < newest) {
+                    return;
+                }
+                self.desired_revision = Some(revision);
+                if !active {
+                    return;
+                }
+                let view = StateView::from_snapshot(*snapshot);
+                if self.seen.orion_up != Some(true) {
+                    state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
+                    self.seen.orion_up = Some(true);
+                }
+                let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view) };
+                if let Some(before) = &self.seen.last {
+                    for (kind, data) in diff(before, &digest) {
+                        state.events.publish(kind, data);
+                    }
+                }
+                self.seen.last = Some(digest);
+            }
+            OrionFeed::Host(change) => {
+                // Folded in while idle too: the bootstrap comes once per connection.
+                if !apply_host_change(&mut self.host, change) || !active {
+                    return;
+                }
+                if let Ok(metrics) = serde_json::to_value(metrics_from(Some(&HostSample::from_status(&self.host)))) {
+                    state.events.publish("metrics", metrics);
+                }
+            }
+            OrionFeed::Down(message) => {
+                self.host.clear();
+                // A restarted node may start from an older revision.
+                self.desired_revision = None;
+                if active && self.seen.orion_up != Some(false) {
+                    state.events.publish("orion", serde_json::json!({ "reachable": false, "message": message }));
+                    self.seen.orion_up = Some(false);
+                }
+            }
+        }
+    }
+
+    async fn on_tick(&mut self, state: &SharedState) {
+        self.ticks = self.ticks.wrapping_add(1);
+        // Without Orion there are no host samples; keep `metrics` coming with what HeliOS reads
+        // itself (throttling, disk).
+        if self.seen.orion_up == Some(false)
+            && self.ticks.is_multiple_of(METRICS_WHILE_DOWN_EVERY)
+            && let Ok(metrics) = serde_json::to_value(metrics_from(None))
+        {
+            state.events.publish("metrics", metrics);
+        }
+        // OS updates do not go through Orion: the writer's state file is read directly.
+        let update = serde_json::to_value(routes::update::current_status(state).await).ok();
+        if self.seen.last_update.is_some()
+            && self.seen.last_update != update
+            && let Some(update) = &update
+        {
+            state.events.publish("update", update.clone());
+        }
+        self.seen.last_update = update;
+    }
+}
+
+/// Folds a `host.*` status change into `host`; `false` when nothing changed.
+pub fn apply_host_change(host: &mut BTreeMap<String, TypedConfigValue>, change: StatusChange) -> bool {
+    if change.is_empty() && !change.bootstrap {
+        return false;
+    }
+    if change.bootstrap {
+        host.clear();
+    }
+    for entry in change.updated.into_iter().filter(|entry| entry.key.starts_with("host.")) {
+        host.insert(entry.key, entry.value);
+    }
+    for key in change.expired {
+        host.remove(&key.key);
+    }
+    true
+}
+
+/// Follow Orion and the device package updater's state and publish the changes while there are
+/// subscribers. Nothing connects to Orion before the first subscriber.
 pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut last: Option<Digest> = None;
-        let mut last_update: Option<serde_json::Value> = None;
-        let mut orion_up: Option<bool> = None;
-        let mut tick: u32 = 0;
-        let mut interval = tokio::time::interval(POLL_INTERVAL);
+        let mut watch = Watch::default();
+        let mut interval = tokio::time::interval(UPDATE_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            interval.tick().await;
-            if state.events.subscribers() == 0 {
-                // Start from a fresh baseline when someone subscribes again.
-                last = None;
-                last_update = None;
-                orion_up = None;
-                continue;
+            if watch.feed.is_none() {
+                state.events.wait_for_subscriber().await;
             }
-            tick = tick.wrapping_add(1);
-            if tick.is_multiple_of(METRICS_EVERY)
-                && let Ok(metrics) = serde_json::to_value(routes::system::metrics_now(&state).await)
-            {
-                state.events.publish("metrics", metrics);
-            }
-            // OS updates do not go through Orion: the writer's state file is read directly.
-            let update = serde_json::to_value(routes::update::current_status(&state).await).ok();
-            if last_update.is_some()
-                && last_update != update
-                && let Some(update) = &update
-            {
-                state.events.publish("update", update.clone());
-            }
-            last_update = update;
-            match state.orion.view().await {
-                Ok(view) => {
-                    if orion_up != Some(true) {
-                        state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
-                        orion_up = Some(true);
-                    }
-                    let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view) };
-                    if let Some(before) = &last {
-                        for (kind, data) in diff(before, &digest) {
-                            state.events.publish(kind, data);
+            let active = state.events.subscribers() > 0;
+            if active != watch.seen.active {
+                watch.seen = Seen { active, ..Seen::default() };
+                // A new feed reads its own baseline. A running one re-reads only with the next host
+                // sample, so read it now: the new subscriber gets `orion` and a baseline at once.
+                if active && watch.feed.is_some() {
+                    match state.orion.snapshot().await {
+                        Ok(snapshot) => watch.on_orion(&state, OrionFeed::State(Box::new(snapshot))),
+                        Err(error) => {
+                            state.events.publish("orion", serde_json::json!({ "reachable": false, "message": error.message }));
+                            watch.seen.orion_up = Some(false);
                         }
                     }
-                    last = Some(digest);
                 }
-                Err(error) => {
-                    if orion_up != Some(false) {
-                        state.events.publish("orion", serde_json::json!({ "reachable": false, "message": error.message }));
-                        orion_up = Some(false);
-                    }
-                }
+            }
+            let feed = watch.feed.get_or_insert_with(|| Feed::spawn(state.orion.clone(), state.events.clone()));
+            let item = tokio::select! {
+                item = feed.rx.recv() => Some(item),
+                _ = interval.tick() => None,
+            };
+            match item {
+                Some(Some(item)) => watch.on_orion(&state, item),
+                // The feed task ended; the next turn starts a new one.
+                Some(None) => watch.feed = None,
+                None if active => watch.on_tick(&state).await,
+                None => {}
             }
         }
     })
@@ -194,6 +401,51 @@ mod tests {
         assert!(changes.contains(&"pipeline:a:updated".to_string()));
         assert!(changes.contains(&"pipeline:c:added".to_string()));
         assert!(changes.contains(&"pipeline:b:removed".to_string()));
+    }
+
+    #[test]
+    fn host_changes_fold_into_metrics() {
+        use orion::control_plane::{StatusEntry, StatusKey, StatusSubject};
+        let node = StatusSubject::Node("raze".into());
+        let entry = |key: &str, value| StatusEntry::new(node.clone(), key, value);
+        let mut host = BTreeMap::new();
+        let bootstrap = StatusChange {
+            bootstrap: true,
+            updated: vec![
+                entry("host.cpu_busy_milli", TypedConfigValue::UInt(250)),
+                entry("host.cpu1_busy_milli", TypedConfigValue::UInt(500)),
+                entry("host.cpu0_busy_milli", TypedConfigValue::UInt(100)),
+                entry("host.load1_milli", TypedConfigValue::UInt(1500)),
+                entry("host.load5_milli", TypedConfigValue::UInt(1000)),
+                entry("host.load15_milli", TypedConfigValue::UInt(500)),
+                entry("host.memory_total_bytes", TypedConfigValue::UInt(4 << 30)),
+                entry("host.memory_available_bytes", TypedConfigValue::UInt(3 << 30)),
+                entry("host.temperature.cpu-thermal", TypedConfigValue::Int(52_500)),
+                entry("host.temperature.rp1_adc", TypedConfigValue::Int(48_000)),
+            ],
+            expired: Vec::new(),
+        };
+        assert!(apply_host_change(&mut host, bootstrap));
+        let sample = HostSample::from_status(&host);
+        assert_eq!(sample.cpu_busy_milli, Some(250));
+        assert_eq!(sample.cpu_core_busy_milli, vec![100, 500]);
+        assert_eq!(sample.load_milli, Some([1500, 1000, 500]));
+        let metrics = metrics_from(Some(&sample));
+        assert_eq!(metrics.cpu, Some(0.25));
+        assert_eq!(metrics.cpu_cores, vec![0.1, 0.5]);
+        assert_eq!(metrics.temperature_c, Some(52.5));
+        assert_eq!(metrics.load, Some([1.5, 1.0, 0.5]));
+
+        let expire = StatusChange {
+            bootstrap: false,
+            updated: vec![entry("host.cpu_busy_milli", TypedConfigValue::UInt(900))],
+            expired: vec![StatusKey { subject: node.clone(), key: "host.temperature.cpu-thermal".into() }],
+        };
+        assert!(apply_host_change(&mut host, expire));
+        let metrics = metrics_from(Some(&HostSample::from_status(&host)));
+        assert_eq!(metrics.cpu, Some(0.9));
+        assert_eq!(metrics.temperature_c, Some(48.0));
+        assert!(!apply_host_change(&mut host, StatusChange { bootstrap: false, updated: Vec::new(), expired: Vec::new() }));
     }
 
     #[test]

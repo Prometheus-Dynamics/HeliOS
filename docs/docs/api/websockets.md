@@ -38,11 +38,13 @@ Each message's `event:` field is the event type. Its `data:` is a JSON object:
 | `resource` | A resource is added, changes health, availability or lease, or is removed | `{id, change, value?: {type, health, availability, lease_state, leased_by}}` |
 | `update` | The update status changes, an image is uploaded, or an update is submitted | the update status (as from `GET /v1/update/status`), or `{change: "uploaded", upload}`, or `{change: "submitted", update_id, version}` |
 | `camera` | A camera mount changes, a camera control changes (by any client of the camera, the API included), the API's control client connects to or loses the camera service, or the API applied a camera's stored settings when its camera service appeared | `{id, change: "mount", mount}`, `{id, change: "control", control: {id, standard, value, frame, by, frame_rate_restart}}`, `{id, change: "online", reconnects}`, `{id, change: "offline", error}` or `{id, change: "restored", applied: [...], errors: [...]}` |
-| `metrics` | Every 2 s | the `GET /v1/metrics` object |
+| `metrics` | With every Orion host-metrics sample (every 2 s on the image), and every 2 s with Orion's fields empty while Orion is unreachable | the `GET /v1/metrics` object |
 | `orion` | Orion becomes reachable or unreachable | `{reachable, desired_revision?, message?}` |
 | `log` | `/v1/logs/stream` only | `{at_ms, level, unit, message, pid}` |
 | `lagged` | The client fell behind and missed events | `{missed}`. Refetch with the REST endpoints |
 
-While at least one client is subscribed, the API reads Orion once a second and publishes the
-differences. Treat events as hints that something changed: they carry the new summary, and the
+While at least one client is subscribed, the API publishes the differences. It follows Orion on
+one event stream: desired-state changes arrive at once, the node's `host.*` metrics with every
+sample, and observed changes (pipeline session state, resource health) are picked up within one
+sample, since Orion does not push those. The updater's state file is read once a second. Treat events as hints that something changed: they carry the new summary, and the
 REST endpoints hold the full objects. Keep-alive comments are sent while the stream is idle.
