@@ -1,6 +1,6 @@
 # HeliOS TODO
 
-State of HeliOS and the Raze work as of 2026-10-06.
+State of HeliOS and the Raze work as of 2026-10-07.
 
 ## Where things stand
 
@@ -11,7 +11,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | Piece | Where | State |
 |---|---|---|
 | HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (c77c6ce, plugin ABI 9, `daedalus:frame` v2), Styx `dev` (cff5233), Eidos `main` (306fea6), Orion v4 `main` (154fab0), Lemnos `dev` (10269f9) |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (c77c6ce, plugin ABI 9, `daedalus:frame` v2), Styx `dev` (cff5233), Eidos `main` (306fea6), Orion v4 `main` (7f9c88a, also the Gaia `orion` source; they must match), Lemnos `dev` (10269f9) |
 | UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
 | Raze device package | Atlas `dev`, 1.5.0 (695d172) | pinned by HeliOS: A/B update writer, EROFS root, read-only-safe services |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
@@ -23,7 +23,8 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [ ] A/B and read-only root on hardware: first boot (data.ext4 grows to the eMMC, `/data` binds, machine-id and SSH host keys persist across a reboot and an update, hostname `helios-<serial8>`, `manage_url` `http://helios-<serial8>.local:5800/`), the UI on :5800, an update from the UI and from Atlas (stage, trial reboot, update-health confirms; a broken image rolls back), `rootfs.erofs` size vs. the 512 MiB slot, boot time with an LZMA root, journald after the machine-id bind (restarted once per boot), nothing writing to `/` (`journalctl -b | grep -i 'read-only'`).
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `pd-device/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
 - [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
-- [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, HeliOS services connect with `Group=orion`. `orionctl` from a root shell has gid 0 and is refused; decide how operators reach the node.
+- [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, helios-engine and helios-peripherals connect with `Group=orion`, helios-api (root) and `orionctl` from a root shell are admitted (`ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root`; `orionctl` from Orion's `packaging/gaia/orionctl.toml`).
+- [ ] helios-api live metrics on the CM5: `GET /v1/metrics` and SSE `metrics` from Orion's host metrics (CPU per core, the hottest thermal zone; `ORION_NODE_HOST_FACTS_REFRESH_MS=2000`), `pipeline`/`resource` events within one sample, and the event stream surviving an orion-node restart.
 - [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
 - [x] Hostname: `helios-{serial8}` through the device package's hostname policy (`/etc/pd-device/hostname.env`); no static hostname.
 
@@ -69,7 +70,9 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Daedalus: tick-cost pass, 0 node allocations per tick, `daedalus:frame` v2 (c77c6ce).
 - [x] Eidos: faster pipeline, bare CM5 p99 0.98–1.01 ms, detections unchanged (306fea6); the stored templates are unchanged (golden test passes).
 
-- [ ] Orion: an optional `orionctl` in `packaging/gaia/`; a way to admit root clients (or supplementary groups) under `same-user-or-group`.
+- [x] Orion: `orionctl` Gaia layer, root and supplementary-group admission, CPU and temperature host metrics, host metrics on the status lane (3cf27ed, 7f9c88a). HeliOS imports the layer; helios-api reads CPU and temperatures from Orion and follows Orion with a `ControlPlaneEventStream` instead of polling it.
+- [ ] Orion: an observed-state watch. `WatchState` fires on desired-revision changes only, so helios-api re-reads the state snapshot with every host sample to catch pipeline session and resource health changes.
+- [ ] Orion client: reconnecting a `ControlPlaneEventStream` under the same local address fails while the node still holds the old session (its queued events are flushed ahead of the subscription's `Accepted`, which `subscribe_and_expect_accepted` reports as `NoMessageAvailable`, until `ORION_NODE_LOCAL_SESSION_TTL_MS` expires). helios-api uses a fresh address per connection; the host-facts doc's reconnect advice hits this.
 - [ ] Atlas: `PD_DEVICE_PACKAGE_COMMIT` stays empty for git-source imports (Gaia now exposes `${source.atlas.commit}`).
 - [ ] Gaia: `@source:` inside quoted Buildroot values (HeliOS keeps its own copy of Orion's users table); building related rust artifacts in one cargo invocation (engine and plugins).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
