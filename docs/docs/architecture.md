@@ -20,7 +20,7 @@ Atlas.
 | State, resources, workloads, assignment | Orion | provider and executor services; IPC-only node |
 | Graph runtime, nodes, plugins | Daedalus | loads plugin libraries, runs graphs input-driven |
 | Vision algorithms and their graph nodes (ArUco, AprilTag, ...) | Eidos (`eidos-daedalus`) | ships Eidos's plugin as `libhelios_eidos_plugin.so`; stores its graph documents |
-| Product API, OTA, provisioning, diagnostics | **HeliOS** | `helios-api`, `helios-updater`, `helios-provision`, `helios-diagnostics` |
+| Product API, OTA, provisioning, diagnostics | **HeliOS** | `helios-api` (OTA through the device package's A/B writer), `helios-diagnostics` |
 
 ## Processes on the device
 
@@ -159,7 +159,7 @@ for vision:
 | orion-node | ≤ 20 MiB |
 | helios-peripherals with one camera | ≤ 35 MiB |
 | helios-engine with an ArUco graph | ≤ 25 MiB |
-| helios-api, updater | ≤ 10 MiB |
+| helios-api | ≤ 10 MiB |
 
 ## Testing
 

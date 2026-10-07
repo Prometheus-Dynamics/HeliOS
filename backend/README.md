@@ -6,7 +6,6 @@ Helios is a Rust workspace that implements a full featured backend for camera ca
 
 - **src/helios/api** – API binary exposing JSON‑RPC/REST/WS endpoints and orchestration logic.
 - **src/helios/engine** – standalone engine crate that owns the runtime, IPC server, and reusable client for pipeline orchestration.
-- **src/helios/updater** – updater crate that owns the OTA runtime, state machine, IPC server, and reusable client APIs.
 - **src/libs** – collection of library crates covering capture, codecs, computer vision, networking and the pipeline framework.
 - **configs** – Buildroot and init configuration templates consumed by the image builder.
 
@@ -62,7 +61,7 @@ cargo --config .cargo/local-overrides.toml check --manifest-path backend/Cargo.t
 
 The repo does not auto-load that file. If you need a sibling checkout override, you must opt into it explicitly per command.
 
-The live deploy helper accepts the same override explicitly. It now uploads binaries over SSH and activates them through `helios-updater` on the device instead of publishing them as OTA bundles:
+The live deploy helper accepts the same override explicitly. It uploads binaries over SSH to `/data/helios-dev` and points the services at them with runtime drop-ins until the next reboot (the root filesystem is read-only):
 
 ```bash
 HELIOS_CARGO_CONFIG=.cargo/local-overrides.toml \
@@ -227,7 +226,7 @@ material pending a replacement and is not built, packaged, or used.
 
 ## Application structure
 
-The `helios-api` crate under `src/helios/api` is the main server entry point while runtime logic lives in `helios-engine` and `helios-updater`. It is split into several sections:
+The `helios-api` crate under `src/helios/api` is the main server entry point while runtime logic lives in `helios-engine`; OS updates go through the Raze device package's A/B writer. It is split into several sections:
 
 - **api** – exposes HTTP endpoints, a JSON‑RPC service, WebSocket streaming and an NT4 (NetworkTables) server. Individual modules under `api/http` implement routes for device information, sensor control, streaming operations and system services.
 - **pipeline** – orchestrates one or more processing pipelines using `lib-pipeline-core`. Built‑in pipeline nodes live in `pipeline/nodes` and are registered on startup.
