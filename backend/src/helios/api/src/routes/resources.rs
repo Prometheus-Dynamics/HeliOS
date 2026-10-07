@@ -258,7 +258,7 @@ pub async fn action(State(state): State<SharedState>, Path(id): Path<String>, Js
 pub async fn fan() -> ApiError {
     ApiError::not_available(
         "fan control is not available",
-        "helios-peripherals publishing the hwmon fan (Lemnos fan.read / fan.set_pwm / fan.set_mode) as an Orion resource with fan actions, and a decision on how it shares control with the kernel thermal governor",
+        "helios-peripherals publishing the hwmon fan (Lemnos fan.read, and the timed fan.override / fan.release that always returns to the kernel thermal governor) as an Orion resource with fan actions",
     )
 }
 
