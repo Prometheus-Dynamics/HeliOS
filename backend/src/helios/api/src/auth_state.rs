@@ -1,12 +1,12 @@
-//! Device security state on the data partition, shared by helios-api and `heliosctl auth`.
+//! Device security state on the data partition, read by the server and by `helios-api auth`.
 //!
 //! helios-api keeps the device password (argon2id) and the API token hashes in one JSON file.
 //! No file means the device is **open** (the default). A file means it is **secured**. The file
 //! lives under `/var/lib/helios`, the data partition, so it survives OS updates and reflashes of
 //! the root filesystem.
 //!
-//! `heliosctl auth reset` (from a root shell, e.g. the serial console) removes the file, which
-//! returns the device to open. helios-api notices the change on its next request.
+//! `helios-api auth reset` (from a root shell, e.g. the serial console) removes the file, which
+//! returns the device to open. The running server notices the change on its next request.
 
 use std::{
     fs,
@@ -16,7 +16,7 @@ use std::{
 use anyhow::{Context, Result};
 
 pub const DEFAULT_AUTH_FILE: &str = "/var/lib/helios/auth/auth.json";
-/// Overrides [`DEFAULT_AUTH_FILE`] for helios-api and heliosctl alike.
+/// Overrides [`DEFAULT_AUTH_FILE`] for the server and `helios-api auth` alike.
 pub const AUTH_FILE_ENV: &str = "HELIOS_API_AUTH_FILE";
 
 /// The auth file from `HELIOS_API_AUTH_FILE`, or the default.
@@ -44,7 +44,7 @@ pub struct AuthSummary {
     pub mode: AuthMode,
     pub tokens: usize,
     /// The file exists but cannot be read. helios-api then refuses every protected request
-    /// (fails closed) until `heliosctl auth reset`.
+    /// (fails closed) until `helios-api auth reset`.
     pub unreadable: Option<String>,
 }
 

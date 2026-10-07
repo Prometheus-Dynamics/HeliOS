@@ -15,7 +15,6 @@ members = [
     "src/helios/engine",
     "src/helios/peripherals",
     "src/helios/diagnostics",
-    "src/helios/ctl",
     "src/helios/eidos-plugin",
     "src/helios/vision-probe",
     "tools/xtask",

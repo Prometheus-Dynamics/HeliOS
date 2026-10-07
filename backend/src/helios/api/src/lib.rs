@@ -6,12 +6,14 @@
 //! `{"error": {"code": "not_available", "needs": "..."}}`. See `docs/docs/api/http.md`.
 
 pub mod auth;
+pub mod auth_state;
 pub mod camera_controls;
 pub mod config;
 pub mod error;
 pub mod events;
 pub mod host;
 pub mod orion;
+pub mod pd_update;
 pub mod routes;
 pub mod store;
 pub mod ui;

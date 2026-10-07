@@ -196,8 +196,8 @@ async fn console_reset_returns_to_open() {
     let state = test_state(dir.path());
     secure(&state).await;
     assert_eq!(send(&state, "DELETE", "/v1/cameras/cam0/mount", &[], None).await.status, StatusCode::UNAUTHORIZED);
-    // What `heliosctl auth reset` does on the device.
-    assert!(heliosctl::auth_state::reset(&dir.path().join("auth").join("auth.json")).expect("reset"));
+    // What `helios-api auth reset` does on the device.
+    assert!(crate::auth_state::reset(&dir.path().join("auth").join("auth.json")).expect("reset"));
     assert_eq!(send(&state, "GET", "/v1/auth/status", &[], None).await.body["mode"], "open");
     assert_eq!(send(&state, "DELETE", "/v1/cameras/cam0/mount", &[], None).await.status, StatusCode::NO_CONTENT);
 }

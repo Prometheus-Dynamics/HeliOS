@@ -20,6 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 argon2 = { workspace = true }
 getrandom = { workspace = true }
 subtle = { workspace = true }
@@ -44,7 +45,6 @@ orion = { workspace = true, default-features = false, features = ["client"] }
 # Camera list and live camera metrics from the Styx camera services (no capture backends).
 styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde"] }
 
-heliosctl = { path = "../ctl" }
 helios-diagnostics = { path = "../diagnostics" }
 
 [dev-dependencies]

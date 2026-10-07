@@ -341,7 +341,7 @@ pub async fn metrics(State(state): State<SharedState>) -> Json<Metrics> {
     Json(metrics_now(&state).await)
 }
 
-/// The full helios-diagnostics health report (`heliosctl doctor`).
+/// The full helios-diagnostics health report (`helios-diagnostics doctor`).
 pub async fn health_report() -> ApiResult<Json<serde_json::Value>> {
     let report = tokio::task::spawn_blocking(|| helios_diagnostics::collect_health_report(&helios_diagnostics::config::DiagnosticsConfig::default()))
         .await
