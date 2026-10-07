@@ -26,6 +26,10 @@ imports = [
   # entry and preset. The app layer redeclares `orion-node-env` with HeliOS's
   # appliance settings; the release layer adds a drop-in for its state.
   { source = "orion", path = "packaging/gaia/orion-node.toml", when = { profile = "full" } },
+  # orionctl, the operator CLI, as /usr/bin/orionctl (IPC only). orion-node
+  # admits root (ORION_NODE_LOCAL_AUTH in HeliOS's orion-node.env), so it works
+  # from a root shell.
+  { source = "orion", path = "packaging/gaia/orionctl.toml", when = { profile = "full" } },
   { path = "../layers/app-layer.toml", when = { profile = "full" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
@@ -43,8 +47,8 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "0fc8ecf8f7814b9276988999c8108205b99d3102"
 
-# Orion v4 (main 7f9c88a: CPU and temperature host metrics, operator access).
-# Must be the commit backend/Cargo.lock pins for the `orion`
+# Orion v4 (main 7f9c88a: CPU and temperature host metrics, operator access,
+# orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node, orionctl and the HeliOS services speak the same control
 # protocol, and its layout changed within v4.
 [[sources]]
