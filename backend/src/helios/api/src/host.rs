@@ -1,12 +1,11 @@
-//! Facts the kernel and systemd own: CPU load, temperature, disk, processes, units and the
-//! journal. Orion's host metrics cover memory, load and uptime; CPU utilisation and temperature
-//! are read here until Orion reports them.
+//! Facts the kernel and systemd own that Orion does not report: firmware throttling, disk,
+//! processes, units and the journal. CPU utilisation, temperatures, memory, load and uptime are
+//! Orion's host metrics (`routes::system::HostSample`).
 
 use std::{
     collections::BTreeMap,
     path::Path,
     process::Stdio,
-    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -34,77 +33,6 @@ pub fn parse_env(text: &str) -> BTreeMap<String, String> {
 
 pub fn os_release() -> BTreeMap<String, String> {
     std::fs::read_to_string("/etc/os-release").map(|text| parse_env(&text)).unwrap_or_default()
-}
-
-/// One `/proc/stat` CPU line: busy and total jiffies.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CpuTimes {
-    pub busy: u64,
-    pub total: u64,
-}
-
-pub fn parse_proc_stat(text: &str) -> (CpuTimes, Vec<CpuTimes>) {
-    let mut all = CpuTimes::default();
-    let mut cores = Vec::new();
-    for line in text.lines() {
-        let mut fields = line.split_whitespace();
-        let Some(name) = fields.next() else { continue };
-        if !name.starts_with("cpu") {
-            continue;
-        }
-        let values: Vec<u64> = fields.filter_map(|v| v.parse().ok()).collect();
-        if values.len() < 4 {
-            continue;
-        }
-        let idle = values[3] + values.get(4).copied().unwrap_or(0);
-        let total: u64 = values.iter().take(8).sum();
-        let times = CpuTimes { busy: total.saturating_sub(idle), total };
-        if name == "cpu" {
-            all = times;
-        } else {
-            cores.push(times);
-        }
-    }
-    (all, cores)
-}
-
-fn fraction(prev: CpuTimes, next: CpuTimes) -> f64 {
-    let total = next.total.saturating_sub(prev.total);
-    if total == 0 {
-        return 0.0;
-    }
-    next.busy.saturating_sub(prev.busy) as f64 / total as f64
-}
-
-/// CPU utilisation between successive calls (the first call measures since boot).
-#[derive(Default)]
-pub struct CpuSampler {
-    last: Mutex<Option<(CpuTimes, Vec<CpuTimes>)>>,
-}
-
-impl CpuSampler {
-    pub fn sample(&self) -> Option<(f64, Vec<f64>)> {
-        let text = std::fs::read_to_string("/proc/stat").ok()?;
-        let next = parse_proc_stat(&text);
-        let mut last = self.last.lock().ok()?;
-        let prev = last.clone().unwrap_or_default();
-        let total = fraction(prev.0, next.0);
-        let cores = next.1.iter().enumerate().map(|(i, core)| fraction(prev.1.get(i).copied().unwrap_or_default(), *core)).collect();
-        *last = Some(next);
-        Some((total, cores))
-    }
-}
-
-/// Hottest thermal zone, °C.
-pub fn temperature_c() -> Option<f64> {
-    let zones = std::fs::read_dir("/sys/class/thermal").ok()?;
-    zones
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("thermal_zone"))
-        .filter_map(|entry| read_trimmed(entry.path().join("temp")))
-        .filter_map(|text| text.parse::<f64>().ok())
-        .map(|milli| milli / 1000.0)
-        .reduce(f64::max)
 }
 
 /// Raspberry Pi firmware throttle flags (`get_throttled`), when the firmware exposes them.
@@ -365,15 +293,6 @@ pub fn send_signal(pid: u32, signal: i32) -> ApiResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn proc_stat_fractions() {
-        let a = parse_proc_stat("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0\ncpu1 50 0 50 400 0 0 0 0\n");
-        let b = parse_proc_stat("cpu  200 0 200 1400 0 0 0 0 0 0\ncpu0 150 0 50 600 0 0 0 0\ncpu1 50 0 150 800 0 0 0 0\n");
-        assert_eq!(a.1.len(), 2);
-        assert!((fraction(a.0, b.0) - 0.25).abs() < 1e-9);
-        assert!((fraction(a.1[0], b.1[0]) - (100.0 / 300.0)).abs() < 1e-9);
-    }
 
     #[test]
     fn journal_lines_map_to_log_lines() {
