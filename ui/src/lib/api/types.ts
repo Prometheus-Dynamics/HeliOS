@@ -386,34 +386,37 @@ export interface Upload {
 
 export interface ApplyResponse {
   update_id: string;
-  artifact_id: string;
   version: string;
   sha256: string;
   image_url: string;
+  reboot: boolean;
   message: string;
 }
 
-export interface UpdateExecution {
+/** What helios-api last asked the device package's A/B writer to do. */
+export interface UpdateTask {
   update_id: string;
-  artifact_id: string | null;
-  version: string | null;
-  artifact_class: string | null;
-  phase: string;
-  message: string | null;
+  upload_id: string;
+  version: string;
+  sha256: string;
+  /** staging, staged, applying (rebooting into the new slot on trial), failed */
+  step: string;
+  reboot: boolean;
+  error: string | null;
+  started_at_ms: number;
 }
 
 export interface UpdateStatus {
+  /** The device package writer's state: idle, staging, staged, trying, confirmed, rolled-back, error, unknown. */
   phase: string;
   stage: string;
   progress_percent: number | null;
   last_error: string | null;
-  orion_reachable: boolean;
-  updater_running: boolean;
-  active: UpdateExecution | null;
-  executions: UpdateExecution[];
-  slots: { active: string | null; reserve: string | null; pending: string | null };
-  boot_confirm: { request_id: string | null; status: string | null; selector: string | null };
-  repartition: Record<string, string | null>;
+  updater_available: boolean;
+  slots: { active: string | null; staged: string | null };
+  version_active: string | null;
+  version_staged: string | null;
+  task: UpdateTask | null;
 }
 
 export interface ApiEvent<T = unknown> {
