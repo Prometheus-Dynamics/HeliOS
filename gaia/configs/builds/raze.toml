@@ -31,6 +31,9 @@ imports = [
   # from a root shell.
   { source = "orion", path = "packaging/gaia/orionctl.toml", when = { profile = "full" } },
   { path = "../layers/app-layer.toml", when = { profile = "full" } },
+  # Expected contents of a full image, in its own file so emptying a layer
+  # can't also remove the check.
+  { path = "../layers/expect-full.toml", when = { profile = "full" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
 ]

@@ -1,0 +1,7 @@
+# What a full HeliOS image must contain: validation fails if any of these disappears
+# (a layer deleted, emptied by a bad write, no longer imported, or its `when`
+# no longer matching), instead of silently building an image without it.
+[expect]
+artifacts = ["helios-api", "helios-engine", "helios-diagnostics", "helios-peripherals", "helios-eidos-plugin", "orion-node", "orionctl"]
+installs = ["install-helios-api", "install-helios-engine", "install-helios-diagnostics", "install-helios-peripherals", "install-helios-eidos-plugin", "install-orion-node", "install-orionctl"]
+
