@@ -123,7 +123,8 @@ source. HeliOS overrides them in later layers:
 - `runtime-services/backend-core.toml` redeclares `orion-node-env` with
   `@assets/runtime-services/core/etc/default/orion-node.env` (single-node
   appliance profile, `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` so
-  helios-api and operators in a root shell reach the node, state in
+  helios-api and operators in a root shell reach the node,
+  `ORION_NODE_HOST_FACTS_REFRESH_MS=2000` for the UI's live metrics, state in
   `/var/lib/helios/orion`), and adds Orion's
   `packaging/buildroot/orion-users.table` to `BR2_ROOTFS_USERS_TABLES` for the
   `orion` user (the read-only root has no runtime sysusers);

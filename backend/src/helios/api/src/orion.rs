@@ -2,16 +2,25 @@
 //! peripherals service and the updater publish is read from here, and pipeline/update/peripheral
 //! requests are written here as desired state.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use orion::{
-    client::{ClientError, LocalControlPlaneClient},
-    control_plane::{ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, WorkloadObservedState, WorkloadRecord},
+    Revision,
+    client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
+    control_plane::{
+        ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusQuery, StatusSubject, WorkloadObservedState,
+        WorkloadRecord,
+    },
 };
 
 use crate::error::{ApiError, ApiResult};
 
 const CLIENT_NAME: &str = "helios-api";
+const EVENTS_CLIENT_NAME: &str = "helios-api-events";
 
 #[derive(Debug, Clone)]
 pub struct Orion {
@@ -42,6 +51,26 @@ impl Orion {
 
     pub async fn view(&self) -> ApiResult<StateView> {
         Ok(StateView::from_snapshot(self.snapshot().await?))
+    }
+
+    /// An event stream on the node's stream socket, subscribed to desired/observed state changes
+    /// (a full snapshot each) and to this node's `host.*` metrics (Orion `docs/host-facts.md`,
+    /// "Following host metrics without polling").
+    ///
+    /// Every connection gets its own local address: orion-node keeps a disconnected client's
+    /// state (its watches and queued events) for `ORION_NODE_LOCAL_SESSION_TTL_MS` and flushes that
+    /// queue into a reconnect under the same address ahead of the subscription replies, which the
+    /// client then refuses ("no control message available"). A fresh address starts clean, also
+    /// after a helios-api restart.
+    pub async fn state_and_host_events(&self) -> ApiResult<ControlPlaneEventStream> {
+        static CONNECTIONS: AtomicU64 = AtomicU64::new(0);
+        let fail = |error| unreachable(&self.stream_socket, error);
+        let address = format!("orion-client.control-plane.{EVENTS_CLIENT_NAME}.{}.{}", std::process::id(), CONNECTIONS.fetch_add(1, Ordering::Relaxed));
+        let mut events = ControlPlaneEventStream::connect_at_with_local_address(&self.stream_socket, EVENTS_CLIENT_NAME, address).await.map_err(fail)?;
+        events.subscribe_state(Revision::ZERO).await.map_err(fail)?;
+        let node = events.node_id().clone();
+        events.subscribe_status(StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host.")).await.map_err(fail)?;
+        Ok(events)
     }
 
     pub async fn observability(&self) -> ApiResult<NodeObservabilitySnapshot> {
