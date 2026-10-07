@@ -43,9 +43,9 @@ HeliOS layers are imported after it and override its defaults:
   the image has no static hostname, so every board is `helios-<serial8>`.
 - `/etc/pd-device/update-health` and `/etc/pd-device/update.d/pre-reboot` are
   the OS hooks of the update writer (`storage/update.toml`).
-- `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` lists the package's `raze.config`
-  first, then `linux-4k-page-size.fragment` (the CM5 defconfig's 4 KiB pages,
-  which the package's list replaces).
+- `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` is the package's `raze.config` only,
+  so HeliOS runs the same kernel (including its page size) as every other OS
+  image on a Raze.
 
 For a local Atlas checkout use
 `--set sources.atlas.path=$PWD/../Atlas-Hardware-Manager` (the path must be

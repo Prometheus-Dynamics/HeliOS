@@ -11,10 +11,10 @@ external_tree_mode = "required"
 # defconfig, kernel tarball and hash, OV9782 extension, rpi-firmware overlays,
 # rpi-utils and host-dtc come from the device package.
 config_overrides = [
-  # The device package's raze.config first (its trims and the built-in EROFS
-  # the root needs), then the 4 KiB page size HeliOS has always run with (the
-  # CM5 defconfig's fragment, which the package's list replaces).
-  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"$(BR2_EXTERNAL_RAZE_DEVICE_PATH)/linux/raze.config board/raspberrypi/linux-4k-page-size.fragment\""],
+  # The device package's kernel configuration (its trims, the built-in EROFS
+  # the root needs, and the page size). HeliOS adds nothing, so every OS image
+  # on a Raze runs the same kernel.
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"$(BR2_EXTERNAL_RAZE_DEVICE_PATH)/linux/raze.config\""],
   # post-build: the read-only root's fstab, mount points and /run links.
   # post-image: checks rootfs.erofs fits its 512 MiB slot, makes data.ext4.
   ["BR2_ROOTFS_POST_BUILD_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-build.sh\""],
