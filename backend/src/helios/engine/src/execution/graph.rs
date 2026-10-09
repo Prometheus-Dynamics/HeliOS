@@ -62,7 +62,6 @@ pub(crate) fn compile_workload_graph(
     let mut document = graph_document_for(workload)?;
     validate_document_requires(registry, &document)?;
     let host_alias = host_alias(&document);
-    inline_named_context(&mut document, &host_alias, workload, frame_inputs)?;
     if !frame_inputs.is_empty() {
         declare_context_held(&mut document, &host_alias, frame_inputs)?;
     }
@@ -149,66 +148,6 @@ pub(super) fn declare_context_held(document: &mut GraphDocument, host: &str, fra
     for port in context {
         document.set_host_input_policy(host, &port, HostInputPolicy::Held).map_err(|error| ExecutionError::Plan(format!("host input '{port}': {error}")))?;
     }
-    Ok(())
-}
-
-/// Named camera context (`ContextValue::Name`, e.g. a lens model) cannot be pushed into the
-/// enum-typed node inputs it feeds, so each named value whose host input `<input>_<field>` the
-/// document has becomes a constant on every node input that host input feeds, and the host
-/// input goes away. A changed name recompiles the graph (`ExecutionWorkload::compiled_shape`).
-pub(super) fn inline_named_context(document: &mut GraphDocument, host: &str, workload: &ExecutionWorkload, frame_inputs: &[String]) -> Result<(), ExecutionError> {
-    let named = workload
-        .bindings
-        .iter()
-        .filter(|binding| frame_inputs.contains(&binding.input))
-        .flat_map(|binding| binding.context.iter().filter_map(|(field, value)| value.as_name().map(|name| (binding.context_port(field), name.to_string()))))
-        .collect::<Vec<_>>();
-    if named.is_empty() {
-        return Ok(());
-    }
-    let Ok(ports) = document.graph.host_input_ports(host) else {
-        return Ok(());
-    };
-    let named = named.into_iter().filter(|(port, _)| ports.contains(&port.as_str())).collect::<Vec<_>>();
-    if named.is_empty() {
-        return Ok(());
-    }
-    let mut json = serde_json::to_value(&*document).map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
-    let graph = &mut json["graph"];
-    let host_index = graph["nodes"]
-        .as_array()
-        .and_then(|nodes| nodes.iter().position(|node| node.get("label").and_then(|label| label.as_str()) == Some(host) || node.get("id").and_then(|id| id.as_str()) == Some(host)))
-        .ok_or_else(|| ExecutionError::Plan(format!("host bridge '{host}' not found")))?;
-    for (port, name) in &named {
-        let value = serde_json::to_value(Value::String(name.clone().into())).map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
-        let mut targets = Vec::new();
-        if let Some(edges) = graph["edges"].as_array_mut() {
-            edges.retain(|edge| {
-                let from_host = edge["from"]["node"].as_u64() == Some(host_index as u64) && edge["from"]["port"].as_str() == Some(port.as_str());
-                if from_host {
-                    targets.push((edge["to"]["node"].as_u64().unwrap_or(u64::MAX) as usize, edge["to"]["port"].as_str().unwrap_or_default().to_string()));
-                }
-                !from_host
-            });
-        }
-        let nodes = graph["nodes"].as_array_mut().expect("nodes were found above");
-        for (node, input) in targets {
-            let Some(consts) = nodes.get_mut(node).and_then(|node| {
-                if node.get("const_inputs").is_none() {
-                    node["const_inputs"] = serde_json::json!([]);
-                }
-                node["const_inputs"].as_array_mut()
-            }) else {
-                continue;
-            };
-            consts.retain(|entry| entry.get(0).and_then(|name| name.as_str()) != Some(input.as_str()));
-            consts.push(serde_json::json!([input, value.clone()]));
-        }
-        if let Some(outputs) = nodes[host_index]["outputs"].as_array_mut() {
-            outputs.retain(|output| output.as_str() != Some(port.as_str()));
-        }
-    }
-    *document = GraphDocument::from_json(&json.to_string()).map_err(|error| ExecutionError::GraphDocument(format!("inlining named camera context: {error}")))?;
     Ok(())
 }
 

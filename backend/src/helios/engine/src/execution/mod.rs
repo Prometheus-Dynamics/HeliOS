@@ -7,6 +7,7 @@
 //! publishes the latest outputs, stats, plan and metrics of every workload as Orion artifacts.
 
 mod bindings;
+mod camera_context;
 mod driver;
 mod frame_source;
 mod graph;

@@ -1224,6 +1224,7 @@ dependencies = [
  "eidos-aruco",
  "eidos-daedalus",
  "helios-eidos-plugin",
+ "helios-field",
  "memmap2",
  "nix",
  "notify",

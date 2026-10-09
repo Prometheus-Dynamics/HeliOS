@@ -53,19 +53,32 @@ struct BindingConfig {
     /// Camera frame sources only: half-size pyramid levels to attach to each frame.
     #[serde(default)]
     pyramid: Option<u8>,
-    /// Camera frame sources only: context fed to the graph's `<input>_<field>` host inputs
-    /// (numbers pushed as held `f64` values, names set as constants when compiling). Orion's
-    /// config values have no floats, so a number is a decimal string (`"612.5"`) or an int; any
-    /// other string is a name.
+    /// Camera frame sources only: the camera's calibration (`camera.*`) and mount (`mount.*`),
+    /// pushed into the graph's held `camera` and `extrinsics` inputs. Numbers are
+    /// `TypedConfigValue::F64` (or ints), names strings; the unit is in the key
+    /// (`camera.fx_px`, `mount.pitch_rad`).
     #[serde(default)]
     context: BTreeMap<String, ContextConfig>,
 }
 
+/// A context value, or (Orion config keys nest at each `.`) a group of them: `camera.fx_px`
+/// arrives as `camera: {fx_px: ..}`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 enum ContextConfig {
     Number(f64),
     Name(String),
+    Group(BTreeMap<String, ContextConfig>),
+}
+
+impl ContextConfig {
+    /// Every value under this one, with its dotted key below `prefix`.
+    fn flatten<'a>(&'a self, prefix: String, out: &mut Vec<(String, &'a ContextConfig)>) {
+        match self {
+            Self::Group(group) => group.iter().for_each(|(key, value)| value.flatten(format!("{prefix}.{key}"), out)),
+            value => out.push((prefix, value)),
+        }
+    }
 }
 
 impl Eq for ContextConfig {}
@@ -179,26 +192,24 @@ fn decode_frame_request(record: &WorkloadRecord, input: &str, binding: &BindingC
 }
 
 fn decode_context(record: &WorkloadRecord, input: &str, binding: &BindingConfig) -> Result<BTreeMap<String, ContextValue>, WorkloadDecodeError> {
-    binding
-        .context
-        .iter()
+    let mut fields = Vec::new();
+    binding.context.iter().for_each(|(key, value)| value.flatten(key.clone(), &mut fields));
+    fields
+        .into_iter()
         .map(|(field, value)| {
             let invalid =
                 |message: &str| WorkloadDecodeError::InvalidField { workload_id: record.workload_id.as_str().to_string(), field: format!("binding.{input}.context.{field}"), message: message.into() };
-            if field.is_empty() || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                return Err(invalid("context field names are letters, digits and '_'"));
+            if field.is_empty() || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+                return Err(invalid("context field names are letters, digits, '_' and '.'"));
             }
             let value = match value {
                 ContextConfig::Number(number) if number.is_finite() => ContextValue::Number(*number),
                 ContextConfig::Number(_) => return Err(invalid("context numbers must be finite")),
-                ContextConfig::Name(text) => match text.trim().parse::<f64>() {
-                    Ok(number) if number.is_finite() => ContextValue::Number(number),
-                    Ok(_) => return Err(invalid("context numbers must be finite")),
-                    Err(_) if text.is_empty() => return Err(invalid("context names must not be empty")),
-                    Err(_) => ContextValue::Name(text.clone()),
-                },
+                ContextConfig::Name(text) if text.is_empty() => return Err(invalid("context names must not be empty")),
+                ContextConfig::Name(text) => ContextValue::Name(text.clone()),
+                ContextConfig::Group(_) => unreachable!("groups are flattened"),
             };
-            Ok((field.clone(), value))
+            Ok((field, value))
         })
         .collect()
 }
@@ -314,19 +325,20 @@ mod tests {
             .config(
                 WorkloadConfig::new("schema.exec")
                     .field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into()))
-                    .field("binding.frame.context.fx", TypedConfigValue::String("612.5".into()))
-                    .field("binding.frame.context.mount_x", TypedConfigValue::Int(0))
-                    .field("binding.frame.context.lens", TypedConfigValue::String("fisheye".into())),
+                    .field("binding.frame.context.camera.fx_px", TypedConfigValue::F64(612.5))
+                    .field("binding.frame.context.camera.width_px", TypedConfigValue::Int(1280))
+                    .field("binding.frame.context.camera.lens", TypedConfigValue::String("fisheye".into()))
+                    .field("binding.frame.context.mount.pitch_rad", TypedConfigValue::F64(-0.25)),
             )
             .build();
         let decoded = decode_assigned_workload(&record, NODE_ID).expect("decode");
         let context = &decoded.bindings[0].context;
-        assert_eq!(context.get("fx"), Some(&ContextValue::Number(612.5)));
-        assert_eq!(context.get("mount_x"), Some(&ContextValue::Number(0.0)));
-        assert_eq!(context.get("lens"), Some(&ContextValue::Name("fisheye".into())));
-        assert_eq!(decoded.bindings[0].context_port("fx"), "frame_fx");
+        assert_eq!(context.get("camera.fx_px"), Some(&ContextValue::Number(612.5)));
+        assert_eq!(context.get("camera.width_px"), Some(&ContextValue::Number(1280.0)));
+        assert_eq!(context.get("camera.lens"), Some(&ContextValue::Name("fisheye".into())));
+        assert_eq!(context.get("mount.pitch_rad"), Some(&ContextValue::Number(-0.25)));
         let shape = decoded.compiled_shape();
-        assert_eq!(shape.bindings[0].context.keys().collect::<Vec<_>>(), ["lens"], "numbers are pushed, not compiled in");
+        assert!(shape.bindings[0].context.is_empty(), "context is pushed, never compiled in");
     }
 
     #[test]

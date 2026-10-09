@@ -57,6 +57,7 @@ use tokio::sync::Notify;
 use super::{
     ExecutionError,
     bindings::{FrameSourceSpec, ResourceInput},
+    camera_context,
     frame_source::{FrameReceive, FrameSource, FrameSourceStatus},
     graph::{CompiledWorkloadGraph, ResidentHostGraph},
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
@@ -131,8 +132,8 @@ pub(crate) struct WorkloadDriver {
     revisions: BTreeMap<String, String>,
     /// Host inputs of the graph (for camera context).
     input_ports: Vec<String>,
-    /// The numeric camera context last pushed, per host input.
-    camera_context: BTreeMap<String, f64>,
+    /// The structured camera context last pushed, per host input.
+    camera_context: BTreeMap<String, serde_json::Value>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -221,24 +222,36 @@ impl WorkloadDriver {
         self.revisions = inputs.into_iter().map(|input| (input.input, input.revision)).collect();
     }
 
-    /// Push the numeric camera context of `workload`'s frame bindings (calibration, mount) into
-    /// the graph's held host inputs `<input>_<field>` that changed. Every tick after a push sees
-    /// the new value; a push never ticks the graph. Fields the graph has no host input for are
-    /// ignored.
+    /// Push the camera context of `workload`'s frame bindings (calibration, mount) into the
+    /// graph's held structured host inputs (`camera`, `extrinsics`, `<input>_camera`, ...; see
+    /// `camera_context`) whose value changed. Every tick after a push sees the new value; a push
+    /// never ticks the graph. Values the graph has no host input for are ignored.
     pub fn update_camera_context(&mut self, workload: &ExecutionWorkload) {
+        let primary = self.sources.first().map(|source| source.input.clone());
         for binding in workload.bindings.iter().filter(|binding| self.sources.iter().any(|source| source.input == binding.input)) {
-            for (field, value) in &binding.context {
-                let Some(number) = value.as_number() else { continue };
-                let port = binding.context_port(field);
-                if !self.input_ports.contains(&port) || self.camera_context.get(&port) == Some(&number) {
+            let pushes = match camera_context::context_pushes(binding, primary.as_deref() == Some(binding.input.as_str())) {
+                Ok(pushes) => pushes,
+                Err(error) => {
+                    self.record_error(format!("camera context of {}: {error}", binding.input));
                     continue;
                 }
-                let outcome = self.host.push(port.clone(), number);
+            };
+            for push in pushes {
+                if !self.input_ports.contains(&push.port) || self.camera_context.get(&push.port) == Some(&push.value) {
+                    continue;
+                }
+                let outcome = match push.feed(&self.host) {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        self.record_error(format!("camera context {}: {error}", push.port));
+                        continue;
+                    }
+                };
                 if matches!(outcome, daedalus::transport::FeedOutcome::Rejected(_)) {
-                    self.record_error(format!("camera context {port} rejected: {outcome:?}"));
+                    self.record_error(format!("camera context {} rejected: {outcome:?}", push.port));
                     continue;
                 }
-                self.camera_context.insert(port, number);
+                self.camera_context.insert(push.port, push.value);
             }
         }
         self.workload.bindings.clone_from(&workload.bindings);

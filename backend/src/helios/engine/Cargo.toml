@@ -29,14 +29,17 @@ daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"]
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
 # `poll(2)`: a graph thread waits on its cameras and its graph's inbound fd in one call.
 nix = { workspace = true, features = ["poll"] }
+# The robot-frame camera mount as Eidos extrinsics (camera context).
+helios-field = { path = "../field" }
+# Eidos's camera calibration and extrinsics types, which the engine pushes into the graphs'
+# held `camera` and `extrinsics` inputs (a Daedalus host can push only Rust-typed values). The
+# same crate and features the plugin library is built with, in the same cargo build.
+eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 # Marker bit patterns for synthetic test scenes.
 eidos-aruco = { workspace = true }
-# Eidos's graph templates, to check the stored graph documents against. The nodes come from
-# the plugin library below, loaded like in production; nothing installs Eidos statically.
-eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
 # Built by `cargo test` before the engine's tests, in the same build, so the tests can load
 # `libhelios_eidos_plugin.so` through the engine's plugin loader.
 helios-eidos-plugin = { path = "../eidos-plugin" }

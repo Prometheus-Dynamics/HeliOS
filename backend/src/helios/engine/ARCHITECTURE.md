@@ -76,14 +76,18 @@ session state, artifacts, and telemetry back into Orion.
   rejected. A document's `requires` must name every installed plugin that
   provides one of its nodes (what `PluginRegistry::graph_document` fills in),
   and is checked against the loaded plugins before compiling. The stored
-  graphs in `graphs/` are Eidos's tracked detector templates
-  (`TrackedDetectorTemplate`, full search every 8 frames) with the tag pose
-  tail (`eidos:aruco.pose`, 0.1651 m tags) and, for AprilTag 36h11, the field
-  pose tail (`eidos:aruco.field_pose`, the FRC 2026 AndyMark layout from
-  `FRC2026_ANDYMARK.fmap`, mount in the camera's body frame); ArUco 4x4_50 has
-  the tag pose tail only. Their pose nodes' camera calibration and mount ports
-  are host inputs `frame_<field>` (camera context, below) instead of
-  constants. The tests build them from Eidos's templates and check them
+  graphs in `graphs/` are built with Eidos's template API alone
+  (`TrackedDetectorTemplate`, full search every 8 frames, track loss
+  `recover`): the tag pose tail (`eidos:aruco.pose`, 0.1651 m tags) and, for
+  AprilTag 36h11, the multi-tag pose tail (`eidos:aruco.multi_tag_pose`,
+  output `multi_tag_pose`) against the FRC 2026 AndyMark layout as a
+  `known_tags` constant (`helios_field`: the field is the reference frame;
+  helios-api swaps the constant for a pipeline's selected layout); ArUco
+  4x4_50 has the tag pose tail only. The camera (`camera`,
+  `eidos:camera_calibration`) and, for the multi-tag pose, the extrinsics
+  (`extrinsics`, `eidos:camera_extrinsics`) are held host inputs
+  (`StructuredInput::GraphInput`), fed from the camera binding (camera
+  context, below). The tests build them from Eidos's templates and check them
   (`UPDATE_GOLDEN=1 cargo test -p helios-engine graph_documents_are_eidos_templates`).
 - each workload's graph is compiled once, with a host bridge of its own, and
   stays resident until the decoded workload changes or disappears.
@@ -120,17 +124,22 @@ session state, artifacts, and telemetry back into Orion.
     primary frame, so both land in the same tick.
   - camera context: a frame binding's `binding.<input>.context.<field>`
     values (written by helios-api from the camera's stored calibration and
-    mount) feed the graph's host input `<input>_<field>` when it has one
-    (`frame_fx`, `frame_k1`, `frame_mount_yaw`, ...). Numbers (decimal strings
-    or ints: Orion config values have no floats) are pushed into held `f64`
-    inputs whenever they change, without recompiling: the next frame's tick
-    uses them. Names (enum values: `lens` `pinhole`/`fisheye`, `mount`
-    `none`/`body`) cannot be pushed into enum-typed node inputs, so they are
-    set as constants on the nodes their host input feeds when the graph is
-    compiled, and changing one recompiles it
-    (`ExecutionWorkload::compiled_shape`). A graph whose context inputs get no
-    value never runs the nodes behind them. With `fx`/`fy` 0 (no calibration)
-    Eidos's pose nodes report `status: "uncalibrated"` and no poses.
+    mount: `camera.lens`, `camera.fx_px` ... `camera.p2`, `camera.width_px`,
+    `camera.height_px`; `mount.x_m` ... `mount.yaw_rad`; numbers as Orion
+    `TypedConfigValue::F64`) become one structured value each
+    (`execution::camera_context`): Eidos's `eidos:camera_calibration` and
+    `eidos:camera_extrinsics` (the mount, WPILib's forward-left-up robot
+    frame, through `helios_field::CameraMount`, so `reference_from_rig` is
+    the robot). The primary camera's go into the held host inputs `camera`
+    and `extrinsics`, every camera's into `<input>_camera` and
+    `<input>_extrinsics` when the graph has them, whenever they change and
+    without recompiling: the next frame's tick uses them. Context never
+    changes the compiled graph (`ExecutionWorkload::compiled_shape`), the lens
+    model included. Without `camera.*` the pose nodes see no camera and report
+    `status: "uncalibrated"` (as with `fx`/`fy` 0); without `mount.*` the
+    multi-tag pose has no rig pose. The values are pushed as Eidos's Rust
+    types (a Daedalus host cannot push a `Value` into a structured port), so
+    the engine links `eidos-daedalus` for those two types.
   - resource-driven workloads: the bound resources are pushed as one batch
     into latest-only inputs whenever one changes, which makes the inbound fd
     readable; the same loop, with no cameras, ticks once per batch. Graphs
