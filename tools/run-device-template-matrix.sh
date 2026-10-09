@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="$ROOT_DIR/tools/run-device-template.sh"
-API_BASE="${API_BASE:-http://172.31.250.1}"
+# No default address: each board has its own (HELIOS_DEVICE, or --api-base).
+API_BASE="${API_BASE:-${HELIOS_DEVICE:+http://$HELIOS_DEVICE:5800}}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$ROOT_DIR/artifacts/device-runtime/cm5}"
 RESOURCE_ID=""
 POLL_SECONDS="${POLL_SECONDS:-3}"
@@ -17,7 +18,7 @@ Usage:
   ./tools/run-device-template-matrix.sh --consume <resource_id> [options]
 
 Options:
-  --api-base <url>        Helios API base URL (default: http://172.31.250.1)
+  --api-base <url>        Helios API base URL (default: http://$HELIOS_DEVICE:5800)
   --artifact-dir <dir>    Output artifact directory
   --consume <resource_id> Consumed resource id used by graph templates
   --poll-seconds <n>      Seconds to wait before sampling runtime
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown arg: $1" ;;
   esac
 done
+[[ -n "${API_BASE// }" ]] || { echo "error: no device: pass --api-base <url> or set HELIOS_DEVICE" >&2; exit 2; }
 
 [[ -n "$RESOURCE_ID" ]] || die "--consume is required"
 

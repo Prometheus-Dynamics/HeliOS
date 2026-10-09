@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT_DIR_DEFAULT="$ROOT_DIR/artifacts/device-runtime/cm5"
-API_BASE_DEFAULT="http://172.31.250.1"
+# No default address: each board has its own (HELIOS_DEVICE, or --api-base).
+API_BASE_DEFAULT="${HELIOS_DEVICE:+http://$HELIOS_DEVICE:5800}"
 
 API_BASE="${API_BASE:-$API_BASE_DEFAULT}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$ARTIFACT_DIR_DEFAULT}"
@@ -25,7 +26,7 @@ Usage:
   ./tools/run-device-template.sh --template <template_id> --workload-local <name> [options]
 
 Options:
-  --api-base <url>          Helios API base URL (default: $API_BASE_DEFAULT)
+  --api-base <url>          Helios API base URL (default: http://\$HELIOS_DEVICE:5800)
   --artifact-dir <dir>      Output artifact directory (default: $ARTIFACT_DIR_DEFAULT)
   --template <id>           Workload template id to run
   --workload-local <name>   Local workload name used for instantiated workload id
@@ -69,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown arg: $1" ;;
   esac
 done
+[[ -n "${API_BASE// }" ]] || { echo "error: no device: pass --api-base <url> or set HELIOS_DEVICE" >&2; exit 2; }
 
 [[ -n "${TEMPLATE_ID}" ]] || die "--template is required"
 [[ -n "${WORKLOAD_LOCAL}" ]] || die "--workload-local is required"

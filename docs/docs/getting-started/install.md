@@ -28,7 +28,9 @@ The detailed rpiboot instructions (Linux + Windows) live here:
 ## Power + network
 
 - Ethernet is `10/100`. (It uses DHCP by default unless changed in your image/config.)
-- Current HVS - Raze images enable USB gadget networking and bring up `usbbr0` as `172.31.250.1/24`.
+- HVS - Raze images enable USB gadget networking (`usbbr0`). Each board has its own USB address,
+  derived from its serial (Atlas serial-hash-v1, for example `172.31.209.217/24`), so several
+  boards can be plugged into one computer. See [Find the board's USB address](#find-the-boards-usb-address).
 
 Power + port details:
 
@@ -42,17 +44,31 @@ Once the device boots, the Web UI is on port `5800`:
 http://<device-ip>:5800/
 ```
 
-If mDNS is working on your network, the default hostname is `helios`:
+If mDNS is working on your network, the hostname is `helios-<serial8>` (the last 8 hex digits of
+the board serial):
 
 ```txt
-http://helios.local:5800/
+http://helios-<serial8>.local:5800/
 ```
 
-Over USB (gadget networking), you can also use:
+Over USB (gadget networking), use the board's own USB address:
 
 ```txt
-http://172.31.250.1:5800/
+http://<usb-address>:5800/
 ```
+
+### Find the board's USB address
+
+There is no fixed address. Any of these gives it:
+
+- The board identity's `gadget.address`:
+  `curl http://helios-<serial8>.local:5899/.well-known/pd-device` (the same document is at
+  `http://<board>:5800/v1/identity`).
+- Atlas Hardware Manager lists it with the board.
+- On the board (serial console on `ttyGS0`, or SSH): `ip -4 addr show usbbr0`.
+
+The developer tools in `tools/` take it from `HELIOS_DEVICE` (or `--device`), for example
+`HELIOS_DEVICE=172.31.209.217 ./tools/deploy-live.sh`.
 
 ## First Boot (What Happens)
 
@@ -65,7 +81,7 @@ First boot may take longer than normal. The image provisions the on-device disk 
 
 If you can’t find the device on the network:
 
-1. Try `http://helios.local:5800/` (mDNS).
+1. Try `http://helios-<serial8>.local:5800/` (mDNS).
 2. Use your router/DHCP client list to find the IP, then try `http://<device-ip>:5800/`.
 3. If you’re on a `10.TE.AM.0/24` network and mDNS isn’t working, scan for port `5800`:
 

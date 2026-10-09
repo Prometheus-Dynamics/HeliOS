@@ -110,11 +110,14 @@ The repository includes a small harness that:
 - polls canonical workload/runtime/system routes
 - saves the captured JSON under `artifacts/device-runtime/cm5/`
 
+The device tools take the board's address from `HELIOS_DEVICE` (or `--device`/`--api-base`); there is no default. Each board has its own USB address (Atlas serial-hash-v1, e.g. `172.31.209.217`); find it in the board identity's `gadget.address` (`curl http://helios-<serial8>.local:5899/.well-known/pd-device`), in Atlas, or on the board with `ip -4 addr show usbbr0`.
+
 Example:
 
 ```bash
+export HELIOS_DEVICE=172.31.209.217   # this board's address
 ./tools/run-device-template.sh \
-  --api-base http://172.31.250.1 \
+  --api-base http://$HELIOS_DEVICE:5800 \
   --template imu_pose_9axis_graph \
   --workload-local imu-pose-9 \
   --consume virtual_cm5exp_imu-bmi088-bus4 \
@@ -128,7 +131,7 @@ For a broader graph-template sweep against a live resource stream, use the matri
 
 ```bash
 ./tools/run-device-template-matrix.sh \
-  --api-base http://172.31.250.1 \
+  --api-base http://$HELIOS_DEVICE:5800 \
   --consume virtual_cm5exp_imu-bmi088-bus4
 ```
 
@@ -149,7 +152,7 @@ If the resident device image is behind the repo, stage the current API/engine/pe
   --api-port 5802
 
 ./tools/run-device-template-matrix.sh \
-  --api-base http://172.31.250.1:5802 \
+  --api-base http://$HELIOS_DEVICE:5802 \
   --consume virtual_cm5exp_imu-bmi088-bus4
 
 ./tools/run-device-isolated-runtime.sh stop

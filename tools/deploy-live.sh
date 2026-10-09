@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OTA_RELEASE_PUBLISHER="$ROOT_DIR/tools/ota_release_publisher.py"
 
-SSH_TARGET_DEFAULT="root@172.31.250.1"
-
-SSH_TARGET="$SSH_TARGET_DEFAULT"
+# The board's address: no default. Each board has its own USB address
+# (Atlas serial-hash-v1, e.g. 172.31.209.217); see --help for finding it.
+HELIOS_DEVICE="${HELIOS_DEVICE:-}"
+SSH_TARGET=""
 SSH_PASS="root"
 
 TARGET_TRIPLE="${TARGET_TRIPLE:-aarch64-unknown-linux-gnu}"
@@ -35,9 +35,7 @@ HELIOS_CARGO_CONFIG="${HELIOS_CARGO_CONFIG:-}"
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
 BINS_DIR="$BINS_DIR_DEFAULT"
 
-FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
-OTA_BASE_URL="${OTA_BASE_URL:-}"
-OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
+FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/ui/build}"
 BINARY_REVISION="${BINARY_REVISION:-}"
 
 ONLY="all" # all|binaries|frontend
@@ -51,17 +49,24 @@ REQUIRES_SSH="0"
 
 usage() {
   cat <<EOF
-Build + deploy Helios CM5 binaries and frontend assets to a device.
-Binary deploys upload over SSH to /data/helios-dev/<revision> and point the services at them
-with runtime drop-ins (/run/systemd/system/<unit>.d/50-dev.conf): the root filesystem is a
-read-only EROFS slot, and a reboot returns to the image's own binaries. Ship for real with an
-image (the device package's A/B updater).
+Build + deploy Helios CM5 binaries and the UI to a device.
+Deploys upload over SSH to /data/helios-dev/<revision> and point the services at them with
+runtime drop-ins (/run/systemd/system/<unit>.d/50-dev.conf; the UI through helios-api's
+HELIOS_API_UI_DIR): the root filesystem is a read-only EROFS slot, and a reboot returns to the
+image's own binaries and UI. Ship for real with an image (the board update, A/B).
+
+The device address has no default: pass --device <addr> (or HELIOS_DEVICE=<addr>), or
+--ssh <user@host>. Each board has its own USB address (Atlas serial-hash-v1, for example
+172.31.209.217). Find it in the board identity's gadget.address
+(curl http://<board>.local:5899/.well-known/pd-device), in Atlas, or on the board with
+`ip -4 addr show usbbr0`; the mDNS name helios-<serial8>.local works too.
 
 Usage:
   ./tools/deploy-live.sh [options]
 
 Options:
-  --ssh <user@host>     SSH target (default: $SSH_TARGET_DEFAULT)
+  --device <addr>       Board address or host name (default: \$HELIOS_DEVICE); SSH as root
+  --ssh <user@host>     SSH target (overrides --device)
   --pass <password>     Optional SSH password (uses sshpass)
   --release|--debug|--dev-release
                         Build profile (default: dev-release)
@@ -72,9 +77,8 @@ Options:
   --no-upload           Only build; skip upload/restart
   --no-restart          Upload but do not restart services
   --bins-dir <dir>      Local binaries dir (default: $BINS_DIR_DEFAULT)
-  --no-frontend         Skip uploading frontend assets
-  --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
-  --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
+  --no-frontend         Skip uploading the UI
+  --frontend-dir <dir>  Local UI build dir (default: $FRONTEND_DIR_LOCAL)
   --binary-revision <r> Explicit revision string for binary activation (default: generated)
   --no-strip            Do not strip debug sections from built artifacts before upload
   --target <triple>     Rust target triple (default: $TARGET_TRIPLE)
@@ -87,7 +91,7 @@ Options:
 
 Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
-  OTA_BASE_URL           OTA API base URL override
+  HELIOS_DEVICE          Board address or host name (same as --device)
   BINARY_REVISION        Explicit revision string for binary activation
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
@@ -158,24 +162,9 @@ profile_dir_from_flag() {
   fi
 }
 
-ssh_target_host() {
-  local target="$1"
-  target="${target##*@}"
-  printf '%s\n' "$target"
-}
-
-default_ota_base_url() {
-  local host
-  host="$(ssh_target_host "$SSH_TARGET")"
-  printf 'http://%s/v1\n' "$host"
-}
-
-if [[ -z "${OTA_BASE_URL// }" ]]; then
-  OTA_BASE_URL="$(default_ota_base_url)"
-fi
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --device) HELIOS_DEVICE="${2:-}"; shift 2 ;;
     --ssh) SSH_TARGET="${2:-}"; shift 2 ;;
     --pass) SSH_PASS="${2:-}"; shift 2 ;;
     --release) PROFILE_FLAG="--release"; shift ;;
@@ -193,13 +182,12 @@ while [[ $# -gt 0 ]]; do
     --bin-dir|--frontend-remote)
       shift 2 || die "$1 requires a value"
       ;;
-    --binaries-via-ota|--frontend-via-ota)
+    --binaries-via-ota|--frontend-via-ota|--binaries-via-ssh|--frontend-via-ssh)
       shift
       ;;
-    --binaries-via-ssh|--frontend-via-ssh)
-      die "$1 has been removed; binaries and frontend now publish only through OTA"
+    --ota-base-url)
+      die "$1 has been removed: the UI is deployed over SSH like the binaries"
       ;;
-    --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
     --binary-revision) BINARY_REVISION="${2:-}"; shift 2 ;;
     --no-strip) STRIP_DEBUG="0"; shift ;;
     --target) TARGET_TRIPLE="${2:-}"; shift 2 ;;
@@ -213,8 +201,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "${SSH_TARGET// }" && -n "${HELIOS_DEVICE// }" ]]; then
+  SSH_TARGET="root@$HELIOS_DEVICE"
+fi
 if [[ -z "${SSH_TARGET// }" ]]; then
-  die "--ssh is required"
+  die "no device: pass --device <addr> (or set HELIOS_DEVICE), or --ssh <user@host> (try --help)"
 fi
 
 # Enable profiler + perf counters by default in release builds so Helios profiling endpoints
@@ -260,7 +251,7 @@ ensure_deps() {
   fi
   if [[ "$UPLOAD" == "1" ]]; then
     needs_ssh="0"
-    if [[ "$do_binaries" == "1" ]]; then
+    if [[ "$do_binaries" == "1" || ( "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ) ]]; then
       needs_ssh="1"
     fi
     if [[ "$needs_ssh" == "1" ]]; then
@@ -269,11 +260,6 @@ ensure_deps() {
       if [[ -n "${SSH_PASS// }" ]]; then
         command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
       fi
-    fi
-    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
-      command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
-      command -v python3 >/dev/null 2>&1 || die "python3 is required for frontend OTA deploys"
-      [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
     fi
   fi
 }
@@ -533,7 +519,7 @@ if [[ "$BUILD" == "1" ]]; then
 
   if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
     echo "Building frontend bundle..."
-    run_with_env SKIP_DOCS_SYNC=1 -- bash -lc "cd '$ROOT_DIR/frontend' && bun run build"
+    run_with_env SKIP_DOCS_SYNC=1 -- bash -lc "cd '$ROOT_DIR/ui' && bun run build"
   fi
 fi
 
@@ -605,32 +591,6 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
   }
 
-  ota_publish_release() {
-    local artifact_kind="$1"
-    local source_dir="$2"
-    local post_url="$3"
-    shift 3
-    local -a bundle_entries=( "$@" )
-    local -a cmd=(
-      python3
-      "$OTA_RELEASE_PUBLISHER"
-      publish
-      --artifact-kind "$artifact_kind"
-      --base-url "$OTA_BASE_URL"
-      --requested-by "$OTA_REQUESTED_BY"
-      --source-dir "$source_dir"
-      --post-url "$post_url"
-    )
-    local entry
-    for entry in "${bundle_entries[@]}"; do
-      cmd+=( --entry "$entry" )
-    done
-    if [[ "$DRY_RUN" == "1" ]]; then
-      cmd+=( --dry-run )
-    fi
-    run "${cmd[@]}"
-  }
-
   if [[ "$do_binaries" == "1" ]]; then
     bins=("helios-engine" "helios-api" "helios-peripherals")
     b=""
@@ -647,25 +607,28 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
   fi
 
+  revision="$BINARY_REVISION"
+  if [[ -z "${revision// }" ]]; then
+    revision="dev-$(date +%Y%m%d-%H%M%S)"
+  fi
+
   if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
     if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
-      die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
+      die "local UI build dir not found: $FRONTEND_DIR_LOCAL"
     fi
-    echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
-    frontend_root_url=""
-    frontend_root_url="${OTA_BASE_URL%/v1}/"
-    if [[ "$frontend_root_url" == "$OTA_BASE_URL/" ]]; then
-      frontend_root_url="${OTA_BASE_URL%/}/"
+    remote_ui="/data/helios-dev/$revision/ui"
+    echo "Uploading the UI -> $SSH_TARGET:$remote_ui (until the next reboot)"
+    ssh_exec "install -d -m0755 '$remote_ui'"
+    ssh_upload_tar "$FRONTEND_DIR_LOCAL" "$remote_ui" .
+    dropin_dir="/run/systemd/system/helios-api.service.d"
+    ssh_exec "install -d -m0755 '$dropin_dir' && printf '[Service]\nEnvironment=HELIOS_API_UI_DIR=%s\n' '$remote_ui' > '$dropin_dir/50-dev-ui.conf' && systemctl daemon-reload"
+    if [[ "$RESTART_SERVICES" == "1" && "$do_binaries" != "1" ]]; then
+      ssh_exec "systemctl restart helios-api.service"
     fi
-    ota_publish_release "frontend_bundle" "$FRONTEND_DIR_LOCAL" "$frontend_root_url" "."
   fi
 
   if [[ "$do_binaries" == "1" ]]; then
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      revision="$BINARY_REVISION"
-      if [[ -z "${revision// }" ]]; then
-        revision="dev-$(date +%Y%m%d-%H%M%S)"
-      fi
       remote_incoming="/data/helios-dev/$revision"
       echo "Uploading ${#bins_to_upload[@]} binary artifact(s) -> $SSH_TARGET:$remote_incoming"
       ssh_exec "install -d -m0755 '$remote_incoming'"

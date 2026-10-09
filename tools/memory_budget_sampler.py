@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import math
 import signal
@@ -155,11 +156,20 @@ def mib_from_kib(value_kib: int) -> float:
     return value_kib / 1024.0
 
 
+DEVICE_HELP = (
+    "Each board has its own USB address (Atlas serial-hash-v1, e.g. 172.31.209.217): the board identity's gadget.address (curl http://<board>.local:5899/.well-known/pd-device), Atlas, or `ip -4 addr show usbbr0` on the board."
+)
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sample live Helios process memory against a threshold.")
-    parser.add_argument("--ssh", default="root@172.31.250.1", help="SSH target")
+    parser = argparse.ArgumentParser(
+        description="Sample live Helios process memory against a threshold.",
+        epilog="The device has no default address. " + DEVICE_HELP,
+    )
+    parser.add_argument("--device", default=os.environ.get("HELIOS_DEVICE"), help="Board address or host name (default: $HELIOS_DEVICE)")
+    parser.add_argument("--ssh", help="SSH target (default: root@<device>)")
     parser.add_argument("--pass", dest="password", default="root", help="SSH password for sshpass")
-    parser.add_argument("--api-url", default="http://172.31.250.1:5801", help="Base API URL")
+    parser.add_argument("--api-url", help="Base API URL (default: http://<device>:5800)")
     parser.add_argument("--manifest-json", type=Path, help="Optional stream manifest JSON to POST before sampling")
     parser.add_argument("--preview", action="store_true", help="Attach a /preview consumer during sampling")
     parser.add_argument("--restart-services", action="store_true", help="Restart core services before sampling")
@@ -171,7 +181,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--required-percent", type=float, default=90.0, help="Required percent of samples under threshold")
     parser.add_argument("--processes", nargs="*", default=DEFAULT_PROCESSES, help="Processes to include in subtotal")
     parser.add_argument("--output-json", type=Path, help="Optional path to write full sample data as JSON")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.device and not (args.ssh and args.api_url):
+        parser.error("no device: pass --device <addr> or set HELIOS_DEVICE (or both --ssh and --api-url). " + DEVICE_HELP)
+    args.ssh = args.ssh or f"root@{args.device}"
+    args.api_url = args.api_url or f"http://{args.device}:5800"
+    return args
 
 
 def main() -> int:

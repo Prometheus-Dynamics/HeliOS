@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SSH_TARGET="${SSH_TARGET:-root@172.31.250.1}"
+# No default address: each board has its own (see --help).
+HELIOS_DEVICE="${HELIOS_DEVICE:-}"
+SSH_TARGET="${SSH_TARGET:-}"
 SSH_PASS="${SSH_PASS:-root}"
 BINS_DIR="${BINS_DIR:-$ROOT_DIR/output/cm5/binaries}"
 REMOTE_ROOT="${REMOTE_ROOT:-/tmp/helios-isolated}"
@@ -23,7 +25,8 @@ Usage:
   ./tools/run-device-isolated-runtime.sh <start|stop|status> [options]
 
 Options:
-  --ssh <user@host>      SSH target (default: $SSH_TARGET)
+  --device <addr>        Board address or host name (default: \$HELIOS_DEVICE); SSH as root
+  --ssh <user@host>      SSH target (overrides --device)
   --pass <password>      SSH password (default: $SSH_PASS)
   --bins-dir <dir>       Local directory containing helios-node/engine/peripherals
   --remote-root <dir>    Remote runtime root (default: $REMOTE_ROOT)
@@ -35,6 +38,11 @@ Options:
   --node-tick-ms <ms>    API node tick interval
   --node-api-timeout-ms <ms> Node API timeout
   --sensor-config-paths <csv> Sensor config paths passed to peripherals
+
+The device has no default address. Each board has its own USB address (Atlas
+serial-hash-v1, e.g. 172.31.209.217): the board identity's gadget.address
+(curl http://<board>.local:5899/.well-known/pd-device), Atlas, or
+`ip -4 addr show usbbr0` on the board.
 
 Examples:
   ./tools/run-device-isolated-runtime.sh start --bins-dir output/cm5/binaries
@@ -60,6 +68,7 @@ shift || true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --device) HELIOS_DEVICE="${2:-}"; shift 2 ;;
     --ssh) SSH_TARGET="${2:-}"; shift 2 ;;
     --pass) SSH_PASS="${2:-}"; shift 2 ;;
     --bins-dir) BINS_DIR="${2:-}"; shift 2 ;;
@@ -81,6 +90,11 @@ case "$ACTION" in
   start|stop|status) ;;
   *) die "action must be one of: start, stop, status" ;;
 esac
+
+if [[ -z "${SSH_TARGET// }" && -n "${HELIOS_DEVICE// }" ]]; then
+  SSH_TARGET="root@$HELIOS_DEVICE"
+fi
+[[ -n "${SSH_TARGET// }" ]] || die "no device: pass --device <addr> (or set HELIOS_DEVICE), or --ssh <user@host> (try --help)"
 
 REMOTE_BIN_DIR="$REMOTE_ROOT/bin"
 REMOTE_IPC_DIR="$REMOTE_ROOT/ipc"
