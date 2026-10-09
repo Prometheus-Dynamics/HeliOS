@@ -6,10 +6,17 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 use axum::{
     Json,
-    extract::{Path, State},
-    http::StatusCode,
+    body::Body,
+    extract::{
+        Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
+use futures_util::StreamExt;
 use serde::Serialize;
+use styx::preview::{MJPEG_CONTENT_TYPE, ws_message};
 
 use crate::{
     SharedState,
@@ -87,6 +94,7 @@ pub struct Camera {
     /// Whether settings can be changed through the API: the camera has a Styx camera service
     /// (which controls are writable is in its settings).
     pub settings_writable: bool,
+    /// Whether `GET /v1/cameras/{id}/preview` can serve it: the camera has a Styx camera service.
     pub preview_available: bool,
 }
 
@@ -110,7 +118,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         availability: enum_name(record.availability),
         backend: labels.get("helios.label.styx.backend").cloned(),
         labels: labels.iter().filter_map(|(k, v)| k.strip_prefix("helios.label.").map(|k| (k.to_string(), v.clone()))).collect(),
-        preview_available: false,
+        preview_available: frames_endpoint.is_some(),
         settings_writable: frames_endpoint.is_some(),
         used_by: pipelines::pipelines_using(view, &id),
         mount: mounts.get(&id).copied(),
@@ -244,6 +252,7 @@ pub fn spawn_camera_settings_keeper(state: SharedState) -> tokio::task::JoinHand
             let Ok(view) = state.orion.view().await else {
                 continue;
             };
+            state.previews.retain(|id| camera_records(&view).any(|record| record.resource_id.as_str() == id && frames_socket(&record.endpoints).is_some())).await;
             for record in camera_records(&view) {
                 if let Some(socket) = frames_socket(&record.endpoints)
                     && let Err(error) = state.cameras.client(record.resource_id.as_str(), &socket).await
@@ -317,12 +326,46 @@ pub async fn delete_mount(State(state): State<SharedState>, Path(id): Path<Strin
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn preview(Path(id): Path<String>) -> ApiResult<ApiError> {
-    check_id(&id)?;
-    Ok(ApiError::not_available(
-        "camera preview is not available yet",
-        "an MJPEG endpoint in helios-api fed by a Styx FrameClient on the camera service and a Styx JPEG encoder (TODO.md: MJPEG camera preview)",
-    ))
+/// The camera's preview (`camera_preview`), made on its first viewer.
+async fn camera_preview(state: &SharedState, id: &str) -> ApiResult<std::sync::Arc<styx::preview::Preview>> {
+    let (_, record) = find(state, id).await?;
+    let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
+    state.previews.get(id, &socket).await
+}
+
+/// MJPEG (`multipart/x-mixed-replace`, for an `<img>`): the newest preview JPEG each time the
+/// client is ready for one; a slow client skips frames. The body stays open while the client
+/// reads it, also while the camera service is down (frames resume when it is back).
+pub async fn preview(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
+    let preview = camera_preview(&state, &id).await?;
+    let body = Body::from_stream(preview.mjpeg().fallible());
+    Ok(([(header::CONTENT_TYPE, MJPEG_CONTENT_TYPE), (header::CACHE_CONTROL, "no-cache, no-store"), (header::HeaderName::from_static("x-accel-buffering"), "no")], body).into_response())
+}
+
+/// WebSocket: one binary message per preview frame, Styx's `SPV1` layout (a 32-byte header
+/// with the sequence, capture timestamp and size, then the JPEG; Styx `docs/preview.md`).
+pub async fn preview_ws(State(state): State<SharedState>, Path(id): Path<String>, upgrade: WebSocketUpgrade) -> ApiResult<Response> {
+    let preview = camera_preview(&state, &id).await?;
+    Ok(upgrade.on_upgrade(move |socket| send_preview(socket, preview)))
+}
+
+async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::preview::Preview>) {
+    let mut viewer = preview.subscribe();
+    loop {
+        tokio::select! {
+            frame = viewer.next() => {
+                let Some(frame) = frame else { break };
+                if socket.send(Message::Binary(ws_message(&frame))).await.is_err() {
+                    break;
+                }
+            }
+            // The client closing (or anything it sends) is noticed between frames too.
+            message = socket.next() => match message {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
 }
 
 pub async fn calibration(Path(id): Path<String>) -> ApiResult<ApiError> {

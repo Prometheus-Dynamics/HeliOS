@@ -54,7 +54,7 @@ async fn health_reports_the_api() {
 async fn orion_backed_routes_answer_503_without_orion() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
-    for uri in ["/v1/pipelines", "/v1/cameras", "/v1/resources", "/v1/peripherals", "/v1/outputs", "/v1/nodes", "/v1/plugins"] {
+    for uri in ["/v1/pipelines", "/v1/cameras", "/v1/cameras/cam0/preview", "/v1/resources", "/v1/peripherals", "/v1/outputs", "/v1/nodes", "/v1/plugins"] {
         let (status, body) = call(&state, "GET", uri, None).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
         assert_eq!(body["error"]["code"], "backend_unavailable", "{uri}");
@@ -66,7 +66,6 @@ async fn missing_backends_answer_501_with_what_they_need() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
     let cases = [
-        ("GET", "/v1/cameras/cam0/preview"),
         ("POST", "/v1/cameras/cam0/calibration"),
         ("GET", "/v1/catalog"),
         ("POST", "/v1/system/safe-mode"),

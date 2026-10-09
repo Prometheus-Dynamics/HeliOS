@@ -106,7 +106,8 @@ export interface Camera {
   mount: string;
   settings: CameraSettings;
   stats: { fps: number; dropped: number; latencyMs: number; cpuMsPerFrame: number };
-  feed: { base: string; offset: number };
+  /** `base`: recorded frames replayed (mocks); `live`: the camera's MJPEG preview URL. */
+  feed: { base: string; offset: number; live?: string };
   foreign?: string;
   /** Deeper sensor, ISP and transport controls, by name. */
   extra?: Record<string, number | string | boolean>;

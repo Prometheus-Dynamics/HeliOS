@@ -44,7 +44,7 @@ separate (`/var/lib/helios/auth/auth.json`, see below).
 Every error has the same body:
 
 ```json
-{ "error": { "code": "not_available", "message": "camera preview is not available yet", "needs": "an MJPEG endpoint in helios-api ..." } }
+{ "error": { "code": "not_available", "message": "switching boot slots without an update is not available", "needs": "the board update writer offering ..." } }
 ```
 
 | HTTP | `code` | Meaning |
@@ -105,7 +105,8 @@ as unavailable and not retry.
 | `PATCH` | `/v1/cameras/{id}/settings` | Styx + API store | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`) and the values now kept across reboots. Resolution and pyramid levels are set per pipeline (see bindings) |
 | `DELETE` | `/v1/cameras/{id}/settings` | Styx + API store | Reset to defaults: every writable control back to its default, and the stored values forgotten. Same answer as `PATCH` |
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees (x forward, y left, z up) |
-| `GET` | `/v1/cameras/{id}/preview` | — | **501**. A future MJPEG stream fed from Styx frames, never decoded images in JSON |
+| `GET` | `/v1/cameras/{id}/preview` | Styx preview | MJPEG (`multipart/x-mixed-replace; boundary=styxpreview`) for an `<img>`. See [Camera preview](#camera-preview) |
+| `GET` | `/v1/cameras/{id}/preview/ws` | Styx preview | The same frames over a WebSocket, one binary `SPV1` message each |
 | `GET` `POST` | `/v1/cameras/{id}/calibration` | — | **501** |
 
 A camera:
@@ -126,11 +127,11 @@ A camera:
                    "latency_p95_ms": 10.4, "cpu_per_frame_us": 300, "exposure_us": 2200,
                    "analogue_gain": 4, "digital_gain": 1, "ae_state": "converged" }]
   },
-  "live_error": null, "service_online": true, "settings_writable": true, "preview_available": false
+  "live_error": null, "service_online": true, "settings_writable": true, "preview_available": true
 }
 ```
 
-`settings_writable` is true when the camera has a Styx camera service; its settings say which
+`settings_writable` and `preview_available` are true when the camera has a Styx camera service; its settings say which
 controls can be changed. `service_online` says whether the API's control client of that
 service is connected now (from Styx's connection events; `null` before the API made one); each
 change is also sent as a `camera` event (`change: "online"` or `"offline"`).
@@ -217,6 +218,32 @@ whether one is kept for it (`persisted: true`).
 `DELETE /v1/cameras/{id}/settings` resets the camera to defaults: it forgets the stored
 values and sets every writable control back to its default, and answers like `PATCH`
 (`persisted` is then empty). Changes made by other clients of the camera are not stored.
+
+#### Camera preview
+
+`GET /v1/cameras/{id}/preview` streams the camera as MJPEG: small JPEG frames, newest first, for
+an `<img src>` (the UI's camera pane shows it). `GET /v1/cameras/{id}/preview/ws` sends the same
+frames over a WebSocket, one binary message per frame in Styx's `SPV1` layout (a 32-byte header:
+magic `SPV1`, header length, clock, flags, sequence, capture timestamp in ns, width, height and
+JPEG length, all little-endian; then the JPEG; Styx `docs/preview.md`). Both follow the usual
+[auth rules](#device-security): a session cookie or a bearer token on a secured device.
+
+Each camera has one preview, made on its first viewer and shared by all viewers (Styx
+`styx::preview::Preview::from_service`):
+
+- **It never disturbs the vision pipeline.** It is a *low-priority* client of the camera
+  service: helios-engine's frame client is planned as if the preview were not there, the
+  preview gets its own frames only where that changes nothing for the engine (the ISP's free
+  second output when the capture starts with it), otherwise a share of the engine's frames,
+  which it scales itself; it never restarts the capture or changes its mode, rate or format.
+- **It costs little and only while watched.** At most `HELIOS_API_PREVIEW_FPS` frames per second
+  (default 15) are scaled to fit `HELIOS_API_PREVIEW_SIZE` (default `640x400`, aspect kept,
+  never upscaled) and encoded with libjpeg-turbo from YUV planes at `HELIOS_API_PREVIEW_QUALITY`
+  (default 70), on a thread at lower priority (`nice` 10). Frames are dropped, never queued; a
+  slow viewer skips frames. The preview connects to the camera service when someone watches and
+  disconnects 5 s after the last viewer left, so an unwatched camera can idle.
+- **It does not block.** A camera service that is down keeps the stream open; frames resume
+  when it is back.
 
 ### Pipelines and outputs
 
@@ -516,4 +543,7 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_BOARD_IDENTITY_PATH` | `/run/board/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |
 | `HELIOS_API_CORS_ORIGIN` | unset (no CORS headers) |
+| `HELIOS_API_PREVIEW_SIZE` | `640x400`: the largest camera preview (16 to 4096 each) |
+| `HELIOS_API_PREVIEW_FPS` | `15`: most preview frames per second (0.5 to 60) |
+| `HELIOS_API_PREVIEW_QUALITY` | `70`: preview JPEG quality (1 to 100) |
 | `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `helios-api auth` reads the same variable |

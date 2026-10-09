@@ -46,6 +46,8 @@ pub struct ApiConfig {
     pub max_upload_bytes: u64,
     /// Device security state (password hash, API token hashes). Absent means open.
     pub auth_file: PathBuf,
+    /// Camera previews: size, frame rate and JPEG quality.
+    pub preview: crate::camera_preview::PreviewSettings,
 }
 
 impl Default for ApiConfig {
@@ -66,6 +68,7 @@ impl Default for ApiConfig {
             cors_origin: None,
             max_upload_bytes: 8 << 30,
             auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
+            preview: crate::camera_preview::PreviewSettings::default(),
         }
     }
 }
@@ -119,6 +122,22 @@ impl ApiConfig {
         if let Some(value) = env.get(crate::auth_state::AUTH_FILE_ENV) {
             config.auth_file = value.into();
         }
+        if let Some(value) = env.get("HELIOS_API_PREVIEW_SIZE") {
+            let (width, height) =
+                crate::camera_preview::PreviewSettings::parse_size(value).ok_or_else(|| anyhow::anyhow!("HELIOS_API_PREVIEW_SIZE must be <width>x<height> (16 to 4096 each), got {value:?}"))?;
+            config.preview.width = width;
+            config.preview.height = height;
+        }
+        if let Some(value) = env.get("HELIOS_API_PREVIEW_FPS") {
+            let fps: f32 = value.parse()?;
+            anyhow::ensure!(fps.is_finite() && (0.5..=60.0).contains(&fps), "HELIOS_API_PREVIEW_FPS must be 0.5 to 60, got {value}");
+            config.preview.max_fps = fps;
+        }
+        if let Some(value) = env.get("HELIOS_API_PREVIEW_QUALITY") {
+            let quality: u8 = value.parse()?;
+            anyhow::ensure!((1..=100).contains(&quality), "HELIOS_API_PREVIEW_QUALITY must be 1 to 100, got {value}");
+            config.preview.quality = quality;
+        }
         Ok(config)
     }
 }
@@ -142,5 +161,14 @@ mod tests {
         assert_eq!(config.upload_dir, PathBuf::from("/data/updates"));
         assert_eq!(config.cors_origin, None);
         assert_eq!(config.ui_dir, None);
+        assert_eq!(config.preview, crate::camera_preview::PreviewSettings::default());
+    }
+
+    #[test]
+    fn preview_settings_from_env() {
+        let config = ApiConfig::from_vars([("HELIOS_API_PREVIEW_SIZE", "320x200"), ("HELIOS_API_PREVIEW_FPS", "10"), ("HELIOS_API_PREVIEW_QUALITY", "60")]).expect("config");
+        assert_eq!((config.preview.width, config.preview.height, config.preview.max_fps, config.preview.quality), (320, 200, 10.0, 60));
+        assert!(ApiConfig::from_vars([("HELIOS_API_PREVIEW_SIZE", "big")]).is_err());
+        assert!(ApiConfig::from_vars([("HELIOS_API_PREVIEW_QUALITY", "0")]).is_err());
     }
 }

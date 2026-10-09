@@ -25,12 +25,21 @@
 
   const CORNER_COLORS = ["#ff4d4d", "#4ade80", "#60a5fa", "#facc15"];
   const index = $derived(cluster.feedIndex(camera));
-  const src = $derived(`${camera.feed.base}/${String(index).padStart(4, "0")}.jpg`);
+  const live = $derived(camera.feed.live);
+  const src = $derived(live ?? `${camera.feed.base}/${String(index).padStart(4, "0")}.jpg`);
+  // The live preview's own size (scaled by the device, 640x400 by default) once it loads.
+  let natural = $state<{ w: number; h: number } | null>(null);
+  let previewFailed = $state(false);
+  $effect(() => {
+    void live;
+    natural = null;
+    previewFailed = false;
+  });
   const markers = $derived(cluster.detectionsFor(camera));
   // Feed frames are a scaled replay; overlays use the feed's pixel space and
   // the ROI is stored in sensor pixels.
-  const fw = $derived(cluster.feed?.width ?? 640);
-  const fh = $derived(cluster.feed?.height ?? 400);
+  const fw = $derived(live ? (natural?.w ?? 640) : (cluster.feed?.width ?? 640));
+  const fh = $derived(live ? (natural?.h ?? 400) : (cluster.feed?.height ?? 400));
   const sx = $derived(camera.settings.width / fw);
   const sy = $derived(camera.settings.height / fh);
   const tint = $derived(colorVar(identity.get(camera.resourceId).color));
@@ -88,15 +97,30 @@
   let img = $state<HTMLImageElement>();
   let hist = $state<number[]>([]);
   let canvas: HTMLCanvasElement | null = null;
-  function sample() {
-    if (!overlays.histogram || !img || !img.complete || !img.naturalWidth || index % 4) return;
+  function loaded() {
+    if (live && img?.naturalWidth) natural = { w: img.naturalWidth, h: img.naturalHeight };
+    sample();
+  }
+  // An MJPEG stream fires `load` once, so the live preview is sampled on a timer.
+  $effect(() => {
+    if (!live || !overlays.histogram) return;
+    const timer = setInterval(() => sample(true), 500);
+    return () => clearInterval(timer);
+  });
+  function sample(force = false) {
+    if (!overlays.histogram || !img || !img.complete || !img.naturalWidth || (!force && index % 4)) return;
     canvas ??= document.createElement("canvas");
     canvas.width = 128;
     canvas.height = 80;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
     ctx.drawImage(img, 0, 0, 128, 80);
-    const data = ctx.getImageData(0, 0, 128, 80).data;
+    let data: Uint8ClampedArray;
+    try {
+      data = ctx.getImageData(0, 0, 128, 80).data;
+    } catch {
+      return; // A preview from another origin (a UI served elsewhere) cannot be read back.
+    }
     const bins = new Array(64).fill(0);
     for (let i = 0; i < data.length; i += 4) bins[(data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11) >> 2]++;
     const max = Math.max(...bins);
@@ -112,12 +136,12 @@
 
 <div class="feed" bind:this={host} style:--tint={tint}>
   <div class="frame" style:width="{fit.w}px" style:height="{fit.h}px">
-    {#if camera.feed.base}
-      <img bind:this={img} {src} alt="{camera.name} camera" draggable="false" onload={sample} />
+    {#if (live && !previewFailed) || camera.feed.base}
+      <img bind:this={img} {src} alt="{camera.name} camera" draggable="false" onload={loaded} onerror={() => live && (previewFailed = true)} />
     {:else}
       <div class="no-preview">
         <b>No preview</b>
-        <span>The device does not stream camera previews yet.</span>
+        <span>{live ? "The camera's preview did not load. Is its camera service running?" : "This camera has no camera service to preview."}</span>
       </div>
     {/if}
     <svg

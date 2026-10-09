@@ -72,6 +72,11 @@ function url(path: string, query?: Query): string {
 
 const enc = encodeURIComponent;
 
+/** The camera's live MJPEG preview (`GET /v1/cameras/{id}/preview`), for an `<img>`. */
+export function previewUrl(cameraId: string): string {
+  return url(`/v1/cameras/${enc(cameraId)}/preview`);
+}
+
 // Device security. On a secured device the browser signs in with the device
 // password and gets an HttpOnly session cookie; mutations must also carry the
 // session's CSRF token, which the auth store keeps here. A 401 means the

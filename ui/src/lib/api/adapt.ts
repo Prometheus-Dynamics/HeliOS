@@ -2,6 +2,7 @@
 // versioned Daedalus GraphDocument that actually travels and is stored.
 
 import { CATALOG_BY_ID } from "./catalog";
+import { previewUrl } from "./client";
 import type { Camera, CameraControlInfo, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
 import type * as W from "./types";
 
@@ -196,8 +197,9 @@ export function toCamera(camera: W.Camera): Camera {
       roi: null,
     },
     stats: { fps: capture?.fps_measured ?? 0, dropped: capture?.drops ?? 0, latencyMs: capture?.latency_p50_ms ?? 0, cpuMsPerFrame: (capture?.cpu_per_frame_us ?? 0) / 1000 },
-    // No preview stream yet: an empty base tells the feed to show a placeholder.
-    feed: { base: "", offset: 0 },
+    // The camera service's low-priority JPEG preview; without a camera service the feed
+    // shows a placeholder.
+    feed: { base: "", offset: 0, live: camera.preview_available ? previewUrl(camera.id) : undefined },
   };
 }
 

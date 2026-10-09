@@ -29,8 +29,27 @@
 
   function snapshot() {
     if (!camera) return;
+    if (camera.feed.live) {
+      // The preview frame on screen, as the device encoded it.
+      const img = document.querySelector<HTMLImageElement>(`img[alt="${CSS.escape(camera.name)} camera"]`);
+      if (!img?.naturalWidth) return toasts.info("The preview has no frame yet");
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext("2d")?.drawImage(img, 0, 0);
+      const a = document.createElement("a");
+      try {
+        a.href = canvas.toDataURL("image/jpeg", 0.92);
+      } catch {
+        return toasts.info("The preview comes from another origin and cannot be saved from here");
+      }
+      a.download = `${camera.name.toLowerCase().replace(/\W+/g, "-")}-${Date.now()}.jpg`;
+      a.click();
+      toasts.success(`Saved a preview frame from ${camera.name}`);
+      return;
+    }
     if (!camera.feed.base) {
-      toasts.info("Snapshots need a camera preview, which the device does not stream yet");
+      toasts.info("This camera has no preview");
       return;
     }
     const i = String(cluster.feedIndex(camera)).padStart(4, "0");

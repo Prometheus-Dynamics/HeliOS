@@ -9,6 +9,7 @@ pub mod auth;
 pub mod auth_state;
 pub mod board_update;
 pub mod camera_controls;
+pub mod camera_preview;
 pub mod config;
 pub mod error;
 pub mod events;
@@ -34,6 +35,8 @@ pub struct AppState {
     pub events: Arc<events::EventHub>,
     /// One Styx control client per camera, for camera controls and their persisted values.
     pub cameras: camera_controls::CameraControls,
+    /// One Styx preview per camera, made on its first viewer.
+    pub previews: camera_preview::CameraPreviews,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
     /// Held while helios-api has the device package's writer stage an image.
@@ -51,6 +54,7 @@ impl AppState {
         Arc::new(Self {
             orion: orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone()),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
+            previews: camera_preview::CameraPreviews::new(config.preview),
             store,
             events,
             auth: auth::Auth::new(config.auth_file.clone()),
