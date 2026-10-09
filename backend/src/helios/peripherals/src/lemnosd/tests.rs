@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lemnos_device::DeviceStatus;
+use lemnos_ipc::DeviceStatus;
 use lemnos_ipc::{Event, LedShow, LedStatus, Message, RawReading, Request, VERSION, decode_request};
 
 use super::resources::tests::raze_devices;

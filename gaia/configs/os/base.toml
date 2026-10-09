@@ -40,13 +40,12 @@ config_overrides = [
   # systemd-sysusers (Atlas devices/README.md: lemnosd needs it, Lemnos
   # packaging/README.md). On the read-only root it only checks at boot that
   # the sysusers.d entries exist; the users are created at build time from
-  # users tables (Buildroot does not run sysusers into the target), below.
+  # Buildroot users tables (Buildroot does not run sysusers into the target):
+  # lemnosd's `lemnos` user from Lemnos's own table, which the device package
+  # adds (Atlas's lemnos.toml, BR2_RAZE_LEMNOS_USERS_TABLE; HeliOS keeps no
+  # copy: two copies make mkusers fail), and in the full profile Orion's
+  # (runtime-services/backend-core.toml).
   ["BR2_PACKAGE_SYSTEMD_SYSUSERS", "y"],
-  # Build-time users: lemnosd's `lemnos` (both profiles import the device
-  # layer, and with it lemnosd). runtime-services/backend-core.toml extends
-  # the list with Orion's table for orion-node in the full profile; keep the
-  # two lists in step.
-  ["BR2_ROOTFS_USERS_TABLES", "\"${project.root_dir}/gaia/assets/os/buildroot/lemnos-users.table\""],
 ]
 
 [image.output]

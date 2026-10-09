@@ -105,13 +105,15 @@ pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 8;
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
 /// Config ports the tracked groups have and the full ones do not (Eidos docs/daedalus.md,
 /// "Tracked detector groups").
-const TRACKED_ONLY_PORTS: [&str; 14] = [
+const TRACKED_ONLY_PORTS: [&str; 16] = [
     "full_search_every",
     "roi_margin",
     "roi_margin_side",
     "roi_margin_velocity",
     "max_tracks",
     "max_missed_frames",
+    "margin_growth_misses",
+    "prediction_horizon_frames",
     "loss_search",
     "recovery_margin_scale",
     "loss_full_search_after",

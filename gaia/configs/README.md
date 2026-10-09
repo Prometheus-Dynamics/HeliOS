@@ -44,9 +44,11 @@ Manager (1.5.0), `devices/raze/gaia/device.toml`, imported from the git source
   pins for `lemnos-ipc`. `builds/raze.toml` also imports Lemnos's
   `packaging/gaia/lemnosd-host.toml`, so lemnosd and lemnos-ctl build on the
   host (`rustup target add aarch64-unknown-linux-musl`) instead of in Docker.
-  The `lemnos` user is created at build time from
-  `gaia/assets/os/buildroot/lemnos-users.table` (`os/base.toml`; the
-  read-only root cannot run systemd-sysusers, which the image still ships).
+  The `lemnos` user is created at build time from Lemnos's own Buildroot
+  users table, which the device package adds (Atlas's `lemnos.toml`,
+  `BR2_RAZE_LEMNOS_USERS_TABLE`; the read-only root cannot run
+  systemd-sysusers, which the image still ships). HeliOS keeps no copy: two
+  tables for the same user make mkusers fail.
   helios-peripherals reaches the hardware only through lemnosd and runs with
   `SupplementaryGroups=lemnos`;
 - **board-agent**, the Orion device agent (a Gaia artifact built from the
@@ -143,8 +145,8 @@ source. HeliOS overrides them in later layers:
   `ORION_NODE_HOST_FACTS_REFRESH_MS=2000` for the UI's live metrics, state in
   `/var/lib/helios/orion`), and adds Orion's
   `packaging/buildroot/orion-users.table` to `BR2_ROOTFS_USERS_TABLES` for the
-  `orion` user (the read-only root has no runtime sysusers), next to
-  lemnosd's table (the value replaces `os/base.toml`'s);
+  `orion` user (the read-only root has no runtime sysusers; the device
+  package adds lemnosd's table on its own);
 - `storage/update.toml` adds the drop-in
   `orion-node.service.d/10-helios-state.conf` (state directory on `/data`);
 - helios-engine and helios-peripherals run with `Group=orion`, which the node

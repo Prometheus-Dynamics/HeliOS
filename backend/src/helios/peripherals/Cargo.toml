@@ -33,10 +33,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 orion = { workspace = true, default-features = false, features = ["client"] }
-# lemnosd's client: sensors, the fan and the status light. HeliOS opens no hardware itself.
+# lemnosd's client: sensors, the fan, the status light and raw GPIO/PWM/I2C/SPI. HeliOS opens no
+# hardware itself.
 lemnos-ipc = { workspace = true }
-# The compact-model types lemnos-ipc's device descriptions use (class, status, quantity).
-lemnos-device = { workspace = true }
 styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg"] }
 
 [dev-dependencies]

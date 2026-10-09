@@ -361,7 +361,8 @@ impl Worker {
                 self.write_marker();
                 self.changed = true;
             }
-            Event::Control { .. } | Event::LedOwner { .. } => {}
+            Event::Dropped { count } => warn!(count, "lemnosd dropped events HeliOS did not read in time"),
+            Event::Control { .. } | Event::LedOwner { .. } | Event::Edge { .. } => {}
         }
     }
 
@@ -372,7 +373,7 @@ impl Worker {
                 self.send_status();
             }
             Command::FanOverride { device, request, reply } => {
-                let result = match self.devices.as_mut() {
+                let result = match self.devices.as_mut().filter(|devices| devices.is_connected()) {
                     Some(devices) => devices.set(&device, FAN_DUTY_CONTROL, request.duty).map_err(describe),
                     None => Err("lemnosd is not connected".into()),
                 };
@@ -392,7 +393,7 @@ impl Worker {
                 let _ = reply.send(result);
             }
             Command::Set { device, control, value, reply } => {
-                let result = match self.devices.as_mut() {
+                let result = match self.devices.as_mut().filter(|devices| devices.is_connected()) {
                     Some(devices) => devices.set(&device, &control, value).map_err(describe),
                     None => Err("lemnosd is not connected".into()),
                 };
@@ -403,7 +404,7 @@ impl Worker {
 
     /// Releases `device`; a release lemnosd cannot take now is owed.
     fn release(&mut self, device: &str) -> Result<(), String> {
-        let result = match self.devices.as_mut() {
+        let result = match self.devices.as_mut().filter(|devices| devices.is_connected()) {
             Some(devices) => devices.release(device),
             None => Err(ClientError::Closed),
         };

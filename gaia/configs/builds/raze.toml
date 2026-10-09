@@ -44,7 +44,11 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev e12b079: Lemnos 62c3caf's lemnosd owns the LED
+# Raze board package (Atlas dev 42d91e2: Lemnos cca50f7, with the `lemnos`
+# user created at build time from Lemnos's own Buildroot users table through
+# the device package (BR2_RAZE_LEMNOS_USERS_TABLE; HeliOS keeps no copy), the
+# self-test's chip-id reads brokered through lemnosd, and no free GPIO line,
+# PWM channel or spidev named in the board definition; lemnosd owns the LED
 # ring, fan and sensors, with the fan released back to the kernel governor
 # while lemnosd runs and self-test LEDs on the test layer; its layers ask for
 # Gaia >=2.0.0; board-agent, the Orion device agent, as a Gaia artifact
@@ -62,23 +66,25 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "e12b079bb22489e80bf29e674d5d79818b49824f"
+rev = "42d91e2fd6c7dd3442d37f1fb562f9da83d119f4"
 
-# Lemnos (dev 62c3caf). The Raze layer imports Lemnos's lemnosd layer from a
+# Lemnos (dev cca50f7). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
 # sources, so it is declared here, at the commit the Atlas package is tested
 # with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
-# in the Raze manifest): b4d6cfe's daemon and client API with packaging fixes
-# (Gaia >=2.0.0, one cargo build group for lemnosd and lemnos-ctl, the
-# host-build layer imported above). backend/Cargo.lock pins the same commit for
-# lemnos-ipc, the lemnosd client helios-peripherals uses.
+# in the Raze manifest): raw GPIO, PWM, I2C and SPI access through lemnosd,
+# writes and claims that end with the client's connection, and the Buildroot
+# users table for the `lemnos` user (packaging fixes: Gaia >=2.0.0, one cargo
+# build group for lemnosd and lemnos-ctl, the host-build layer imported
+# above). backend/Cargo.lock pins the same commit for lemnos-ipc, the lemnosd
+# client helios-peripherals uses.
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "62c3caf677c4bf9cef47fcb02b36d0e98f3248ef"
+rev = "cca50f73950f66c5606f1573a5c4b0d429bb963b"
 
-# Orion v4 (main 4a6945a: the node stops its systemd watchdog before
+# Orion v4 (main 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
 # STOPPING=1; TypedConfigValue::F64 (ec91d0a), observed-state watch, session
 # resume on reconnect, CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
@@ -88,7 +94,7 @@ rev = "62c3caf677c4bf9cef47fcb02b36d0e98f3248ef"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "4a6945a00e4acfc9d18dcba1e6f527af81dfefac"
+rev = "973ced750267f4094155b628aef25d6564580813"
 
 [inputs.profile]
 description = "Build profile"

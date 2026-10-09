@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use lemnos_device::{DeviceClass, DeviceStatus};
-use lemnos_ipc::DeviceDesc;
+use lemnos_ipc::{DeviceClass, DeviceDesc, DeviceStatus};
 
 use crate::lemnosd::fan::{FAN_DUTY_CONTROL, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION};
 use crate::model::{NodeId, ObservedValue, ResourceDescriptor, ResourceKind, ResourceObservation, ResourceStatus};
@@ -188,7 +187,7 @@ impl DiscoveryProbe for LemnosdProbe {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lemnos_device::{Axis, Quantity};
+    use lemnos_ipc::{Axis, Quantity};
     use lemnos_ipc::{ChannelDesc, ControlDesc};
 
     pub(crate) fn raze_devices() -> Vec<DeviceDesc> {
