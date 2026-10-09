@@ -206,11 +206,11 @@ export const api = {
   resources: (type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),
   peripherals: () => request<Resource[]>("GET", "/v1/peripherals"),
   peripheralAction: (id: string, kind: string, arg: Record<string, unknown> = {}) =>
-    request<{ workload_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", `/v1/peripherals/${enc(id)}/actions`, { body: { kind, arg } }),
+    request<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", `/v1/peripherals/${enc(id)}/actions`, { body: { kind, arg } }),
   /** Raw GPIO/PWM/I2C/SPI through lemnosd: the live claims, and a raw action (`gpio.claim`, ...). */
   rawIo: () => request<RawIo>("GET", "/v1/peripherals/io"),
   rawIoAction: (kind: string, arg: Record<string, unknown> = {}) =>
-    request<{ workload_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", "/v1/peripherals/io/actions", { body: { kind, arg } }),
+    request<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", "/v1/peripherals/io/actions", { body: { kind, arg } }),
 
   // Updates
   uploadImage: (file: Blob, options: { filename?: string; sha256?: string; version?: string } = {}) =>

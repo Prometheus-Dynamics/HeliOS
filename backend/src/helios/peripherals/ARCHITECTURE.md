@@ -7,7 +7,8 @@ lemnosd, and serves local cameras to other processes through Styx.
 It should only do five things:
 
 - provide canonical local `resources`
-- consume Orion `workloads` and leases
+- consume Orion `workloads` and leases, and serve Orion action requests for its
+  resources (`watch_action_requests`, answered by action id)
 - publish provider/resource/state updates back into Orion
 - serve local cameras through Styx `CameraService`s and advertise their sockets
 - run the local reconciliation loop
@@ -46,7 +47,7 @@ Peripherals owns:
 - stable resource identity and records
 - the `lemnos-ipc` client (`helios`): one Orion resource per lemnosd device,
   the fan rule (read-only, timed override), HeliOS's status on the light
-- workload decoding and lease validation
+- action decoding (an Orion action request's typed arguments back to JSON, then per kind)
 - local reconcile/apply
 - observed state publication
 - local camera service lifecycle (one Styx `CameraService` per camera)
@@ -80,8 +81,10 @@ src/
   `styx-frames+unix://<stream_dir>/<resource id>.styx.sock` (absolute path);
   consumers connect with a Styx `FrameClient`. There is no derived
   `stream.channel` resource and no MJPEG preview socket.
-- resource action workloads reconcile against Orion leases before touching
-  hardware.
+- resource actions arrive as Orion request/response actions: each request is
+  decoded against the current inventory and run on its own task, so actions run
+  concurrently; the answer (succeed, fail or reject) goes back by its id. No
+  lease is needed for an action; raw claims are HeliOS leases.
 - direct frontend API exposure should go through API/orchestrated resources, not
   direct peripherals endpoints.
 - HeliOS opens no I2C bus, GPIO chip, PWM channel, spidev, LED device or fan
@@ -109,8 +112,8 @@ src/
   duration_ms: 1000-600000}`, default 60 s) is the only write
   (`DeviceClient::set(fan, "duty", ..)`); it ends with
   `DeviceClient::release(fan)` on `fan.release`, at the end of `duration_ms`
-  and when the service stops. It outlives the action workload (the API removes
-  it once the result is in). lemnosd ties the write to HeliOS's connection, so
+  and when the service stops. It outlives the action (the write ends with its
+  timer, not with the request's answer). lemnosd ties the write to HeliOS's connection, so
   a crash, a `kill -9` or a lemnosd restart hands the fan back too; nothing is
   kept on disk and a reconnect never resumes it. Another client writing the
   fan ends the override without a release. The resource state shows
@@ -130,8 +133,7 @@ src/
   Tests run the bridge against `lemnosd::mock::MockLemnosd` (the real service
   over mock hardware).
 - Other devices with controls take `control.set` (`{control, value}`) under
-  lemnosd's write policy; refusals come back as action failures. Each action
-  workload runs once.
+  lemnosd's write policy; refusals come back as action failures.
 - Status light: lemnosd's status layer (`LedClient::status`) from the
   provider's health: busy while starting or connecting to Orion, ok once
   registered and publishing, warn when a watch stops, error when the runtime

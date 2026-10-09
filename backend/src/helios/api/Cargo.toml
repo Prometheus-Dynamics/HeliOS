@@ -48,6 +48,7 @@ daedalus-data = { workspace = true }
 helios-field = { path = "../field" }
 # Orion is the device's state store: resources, workloads, the updater and host facts.
 orion = { workspace = true, default-features = false, features = ["client"] }
+orion-client = { workspace = true }
 # Camera list, live camera metrics, controls and previews from the Styx camera services (no
 # capture backends). `preview` + `codec-turbojpeg`: JPEG previews from YUV planes with
 # libjpeg-turbo (Styx docs/preview.md).

@@ -144,6 +144,9 @@ daedalus-planner = { version = "3.0.0", git = "https://github.com/Prometheus-Dyn
 lemnos-ipc = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev" }
 lemnosd = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
 orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "main", default-features = false }
+# The client SDK, for `ActionCaller` (request/response actions over one stream; the `orion` facade
+# does not re-export it). The same Orion source and commit as `orion`.
+orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "main", default-features = false, features = ["ipc"] }
 styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false, features = ["std"] }

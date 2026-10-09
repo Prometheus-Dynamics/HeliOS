@@ -9,8 +9,8 @@ use axum::{
     http::StatusCode,
 };
 use orion::{
-    control_plane::{DesiredState, DesiredStateMutation, LeaseRecord, LeaseState, ResourceRecord, TypedConfigValue, WorkloadConfig, WorkloadRecord},
-    core::{ArtifactId, NodeId, ResourceId, WorkloadId},
+    control_plane::{ActionRequest as OrionActionRequest, ActionResult as OrionActionResult, ActionState, ActionTarget, ResourceRecord, TypedConfigValue},
+    core::ResourceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -18,18 +18,20 @@ use crate::{
     SharedState,
     error::{ApiError, ApiResult},
     host::now_ms,
-    orion::{StateView, config_value_json, enum_name, label_map},
+    orion::{ActionCall, StateView, config_value_json, enum_name, label_map},
 };
 
 use super::check_id;
 
 const PERIPHERALS_PROVIDER_PREFIX: &str = "provider.peripherals.";
-pub const RESOURCE_ACTION_RUNTIME: &str = "helios.peripheral.resource_action.v1";
-const RESOURCE_ACTION_ARTIFACT: &str = "artifact.helios.peripheral-action";
+/// How long a request waits for an action's result (Orion's `wait_ms`); a longer action still runs,
+/// and the answer is 202 with its latest result.
 const ACTION_WAIT: Duration = Duration::from_secs(5);
-/// How often a running action looks for its result.
-const ACTION_POLL: Duration = Duration::from_millis(50);
+/// The action's own budget, counted from when the node accepts it (Orion's `deadline_ms`).
+const ACTION_DEADLINE_MS: u64 = 10_000;
+static ACTION_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// A resource's latest action result, as the API reports it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ActionResult {
     pub action_kind: String,
@@ -158,22 +160,21 @@ pub const RAW_RESOURCE_TYPE: &str = "lemnos.raw";
 /// The most `arg` fields an action may expand to (an SPI transfer of 64 KiB is one field).
 const MAX_ARG_FIELDS: usize = 512;
 
-/// The workload config of an action: `action.kind` and `arg.*`, with nested objects and arrays
-/// as dotted paths (Orion's config decoding puts them back together) and arrays of byte values
-/// (0-255) as one `Bytes` value.
-pub fn action_config(request: &ActionRequest) -> ApiResult<WorkloadConfig> {
+/// The arguments of an action as Orion carries them: typed values under their names, nested
+/// objects and arrays as dotted names (`ops.0.write`), arrays of byte values (0-255) as `Bytes`.
+/// Orion's `config_json_value` puts them back together on helios-peripherals' side.
+pub fn action_args(request: &ActionRequest) -> ApiResult<BTreeMap<String, TypedConfigValue>> {
     if !DEVICE_ACTION_KINDS.contains(&request.kind.as_str()) && !RAW_ACTION_KINDS.contains(&request.kind.as_str()) {
         return Err(ApiError::bad_request(format!("unknown action kind {:?}; one of {}, {}", request.kind, DEVICE_ACTION_KINDS.join(", "), RAW_ACTION_KINDS.join(", "))));
     }
     let mut fields = Vec::new();
     for (key, value) in &request.arg {
-        flatten(&format!("arg.{key}"), value, &mut fields)?;
+        flatten(key, value, &mut fields)?;
     }
     if fields.len() > MAX_ARG_FIELDS {
         return Err(ApiError::bad_request(format!("arg has more than {MAX_ARG_FIELDS} values")));
     }
-    let config = WorkloadConfig::new("helios.peripheral.resource_action.config.v1").field("action.kind", TypedConfigValue::String(request.kind.clone()));
-    Ok(fields.into_iter().fold(config, |config, (key, value)| config.field(key, value)))
+    Ok(fields.into_iter().collect())
 }
 
 fn flatten(key: &str, value: &serde_json::Value, out: &mut Vec<(String, TypedConfigValue)>) -> ApiResult<()> {
@@ -220,61 +221,67 @@ fn flatten(key: &str, value: &serde_json::Value, out: &mut Vec<(String, TypedCon
 
 #[derive(Debug, Serialize)]
 pub struct ActionResponse {
-    pub workload_id: String,
+    /// The id Orion ran the action under.
+    pub action_id: String,
     pub resource: String,
     pub done: bool,
     pub result: Option<ActionResult>,
 }
 
-/// Run one action: a short-lived resource-action workload holding the resource's lease. Waits up
-/// to five seconds for helios-peripherals to report the result, then removes the workload and
-/// its lease. helios-api runs one action at a time, so its own callers queue instead of
-/// meeting each other's leases.
+/// Run one action on a resource: an Orion action request, answered by the resource's provider
+/// (helios-peripherals) by its id. Concurrent actions run concurrently; the answer is 200 with the
+/// final result, or 202 with `done: false` and the latest result when the wait runs out.
 pub async fn action(State(state): State<SharedState>, Path(id): Path<String>, Json(request): Json<ActionRequest>) -> ApiResult<(StatusCode, Json<ActionResponse>)> {
     check_id(&id)?;
     run_action(&state, id, request).await
 }
 
 async fn run_action(state: &SharedState, id: String, request: ActionRequest) -> ApiResult<(StatusCode, Json<ActionResponse>)> {
-    let config = action_config(&request)?;
-    let _turn = state.action_lock.lock().await;
+    let args = action_args(&request)?;
     let view = state.orion.view().await?;
     let resource = view.resources.get(&id).ok_or_else(|| ApiError::not_found(format!("no resource {id}")))?;
     if !resource.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX) {
         return Err(ApiError::bad_request(format!("{id} is not a helios-peripherals resource")));
     }
-    if let Some(holder) = view.leases.get(&id).and_then(|lease| lease.holder_workload_id.as_ref()) {
-        return Err(ApiError::conflict(format!("{id} is leased by {holder}")));
-    }
-    let node = state.config.node_id.clone();
-    let started_at = now_ms();
-    let workload_id = format!("action.{}.{started_at}", id.replace(':', "_"));
-    let workload = WorkloadRecord::builder(WorkloadId::new(workload_id.clone()), RESOURCE_ACTION_RUNTIME, ArtifactId::new(RESOURCE_ACTION_ARTIFACT))
-        .desired_state(DesiredState::Running)
-        .assigned_to(NodeId::new(node.clone()))
-        .bind_resource(ResourceId::new(id.clone()), NodeId::new(node.clone()))
-        .config(config)
-        .build();
-    let lease = LeaseRecord::builder(ResourceId::new(id.clone())).lease_state(LeaseState::Leased).holder_node(NodeId::new(node)).holder_workload(WorkloadId::new(workload_id.clone())).build();
-    state.orion.apply(vec![DesiredStateMutation::PutWorkload(workload), DesiredStateMutation::PutLease(lease)]).await?;
+    let action = action_request(&id, &request.kind, args);
+    perform_action(&state.orion, action, ACTION_WAIT).await
+}
 
-    let deadline = tokio::time::Instant::now() + ACTION_WAIT;
-    let mut result = None;
-    while tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(ACTION_POLL).await;
-        let Ok(view) = state.orion.view().await else { continue };
-        if let Some(found) = view.resources.get(&id).map(|r| resource_dto(r, &view)).and_then(|dto| dto.action_result).filter(|r| r.observed_at_ms >= started_at && r.action_kind == request.kind) {
-            result = Some(found);
-            break;
-        }
-    }
-    let cleanup = vec![DesiredStateMutation::RemoveWorkload(WorkloadId::new(workload_id.clone())), DesiredStateMutation::RemoveLease(ResourceId::new(id.clone()))];
-    if let Err(error) = state.orion.apply(cleanup).await {
-        tracing::warn!(workload = %workload_id, error = %error.message, "failed to remove finished peripheral action");
-    }
-    let done = result.is_some();
+/// The Orion request for an action on resource `id`: a fresh id, the deadline, and the arguments.
+pub fn action_request(id: &str, kind: &str, args: BTreeMap<String, TypedConfigValue>) -> OrionActionRequest {
+    let seq = ACTION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let action_id = format!("helios-api.{}.{seq}", now_ms());
+    let mut request = OrionActionRequest::new(action_id, ActionTarget::Resource(ResourceId::new(id)), kind).with_deadline_ms(ACTION_DEADLINE_MS);
+    request.args = args;
+    request
+}
+
+/// Runs `action` through `caller` and waits up to `wait` for its result.
+pub async fn perform_action<C: ActionCall>(caller: &C, action: OrionActionRequest, wait: Duration) -> ApiResult<(StatusCode, Json<ActionResponse>)> {
+    let action_id = action.action_id.clone();
+    let resource = action.target.id().to_string();
+    let result = caller.call_action(action, wait).await?;
+    let done = result.state.is_terminal();
     let status = if done { StatusCode::OK } else { StatusCode::ACCEPTED };
-    Ok((status, Json(ActionResponse { workload_id, resource: id, done, result })))
+    Ok((status, Json(ActionResponse { action_id, resource, done, result: Some(action_result_dto(&result)) })))
+}
+
+/// An Orion result as the API reports an action: `applied` (succeeded), `failed` (failed,
+/// rejected or timed out, with the reason), or `running`. `data` is the `value` output, or the
+/// whole output when there are other entries.
+fn action_result_dto(result: &OrionActionResult) -> ActionResult {
+    let (status, error) = match &result.state {
+        ActionState::Succeeded => ("applied", None),
+        ActionState::Failed { reason } | ActionState::Rejected { reason } => ("failed", Some(reason.clone())),
+        ActionState::TimedOut => ("failed", Some("timed out".to_string())),
+        ActionState::Accepted | ActionState::Running { .. } => ("running", None),
+    };
+    let data = match result.output.get("value") {
+        Some(value) => Some(config_value_json(value)),
+        None if result.output.is_empty() => None,
+        None => Some(serde_json::Value::Object(result.output.iter().map(|(key, value)| (key.clone(), config_value_json(value))).collect())),
+    };
+    ActionResult { action_kind: result.name.clone(), status: status.to_string(), data, error, observed_at_ms: result.updated_at_ms }
 }
 
 // --- raw GPIO, PWM, I2C and SPI ------------------------------------------------
@@ -394,42 +401,115 @@ pub async fn imu() -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion::control_plane::ActionRequest as OrionActionRequest;
 
-    #[test]
-    fn action_config_encodes_typed_args() {
-        let request = |kind: &str, arg: serde_json::Value| ActionRequest { kind: kind.into(), arg: arg.as_object().cloned().unwrap_or_default() };
-        let config = action_config(&request("fan.override", serde_json::json!({ "duty": 0.8, "duration_ms": 60_000 }))).expect("config");
-        assert_eq!(config.payload.get("action.kind"), Some(&TypedConfigValue::String("fan.override".into())));
-        assert_eq!(config.payload.get("arg.duty"), Some(&TypedConfigValue::F64(0.8)));
-        assert_eq!(config.payload.get("arg.duration_ms"), Some(&TypedConfigValue::UInt(60_000)));
-        let config = action_config(&request("control.set", serde_json::json!({ "control": "level", "value": 1.0 }))).expect("config");
-        assert_eq!(config.payload.get("arg.control"), Some(&TypedConfigValue::String("level".into())));
-        assert_eq!(config.payload.get("arg.value"), Some(&TypedConfigValue::F64(1.0)));
-        assert!(action_config(&request("gpio.write", serde_json::json!({}))).is_err(), "unknown kind");
+    fn http_request(kind: &str, arg: serde_json::Value) -> ActionRequest {
+        ActionRequest { kind: kind.into(), arg: arg.as_object().cloned().unwrap_or_default() }
     }
 
     #[test]
-    fn raw_action_args_expand_to_dotted_fields_with_byte_arrays_as_bytes() {
-        let request = ActionRequest {
-            kind: "i2c.transfer".into(),
-            arg: serde_json::json!({ "bus": "i2c-1", "address": 80, "ops": [{ "write": [16] }, { "read": 2 }], "skip": null, "offset": -1 }).as_object().cloned().expect("object"),
-        };
-        let config = action_config(&request).expect("config");
-        assert_eq!(config.payload.get("arg.bus"), Some(&TypedConfigValue::String("i2c-1".into())));
-        assert_eq!(config.payload.get("arg.address"), Some(&TypedConfigValue::UInt(80)));
-        assert_eq!(config.payload.get("arg.ops.0.write"), Some(&TypedConfigValue::Bytes(vec![16])));
-        assert_eq!(config.payload.get("arg.ops.1.read"), Some(&TypedConfigValue::UInt(2)));
-        assert_eq!(config.payload.get("arg.offset"), Some(&TypedConfigValue::Int(-1)));
-        assert!(!config.payload.contains_key("arg.skip"));
-        // Orion's config decoding gives the same JSON back.
-        let decoded = orion::control_plane::config_json_value(&config.payload).expect("decode");
-        assert_eq!(decoded["arg"]["ops"], serde_json::json!([{ "write": [16] }, { "read": 2 }]));
+    fn action_args_are_typed_and_checked() {
+        let args = action_args(&http_request("fan.override", serde_json::json!({ "duty": 0.8, "duration_ms": 60_000 }))).expect("args");
+        assert_eq!(args.get("duty"), Some(&TypedConfigValue::F64(0.8)));
+        assert_eq!(args.get("duration_ms"), Some(&TypedConfigValue::UInt(60_000)));
+        let args = action_args(&http_request("control.set", serde_json::json!({ "control": "level", "value": 1.0 }))).expect("args");
+        assert_eq!(args.get("control"), Some(&TypedConfigValue::String("level".into())));
+        assert!(action_args(&http_request("gpio.write", serde_json::json!({}))).is_err(), "unknown kind");
+    }
 
-        let too_big =
-            ActionRequest { kind: "spi.transfer".into(), arg: serde_json::json!({ "transfers": vec![serde_json::json!({ "rx_len": 1 }); MAX_ARG_FIELDS + 1] }).as_object().cloned().expect("object") };
-        assert!(action_config(&too_big).is_err());
-        let numbered = ActionRequest { kind: "gpio.claim".into(), arg: serde_json::json!({ "x": { "0": 1 } }).as_object().cloned().expect("object") };
-        assert!(action_config(&numbered).is_err(), "numeric keys would read as array indices");
+    #[test]
+    fn raw_action_args_expand_to_dotted_names_with_byte_arrays_as_bytes() {
+        let request = http_request("i2c.transfer", serde_json::json!({ "bus": "i2c-1", "address": 80, "ops": [{ "write": [16] }, { "read": 2 }], "skip": null, "offset": -1 }));
+        let args = action_args(&request).expect("args");
+        assert_eq!(args.get("bus"), Some(&TypedConfigValue::String("i2c-1".into())));
+        assert_eq!(args.get("address"), Some(&TypedConfigValue::UInt(80)));
+        assert_eq!(args.get("ops.0.write"), Some(&TypedConfigValue::Bytes(vec![16])));
+        assert_eq!(args.get("ops.1.read"), Some(&TypedConfigValue::UInt(2)));
+        assert_eq!(args.get("offset"), Some(&TypedConfigValue::Int(-1)));
+        assert!(!args.contains_key("skip"));
+        // Orion's config decoding gives the same JSON back (what helios-peripherals reads).
+        let decoded = orion::control_plane::config_json_value(&args).expect("decode");
+        assert_eq!(decoded["ops"], serde_json::json!([{ "write": [16] }, { "read": 2 }]));
+
+        let too_big = http_request("spi.transfer", serde_json::json!({ "transfers": vec![serde_json::json!({ "rx_len": 1 }); MAX_ARG_FIELDS + 1] }));
+        assert!(action_args(&too_big).is_err());
+        let numbered = http_request("gpio.claim", serde_json::json!({ "x": { "0": 1 } }));
+        assert!(action_args(&numbered).is_err(), "numeric keys would read as array indices");
+    }
+
+    /// A fake Orion: each action takes `duration` and answers `Running` when the wait runs out first.
+    struct FakeOrion {
+        duration: std::time::Duration,
+        in_flight: std::sync::atomic::AtomicUsize,
+        peak: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ActionCall for FakeOrion {
+        async fn call_action(&self, request: OrionActionRequest, timeout: std::time::Duration) -> ApiResult<OrionActionResult> {
+            {
+                use std::sync::atomic::Ordering::SeqCst;
+                let now = self.in_flight.fetch_add(1, SeqCst) + 1;
+                self.peak.fetch_max(now, SeqCst);
+                tokio::time::sleep(self.duration.min(timeout)).await;
+                self.in_flight.fetch_sub(1, SeqCst);
+                let state = if self.duration <= timeout { ActionState::Succeeded } else { ActionState::Running { progress: None } };
+                let mut result = OrionActionResult::new(request.action_id.clone(), request.target.clone(), request.name.clone(), orion::core::NodeId::new("node-local"), state);
+                if request.name == "raw.renew" {
+                    result = result.with_output("value", TypedConfigValue::UInt(7));
+                }
+                Ok(result)
+            }
+        }
+    }
+
+    fn fake(duration_ms: u64) -> FakeOrion {
+        FakeOrion { duration: std::time::Duration::from_millis(duration_ms), in_flight: Default::default(), peak: Default::default() }
+    }
+
+    #[tokio::test]
+    async fn concurrent_raw_actions_run_at_once() {
+        let orion = fake(100);
+        let started = std::time::Instant::now();
+        let calls = (0..4).map(|n| {
+            let action = action_request("lemnos_raw_node1_io", "gpio.get", BTreeMap::from([("claim".to_string(), TypedConfigValue::String(format!("gpio-{n}")))]));
+            perform_action(&orion, action, std::time::Duration::from_secs(5))
+        });
+        let answers = futures_util_join(calls).await;
+        assert!(answers.iter().all(|(status, body)| *status == StatusCode::OK && body.done), "every action answers 200 done");
+        assert_eq!(orion.peak.load(std::sync::atomic::Ordering::SeqCst), 4, "no action waits for another");
+        assert!(started.elapsed() < std::time::Duration::from_millis(350), "four 100 ms actions take about 100 ms, not 400");
+        let ids: std::collections::BTreeSet<_> = answers.iter().map(|(_, body)| body.action_id.clone()).collect();
+        assert_eq!(ids.len(), 4, "each action has its own id");
+    }
+
+    #[tokio::test]
+    async fn an_action_past_the_wait_answers_202_with_its_latest_result() {
+        let orion = fake(500);
+        let action = action_request("lemnos_raw_node1_io", "i2c.transfer", BTreeMap::new());
+        let (status, body) = perform_action(&orion, action, std::time::Duration::from_millis(50)).await.expect("answer");
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert!(!body.done);
+        assert_eq!(body.result.as_ref().map(|result| result.status.as_str()), Some("running"));
+    }
+
+    #[tokio::test]
+    async fn results_carry_the_value_output_as_data() {
+        let orion = fake(0);
+        let action = action_request("lemnos_raw_node1_io", "raw.renew", BTreeMap::new());
+        let (_, body) = perform_action(&orion, action, std::time::Duration::from_secs(1)).await.expect("answer");
+        let result = body.result.clone().expect("result");
+        assert_eq!(result.status, "applied");
+        assert_eq!(result.action_kind, "raw.renew");
+        assert_eq!(result.data, Some(serde_json::json!(7)));
+    }
+
+    /// Joins the futures in order (no runtime-specific join).
+    async fn futures_util_join<F: std::future::Future<Output = ApiResult<(StatusCode, Json<ActionResponse>)>>>(futures: impl Iterator<Item = F>) -> Vec<(StatusCode, ActionResponse)> {
+        let mut out = Vec::new();
+        for (status, body) in futures_util::future::join_all(futures.map(|future| async move { future.await.expect("action") })).await {
+            out.push((status, body.0));
+        }
+        out
     }
 
     #[test]

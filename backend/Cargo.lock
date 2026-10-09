@@ -1168,6 +1168,7 @@ dependencies = [
  "hex",
  "libc",
  "orion",
+ "orion-client",
  "serde",
  "serde_json",
  "sha2",

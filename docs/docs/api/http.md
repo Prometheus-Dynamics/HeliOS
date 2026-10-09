@@ -55,7 +55,7 @@ Every error has the same body:
 | 401 | `unauthorized` | The device is secured and the request has no valid session or token, or a wrong password at sign-in |
 | 403 | `forbidden` | A session mutation without the right `X-Helios-CSRF` header, or a wrong re-entered password |
 | 404 | `not_found` | No such route or object |
-| 409 | `conflict` | Orion rejected the change, a resource is leased, or an update is already being prepared |
+| 409 | `conflict` | Orion rejected the change, or an update is already being prepared |
 | 413 | `payload_too_large` | The upload exceeds `HELIOS_API_MAX_UPLOAD_BYTES` |
 | 422 | `unprocessable` | Validation failed (invalid graph document, unknown binding resource, checksum mismatch, ...) |
 | 429 | `too_many_requests` | Too many failed sign-ins from this address; wait and retry |
@@ -466,14 +466,18 @@ Action kinds, on lemnosd devices:
 - `control.set` (`control`, `value`): another device's control, e.g. `usb-a-power`'s `level`
   (undone by lemnosd when helios-peripherals' connection ends).
 
-The API runs an action as a short-lived `helios.peripheral.resource_action.v1` workload that
-holds the resource's lease. It waits up to 5 s for the result, then removes the workload and the
-lease. The answer is 200 `{workload_id, resource, done: true, result: {action_kind, status, data, error, observed_at_ms}}`,
-or 202 with `done: false` when helios-peripherals did not report in time. A refused or invalid
-action is a 200 with `result.status` `failed` and the reason in `result.error`. helios-api runs
-one action at a time (its callers queue); a resource leased by someone else gets a 409. `arg` is
-any JSON object: nested objects and arrays reach helios-peripherals as they were sent, and arrays
-of byte values (0 to 255) travel as bytes.
+The API sends an action to the resource's provider (helios-peripherals) as an Orion request/response
+action (`ActionCaller`, Orion `docs/actions.md`): one control-plane stream shared by all requests, so
+concurrent actions run at once and none waits for another's answer. helios-peripherals answers each
+action by its id, and the API waits up to 5 s for the final result. The answer is 200
+`{action_id, resource, done: true, result: {action_kind, status, data, error, observed_at_ms}}`, or
+202 with `done: false` and the latest result (`status` `running`) when the wait runs out; the action
+itself keeps running until its own 10 s budget. `status` is `applied`, `failed` (the action failed,
+or the node refused it, with the reason in `error`) or `running`. `data` is the action's `value`.
+`arg` is any JSON object: nested objects and arrays are sent as dotted argument names and rebuilt
+for helios-peripherals, and arrays of byte values (0 to 255) travel as `Bytes`.
+Raw claims are unchanged: a claim is a HeliOS lease with an id, a time to live and renewal (see
+[Raw GPIO, PWM, I2C and SPI](#raw-gpio-pwm-i2c-and-spi)).
 
 #### Raw GPIO, PWM, I2C and SPI
 
@@ -496,13 +500,14 @@ the `lemnos.raw` resource (`POST /v1/peripherals/io/actions`, or
 | `spi.transfer` | `bus`, `chip_select`, and `transfers` (`[{tx, rx_len, speed_hz, mode, bits_per_word, cs_change, delay_us}, ...]`, one transaction, one SPI mode) or one transfer's fields | the bytes received |
 | `raw.renew` | `claim`, `ttl_ms` | when the lease now ends (`expires_at_ms`) |
 
-Bytes are arrays of numbers or hex strings (`"9f00"`, `"0x9f 0x00"`). Limits (lemnosd's): 4 KiB
-per I2C transaction, 64 KiB per SPI transaction, 64 claims.
+Bytes are arrays of numbers or hex strings (`"9f00"`, `"0x9f 0x00"`). Limits: lemnosd's 4 KiB per
+I2C transaction, 64 KiB per SPI transaction and 64 claims; Orion's, for an action's arguments, 64 KiB
+per `Bytes` value (one SPI transaction) and 256 KiB per request, so the I2C and SPI payloads fit.
 
 ```json
 POST /v1/peripherals/io/actions
 {"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output", "value": false, "ttl_ms": 60000}}
-→ {"workload_id": "...", "resource": "lemnos_raw_raze_io", "done": true,
+→ {"action_id": "helios-api.1760000000000.0", "resource": "lemnos_raw_raze_io", "done": true,
    "result": {"action_kind": "gpio.claim", "status": "applied", "data": "gpio-1", "error": null, "observed_at_ms": 1760000000000}}
 {"kind": "gpio.set", "arg": {"claim": "gpio-1", "value": true}}
 {"kind": "i2c.transfer", "arg": {"bus": "i2c-1", "address": 80, "ops": [{"write": [16]}, {"read": 2}]}}

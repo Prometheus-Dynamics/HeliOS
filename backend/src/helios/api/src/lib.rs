@@ -43,7 +43,6 @@ pub struct AppState {
     pub auth: auth::Auth,
     /// Held while a peripheral action runs: helios-api runs one at a time, so its callers queue
     /// instead of meeting each other's resource leases.
-    pub action_lock: Mutex<()>,
     /// Held while helios-api has the device package's writer stage an image.
     pub update_lock: Arc<Mutex<()>>,
     /// The last stage/apply helios-api started, for `/v1/update/status`.
@@ -63,7 +62,6 @@ impl AppState {
             store,
             events,
             auth: auth::Auth::new(config.auth_file.clone()),
-            action_lock: Mutex::new(()),
             update_lock: routes::update::new_update_lock(),
             update_task: std::sync::Mutex::new(None),
             config,

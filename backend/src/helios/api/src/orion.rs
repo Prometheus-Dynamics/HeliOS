@@ -2,31 +2,67 @@
 //! peripherals service and the updater publish is read from here, and pipeline/update/peripheral
 //! requests are written here as desired state.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use orion::{
     Revision,
     client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
     control_plane::{
-        ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusQuery, StatusSubject, WorkloadObservedState,
-        WorkloadRecord,
+        ActionRequest, ActionResult, ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusQuery,
+        StatusSubject, WorkloadObservedState, WorkloadRecord,
     },
 };
+use orion_client::ActionCaller;
+use tokio::sync::Mutex;
 
 use crate::error::{ApiError, ApiResult};
 
 const CLIENT_NAME: &str = "helios-api";
 const EVENTS_CLIENT_NAME: &str = "helios-api-events";
+const ACTIONS_CLIENT_NAME: &str = "helios-api-actions";
+
+/// Anything that runs an Orion action and waits for its result: [`Orion`] in the server, a fake in
+/// the tests of the action routes.
+pub trait ActionCall: Sync {
+    fn call_action(&self, request: ActionRequest, timeout: Duration) -> impl Future<Output = ApiResult<ActionResult>> + Send;
+}
 
 #[derive(Debug, Clone)]
 pub struct Orion {
     socket: PathBuf,
     stream_socket: PathBuf,
+    /// One control-plane stream for every action, shared by all callers (concurrent calls do not
+    /// wait for each other); connected on first use and again after it drops.
+    actions: Arc<Mutex<Option<ActionCaller>>>,
 }
 
 impl Orion {
     pub fn new(socket: PathBuf, stream_socket: PathBuf) -> Self {
-        Self { socket, stream_socket }
+        Self { socket, stream_socket, actions: Arc::new(Mutex::new(None)) }
+    }
+
+    /// Runs `request` and waits up to `timeout` for its final result (Orion `ActionCaller`): the
+    /// latest, still running result when the wait runs out.
+    pub async fn call_action(&self, request: ActionRequest, timeout: Duration) -> ApiResult<ActionResult> {
+        let caller = {
+            let mut slot = self.actions.lock().await;
+            match slot.as_ref() {
+                Some(caller) => caller.clone(),
+                None => {
+                    let caller = ActionCaller::connect_at(&self.stream_socket, ACTIONS_CLIENT_NAME).await.map_err(|error| unreachable(&self.stream_socket, error))?;
+                    *slot = Some(caller.clone());
+                    caller
+                }
+            }
+        };
+        match caller.call(request, timeout).await {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                // The stream is gone (orion-node restarted, or it gave up the call): connect again next time.
+                *self.actions.lock().await = None;
+                Err(unreachable(&self.stream_socket, error))
+            }
+        }
     }
 
     pub fn stream_socket(&self) -> &PathBuf {
@@ -84,6 +120,12 @@ impl Orion {
             }
         }
         Err(ApiError::conflict(format!("Orion rejected the change: {}", last_error.unwrap_or_default())))
+    }
+}
+
+impl ActionCall for Orion {
+    fn call_action(&self, request: ActionRequest, timeout: Duration) -> impl Future<Output = ApiResult<ActionResult>> + Send {
+        Orion::call_action(self, request, timeout)
     }
 }
 

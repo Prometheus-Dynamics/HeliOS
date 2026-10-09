@@ -200,7 +200,7 @@ fn resource_state(observation: Option<&ResourceObservation>, feedback: Option<&R
     Some(state)
 }
 
-fn observed_value(value: &ObservedValue) -> TypedConfigValue {
+pub fn observed_value(value: &ObservedValue) -> TypedConfigValue {
     match value {
         ObservedValue::Bool(value) => TypedConfigValue::Bool(*value),
         ObservedValue::UInt(value) => TypedConfigValue::UInt(*value),
