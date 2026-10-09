@@ -31,17 +31,17 @@ Manager (1.5.0), `devices/raze/gaia/device.toml`, imported from the git source
   assembly tree;
 - the USB gadget (network, serial console on `ttyGS0`) and its DHCP, the
   identity endpoint on :5899 and mDNS advertisement, SSH keys from p1's
-  `pd-device/authorized_keys` (to `/run/pd-device/ssh/authorized_keys`, read
-  through `/etc/ssh/sshd_config.d/50-pd-device.conf`), the hardware watchdog,
+  `board/authorized_keys` (to `/run/board/ssh/authorized_keys`, read
+  through `/etc/ssh/sshd_config.d/50-board.conf`), the hardware watchdog,
   the default hostname, and the **A/B update writer**
-  (`/usr/lib/pd-device/update`, `pd-image-slots`,
-  `pd-device-update-confirm.service`).
+  (`/usr/lib/board/update`, `board-image-slots`,
+  `board-update-confirm.service`).
 
 HeliOS layers are imported after it and override its defaults:
 
-- `/etc/pd-device/hostname.env` sets `PD_HOSTNAME_PATTERN=helios-{serial8}`;
+- `/etc/board/hostname.env` sets `BOARD_HOSTNAME_PATTERN=helios-{serial8}`;
   the image has no static hostname, so every board is `helios-<serial8>`.
-- `/etc/pd-device/update-health` and `/etc/pd-device/update.d/pre-reboot` are
+- `/etc/board/update-health` and `/etc/board/update.d/pre-reboot` are
   the OS hooks of the update writer (`storage/update.toml`).
 - `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` is the package's `raze.config` only,
   so HeliOS runs the same kernel (including its page size) as every other OS
@@ -57,7 +57,7 @@ The same MBR A/B layout as the PhotonVision Raze image (`targets/raze.toml`):
 
 | # | Size | Content |
 |---|---|---|
-| p1 | 16 MiB FAT | `autoboot.txt` (`tryboot_a_b=1`, boot A = p2, `[tryboot]` p3); the writer's state (`pd-update.env`) and opt-in SSH keys |
+| p1 | 16 MiB FAT | `autoboot.txt` (`tryboot_a_b=1`, boot A = p2, `[tryboot]` p3); the writer's state (`board-update.env`) and opt-in SSH keys |
 | p2, p3 | 128 MiB FAT each | boot A/B (kernel, DTBs, overlays, `config.txt`, `cmdline.txt` with `root=/dev/mmcblk0p5 rootfstype=erofs ro`); both ship the same image |
 | p4 | extended | |
 | p5, p6 | 512 MiB each | root A/B: read-only EROFS (LZMA, 256 KiB pclusters); B ships empty |
@@ -73,11 +73,11 @@ Updates use the device package's writer with the same `.img.xz` that is
 flashed: `update stage <image> --sha256 <hex>` copies p2 and p5 of the image
 into the inactive slot, `update apply` runs `update.d/pre-reboot` (stops
 helios-engine, helios-peripherals, helios-api and orion-node) and reboots into
-it on trial, and `pd-device-update-confirm` keeps it once `update-health`
+it on trial, and `board-update-confirm` keeps it once `update-health`
 passes (orion-node, helios-engine and helios-api active, `GET /v1/health` on
 :5800 answering within 120 s); otherwise the board restarts into the old slot.
 helios-api drives the writer for `/v1/update/*` and `/v1/ota/*`; on the board,
-run `/usr/lib/pd-device/update` directly. Moving a board from the old squashfs layout to this
+run `/usr/lib/board/update` directly. Moving a board from the old squashfs layout to this
 one is a USB reflash.
 
 ## Read-only root
@@ -98,12 +98,12 @@ gadget services) and binds it into place; if p7 is missing or will not mount,
 | SSH host keys | `/data/ssh` | `HostKey` lines in `/etc/ssh/sshd_config`; generated there on first boot |
 | root's home (shell history, `.ssh`) | `/data/root` | bound on `/root` |
 | timesyncd's clock file (time floor across boots) | `/data/timesync` | bound on `/var/lib/systemd/timesync` |
-| Device package user overrides (`*.env`) | `/data/pd-device` | read by the package directly |
-| Hostname | kernel (transient) | `pd-device-hostname` from `/etc/pd-device/hostname.env`; no `/etc/hostname` |
-| `manage_url` | `/run/helios/manage-url` | `helios-manage-url.service`; `/etc/pd-device/manage-url` links there |
+| Device package user overrides (`*.env`) | `/data/board` | read by the package directly |
+| Hostname | kernel (transient) | `board-hostname` from `/etc/board/hostname.env`; no `/etc/hostname` |
+| `manage_url` | `/run/helios/manage-url` | `helios-manage-url.service`; `/etc/board/manage-url` links there |
 | Login banner | `/run/helios/issue` | `helios-update-issue.service`; `/etc/issue` links there |
 | Sockets (engine, Styx streams, Orion IPC), runtime reports | `/run/helios`, `/run/orion` | tmpfs |
-| Device package state (identity, update status, gadget leases, SSH keys) | `/run/pd-device`, p1 | the package |
+| Device package state (identity, update status, gadget leases, SSH keys) | `/run/board`, p1 | the package |
 | networkd and resolved state, DHCP leases | `/run/systemd` | tmpfs (HeliOS uses systemd-networkd, not NetworkManager) |
 | Everything else in `/var` (tmpfiles, caches) | `/var` | Buildroot's `var.mount` tmpfs, populated from `/usr/share/factory/var` |
 

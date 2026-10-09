@@ -1,9 +1,9 @@
-//! The Raze device package's A/B updater (`/usr/lib/pd-device/update`, Atlas `docs/ota.md`).
+//! The Raze device package's A/B updater (`/usr/lib/board/update`, Atlas `docs/ota.md`).
 //!
 //! HeliOS has no updater of its own: the device package's writer copies boot slot A and root
 //! slot A of the same `.img.xz` that is flashed into the board's inactive slot, trial-boots it
-//! with the Pi bootloader's tryboot and keeps it once `/etc/pd-device/update-health` passes.
-//! This module reads the state it publishes in `/run/pd-device/update.json`; helios-api drives
+//! with the Pi bootloader's tryboot and keeps it once `/etc/board/update-health` passes.
+//! This module reads the state it publishes in `/run/board/update.json`; helios-api drives
 //! the CLI itself (`/v1/update/*`, `/v1/ota/*`).
 
 use std::{fs, path::Path};
@@ -13,16 +13,16 @@ use serde::{Deserialize, Serialize};
 use crate::host::read_trimmed;
 
 /// The device package's update CLI.
-pub const PD_UPDATE_TOOL: &str = "/usr/lib/pd-device/update";
+pub const BOARD_UPDATE_TOOL: &str = "/usr/lib/board/update";
 /// `{"state", "slot_active", "slot_staged", "version_active", "version_staged", "progress", "error"}`,
-/// rewritten by every update command (and at boot by `pd-device-update-confirm.service`).
-pub const PD_UPDATE_STATUS: &str = "/run/pd-device/update.json";
-/// While an image is copied into the inactive slot: `pd-image-slots`' own progress, 0..1000.
-pub const PD_UPDATE_COPY_PROGRESS: &str = "/run/pd-device/update/progress";
+/// rewritten by every update command (and at boot by `board-update-confirm.service`).
+pub const BOARD_UPDATE_STATUS: &str = "/run/board/update.json";
+/// While an image is copied into the inactive slot: `board-image-slots`' own progress, 0..1000.
+pub const BOARD_UPDATE_COPY_PROGRESS: &str = "/run/board/update/progress";
 
 /// The updater's state, as `update status` prints it. `progress` is 0..1000.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PdUpdateStatus {
+pub struct BoardUpdateStatus {
     /// idle, staging, staged, trying, confirmed, rolled-back or error.
     #[serde(default)]
     pub state: String,
@@ -46,7 +46,7 @@ fn empty_as_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Op
     Ok(value.filter(|v| !v.trim().is_empty()))
 }
 
-impl PdUpdateStatus {
+impl BoardUpdateStatus {
     pub fn parse(json: &str) -> Option<Self> {
         serde_json::from_str(json.lines().next()?).ok()
     }
@@ -89,8 +89,8 @@ impl PdUpdateStatus {
 
 /// Reads the updater's status file; while it copies an image, the copy's own progress (0..1000)
 /// maps to 100..950 as `update status` reports it.
-pub fn read_status_at(status_path: &Path, copy_progress_path: &Path) -> Option<PdUpdateStatus> {
-    let mut status = PdUpdateStatus::parse(&fs::read_to_string(status_path).ok()?)?;
+pub fn read_status_at(status_path: &Path, copy_progress_path: &Path) -> Option<BoardUpdateStatus> {
+    let mut status = BoardUpdateStatus::parse(&fs::read_to_string(status_path).ok()?)?;
     if status.state == "staging"
         && status.progress >= 100
         && let Some(copied) = read_trimmed(copy_progress_path).and_then(|p| p.parse::<u32>().ok())
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn parses_the_writer_status() {
-        let status = PdUpdateStatus::parse(r#"{"state":"staged","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("status");
+        let status = BoardUpdateStatus::parse(r#"{"state":"staged","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("status");
         assert_eq!(status.slot_staged.as_deref(), Some("B"));
         assert_eq!(status.error, None);
         assert_eq!(status.percent(), Some(100));
@@ -127,13 +127,13 @@ mod tests {
 
     #[test]
     fn trial_boot_stages() {
-        let mut status = PdUpdateStatus { state: "trying".into(), slot_active: Some("A".into()), slot_staged: Some("B".into()), ..PdUpdateStatus::default() };
+        let mut status = BoardUpdateStatus { state: "trying".into(), slot_active: Some("A".into()), slot_staged: Some("B".into()), ..BoardUpdateStatus::default() };
         assert_eq!(status.atlas_stage(), "rebooting");
         status.slot_active = Some("B".into());
         assert_eq!(status.atlas_stage(), "finalizing");
         status.state = "rolled-back".into();
         assert_eq!(status.atlas_stage(), "rolled_back");
-        let off_layout = PdUpdateStatus { state: "idle".into(), slot_active: Some("unknown".into()), ..PdUpdateStatus::default() };
+        let off_layout = BoardUpdateStatus { state: "idle".into(), slot_active: Some("unknown".into()), ..BoardUpdateStatus::default() };
         assert!(!off_layout.on_ab_layout());
     }
 

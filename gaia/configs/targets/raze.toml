@@ -36,8 +36,8 @@ out_dir = "$provider.images"
 # --- p1: autoboot --------------------------------------------------------------
 # autoboot.txt only. The bootloader reads it first: boot A (p2) by default,
 # boot B (p3) once on a tryboot. The device package's writer rewrites it,
-# keeps its state there (pd-update.env), and reads opt-in SSH keys from
-# pd-device/authorized_keys on it, so p1 is shared by both slots.
+# keeps its state there (board-update.env), and reads opt-in SSH keys from
+# board/authorized_keys on it, so p1 is shared by both slots.
 [[image.assembly.trees]]
 id = "autoboot"
 path = "$assembly.work/autoboot"

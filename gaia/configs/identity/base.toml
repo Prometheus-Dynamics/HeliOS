@@ -63,7 +63,7 @@ dest = "/etc/timezone"
 origin = "static-asset"
 
 # manage_url for Atlas ("Web UI"): http://<hostname>.local:5800/, written to
-# /run at boot because the hostname is per board (/etc/pd-device/manage-url
+# /run at boot because the hostname is per board (/etc/board/manage-url
 # links there, gaia/assets/buildroot/scripts/post-build.sh).
 [[stage.files]]
 id = "identity-manage-url-script"
@@ -107,11 +107,22 @@ entries = [
   ["ORION_COMMIT", "${source.orion.commit}"],
 ]
 
+# The Raze board package's commit for its identity (`device_package.commit`):
+# a package imported from a source leaves BOARD_PACKAGE_COMMIT empty and reads
+# it from /etc/board/board-package.env, which the image links to this file
+# (assets/buildroot/scripts/post-build.sh).
+[[stage.env_sets]]
+id = "identity-board-package"
+name = "board-package"
+entries = [
+  ["BOARD_PACKAGE_COMMIT", "${source.atlas.commit}"],
+]
+
 [image]
 kind = "buildroot"
 
 [image.feed]
-stage_env_sets = ["identity-image-version"]
+stage_env_sets = ["identity-image-version", "identity-board-package"]
 stage_files = [
   "identity-hosts",
   "identity-nsswitch",

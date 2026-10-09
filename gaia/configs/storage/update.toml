@@ -1,24 +1,24 @@
 description = "A/B updates with the Raze device package's writer: the OS hooks it runs (health check, pre-reboot), and orion-node's state on the data partition."
 
-# The device package's writer (/usr/lib/pd-device/update, Atlas docs/ota.md)
+# The device package's writer (/usr/lib/board/update, Atlas docs/ota.md)
 # takes the same .img.xz that is flashed: `stage` copies its boot and root
 # slot A into the board's inactive slot, `apply` runs update.d/pre-reboot and
-# trial-boots it, and pd-device-update-confirm keeps it once update-health
+# trial-boots it, and board-update-confirm keeps it once update-health
 # passes (else the board restarts into the previous slot). helios-api drives
 # it for /v1/update/* and /v1/ota/*. pre-stage, post-stage and post-boot hooks
 # are not needed: staging touches only the inactive slot.
 
 [[stage.files]]
 id = "update-health"
-src = "@assets/update/etc/pd-device/update-health"
-dest = "/etc/pd-device/update-health"
+src = "@assets/update/etc/board/update-health"
+dest = "/etc/board/update-health"
 origin = "static-asset"
 mode = 493
 
 [[stage.files]]
 id = "update-pre-reboot"
-src = "@assets/update/etc/pd-device/update.d/pre-reboot"
-dest = "/etc/pd-device/update.d/pre-reboot"
+src = "@assets/update/etc/board/update.d/pre-reboot"
+dest = "/etc/board/update.d/pre-reboot"
 origin = "static-asset"
 mode = 493
 

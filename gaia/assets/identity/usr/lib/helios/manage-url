@@ -1,8 +1,8 @@
 #!/bin/sh
 # Tell Atlas where the HeliOS UI is: the device package's identity endpoint
-# reports /etc/pd-device/manage-url as manage_url. The hostname is per board
-# (helios-<serial8>, set at boot by pd-device-hostname), so the URL is written
-# every boot, to /run (the image links /etc/pd-device/manage-url there).
+# reports /etc/board/manage-url as manage_url. The hostname is per board
+# (helios-<serial8>, set at boot by board-hostname), so the URL is written
+# every boot, to /run (the image links /etc/board/manage-url there).
 # helios-api serves the UI and the API on :5800.
 set -eu
 mkdir -p /run/helios

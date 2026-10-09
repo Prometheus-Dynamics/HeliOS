@@ -37,7 +37,7 @@ impl Default for DiagnosticsConfig {
             machine_id_path: PathBuf::from("/etc/machine-id"),
             persistent_machine_id_path: PathBuf::from("/data/identity/machine-id"),
             ssh_host_key_dir: PathBuf::from("/data/ssh"),
-            update_status_path: PathBuf::from("/run/pd-device/update.json"),
+            update_status_path: PathBuf::from("/run/board/update.json"),
             startup_preset_path: PathBuf::from("/etc/helios/startup.toml"),
             snapshot_tar: true,
             snapshot_keep: 10,

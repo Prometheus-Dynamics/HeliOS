@@ -19,9 +19,9 @@ const EXPECTED_BINARIES: &[&str] = &["/usr/bin/orion-node", "/usr/bin/orionctl",
 
 const EXPECTED_SERVICES: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
 
-const EXPECTED_EXECUTABLE_FILES: &[&str] = &["/usr/lib/helios/data-setup", "/opt/set-governor.sh", "/opt/helios-update-issue.sh", "/etc/pd-device/update-health", "/etc/pd-device/update.d/pre-reboot"];
-const PD_UPDATE_TOOL: &str = "/usr/lib/pd-device/update";
-const PD_UPDATE_HEALTH: &str = "/etc/pd-device/update-health";
+const EXPECTED_EXECUTABLE_FILES: &[&str] = &["/usr/lib/helios/data-setup", "/opt/set-governor.sh", "/opt/helios-update-issue.sh", "/etc/board/update-health", "/etc/board/update.d/pre-reboot"];
+const BOARD_UPDATE_TOOL: &str = "/usr/lib/board/update";
+const BOARD_UPDATE_HEALTH: &str = "/etc/board/update-health";
 const SSH_HOST_KEYS: &[&str] = &["ssh_host_ecdsa_key", "ssh_host_ed25519_key", "ssh_host_rsa_key"];
 
 pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport> {
@@ -345,9 +345,9 @@ fn collect_orion(path: &Path) -> OrionReport {
 fn collect_update_report(status_path: &Path) -> UpdateReport {
     let status = fs::read_to_string(status_path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next().unwrap_or_default()).ok());
     let field = |key: &str| status.as_ref().and_then(|s| s.get(key)).and_then(|v| v.as_str()).map(str::to_string).filter(|v| !v.is_empty());
-    let tool_installed = is_executable(Path::new(PD_UPDATE_TOOL));
-    let confirm_service_loaded = systemd_unit_load_state("pd-device-update-confirm.service").is_some_and(|state| state == "loaded");
-    let health_check_installed = is_executable(Path::new(PD_UPDATE_HEALTH));
+    let tool_installed = is_executable(Path::new(BOARD_UPDATE_TOOL));
+    let confirm_service_loaded = systemd_unit_load_state("board-update-confirm.service").is_some_and(|state| state == "loaded");
+    let health_check_installed = is_executable(Path::new(BOARD_UPDATE_HEALTH));
     let slot_active = field("slot_active");
     let ab_layout = matches!(slot_active.as_deref(), Some("A" | "B"));
     let state = field("state");

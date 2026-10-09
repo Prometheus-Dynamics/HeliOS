@@ -12,8 +12,8 @@ pub const DEFAULT_STATE_DIR: &str = "/var/lib/helios/api";
 pub const DEFAULT_UPLOAD_DIR: &str = "/var/lib/helios/updates";
 /// The UI's static build (`ui/`), served next to the API on the same port.
 pub const DEFAULT_UI_DIR: &str = "/usr/share/helios/ui";
-/// Written by the Raze device package (`pd-device identity --write`).
-pub const DEFAULT_PD_IDENTITY_PATH: &str = "/run/pd-device/identity.json";
+/// Written by the Raze device package (`/usr/lib/board/identity --write`).
+pub const DEFAULT_BOARD_IDENTITY_PATH: &str = "/run/board/identity.json";
 
 /// systemd units the API reports and may restart.
 pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
@@ -28,18 +28,18 @@ pub struct ApiConfig {
     pub state_dir: PathBuf,
     /// Where OTA uploads are kept until they are staged.
     pub upload_dir: PathBuf,
-    /// The device package's update CLI (`/usr/lib/pd-device/update`).
-    pub pd_update_tool: PathBuf,
-    /// Its state file (`/run/pd-device/update.json`).
-    pub pd_update_status: PathBuf,
-    /// Its live copy progress while staging (`/run/pd-device/update/progress`).
-    pub pd_update_progress: PathBuf,
+    /// The device package's update CLI (`/usr/lib/board/update`).
+    pub board_update_tool: PathBuf,
+    /// Its state file (`/run/board/update.json`).
+    pub board_update_status: PathBuf,
+    /// Its live copy progress while staging (`/run/board/update/progress`).
+    pub board_update_progress: PathBuf,
     /// Run the update CLI through `systemd-run`, outside helios-api's cgroup, so that stopping
     /// helios-api (the pre-reboot hook does) cannot kill it. Off runs it directly (tests).
-    pub pd_update_systemd_run: bool,
+    pub board_update_systemd_run: bool,
     /// The UI's static files; `None` (or a missing directory) serves the API only.
     pub ui_dir: Option<PathBuf>,
-    pub pd_identity_path: PathBuf,
+    pub board_identity_path: PathBuf,
     /// `Access-Control-Allow-Origin` value; `None` sends no CORS headers.
     pub cors_origin: Option<String>,
     /// Largest accepted OTA upload.
@@ -57,12 +57,12 @@ impl Default for ApiConfig {
             orion_stream_socket: DEFAULT_ORION_STREAM_SOCKET.into(),
             state_dir: DEFAULT_STATE_DIR.into(),
             upload_dir: DEFAULT_UPLOAD_DIR.into(),
-            pd_update_tool: crate::pd_update::PD_UPDATE_TOOL.into(),
-            pd_update_status: crate::pd_update::PD_UPDATE_STATUS.into(),
-            pd_update_progress: crate::pd_update::PD_UPDATE_COPY_PROGRESS.into(),
-            pd_update_systemd_run: true,
+            board_update_tool: crate::board_update::BOARD_UPDATE_TOOL.into(),
+            board_update_status: crate::board_update::BOARD_UPDATE_STATUS.into(),
+            board_update_progress: crate::board_update::BOARD_UPDATE_COPY_PROGRESS.into(),
+            board_update_systemd_run: true,
             ui_dir: Some(DEFAULT_UI_DIR.into()),
-            pd_identity_path: DEFAULT_PD_IDENTITY_PATH.into(),
+            board_identity_path: DEFAULT_BOARD_IDENTITY_PATH.into(),
             cors_origin: None,
             max_upload_bytes: 8 << 30,
             auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
@@ -101,14 +101,14 @@ impl ApiConfig {
         if let Some(value) = env.get("HELIOS_API_UPLOAD_DIR") {
             config.upload_dir = value.into();
         }
-        if let Some(value) = env.get("HELIOS_PD_UPDATE_TOOL") {
-            config.pd_update_tool = value.into();
+        if let Some(value) = env.get("HELIOS_BOARD_UPDATE_TOOL") {
+            config.board_update_tool = value.into();
         }
         if let Some(value) = env.get("HELIOS_API_UI_DIR") {
             config.ui_dir = if value == "off" { None } else { Some(value.into()) };
         }
-        if let Some(value) = env.get("HELIOS_PD_IDENTITY_PATH") {
-            config.pd_identity_path = value.into();
+        if let Some(value) = env.get("HELIOS_BOARD_IDENTITY_PATH") {
+            config.board_identity_path = value.into();
         }
         if let Some(value) = env.get("HELIOS_API_CORS_ORIGIN") {
             config.cors_origin = Some(value.clone());

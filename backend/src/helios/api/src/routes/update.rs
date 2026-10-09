@@ -1,13 +1,13 @@
 //! OS updates (OTA): upload an image, stage and apply it, follow it.
 //!
 //! HeliOS has no updater of its own. The Raze device package's A/B writer
-//! (`/usr/lib/pd-device/update`, Atlas `docs/ota.md`) takes the same `.img.xz` that is flashed:
+//! (`/usr/lib/board/update`, Atlas `docs/ota.md`) takes the same `.img.xz` that is flashed:
 //! `stage` checks its SHA-256 and copies its boot and root slot A into the board's inactive
 //! slot, `apply` runs the image's pre-reboot hook and trial-boots that slot, and
-//! `pd-device-update-confirm.service` keeps it once `/etc/pd-device/update-health` passes (or
+//! `board-update-confirm.service` keeps it once `/etc/board/update-health` passes (or
 //! the board falls back by itself). This module is a thin adapter: it stores uploads on the data
 //! partition, runs `stage` and `apply` through `systemd-run` (outside helios-api's cgroup: the
-//! pre-reboot hook stops helios-api), and reports the writer's `/run/pd-device/update.json`.
+//! pre-reboot hook stops helios-api), and reports the writer's `/run/board/update.json`.
 //!
 //! `/v1/ota/*` is the contract Atlas Hardware Manager's HTTP OTA client speaks (multipart
 //! upload, `image_url` apply, lenient state polling).
@@ -28,11 +28,11 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     SharedState,
+    board_update::{self, BoardUpdateStatus},
     config::ApiConfig,
     error::{ApiError, ApiResult},
     events::{ApiEvent, sse_stream},
     host::now_ms,
-    pd_update::{self, PdUpdateStatus},
 };
 
 const META_FILE: &str = "upload.json";
@@ -237,34 +237,34 @@ pub fn version_for(upload: &Upload, requested: Option<String>) -> String {
     requested
         .filter(|v| !v.trim().is_empty())
         .or_else(|| upload.version.clone())
-        .or_else(|| pd_update::infer_version_from_path(std::path::Path::new(&upload.filename)))
+        .or_else(|| board_update::infer_version_from_path(std::path::Path::new(&upload.filename)))
         .unwrap_or_else(|| format!("upload-{}", &upload.sha256[..12]))
 }
 
 fn tool_installed(config: &ApiConfig) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(&config.pd_update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    std::fs::metadata(&config.board_update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// `update <args>`, through `systemd-run` on the device so the command lives in its own unit.
 /// `wait`: block until it ends (stage); otherwise only start it (apply, which reboots).
-fn pd_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> tokio::process::Command {
+fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> tokio::process::Command {
     let mut command;
-    if config.pd_update_systemd_run {
+    if config.board_update_systemd_run {
         command = tokio::process::Command::new("systemd-run");
-        command.args(["--quiet", "--collect", "--description=HeliOS OS update (device package writer)"]);
+        command.args(["--quiet", "--collect", "--description=HeliOS OS update (board update)"]);
         if wait {
             command.args(["--wait", "--pipe"]);
         }
-        command.arg("--").arg(&config.pd_update_tool);
+        command.arg("--").arg(&config.board_update_tool);
     } else {
-        command = tokio::process::Command::new(&config.pd_update_tool);
+        command = tokio::process::Command::new(&config.board_update_tool);
     }
     command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(false);
     command
 }
 
-/// The writer's last words on stderr (it logs `pd-device: <reason>`), else the exit status.
+/// The writer's last words on stderr (it logs `update: <reason>`), else the exit status.
 fn command_error(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     stderr
@@ -272,7 +272,7 @@ fn command_error(output: &std::process::Output) -> String {
         .rev()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .map(|line| line.trim_start_matches("pd-device:").trim().to_string())
+        .map(|line| line.trim_start_matches("update:").trim_start_matches("board:").trim().to_string())
         .unwrap_or_else(|| format!("the device package updater exited with {}", output.status))
 }
 
@@ -291,7 +291,7 @@ fn publish_status(state: &SharedState, change: &str) {
 
 async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTask, _guard: tokio::sync::OwnedMutexGuard<()>) {
     let image = upload.path(&state.config).display().to_string();
-    let result = pd_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true).output().await;
+    let result = board_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true).output().await;
     match result {
         Ok(output) if output.status.success() => {
             tracing::info!(version = %task.version, "update staged");
@@ -318,7 +318,7 @@ async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTas
     }
     // `update apply` runs the pre-reboot hook (which stops helios-api, among others) and
     // reboots into the staged slot on trial; it is started in its own unit and not awaited.
-    match pd_update_command(&state.config, &["apply"], false).output().await {
+    match board_update_command(&state.config, &["apply"], false).output().await {
         Ok(output) if output.status.success() => tracing::info!(version = %task.version, "update applied; rebooting into the staged slot on trial"),
         Ok(output) => {
             task.step = "failed".into();
@@ -343,11 +343,11 @@ async fn apply_upload(state: &SharedState, upload: Upload, version: Option<Strin
     }
     if !tool_installed(&state.config) {
         return Err(ApiError::not_available(
-            format!("the device package updater ({}) is not installed", state.config.pd_update_tool.display()),
-            "the Raze device package's A/B updater (Atlas devices/raze 1.4.0 or newer) and an A/B disk layout",
+            format!("the device package updater ({}) is not installed", state.config.board_update_tool.display()),
+            "the Raze board package's A/B writer (/usr/lib/board/update, Atlas devices/raze at 3c97fa0 or newer) and an A/B disk layout",
         ));
     }
-    if let Some(current) = read_pd_status(&state.config) {
+    if let Some(current) = read_board_status(&state.config) {
         if current.state == "trying" {
             return Err(ApiError::conflict("the last update is still on trial; wait for it to be confirmed or rolled back"));
         }
@@ -398,7 +398,7 @@ pub async fn apply(State(state): State<SharedState>, Json(request): Json<ApplyRe
 }
 
 pub async fn switch_slot() -> ApiError {
-    ApiError::not_available("switching boot slots without an update is not available", "the device package's writer offering a trial boot of the other slot without staging an image")
+    ApiError::not_available("switching boot slots without an update is not available", "the board update writer offering a trial boot of the other slot without staging an image")
 }
 
 // --- status --------------------------------------------------------------------
@@ -420,7 +420,7 @@ pub struct UpdateStatus {
     pub stage: String,
     pub progress_percent: Option<u8>,
     pub last_error: Option<String>,
-    /// `/usr/lib/pd-device/update` is installed.
+    /// `/usr/lib/board/update` is installed.
     pub updater_available: bool,
     pub slots: Slots,
     pub version_active: Option<String>,
@@ -429,8 +429,8 @@ pub struct UpdateStatus {
     pub task: Option<UpdateTask>,
 }
 
-fn read_pd_status(config: &ApiConfig) -> Option<PdUpdateStatus> {
-    pd_update::read_status_at(&config.pd_update_status, &config.pd_update_progress)
+fn read_board_status(config: &ApiConfig) -> Option<BoardUpdateStatus> {
+    board_update::read_status_at(&config.board_update_status, &config.board_update_progress)
 }
 
 fn current_task(state: &SharedState) -> Option<UpdateTask> {
@@ -438,43 +438,43 @@ fn current_task(state: &SharedState) -> Option<UpdateTask> {
 }
 
 pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus {
-    let pd = read_pd_status(config);
+    let board = read_board_status(config);
     let running = task.as_ref().is_some_and(|t| t.step == "staging");
-    let (phase, stage, progress_percent) = match &pd {
+    let (phase, stage, progress_percent) = match &board {
         // Staging asked for, but the writer has not written its first state yet.
-        Some(pd) if running && !matches!(pd.state.as_str(), "staging" | "error") => ("staging".to_string(), "verifying".to_string(), Some(0)),
-        Some(pd) => (pd.state.clone(), pd.atlas_stage().to_string(), pd.percent()),
+        Some(board) if running && !matches!(board.state.as_str(), "staging" | "error") => ("staging".to_string(), "verifying".to_string(), Some(0)),
+        Some(board) => (board.state.clone(), board.atlas_stage().to_string(), board.percent()),
         None if running => ("staging".to_string(), "verifying".to_string(), Some(0)),
         None => ("unknown".to_string(), "unknown".to_string(), None),
     };
     let task_error = task.as_ref().filter(|t| t.step == "failed").and_then(|t| t.error.clone());
-    let last_error = pd.as_ref().filter(|pd| matches!(pd.state.as_str(), "error" | "rolled-back") || pd.error.is_some()).and_then(|pd| pd.error.clone()).or(task_error);
+    let last_error = board.as_ref().filter(|board| matches!(board.state.as_str(), "error" | "rolled-back") || board.error.is_some()).and_then(|board| board.error.clone()).or(task_error);
     UpdateStatus {
         phase,
         stage,
         progress_percent,
         last_error,
         updater_available: tool_installed(config),
-        slots: Slots { active: pd.as_ref().and_then(|pd| pd.slot_active.clone()), staged: pd.as_ref().and_then(|pd| pd.slot_staged.clone()) },
-        version_active: pd.as_ref().and_then(|pd| pd.version_active.clone()),
-        version_staged: pd.as_ref().and_then(|pd| pd.version_staged.clone()),
+        slots: Slots { active: board.as_ref().and_then(|board| board.slot_active.clone()), staged: board.as_ref().and_then(|board| board.slot_staged.clone()) },
+        version_active: board.as_ref().and_then(|board| board.version_active.clone()),
+        version_staged: board.as_ref().and_then(|board| board.version_staged.clone()),
         task,
     }
 }
 
-/// Before the writer has run on this boot `/run/pd-device/update.json` may be missing;
+/// Before the writer has run on this boot `/run/board/update.json` may be missing;
 /// `update status` writes it (it reads the state kept on p1).
-async fn ensure_pd_status(config: &ApiConfig) {
-    if config.pd_update_status.exists() || !tool_installed(config) {
+async fn ensure_board_status(config: &ApiConfig) {
+    if config.board_update_status.exists() || !tool_installed(config) {
         return;
     }
-    let mut command = tokio::process::Command::new(&config.pd_update_tool);
+    let mut command = tokio::process::Command::new(&config.board_update_tool);
     command.arg("status").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command.status()).await;
 }
 
 pub async fn current_status(state: &SharedState) -> UpdateStatus {
-    ensure_pd_status(&state.config).await;
+    ensure_board_status(&state.config).await;
     status_from(&state.config, current_task(state))
 }
 
@@ -575,10 +575,10 @@ mod tests {
     fn config(dir: &std::path::Path) -> ApiConfig {
         ApiConfig {
             upload_dir: dir.join("uploads"),
-            pd_update_tool: dir.join("pd-update"),
-            pd_update_status: dir.join("update.json"),
-            pd_update_progress: dir.join("progress"),
-            pd_update_systemd_run: false,
+            board_update_tool: dir.join("board-update"),
+            board_update_status: dir.join("update.json"),
+            board_update_progress: dir.join("progress"),
+            board_update_systemd_run: false,
             ui_dir: None,
             max_upload_bytes: 64,
             ..ApiConfig::default()
@@ -622,8 +622,8 @@ mod tests {
     fn status_follows_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
-        std::fs::write(&config.pd_update_status, r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#).expect("write");
-        std::fs::write(&config.pd_update_progress, "1000").expect("write");
+        std::fs::write(&config.board_update_status, r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#).expect("write");
+        std::fs::write(&config.board_update_progress, "1000").expect("write");
         let status = status_from(&config, None);
         assert_eq!(status.phase, "staging");
         assert_eq!(status.stage, "installing");
@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(status.slots.staged.as_deref(), Some("B"));
 
         std::fs::write(
-            &config.pd_update_status,
+            &config.board_update_status,
             r#"{"state":"rolled-back","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":"the health check failed on v2"}"#,
         )
         .expect("write");
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(status.last_error.as_deref(), Some("the health check failed on v2"));
     }
 
-    /// A stand-in for `/usr/lib/pd-device/update` that records its arguments and writes the
+    /// A stand-in for `/usr/lib/board/update` that records its arguments and writes the
     /// writer's state file as the real one does.
     fn fake_writer(dir: &std::path::Path, stage_ok: bool) -> PathBuf {
         let log = dir.join("calls.log");
@@ -648,14 +648,14 @@ mod tests {
         let stage = if stage_ok {
             format!(r#"printf '%s\n' '{{"state":"staged","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}}' > {}"#, status.display())
         } else {
-            "echo 'pd-device: the image failed its SHA-256 check (damaged or incomplete copy)' >&2; exit 1".to_string()
+            "echo 'update: the image failed its SHA-256 check (damaged or incomplete copy)' >&2; exit 1".to_string()
         };
         let script = format!(
             "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$1\" in\nstage) {stage} ;;\napply) printf '%s\\n' '{{\"state\":\"trying\",\"slot_active\":\"A\",\"slot_staged\":\"B\",\"version_active\":\"v1\",\"version_staged\":\"v2\",\"progress\":1000,\"error\":\"\"}}' > {status} ;;\nesac\n",
             log = log.display(),
             status = status.display(),
         );
-        let path = dir.join("pd-update");
+        let path = dir.join("board-update");
         std::fs::write(&path, script).expect("write");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         std::fs::write(&status, r#"{"state":"idle","slot_active":"A","slot_staged":"","version_active":"v1","version_staged":"","progress":0,"error":""}"#).expect("write");
@@ -678,7 +678,7 @@ mod tests {
     async fn apply_stages_then_applies_through_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = config(dir.path());
-        config.pd_update_tool = fake_writer(dir.path(), true);
+        config.board_update_tool = fake_writer(dir.path(), true);
         let state = crate::AppState::new(config.clone());
         let upload = store_upload(&config, "helios-full-raze-v2.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
         let response = apply_upload(&state, upload.clone(), None, Some(upload.sha256.clone()), true).await.expect("apply");
@@ -703,7 +703,7 @@ mod tests {
     async fn a_failed_stage_is_reported_and_not_applied() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = config(dir.path());
-        config.pd_update_tool = fake_writer(dir.path(), false);
+        config.board_update_tool = fake_writer(dir.path(), false);
         let state = crate::AppState::new(config.clone());
         let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
         apply_upload(&state, upload.clone(), None, None, true).await.expect("apply");
@@ -725,8 +725,8 @@ mod tests {
         assert_eq!(error.code, crate::error::ErrorCode::NotAvailable);
 
         let mut config = config.clone();
-        config.pd_update_tool = fake_writer(dir.path(), true);
-        std::fs::write(&config.pd_update_status, r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("write");
+        config.board_update_tool = fake_writer(dir.path(), true);
+        std::fs::write(&config.board_update_status, r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("write");
         let state = crate::AppState::new(config);
         let error = apply_upload(&state, upload, None, None, true).await.expect_err("on trial");
         assert_eq!(error.code, crate::error::ErrorCode::Conflict);

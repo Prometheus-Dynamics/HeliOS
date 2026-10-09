@@ -183,7 +183,7 @@ If no paths are provided, both documents are printed to stdout.
 When developing locally, prefer `cargo run -p helios-api --profile dev-release` for faster rebuilds and linking. Use `--release` when validating production performance. The first run will create a `.env` file populated with default configuration values if none exists. On the target device the built API binary is started by systemd and listens on multiple ports for HTTP, JSON‑RPC, WebSocket and NetworkTables.
 
 Hardware specific kernel modules can be loaded automatically by setting the `OPTIONAL_KERNEL_MODULES` environment variable. Provide a comma separated list of module names and the server will attempt to `modprobe` each one without failing if a module is missing.
-The Raze sensor description (IMU, magnetometer, power monitor and their I2C buses) is shipped by the Raze device package at `/usr/share/pd-device/raze/sensors.toml`. HeliOS no longer stages `/etc/helios/sensors.toml`; `helios-peripherals` watches the files listed in `HELIOS_SENSOR_CONFIG_PATHS` (comma separated, unset by default in the image).
+The Raze sensor description (IMU, magnetometer, power monitor and their I2C buses) is shipped by the Raze device package at `/usr/share/board/raze/sensors.toml`. HeliOS no longer stages `/etc/helios/sensors.toml`; `helios-peripherals` watches the files listed in `HELIOS_SENSOR_CONFIG_PATHS` (comma separated, unset by default in the image).
 
 ### First-Boot Stream/Pipeline Startup Preset
 

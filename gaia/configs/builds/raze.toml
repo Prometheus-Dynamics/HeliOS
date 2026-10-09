@@ -38,17 +38,18 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package (Atlas dev 6f51064): EROFS, 4 KiB pages, updater safety nets.
-# base.toml), Bootlin bleeding-edge toolchain, kernel 7.2 with the Raze trims
+# Raze device package (Atlas dev 3c97fa0: the pd-device machinery renamed
+# board-*; network discovery keeps _pd-device._tcp and /.well-known/pd-device):
+# EROFS, 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2 with the Raze trims
 # and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915, libcamera 0.7.2, the
-# A/B update writer (/usr/lib/pd-device/update, pd-image-slots) for the same
+# A/B update writer (/usr/lib/board/update, board-image-slots) for the same
 # .img.xz that is flashed, read-only-root-safe device services, no udev hwdb,
 # optional Vulkan layer.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "0fc8ecf8f7814b9276988999c8108205b99d3102"
+rev = "3c97fa0c45a76323199aabf1f153e86b3d46e2c9"
 
 # Orion v4 (main 7f9c88a: CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`

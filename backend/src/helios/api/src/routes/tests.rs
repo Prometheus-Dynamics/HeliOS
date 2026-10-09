@@ -14,13 +14,13 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
         state_dir: dir.join("state"),
-        pd_update_tool: dir.join("no-pd-update"),
-        pd_update_status: dir.join("update.json"),
-        pd_update_progress: dir.join("update-progress"),
-        pd_update_systemd_run: false,
+        board_update_tool: dir.join("no-board-update"),
+        board_update_status: dir.join("update.json"),
+        board_update_progress: dir.join("update-progress"),
+        board_update_systemd_run: false,
         ui_dir: None,
         upload_dir: dir.join("uploads"),
-        pd_identity_path: dir.join("identity.json"),
+        board_identity_path: dir.join("identity.json"),
         auth_file: dir.join("auth").join("auth.json"),
         ..ApiConfig::default()
     })
@@ -105,7 +105,7 @@ async fn identity_merges_the_device_package_document() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["model"], "raze");
     assert_eq!(body["serial"], "10000000abcdef01");
-    assert_eq!(body["helios"]["source"], "pd-device");
+    assert_eq!(body["helios"]["source"], "board");
     assert_eq!(body["helios"]["api_version"], "v1");
     let methods: Vec<&str> = body["update_methods"].as_array().expect("methods").iter().filter_map(|m| m.as_str()).collect();
     assert_eq!(methods, vec!["image-write", "ab-tryboot", "helios-ota"]);
@@ -145,7 +145,7 @@ async fn raw_upload_then_apply_needs_the_device_package_writer() {
     let (status, list) = call(&state, "GET", "/v1/update/uploads", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list.as_array().map(Vec::len), Some(1));
-    // No /usr/lib/pd-device/update here: applying is not available, and the upload stays.
+    // No /usr/lib/board/update here: applying is not available, and the upload stays.
     let (status, body) = call(&state, "POST", "/v1/update/apply", Some(serde_json::json!({ "upload_id": upload["id"] }))).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
     assert_eq!(body["error"]["code"], "not_available");

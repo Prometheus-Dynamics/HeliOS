@@ -1,7 +1,7 @@
 # HeliOS sshd configuration. The root filesystem is read-only.
 
-# The device package's drop-in (50-pd-device.conf) adds the keys left on the
-# boot partition, from /run/pd-device/ssh/authorized_keys. It must come before
+# The device package's drop-in (50-board.conf) adds the keys left on the
+# boot partition, from /run/board/ssh/authorized_keys. It must come before
 # any AuthorizedKeysFile line: sshd keeps the first value it reads.
 Include /etc/ssh/sshd_config.d/*.conf
 

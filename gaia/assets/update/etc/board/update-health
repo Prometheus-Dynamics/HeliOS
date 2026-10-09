@@ -1,5 +1,5 @@
 #!/bin/sh
-# Health check for the device package's A/B updater (pd-device-update-confirm,
+# Health check for the device package's A/B updater (board-update-confirm,
 # on a trial boot, after UPDATE_CONFIRM_DELAY): exit 0 keeps the new slot,
 # anything else restarts into the previous one.
 #

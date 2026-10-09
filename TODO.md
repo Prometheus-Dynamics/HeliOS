@@ -13,7 +13,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
 | Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (bcc9f33, plugin ABI 9: multi-camera ticks, shared upstream `ExecutionDomain`, node fusion, `daedalus:frame` v2), Styx `dev` (ab6af18: `FrameGrouper`, `styx::preview`, styx-record, connection events), Eidos `main` (853aa0d: fisheye/pinhole pose, `aruco.pose`, `aruco.field_pose`), Orion v4 `main` (7f9c88a, also the Gaia `orion` source; they must match), Lemnos `dev` (cd72ad0); one source each in the lock |
 | UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
-| Raze device package | Atlas `dev`, 1.5.0 (695d172) | pinned by HeliOS: A/B update writer, EROFS root, read-only-safe services |
+| Raze board package | Atlas `dev` (3c97fa0, the `pd-device` machinery renamed `board-*`: `/usr/lib/board`, `/run/board`, `/etc/board`, `/data/board`, `board-*` units, `BOARD_*`; discovery keeps `_pd-device._tcp` and `/.well-known/pd-device`) | pinned by HeliOS: A/B update writer (board update), EROFS root, read-only-safe services |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
 | Gaia | `main` (2.0.0, d82a9b7) | installed in `~/.cargo/bin` |
 
@@ -21,12 +21,12 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 - [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) on a free machine. First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
 - [ ] A/B and read-only root on hardware: first boot (data.ext4 grows to the eMMC, `/data` binds, machine-id and SSH host keys persist across a reboot and an update, hostname `helios-<serial8>`, `manage_url` `http://helios-<serial8>.local:5800/`), the UI on :5800, an update from the UI and from Atlas (stage, trial reboot, update-health confirms; a broken image rolls back), `rootfs.erofs` size vs. the 512 MiB slot, boot time with an LZMA root, journald after the machine-id bind (restarted once per boot), nothing writing to `/` (`journalctl -b | grep -i 'read-only'`).
-- [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `pd-device/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
+- [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `board/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
 - [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
 - [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, helios-engine and helios-peripherals connect with `Group=orion`, helios-api (root) and `orionctl` from a root shell are admitted (`ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root`; `orionctl` from Orion's `packaging/gaia/orionctl.toml`).
 - [ ] helios-api live metrics on the CM5: `GET /v1/metrics` and SSE `metrics` from Orion's host metrics (CPU per core, the hottest thermal zone; `ORION_NODE_HOST_FACTS_REFRESH_MS=2000`), `pipeline`/`resource` events within one sample, and the event stream surviving an orion-node restart.
 - [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
-- [x] Hostname: `helios-{serial8}` through the device package's hostname policy (`/etc/pd-device/hostname.env`); no static hostname.
+- [x] Hostname: `helios-{serial8}` through the device package's hostname policy (`/etc/board/hostname.env`); no static hostname.
 
 ## HeliOS image
 
@@ -50,7 +50,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Engine: one blocking `poll(2)` loop per graph thread over its cameras' Styx `FrameClient` fds and Daedalus's `inbound_fd()` (`tick_ready()` when it is readable); cameras are reconnecting `request_nonblocking` clients, so a missing camera (primary or secondary) never blocks the thread; `stop()` ends the loop through the inbound fd. No async runtime, no feeder thread.
 - [ ] Engine: measure on the CM5 that the poll loop keeps the old per-frame latency and CPU (`helios-vision-probe` drives from a capture thread; the engine's `telemetry` artifact has `last_tick_ms`, input push to tick end).
 - [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
-- [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
+- [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/board/raze/sensors.toml`.
 - [x] Application API v1 (docs/docs/api/http.md) and the UI on it (mocks behind `?mock=1`); Atlas's identity and OTA (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`).
 - [x] helios-api camera controls: `GET`/`PATCH`/`DELETE /v1/cameras/{id}/settings` on a Styx `ControlClient` per camera (no frames, no plan change, no buffers), changes as SSE `camera` events; the UI's camera pane uses them in live mode.
 - [x] Camera settings persist across reboots (HeliOS owns it): values set through the API are stored in `/var/lib/helios/api/camera-settings.json` and re-applied whenever a camera service appears (boot, service restart); `DELETE` resets to defaults and forgets them (docs/docs/api/http.md).
@@ -59,7 +59,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Device security, off by default: open (FRC) or secured with a device password (session cookie + CSRF) and API tokens; `/v1/auth/*`, the UI's Open/Secured indicator, Settings toggle and first-run step; state in `/var/lib/helios/auth/auth.json`; recovery with `helios-api auth reset` (docs/docs/api/http.md, Device security).
 - [ ] Security follow-ups: check on hardware that `/var/lib/helios/auth` survives an OTA and a rootfs reflash; Atlas to send a bearer token when `helios.auth.mode` is `secured` (and to its `/v1/device/os` reconnect probe); end open SSE streams on logout/revoke; optional signed-out read-only view; TLS (per-device certificate) as a later option.
 - [x] helios-api serves the UI and the API on :5800, the port `manage_url` names.
-- [x] OTA through the device package's writer: `/v1/update/*` and `/v1/ota/*` stage an uploaded `.img.xz` with its sha256 (`update stage`), apply it (`update apply`, through systemd-run) and report `/run/pd-device/update.json`.
+- [x] OTA through the device package's writer: `/v1/update/*` and `/v1/ota/*` stage an uploaded `.img.xz` with its sha256 (`update stage`), apply it (`update apply`, through systemd-run) and report `/run/board/update.json`.
 - [ ] OTA: optional image signatures (Atlas open question: where the key lives).
 
 ## Upstream
@@ -73,7 +73,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Orion: `orionctl` Gaia layer, root and supplementary-group admission, CPU and temperature host metrics, host metrics on the status lane (3cf27ed, 7f9c88a). HeliOS imports the layer; helios-api reads CPU and temperatures from Orion and follows Orion with a `ControlPlaneEventStream` instead of polling it.
 - [ ] Orion: an observed-state watch. `WatchState` fires on desired-revision changes only, so helios-api re-reads the state snapshot with every host sample to catch pipeline session and resource health changes.
 - [ ] Orion client: reconnecting a `ControlPlaneEventStream` under the same local address fails while the node still holds the old session (its queued events are flushed ahead of the subscription's `Accepted`, which `subscribe_and_expect_accepted` reports as `NoMessageAvailable`, until `ORION_NODE_LOCAL_SESSION_TTL_MS` expires). helios-api uses a fresh address per connection; the host-facts doc's reconnect advice hits this.
-- [ ] Atlas: `PD_DEVICE_PACKAGE_COMMIT` stays empty for git-source imports (Gaia now exposes `${source.atlas.commit}`).
+- [x] Atlas: `BOARD_PACKAGE_COMMIT` for a source import: HeliOS writes it (`${source.atlas.commit}`) to `/etc/default/board-package.env`, linked as `/etc/board/board-package.env`.
 - [ ] Gaia: `@source:` inside quoted Buildroot values (HeliOS keeps its own copy of Orion's users table); building related rust artifacts in one cargo invocation (engine and plugins).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 

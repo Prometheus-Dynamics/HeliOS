@@ -45,9 +45,9 @@ origin = "static-asset"
 
 # The device package's hostname default with a HeliOS prefix: helios-{serial8}.
 [[stage.files]]
-id = "pd-device-hostname-env"
-src = "@assets/os/etc/pd-device/hostname.env"
-dest = "/etc/pd-device/hostname.env"
+id = "board-hostname-env"
+src = "@assets/os/etc/board/hostname.env"
+dest = "/etc/board/hostname.env"
 origin = "static-asset"
 
 [image]
@@ -84,7 +84,7 @@ stage_files = [
   "data-grow-script",
   "sshd-config",
   "sshd-service-dropin",
-  "pd-device-hostname-env",
+  "board-hostname-env",
 ]
 stage_services = ["data-setup-service"]
 

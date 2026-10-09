@@ -133,13 +133,13 @@ pub struct OrionReport {
     pub control_stream_socket: bool,
 }
 
-/// The device package's A/B updater (`/usr/lib/pd-device/update`).
+/// The device package's A/B updater (`/usr/lib/board/update`).
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateReport {
     pub tool_installed: bool,
     pub confirm_service_loaded: bool,
     pub health_check_installed: bool,
-    /// From `/run/pd-device/update.json`.
+    /// From `/run/board/update.json`.
     pub state: Option<String>,
     pub slot_active: Option<String>,
     pub slot_staged: Option<String>,

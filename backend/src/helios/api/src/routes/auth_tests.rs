@@ -15,13 +15,13 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
         state_dir: dir.join("state"),
-        pd_update_tool: dir.join("no-pd-update"),
-        pd_update_status: dir.join("update.json"),
-        pd_update_progress: dir.join("update-progress"),
-        pd_update_systemd_run: false,
+        board_update_tool: dir.join("no-board-update"),
+        board_update_status: dir.join("update.json"),
+        board_update_progress: dir.join("update-progress"),
+        board_update_systemd_run: false,
         ui_dir: None,
         upload_dir: dir.join("uploads"),
-        pd_identity_path: dir.join("identity.json"),
+        board_identity_path: dir.join("identity.json"),
         auth_file: dir.join("auth").join("auth.json"),
         ..ApiConfig::default()
     })

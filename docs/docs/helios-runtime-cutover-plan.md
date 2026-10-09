@@ -22,7 +22,7 @@ The highest-priority concerns are:
 - Keep Styx as the media/capture/codec owner.
 - Keep Orion as the control-plane/resource/state owner.
 - Keep API application-level; it should not become an Orion control client.
-- HeliOS has no CLI of its own: use `orionctl` for Orion operations, `systemctl` for services, `helios-diagnostics` for health and the device package's `/usr/lib/pd-device/update` for updates; password recovery is `helios-api auth reset`.
+- HeliOS has no CLI of its own: use `orionctl` for Orion operations, `systemctl` for services, `helios-diagnostics` for health and the device package's `/usr/lib/board/update` for updates; password recovery is `helios-api auth reset`.
 
 ## Latest Device Memory Snapshot
 

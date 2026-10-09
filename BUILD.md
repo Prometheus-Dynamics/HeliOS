@@ -100,11 +100,11 @@ A running board updates from the same `.img.xz`:
   `POST /v1/update/apply` (docs/docs/api/http.md, "Updates");
 - from Atlas, over SSH or HTTP (`/v1/ota/*`);
 - on the board: copy it to `/data`, then
-  `/usr/lib/pd-device/update stage /data/<image>.img.xz --sha256 <hex>` and
-  `/usr/lib/pd-device/update apply` (the device package's A/B writer).
+  `/usr/lib/board/update stage /data/<image>.img.xz --sha256 <hex>` and
+  `/usr/lib/board/update apply` (the device package's A/B writer).
 
 The board reboots into the new slot on trial and keeps it once
-`/etc/pd-device/update-health` passes; otherwise it falls back to the previous
+`/etc/board/update-health` passes; otherwise it falls back to the previous
 slot by itself.
 
 On the device, `/etc/default/helios-image.env` records the image version and

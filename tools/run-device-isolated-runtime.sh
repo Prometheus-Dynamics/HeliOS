@@ -13,7 +13,7 @@ CLUSTER_ID="${CLUSTER_ID:-helios-isolated}"
 PROFILE_LABEL="${PROFILE_LABEL:-isolated}"
 NODE_TICK_MS="${NODE_TICK_MS:-250}"
 NODE_API_TIMEOUT_MS="${NODE_API_TIMEOUT_MS:-250}"
-SENSOR_CONFIG_PATHS="${SENSOR_CONFIG_PATHS:-/usr/share/pd-device/raze/sensors.toml}"
+SENSOR_CONFIG_PATHS="${SENSOR_CONFIG_PATHS:-/usr/share/board/raze/sensors.toml}"
 
 usage() {
   cat <<EOF

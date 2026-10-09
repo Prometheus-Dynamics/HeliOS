@@ -25,9 +25,14 @@ mkdir -p "$target/data"
 
 # Files the system writes at runtime, as links into /run:
 #   /etc/issue                  login banner (helios-update-issue.service)
-#   /etc/pd-device/manage-url   the device identity's manage_url
+#   /etc/board/manage-url       the device identity's manage_url
 #                               (helios-manage-url.service; it holds the
 #                               per-board hostname)
-mkdir -p "$target/etc/pd-device"
+mkdir -p "$target/etc/board"
 ln -sfn ../run/helios/issue "$target/etc/issue"
-ln -sfn ../../run/helios/manage-url "$target/etc/pd-device/manage-url"
+ln -sfn ../../run/helios/manage-url "$target/etc/board/manage-url"
+
+# The board package's commit (BOARD_PACKAGE_COMMIT) comes from the image feed's
+# /etc/default/board-package.env (configs/identity/base.toml); the package
+# reads it as /etc/board/board-package.env.
+ln -sfn ../default/board-package.env "$target/etc/board/board-package.env"

@@ -17,7 +17,7 @@
 #   /data/identity/machine-id              bound over /etc/machine-id
 #   /data/ssh/                             sshd host keys (HostKey lines in
 #                                          /etc/ssh/sshd_config)
-#   /data/pd-device/                       user overrides for the device
+#   /data/board/                           user overrides for the device
 #                                          package (*.env, read by it directly)
 #
 # Everything else that changes at runtime is in /run or the /var tmpfs.
@@ -121,4 +121,4 @@ done
 
 # --- the device package -------------------------------------------------------------
 
-mkdir -p "$DATA/pd-device"
+mkdir -p "$DATA/board"

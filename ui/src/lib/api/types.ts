@@ -83,7 +83,7 @@ export interface Device {
   clock: ClockFacts | null;
 }
 
-/** The Raze pd-device identity document plus the API's own section. */
+/** The Raze board identity document plus the API's own section. */
 export interface Identity {
   contract: number;
   model: string | null;
@@ -100,7 +100,7 @@ export interface Identity {
   endpoints?: Record<string, string>;
   actions?: { id: string; label?: string; destructive?: boolean }[];
   camera_stream?: string;
-  helios: { source: "pd-device" | "helios-api"; api_version: string; version: string; node_id: string; endpoints: Record<string, string> };
+  helios: { source: "board" | "helios-api"; api_version: string; version: string; node_id: string; endpoints: Record<string, string> };
 }
 
 export interface Reading {
@@ -393,7 +393,7 @@ export interface ApplyResponse {
   message: string;
 }
 
-/** What helios-api last asked the device package's A/B writer to do. */
+/** What helios-api last asked the board update writer (A/B) to do. */
 export interface UpdateTask {
   update_id: string;
   upload_id: string;
@@ -407,7 +407,7 @@ export interface UpdateTask {
 }
 
 export interface UpdateStatus {
-  /** The device package writer's state: idle, staging, staged, trying, confirmed, rolled-back, error, unknown. */
+  /** The board update writer's state: idle, staging, staged, trying, confirmed, rolled-back, error, unknown. */
   phase: string;
   stage: string;
   progress_percent: number | null;

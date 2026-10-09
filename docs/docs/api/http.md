@@ -32,8 +32,8 @@ The API keeps very little state of its own. It reads other parts of the device a
 | Services, reboot, logs | **systemd** and the **journal** |
 | CPU (total and per core), temperatures, memory, load, uptime | **Orion**'s host metrics (`orion-node` samples `/proc` and `/sys`) |
 | Firmware throttling, disk, processes | the **kernel** (`/proc`, `/sys`) |
-| Identity | the **Raze device package** (`/run/pd-device/identity.json`) |
-| OS updates | the Raze device package's A/B writer (`/usr/lib/pd-device/update`) |
+| Identity | the **Raze device package** (`/run/board/identity.json`) |
+| OS updates | the Raze board package's A/B writer (board update) (`/usr/lib/board/update`) |
 
 The API stores only two things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`):
 pipeline revision history (used for rollback) and camera mounts. The device security file is
@@ -71,7 +71,7 @@ as unavailable and not retry.
 | Method | Path | Backend | Notes |
 |---|---|---|---|
 | `GET` | `/v1/health` | — | `{service, status, api_version, version}`. Liveness probe; Atlas checks it during OTA reconnect |
-| `GET` | `/v1/identity` | pd-device | Device identity document (below). Public; trimmed for signed-out callers on a secured device |
+| `GET` | `/v1/identity` | board package | Device identity document (below). Public; trimmed for signed-out callers on a secured device |
 | `GET` `POST` `DELETE` | `/v1/auth/*` | API | Device security: status, enable/disable, login/logout, password, tokens. See [Device security](#device-security) |
 | `GET` | `/v1/device` | Orion, kernel | node id, hostname, model, serial, OS, uptime, Orion revisions and peers, clock sync |
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
@@ -317,12 +317,12 @@ gets a 409.
 
 ### Updates (OTA)
 
-OS updates go through the Raze device package's A/B writer (`/usr/lib/pd-device/update`, Atlas
+OS updates go through the Raze board package's A/B writer (board update) (`/usr/lib/board/update`, Atlas
 `docs/ota.md`); HeliOS has no updater of its own. The writer takes the same `.img.xz` that is
 flashed over USB: `stage` checks its SHA-256 and copies the image's boot slot A (p2) and root slot
 A (p5) into the board's inactive slot, `apply` runs the image's pre-reboot hook (which stops the
-HeliOS services) and reboots into that slot on trial, and `pd-device-update-confirm.service`
-keeps it once `/etc/pd-device/update-health` passes (orion-node, helios-engine and helios-api
+HeliOS services) and reboots into that slot on trial, and `board-update-confirm.service`
+keeps it once `/etc/board/update-health` passes (orion-node, helios-engine and helios-api
 active, the API answering). Otherwise the board restarts into the previous slot by itself.
 
 | Method | Path | Notes |
@@ -339,7 +339,7 @@ An upload: `{id, filename, size_bytes, sha256, image_url, uploaded_at_ms, versio
 the first 16 hex digits of the sha256, and `image_url` is a `file://` URL inside the upload
 directory. Apply accepts only images that were uploaded here, checks `sha256` against the upload
 when given, and refuses with 409 while an update is staging or on trial, with 422 off the A/B
-layout, and with 501 when the device package's writer is not installed.
+layout, and with 501 when the board update writer is not installed.
 
 The API runs `update stage <image> --sha256 <hex>` and then `update apply` through
 `systemd-run`, so they live in their own units: the pre-reboot hook stops helios-api, and that
@@ -348,7 +348,7 @@ one is kept. The version shown is the first of these that is set: the requested 
 upload's `version`, the `v…` part of the file name, or `upload-<sha256 prefix>`; the writer
 itself takes the version from the new root's os-release.
 
-Update status (from the writer's `/run/pd-device/update.json`):
+Update status (from the writer's `/run/board/update.json`):
 
 ```json
 {
@@ -457,7 +457,7 @@ unreadable file fails closed: everything but the public routes is refused, and
 ### Recovery: lost password
 
 From a root shell on the device (the USB serial console on `ttyGS0`, or SSH with a key from
-`pd-device/authorized_keys`):
+`board/authorized_keys`):
 
 ```sh
 helios-api auth status   # mode: open | secured, and the token count
@@ -482,7 +482,7 @@ possible later step and is not built.
 
 - `"helios-ota"` in `update_methods`
 - a `helios` object: `{source, api_version, version, node_id, endpoints, auth: {mode, status}}`. `source` is
-  `pd-device`, or `helios-api` when the package has not written `/run/pd-device/identity.json`
+  `board`, or `helios-api` when the package has not written `/run/board/identity.json`
   and the API read the same facts from the system itself
 
 ```json
@@ -491,7 +491,7 @@ possible later step and is not built.
   "os": { "name": "helios", "version": "2026.4.0" }, "device_package": { "version": "1.0.10", "commit": null },
   "update_methods": ["image-write", "ab-tryboot", "helios-ota"], "manage_url": "http://helios-abcdef01.local:5800/",
   "macs": { "eth0": "2c:cf:67:00:00:01" },
-  "helios": { "source": "pd-device", "api_version": "v1", "version": "1.0.0", "node_id": "node-local",
+  "helios": { "source": "board", "api_version": "v1", "version": "1.0.0", "node_id": "node-local",
               "endpoints": { "health": "/v1/health", "metrics": "/v1/metrics", "logs": "/v1/logs", "events": "/v1/events",
                              "ota_upload": "/v1/update/uploads", "ota_apply": "/v1/update/apply",
                              "ota_status": "/v1/update/status", "ota_events": "/v1/update/events" },
@@ -511,9 +511,9 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_ORION_IPC_SOCKET`, `HELIOS_ORION_IPC_STREAM_SOCKET` | `/run/orion/control.sock`, `/run/orion/control-stream.sock` |
 | `HELIOS_API_STATE_DIR` | `/var/lib/helios/api` |
 | `HELIOS_API_UPLOAD_DIR` | `/var/lib/helios/updates` (on `/data`) |
-| `HELIOS_PD_UPDATE_TOOL` | `/usr/lib/pd-device/update` (the device package's A/B writer) |
+| `HELIOS_BOARD_UPDATE_TOOL` | `/usr/lib/board/update` (the board update writer) |
 | `HELIOS_API_UI_DIR` | `/usr/share/helios/ui`; `off` serves the API only |
-| `HELIOS_PD_IDENTITY_PATH` | `/run/pd-device/identity.json` |
+| `HELIOS_BOARD_IDENTITY_PATH` | `/run/board/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |
 | `HELIOS_API_CORS_ORIGIN` | unset (no CORS headers) |
 | `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `helios-api auth` reads the same variable |
