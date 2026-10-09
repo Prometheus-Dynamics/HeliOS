@@ -11,7 +11,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | Piece | Where | State |
 |---|---|---|
 | HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (c77c6ce, plugin ABI 9, `daedalus:frame` v2), Styx `dev` (cff5233), Eidos `main` (306fea6), Orion v4 `main` (7f9c88a, also the Gaia `orion` source; they must match), Lemnos `dev` (10269f9) |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (bcc9f33, plugin ABI 9: multi-camera ticks, shared upstream `ExecutionDomain`, node fusion, `daedalus:frame` v2), Styx `dev` (ab6af18: `FrameGrouper`, `styx::preview`, styx-record, connection events), Eidos `main` (853aa0d: fisheye/pinhole pose, `aruco.pose`, `aruco.field_pose`), Orion v4 `main` (7f9c88a, also the Gaia `orion` source; they must match), Lemnos `dev` (cd72ad0); one source each in the lock |
 | UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
 | Raze device package | Atlas `dev`, 1.5.0 (695d172) | pinned by HeliOS: A/B update writer, EROFS root, read-only-safe services |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
