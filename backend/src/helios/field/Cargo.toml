@@ -15,7 +15,9 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+# float_roundtrip: layouts parse to the exact nearest f64 whatever else the build enables
+# (without it the last digit of a tag position depends on feature unification).
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror = { workspace = true }
 # Eidos's pose types and solver (no Daedalus): KnownTagPoses, CameraExtrinsics, Se3Transform.
 eidos-calibration = { workspace = true }
