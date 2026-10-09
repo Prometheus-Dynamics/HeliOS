@@ -44,7 +44,7 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev a3c7fc5: lemnos-orion enabled (lemnosd devices as Orion
+# Raze board package (Atlas dev e565dcf: hat_map.dtb in images/rpi-firmware/overlays, lemnos-orion enabled (lemnosd devices as Orion
 # resources), Orion 4fadba9, one Orion node id, orion:* may set the fan, the board hardware
 # snapshot in /status; since 934f538: Orion `clock.set`, the eased
 # LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2 (HeliOS selects
@@ -74,7 +74,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "a3c7fc5078a55d6f2c78858360beaaa904a79e18"
+rev = "e565dcfb913f4cb468f49c28b9b1cadea9f0ff20"
 
 # Lemnos (dev b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
