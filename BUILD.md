@@ -147,6 +147,11 @@ the dependencies already downloaded; CPU is user + system):
 | `bun run check` / `bun run build` | 149 s / 16 s, 939 s / 19 s (wall is the disk) | unchanged |
 | `gaia validate`, full / base-os | 606 s first run (fetching the import sources) / 0.5 s; under 1.5 s CPU | unchanged |
 
+After the round-5 pins (Daedalus 66659f7, Styx 40069d0, Eidos 52d0c9e60, Lemnos cca50f7 with
+`lemnosd`'s mock as a test dependency of helios-peripherals), same host and method (load average
+about 45): cold clippy 33 s / 204 s CPU, cold `cargo test --workspace` 73 s / 433 s CPU, 2.3 GB
+target directory. No noticeable change.
+
 cargo-nextest was tried and not adopted: the tests themselves run in a few
 seconds, so `cargo nextest run --workspace` (56 s / 403 s cold) saved nothing
 over `cargo test`. Optimizing dependencies in the test profile was not
