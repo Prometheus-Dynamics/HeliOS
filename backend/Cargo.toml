@@ -123,8 +123,11 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (4e8e19c), Eidos main (52d0c9e60),
-#   Orion v4 main (973ced7; also the Gaia `orion` source), Lemnos dev (cca50f7; also the Gaia `lemnos` source).
+#   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (4e8e19c), Eidos main (e1a197444,
+#   tracking overrides and tracked stage nodes; on Daedalus c927136), Orion v4 main (4fadba9:
+#   request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`; also the Gaia
+#   `orion` source), Lemnos dev (e5d5b3b: fault reasons and the lemnosd -> Orion bridge; also the
+#   Gaia `lemnos` source).
 # The engine and the plugin libraries must come from the same Daedalus commit: the image builds
 # them in one cargo invocation (Gaia build_group "helios-backend").
 # Updating another library tends to move Daedalus to its dev head: re-pin it with

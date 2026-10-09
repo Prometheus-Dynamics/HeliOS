@@ -74,7 +74,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "3175ad9c2f912ac2d2d4b113d2efbae5e610c6c7"
 
-# Lemnos (dev cca50f7). The Raze layer imports Lemnos's lemnosd layer from a
+# Lemnos (dev e5d5b3b: fault reasons and lemnosd's Orion bridge, `lemnos-orion`). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
 # sources, so it is declared here, at the commit the Atlas package is tested
 # with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
@@ -88,9 +88,10 @@ rev = "3175ad9c2f912ac2d2d4b113d2efbae5e610c6c7"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "cca50f73950f66c5606f1573a5c4b0d429bb963b"
+rev = "e5d5b3b42837d2c7b537d0a24dd16a909a9110b5"
 
-# Orion v4 (main 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
+# Orion v4 (main 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
+# `ActionCaller`), a wire change, so every Orion consumer moves together. Earlier, 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
 # STOPPING=1; TypedConfigValue::F64 (ec91d0a), observed-state watch, session
 # resume on reconnect, CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
@@ -100,7 +101,7 @@ rev = "cca50f73950f66c5606f1573a5c4b0d429bb963b"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "973ced750267f4094155b628aef25d6564580813"
+rev = "4fadba9fd81d376375dbe9a3c7a6ccc6416685ae"
 
 [inputs.profile]
 description = "Build profile"

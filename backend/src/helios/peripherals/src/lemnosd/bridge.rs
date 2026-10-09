@@ -417,7 +417,7 @@ impl Worker {
 
     fn on_event(&mut self, event: Event) {
         match event {
-            Event::Status { device, status, error } => {
+            Event::Status { device, status, error, .. } => {
                 if let Some(error) = error {
                     debug!(device = %device, status = status.name(), error = %error, "lemnosd device status");
                 }
