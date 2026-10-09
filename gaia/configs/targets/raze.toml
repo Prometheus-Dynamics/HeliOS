@@ -89,14 +89,9 @@ tree = "boot"
 src = "$provider.buildroot_output/images/rpi-firmware/fixup4.dat"
 dest = "fixup4.dat"
 
-[[image.assembly.files]]
-tree = "boot"
-src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5-cm5io.dtb"
-dest = "."
-optional = true
-
-# Kernel-built DTBs (bcm2712-rpi-cm5-cm5io, bcm2712-rpi-cm5l-cm5io); these
-# replace the firmware copy above.
+# Kernel-built DTBs (bcm2712-rpi-cm5-cm5io, bcm2712-rpi-cm5l-cm5io), from images/ (the
+# rpi-firmware package installs DTBs there only when it is built; the package's build/ tree is
+# not read, since a restored package cache does not have it).
 [[image.assembly.files]]
 tree = "boot"
 src_glob = "$provider.buildroot_output/images/bcm*.dtb"
@@ -129,7 +124,9 @@ optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/overlays/hat_map.dtb"
+# Not installed into images/ by Atlas's rpi-firmware override yet (only *.dtbo and overlay_map.dtb
+# are): optional, so it is absent until Atlas installs it.
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/hat_map.dtb"
 dest = "overlays/hat_map.dtb"
 optional = true
 
