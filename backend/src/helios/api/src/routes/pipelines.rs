@@ -75,11 +75,11 @@ pub struct PipelineSpec {
     /// How the graph's Eidos detector groups search each frame: `tracked` (full search every
     /// `full_search_every` frames, windows around tracked tags in between) or `full` (every
     /// frame). Unset keeps what the graph has, except that a camera pipeline's untracked groups
-    /// become `tracked` with `full_search_every` 8.
+    /// become `tracked` with `full_search_every` 4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_mode: Option<SearchMode>,
     /// Tracked search only: full search at least every this many frames (1 to 100000; default
-    /// 8). New tags are found at most `full_search_every - 1` frames after they appear.
+    /// 4). New tags are found at most `full_search_every - 1` frames after they appear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_search_every: Option<u32>,
     /// The field layout (`/v1/field-layouts`) the graph's multi-tag pose solves against; unset
@@ -95,11 +95,12 @@ pub enum SearchMode {
     Tracked,
 }
 
-/// Default tracked search interval. On the CM5 (Eidos 80fe40318, track-loss recovery) tracked
-/// search every 8 frames takes 0.31 to 0.32 ms per frame on average (p99 about 1.0 ms) against
-/// 0.84 ms for full search every frame; new tags are found within 7 frames, which costs some
-/// detections on the recorded robot video (3305 against 3531).
-pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 8;
+/// Default tracked search interval: a full search every 4th frame. On the CM5 (Eidos 2bbad728d,
+/// one thread, the recorded test video, track-loss recovery and dormant tracks) it takes 0.40 to
+/// 0.41 ms per frame on average (p99 about 1.0 ms) and finds 3012 of the 3149 reference tags,
+/// against 3034 at 0.84 ms for full search every frame (N=8: 2988 at 0.33 ms; N=16: 2967 at
+/// 0.28 to 0.29 ms). New tags are found at most 3 frames after they appear.
+pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 4;
 
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
@@ -944,7 +945,7 @@ mod tests {
         spec.full_search_every = Some(12);
         assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("tracked")), Some((SearchMode::Tracked, Some(12))));
 
-        // Unset on a camera pipeline: untracked groups track every 8 frames.
+        // Unset on a camera pipeline: untracked groups track with a full search every 4th frame.
         spec.search_mode = None;
         spec.full_search_every = None;
         assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("default")), Some((SearchMode::Tracked, Some(DEFAULT_FULL_SEARCH_EVERY))));

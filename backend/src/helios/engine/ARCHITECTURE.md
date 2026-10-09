@@ -77,8 +77,9 @@ session state, artifacts, and telemetry back into Orion.
   provides one of its nodes (what `PluginRegistry::graph_document` fills in),
   and is checked against the loaded plugins before compiling. The stored
   graphs in `graphs/` are built with Eidos's template API alone
-  (`TrackedDetectorTemplate`, full search every 8 frames, track loss
-  `recover`): the tag pose tail (`eidos:aruco.pose`, 0.1651 m tags) and, for
+  (`TrackedDetectorTemplate`, a full search every 4th frame, Eidos's
+  defaults for track loss (`recover`) and dormant tracks (`max_missed_frames`
+  12)): the tag pose tail (`eidos:aruco.pose`, 0.1651 m tags) and, for
   AprilTag 36h11, the multi-tag pose tail (`eidos:aruco.multi_tag_pose`,
   output `multi_tag_pose`) against the FRC 2026 AndyMark layout as a
   `known_tags` constant (`helios_field`: the field is the reference frame;

@@ -129,12 +129,13 @@ impl FrameSource for ChannelFrameSource {
 /// Camera calibration fields of Eidos's pose nodes that HeliOS's templates take as camera
 /// context host inputs (`frame_<field>`), fed by the engine from the camera binding.
 /// A HeliOS detector template, built with Eidos's template API alone: the tracked detector group
-/// (full search every 8 frames) with its tag pose tail (FRC's 0.1651 m tags) and, given a field
+/// (full search every 4th frame, Eidos's defaults for track loss and dormant tracks) with its tag
+/// pose tail (FRC's 0.1651 m tags) and, given a field
 /// layout, its multi-tag pose tail against the layout's tags (`helios_field`, reference = the
 /// field). The camera and the extrinsics are held host inputs (`camera`, `extrinsics`), which the
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
-    let mut template = TrackedDetectorTemplate::new(dictionary, 8);
+    let mut template = TrackedDetectorTemplate::new(dictionary, 4);
     template.pose = Some(PoseConfig { tag_size_m: FRC_TAG_SIDE_M, ..PoseConfig::default() });
     template.camera = CameraInput::GraphInput;
     template.multi_tag_pose =

@@ -322,7 +322,7 @@ export interface PipelineSpec {
   graph: DaedalusGraphDocument;
   bindings: Record<string, Binding>;
   enabled?: boolean;
-  /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 8) or `full`. */
+  /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 4) or `full`. */
   search_mode?: SearchMode;
   full_search_every?: number;
   /** The field layout (`/v1/field-layouts`) of the graph's multi-tag pose; unset follows the selected one. */

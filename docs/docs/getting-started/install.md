@@ -77,6 +77,15 @@ First boot may take longer than normal. The image provisions the on-device disk 
 - Root slots: `ACTIVE` and `RESERVE` (A/B)
 - Persistent storage: `DATA` mounted at `/var/lib/helios`
 
+## Tag pipeline defaults
+
+The built-in AprilTag and ArUco pipelines use tracked search: a full search of the frame every
+4th frame, and only windows around the tags already tracked in between. A new tag is found at
+most 3 frames after it appears. On the CM5 (one thread, the recorded test video) that takes about
+0.4 ms per frame on average instead of 0.84 ms for a full search every frame, and finds 3012 of
+3149 reference tags against 3034. A pipeline can choose another interval or full search
+(`search_mode`, `full_search_every`; see [HTTP API > Pipelines](/api/http)).
+
 ## If You Get Stuck
 
 If you can’t find the device on the network:

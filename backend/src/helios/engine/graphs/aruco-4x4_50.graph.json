@@ -467,7 +467,7 @@
             "full_search_every",
             {
               "type": "Int",
-              "value": 8
+              "value": 4
             }
           ]
         ],

@@ -370,7 +370,7 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   or neither) and `pyramid` shape the frames the engine asks the camera service for. A camera
   binding also carries the camera's context (calibration and mount, see
   [Calibration and camera context](#calibration-and-camera-context)).
-- `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 8) set how the
+- `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 4) set how the
   graph's Eidos detector groups (`eidos:detectors.apriltag`, `eidos:detectors.aruco` and their
   `_tracked` versions) search: `tracked` searches the whole frame every `full_search_every`
   frames (and after a lost tag, a scene change or on request) and only windows around tracked
@@ -378,12 +378,20 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   what a full search would for the tags it tracks (same ids, identical corners), and a new tag is
   found at most `full_search_every - 1` frames after it appears (Eidos `docs/daedalus.md`,
   "Tracked detector groups"). Unset, the graph keeps its mode, except that a camera pipeline's
-  untracked groups become `tracked` every 8 frames. On the CM5 (Eidos 80fe40318, with track-loss
-  recovery) that costs 0.31 to 0.32 ms per frame on average instead of 0.84 ms for full search
-  every frame (p99 about 1.0 ms). Tracked search trades some new-tag latency (a new tag is found
-  within 7 frames): on the recorded robot video it reports 3305 detections against 3531 for full
-  search every frame. Scoring against reference poses is pending in Eidos. The API switches the group node in the stored graph; a pipeline
-  reports the mode its graph has (`search_mode`, `full_search_every`).
+  untracked groups become `tracked` with a full search every 4th frame; the stored templates
+  use the same. The cost and what it finds, on the CM5 (Eidos 2bbad728d, one thread, the
+  recorded test video, Eidos's defaults for track loss and dormant tracks; reference: 3149
+  tags):
+
+  | Search | Mean per frame | Reference tags found | New tag found within |
+  |---|---|---|---|
+  | `full` (every frame) | 0.84 ms | 3034 | the same frame |
+  | `tracked`, `full_search_every` 4 (default) | 0.40 to 0.41 ms (p99 about 1.0 ms) | 3012 | 3 frames |
+  | `tracked`, `full_search_every` 8 | 0.33 ms | 2988 | 7 frames |
+  | `tracked`, `full_search_every` 16 | 0.28 to 0.29 ms | 2967 | 15 frames |
+
+  The API switches the group node in the stored graph; a pipeline reports the mode its graph has
+  (`search_mode`, `full_search_every`).
 - `field_layout` names the [field layout](#field-layouts) the graph's multi-tag pose
   (`eidos:aruco.multi_tag_pose`) solves against; unset, the pipeline uses the selected layout and
   follows the selection. The API writes the layout's tags into the node's `known_tags` constant
@@ -401,7 +409,7 @@ The pipeline the API returns:
   "session": { "status": "running", "message": null, "observed_at_ms": 1760000000000 },
   "telemetry": { "fps": 59.8, "last_tick_ms": 0.71, "frames_processed": 3600, "source_connected": true },
   "outputs": [{ "pipeline": "tags-front", "port": "pose_solutions", "value": { "...": "..." }, "observed_at_ms": 1760000000000 }],
-  "search_mode": "tracked", "full_search_every": 8, "field_layout": "frc2026-andymark",
+  "search_mode": "tracked", "full_search_every": 4, "field_layout": "frc2026-andymark",
   "pose": { "status": "calibrated",
             "tags": [{ "id": 7, "translation": { "x": 0.12, "y": -0.05, "z": 2.31 }, "rotation": { "w": 0.02, "x": 0.01, "y": 0.99, "z": 0.0 }, "error_px": 0.21, "ambiguity": 0.08 }],
             "field_valid": true, "field_rms_px": 0.4, "field_inlier_tags": 2, "field_ambiguity": 0.1,
