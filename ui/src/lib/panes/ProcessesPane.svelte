@@ -1,18 +1,18 @@
 <script lang="ts">
   // Every process on the robot (or one device): sort, filter, pause, kill,
   // pin to a core. Per-core load across the top.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { system, type Proc } from "$lib/stores/system.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { system, type Proc } from "#lib/stores/system.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import { follow } from "./follow.svelte";
 
   let { pane, ws }: PaneProps = $props();

@@ -1,7 +1,7 @@
 // One menu host for the whole app: dropdowns and right-click menus both call
 // `menu.at(...)`. Items can nest one level (submenus) and carry a check mark.
 
-import type { IconName } from "$lib/ui/icons";
+import type { IconName } from "#lib/ui/icons.js";
 
 export type MenuItem =
   | {

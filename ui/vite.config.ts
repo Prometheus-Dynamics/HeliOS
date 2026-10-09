@@ -17,8 +17,6 @@ export default defineConfig({
       preprocess: vitePreprocess(),
       // A static bundle the device serves; every route falls back to the app shell.
       adapter: adapter({ fallback: "index.html", precompress: true }),
-      // SvelteKit 3 dropped the built-in `$lib` alias in favour of `#lib`; keep `$lib`.
-      alias: { $lib: "src/lib" },
     }),
   ],
   server: {

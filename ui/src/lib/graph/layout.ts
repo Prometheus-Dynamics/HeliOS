@@ -2,7 +2,7 @@
 // ordered within a layer by the average position of their inputs (two sweeps
 // of the barycentre heuristic), stacked by estimated node height.
 
-import { CATALOG_BY_ID } from "$lib/api/catalog";
+import { CATALOG_BY_ID } from "#lib/api/catalog.js";
 import type { FlowEdge, FlowNode } from "./graph";
 
 const COL = 260;

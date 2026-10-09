@@ -3,11 +3,11 @@
 // turns the screens' actions into API calls. Features the device has no
 // backend for yet (501) are reported once, as "not available".
 
-import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "$lib/api/adapt";
-import { api, ApiError, errorText, isNotAvailable } from "$lib/api/client";
-import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "$lib/api/model";
-import type * as W from "$lib/api/types";
-import { pickFile } from "$lib/files";
+import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
+import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
+import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
+import type * as W from "#lib/api/types.js";
+import { pickFile } from "#lib/files.js";
 import { toasts } from "./toasts.svelte";
 
 /** The parts of the cluster store the live backend fills in. */

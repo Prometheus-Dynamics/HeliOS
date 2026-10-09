@@ -2,14 +2,14 @@
   // Every camera on the robot in one dense list: colour, name, host, live
   // rate and tags. Click selects (everything following the selection
   // switches); right-click for actions.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import Swatch from "$lib/kit/Swatch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import type { Camera } from "$lib/api/model";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import Swatch from "#lib/kit/Swatch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import type { Camera } from "#lib/api/model.js";
 
   const groups = $derived.by(() => {
     const out: { node: string; cams: Camera[] }[] = [];

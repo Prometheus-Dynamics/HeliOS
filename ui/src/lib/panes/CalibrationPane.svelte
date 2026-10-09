@@ -2,22 +2,22 @@
   // Guided calibration: pick the camera and board, capture views until the
   // coverage map is full, solve, check the error per view, save. Every step
   // shows what "good" looks like so nobody needs to know the maths.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { pane as makePane, workspaces } from "$lib/core/workspace.svelte";
-  import { downloadJson } from "$lib/files";
-  import Badge from "$lib/kit/Badge.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Switch from "$lib/kit/Switch.svelte";
-  import { calibration as cal, COVER_COLS, COVER_ROWS } from "$lib/stores/calibration.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import Feed from "$lib/vision/Feed.svelte";
-  import { DEFAULT_OVERLAYS } from "$lib/vision/overlays";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { pane as makePane, workspaces } from "#lib/core/workspace.svelte.js";
+  import { downloadJson } from "#lib/files.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Switch from "#lib/kit/Switch.svelte";
+  import { calibration as cal, COVER_COLS, COVER_ROWS } from "#lib/stores/calibration.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import Feed from "#lib/vision/Feed.svelte";
+  import { DEFAULT_OVERLAYS } from "#lib/vision/overlays.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

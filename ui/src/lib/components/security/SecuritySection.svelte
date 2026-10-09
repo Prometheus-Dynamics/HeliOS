@@ -1,16 +1,16 @@
 <script lang="ts">
   // Settings → Security: the one switch (open / secured), and behind it the
   // password and API tokens for tools such as Atlas.
-  import { errorText } from "$lib/api/client";
-  import type { NewApiToken } from "$lib/api/types";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { timeAgo } from "$lib/format";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Switch from "$lib/kit/Switch.svelte";
-  import { auth, MIN_PASSWORD } from "$lib/stores/auth.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
+  import { errorText } from "#lib/api/client.js";
+  import type { NewApiToken } from "#lib/api/types.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { timeAgo } from "#lib/format.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Switch from "#lib/kit/Switch.svelte";
+  import { auth, MIN_PASSWORD } from "#lib/stores/auth.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
   import SecureForm from "./SecureForm.svelte";
 
   let pending = $state<"enable" | "disable" | "password" | null>(null);

@@ -1,6 +1,6 @@
 <script lang="ts">
   // A whole workspace: the layout tree, or one maximized stack.
-  import { workspaces, type LayoutNode } from "$lib/core/workspace.svelte";
+  import { workspaces, type LayoutNode } from "#lib/core/workspace.svelte.js";
   import LayoutView from "./LayoutView.svelte";
   import StackView from "./StackView.svelte";
 

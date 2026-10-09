@@ -1,17 +1,17 @@
 <script lang="ts">
   // All cameras at once, tiled to fill the pane without scrolling. Click a
   // tile to select it; double-click to open it big.
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import Feed from "$lib/vision/Feed.svelte";
-  import { DEFAULT_OVERLAYS, overlayMenu, type Overlays } from "$lib/vision/overlays";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import Feed from "#lib/vision/Feed.svelte";
+  import { DEFAULT_OVERLAYS, overlayMenu, type Overlays } from "#lib/vision/overlays.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
 
   let { pane, ws }: PaneProps = $props();
   const overlays = $derived({ ...DEFAULT_OVERLAYS, histogram: false, ...((pane.props?.overlays as Partial<Overlays>) ?? {}) });

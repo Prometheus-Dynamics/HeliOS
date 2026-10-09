@@ -1,8 +1,8 @@
 // Problems the robot has right now, each with the fixes that apply.
 
-import type { IconName } from "$lib/ui/icons";
-import { drafts } from "$lib/graph/drafts.svelte";
-import { cluster } from "$lib/stores/cluster.svelte";
+import type { IconName } from "#lib/ui/icons.js";
+import { drafts } from "#lib/graph/drafts.svelte.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
 
 export interface Problem {
   id: string;

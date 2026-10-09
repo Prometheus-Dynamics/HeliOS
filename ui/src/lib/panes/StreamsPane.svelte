@@ -1,10 +1,10 @@
 <script lang="ts">
   // What the pipelines publish and where it goes (NetworkTables, other
   // devices, recordings), with rates and latency.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
 </script>
 
 <div class="table">

@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
   "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "vite dev",

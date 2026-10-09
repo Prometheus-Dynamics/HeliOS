@@ -3,9 +3,9 @@
 // password; tools use API tokens. The top bar always shows which it is.
 // With `?mock=1` the same flow runs against an in-memory device.
 
-import { ApiError, api, errorText, session } from "$lib/api/client";
-import { MOCK } from "$lib/api/mode";
-import type { ApiToken, AuthStatus, NewApiToken } from "$lib/api/types";
+import { ApiError, api, errorText, session } from "#lib/api/client.js";
+import { MOCK } from "#lib/api/mode.js";
+import type { ApiToken, AuthStatus, NewApiToken } from "#lib/api/types.js";
 
 export const MIN_PASSWORD = 8;
 

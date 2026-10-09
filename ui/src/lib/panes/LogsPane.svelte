@@ -1,16 +1,16 @@
 <script lang="ts">
   // Logs from every device, coloured by device. Filter by level, device or
   // text; follow the tail or scroll back freely.
-  import { clockTime } from "$lib/format";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { downloadText } from "$lib/files";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { clockTime } from "#lib/format.js";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { downloadText } from "#lib/files.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
 
   let { pane, ws }: PaneProps = $props();
   const level = $derived((pane.props?.level as string) ?? "all");

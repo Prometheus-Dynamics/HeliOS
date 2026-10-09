@@ -3,9 +3,9 @@
 // LEDs, IMU and power rails have no device backend yet and stay empty.
 // With `?mock=1` everything is simulated next to the mock cluster.
 
-import { api, errorText, isNotAvailable } from "$lib/api/client";
-import { MOCK } from "$lib/api/mode";
-import type * as W from "$lib/api/types";
+import { api, errorText, isNotAvailable } from "#lib/api/client.js";
+import { MOCK } from "#lib/api/mode.js";
+import type * as W from "#lib/api/types.js";
 import { cluster } from "./cluster.svelte";
 import { toasts } from "./toasts.svelte";
 

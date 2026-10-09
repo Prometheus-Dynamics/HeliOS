@@ -1,14 +1,14 @@
 <script lang="ts">
   // One line at the bottom: what is selected (with its key numbers), what
   // needs attention, the next setup step, and the live clock of the feeds.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { actionable, problems } from "$lib/core/fixes";
-  import { guide } from "$lib/core/guide.svelte";
-  import { identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { pane, workspaces } from "$lib/core/workspace.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { actionable, problems } from "#lib/core/fixes.js";
+  import { guide } from "#lib/core/guide.svelte.js";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
 
   const s = $derived(selection.current);
   const readout = $derived.by(() => {

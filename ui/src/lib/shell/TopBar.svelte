@@ -1,18 +1,18 @@
 <script lang="ts">
   // Workspace name and layout tools on the left, robot readouts in the middle
   // (each jumps to the screen that explains it), search and look on the right.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { commands } from "$lib/core/commands.svelte";
-  import { colorVar } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { prefs, THEMES } from "$lib/core/prefs.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { showAddPane } from "$lib/workspace/library";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { commands } from "#lib/core/commands.svelte.js";
+  import { colorVar } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import { auth } from "#lib/stores/auth.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { showAddPane } from "#lib/workspace/library.js";
   import { exportWorkspace, importWorkspace } from "./workspace-actions";
   import { gallery } from "./gallery.svelte";
   import { help } from "./help.svelte";

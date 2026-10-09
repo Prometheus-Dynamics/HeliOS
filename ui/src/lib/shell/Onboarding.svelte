@@ -2,17 +2,17 @@
   // First run: team number, the cameras found and what each should do, and
   // how much of HeliOS to show to begin with. Takes under a minute; everything
   // can be changed later.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { guide, type Job } from "$lib/core/guide.svelte";
-  import { colorVar, ID_COLORS, identity } from "$lib/core/identity.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { team } from "$lib/core/team.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import SecureForm from "$lib/components/security/SecureForm.svelte";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import Feed from "$lib/vision/Feed.svelte";
-  import { DEFAULT_OVERLAYS } from "$lib/vision/overlays";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { guide, type Job } from "#lib/core/guide.svelte.js";
+  import { colorVar, ID_COLORS, identity } from "#lib/core/identity.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { team } from "#lib/core/team.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import SecureForm from "#lib/components/security/SecureForm.svelte";
+  import { auth } from "#lib/stores/auth.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import Feed from "#lib/vision/Feed.svelte";
+  import { DEFAULT_OVERLAYS } from "#lib/vision/overlays.js";
   import { help } from "./help.svelte";
 
   let step = $state(0);

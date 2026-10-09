@@ -3,7 +3,7 @@
 // "Save as" keeps it as a new workspace. Screens and workspaces are the same
 // thing.
 
-import type { IconName } from "$lib/ui/icons";
+import type { IconName } from "#lib/ui/icons.js";
 import { loadRaw, save } from "./persist";
 
 export interface PaneRef {

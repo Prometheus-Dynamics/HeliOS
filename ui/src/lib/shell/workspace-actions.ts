@@ -1,12 +1,12 @@
 // Small flows around workspaces: create, rename, import/export layouts.
 
-import { colorVar, ID_COLORS } from "$lib/core/identity.svelte";
-import { menu } from "$lib/core/menu.svelte";
-import { shell } from "$lib/core/shell.svelte";
-import { workspaces, type Workspace } from "$lib/core/workspace.svelte";
-import type { IconName } from "$lib/ui/icons";
-import { downloadJson, pickJson } from "$lib/files";
-import { toasts } from "$lib/stores/toasts.svelte";
+import { colorVar, ID_COLORS } from "#lib/core/identity.svelte.js";
+import { menu } from "#lib/core/menu.svelte.js";
+import { shell } from "#lib/core/shell.svelte.js";
+import { workspaces, type Workspace } from "#lib/core/workspace.svelte.js";
+import type { IconName } from "#lib/ui/icons.js";
+import { downloadJson, pickJson } from "#lib/files.js";
+import { toasts } from "#lib/stores/toasts.svelte.js";
 
 export const WS_ICONS: IconName[] = ["layout-grid", "camera", "schema", "cube", "cpu", "target", "radar-2", "robot", "flask", "tool", "gauge", "terminal-2", "bulb", "world-www"];
 

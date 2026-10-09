@@ -1,21 +1,21 @@
 <script lang="ts">
   // A device's hardware: fan and curve, LEDs, GPIO pins, IMU and power rails.
-  import { identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import Badge from "$lib/kit/Badge.svelte";
-  import CurveEditor from "$lib/kit/CurveEditor.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Choice from "$lib/kit/Choice.svelte";
-  import Num from "$lib/kit/Num.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import Slider from "$lib/kit/Slider.svelte";
-  import Switch from "$lib/kit/Switch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { system } from "$lib/stores/system.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import CurveEditor from "#lib/kit/CurveEditor.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Choice from "#lib/kit/Choice.svelte";
+  import Num from "#lib/kit/Num.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import Slider from "#lib/kit/Slider.svelte";
+  import Switch from "#lib/kit/Switch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { system } from "#lib/stores/system.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

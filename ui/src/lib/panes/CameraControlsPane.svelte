@@ -1,29 +1,29 @@
 <script lang="ts">
   // Every camera control, live. The everyday ones are open; sensor, ISP,
   // region and transport sit in closed "advanced" sections right below.
-  import type { Camera, CameraControlInfo, CameraSettings } from "$lib/api/model";
-  import { selection } from "$lib/core/selection.svelte";
-  import Badge from "$lib/kit/Badge.svelte";
-  import Choice from "$lib/kit/Choice.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import IdentityEditor from "$lib/kit/IdentityEditor.svelte";
-  import Num from "$lib/kit/Num.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import Slider from "$lib/kit/Slider.svelte";
-  import Switch from "$lib/kit/Switch.svelte";
-  import { identity } from "$lib/core/identity.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { calibration } from "$lib/stores/calibration.svelte";
-  import { robot } from "$lib/stores/robot.svelte";
-  import { guide } from "$lib/core/guide.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import { downloadJson, pickJson } from "$lib/files";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import type { Camera, CameraControlInfo, CameraSettings } from "#lib/api/model.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import Choice from "#lib/kit/Choice.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
+  import Num from "#lib/kit/Num.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import Slider from "#lib/kit/Slider.svelte";
+  import Switch from "#lib/kit/Switch.svelte";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { calibration } from "#lib/stores/calibration.svelte.js";
+  import { robot } from "#lib/stores/robot.svelte.js";
+  import { guide } from "#lib/core/guide.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import { downloadJson, pickJson } from "#lib/files.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

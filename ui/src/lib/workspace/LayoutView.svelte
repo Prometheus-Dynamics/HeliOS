@@ -1,8 +1,8 @@
 <script lang="ts">
   // One node of a workspace layout: a split (children with drag gutters) or a
   // tab stack. Gutters resize live and persist on release.
-  import type { LayoutNode } from "$lib/core/workspace.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
+  import type { LayoutNode } from "#lib/core/workspace.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
   import LayoutView from "./LayoutView.svelte";
   import StackView from "./StackView.svelte";
 

@@ -1,12 +1,12 @@
 <script lang="ts">
   // Add things on purpose: whole screens, prebuilt kits of panes, or single
   // panes. Every entry shows its layout and says what it is for.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar } from "$lib/core/identity.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { pane, workspaces } from "$lib/core/workspace.svelte";
-  import { KITS } from "$lib/screens";
-  import { allPanes } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar } from "#lib/core/identity.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+  import { KITS } from "#lib/screens.js";
+  import { allPanes } from "#lib/workspace/panes.js";
   import { gallery } from "./gallery.svelte";
   import LayoutThumb from "./LayoutThumb.svelte";
   import { importWorkspace } from "./workspace-actions";

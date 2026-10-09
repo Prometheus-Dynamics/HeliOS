@@ -1,8 +1,8 @@
 <script lang="ts">
   // An object's identity mark: its colour, optionally with its icon.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import type { IconName } from "#lib/ui/icons.js";
 
   let { id, size = 18, icon: fallbackIcon, solid = false }: { id: string; size?: number; icon?: IconName; solid?: boolean } = $props();
   const ident = $derived(identity.get(id));

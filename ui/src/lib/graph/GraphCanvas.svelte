@@ -3,10 +3,10 @@
   // SvelteFlowProvider. Edits go to the shared draft (see drafts.svelte.ts).
   import { untrack } from "svelte";
   import { Background, BackgroundVariant, MiniMap, SvelteFlow, useSvelteFlow, type Connection, type Node, type NodeTypes, type OnConnectEnd } from "@xyflow/svelte";
-  import { CATALOG_BY_ID } from "$lib/api/catalog";
-  import { prefs } from "$lib/core/prefs.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
+  import { CATALOG_BY_ID } from "#lib/api/catalog.js";
+  import { prefs } from "#lib/core/prefs.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
   import { setEditorLive } from "./context";
   import type { Draft } from "./drafts.svelte";
   import { CATEGORY_COLORS, DRAG_MIME, checkConnection, edgeId, makeEdge, type FlowEdge, type FlowNode } from "./graph";

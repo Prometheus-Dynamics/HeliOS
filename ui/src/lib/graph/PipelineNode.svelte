@@ -2,9 +2,9 @@
   // A graph node on the canvas: a glass card with its category hint, typed
   // ports (inputs left, outputs right), key params and live timing.
   import { Handle, Position, type NodeProps } from "@xyflow/svelte";
-  import { CATALOG_BY_ID } from "$lib/api/catalog";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { ms } from "$lib/format";
+  import { CATALOG_BY_ID } from "#lib/api/catalog.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { ms } from "#lib/format.js";
   import { getEditorLive } from "./context";
   import { CATEGORY_COLORS, CATEGORY_ICONS, formatParam, keyParams, portColor, portTypeLabel, type FlowNode } from "./graph";
 

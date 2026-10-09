@@ -1,17 +1,17 @@
 <script lang="ts">
   // Board maker: chessboard, ChArUco or AprilGrid, sized for your paper, as
   // an exact-scale SVG to print at 100%.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { downloadText } from "$lib/files";
-  import Choice from "$lib/kit/Choice.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Num from "$lib/kit/Num.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { calibration as cal, type BoardKind } from "$lib/stores/calibration.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { downloadText } from "#lib/files.js";
+  import Choice from "#lib/kit/Choice.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Num from "#lib/kit/Num.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { calibration as cal, type BoardKind } from "#lib/stores/calibration.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
 
   const PAPER = { letter: [215.9, 279.4], a4: [210, 297], a3: [297, 420], tabloid: [279.4, 431.8] } as const;
   const b = $derived(cal.board);

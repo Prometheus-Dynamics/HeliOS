@@ -1,7 +1,7 @@
 // Commands: everything the palette (Ctrl+K) can do. Screens and panes register
 // their own; the palette searches titles and keywords.
 
-import type { IconName } from "$lib/ui/icons";
+import type { IconName } from "#lib/ui/icons.js";
 
 export interface Command {
   id: string;

@@ -1,16 +1,16 @@
 <script lang="ts">
   // Screens down the left edge. Each is a workspace with its own colour; the
   // ones you made sit under the line. Right-click to rename, recolour, reset.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { commands } from "$lib/core/commands.svelte";
-  import { colorVar, ID_COLORS } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { workspaces, type Workspace } from "$lib/core/workspace.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { commands } from "#lib/core/commands.svelte.js";
+  import { colorVar, ID_COLORS } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { workspaces, type Workspace } from "#lib/core/workspace.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
   import { gallery } from "./gallery.svelte";
   import { help } from "./help.svelte";
-  import { pane } from "$lib/core/workspace.svelte";
+  import { pane } from "#lib/core/workspace.svelte.js";
   import { WS_ICONS, renameWorkspace } from "./workspace-actions";
 
   const presets = $derived(workspaces.shown.filter((w) => w.builtin));

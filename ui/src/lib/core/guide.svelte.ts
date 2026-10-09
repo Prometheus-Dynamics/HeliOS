@@ -2,15 +2,15 @@
 // the setup checklist, and plain-language answers for the command palette.
 // Everything resolves to the same screens, panes and settings experts use.
 
-import type { Camera, Workload } from "$lib/api/model";
-import { identity } from "$lib/core/identity.svelte";
-import { tableFor, templateGraph } from "$lib/graph/graph";
-import type { IconName } from "$lib/ui/icons";
-import { calibration } from "$lib/stores/calibration.svelte";
-import { cluster } from "$lib/stores/cluster.svelte";
-import { field } from "$lib/stores/field.svelte";
-import { robot } from "$lib/stores/robot.svelte";
-import { toasts } from "$lib/stores/toasts.svelte";
+import type { Camera, Workload } from "#lib/api/model.js";
+import { identity } from "#lib/core/identity.svelte.js";
+import { tableFor, templateGraph } from "#lib/graph/graph.js";
+import type { IconName } from "#lib/ui/icons.js";
+import { calibration } from "#lib/stores/calibration.svelte.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
+import { field } from "#lib/stores/field.svelte.js";
+import { robot } from "#lib/stores/robot.svelte.js";
+import { toasts } from "#lib/stores/toasts.svelte.js";
 
 export type Job = "apriltag" | "aruco" | "view";
 

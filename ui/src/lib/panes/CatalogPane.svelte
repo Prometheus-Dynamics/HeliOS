@@ -1,12 +1,12 @@
 <script lang="ts">
   // Node types the robot's plugins provide. Drag onto a canvas, or click to
   // add to the pipeline you are editing.
-  import { CATALOG, type NodeType } from "$lib/api/catalog";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { drafts } from "$lib/graph/drafts.svelte";
-  import { CATEGORY_COLORS, CATEGORY_ICONS, CATEGORY_ORDER, DRAG_MIME, portColor } from "$lib/graph/graph";
-  import { cluster } from "$lib/stores/cluster.svelte";
+  import { CATALOG, type NodeType } from "#lib/api/catalog.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { drafts } from "#lib/graph/drafts.svelte.js";
+  import { CATEGORY_COLORS, CATEGORY_ICONS, CATEGORY_ORDER, DRAG_MIME, portColor } from "#lib/graph/graph.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
 
   let query = $state("");
   const groups = $derived.by(() => {

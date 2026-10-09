@@ -2,8 +2,8 @@
   // A collapsible group of rows. Remembers open/closed per `key`. `advanced`
   // sections are labelled so beginners know they can skip them.
   import { untrack, type Snippet } from "svelte";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { loadRaw, save } from "$lib/core/persist";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { loadRaw, save } from "#lib/core/persist.js";
 
   let {
     title,

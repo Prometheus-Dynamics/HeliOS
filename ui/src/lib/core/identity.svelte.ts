@@ -2,7 +2,7 @@
 // pipeline, device, layout). The colour follows the object everywhere: list
 // badges, graph headers, 3D frustums, overlays, chart lines, log tags.
 
-import type { IconName } from "$lib/ui/icons";
+import type { IconName } from "#lib/ui/icons.js";
 import { loadRaw, save } from "./persist";
 
 export interface Identity {

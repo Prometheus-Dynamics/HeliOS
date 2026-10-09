@@ -1,9 +1,9 @@
 <script lang="ts">
   // Name, colour and icon for any object, inline: the swatch opens a palette
   // of colours and icons, the name edits in place.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, ID_COLORS, identity } from "$lib/core/identity.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, ID_COLORS, identity } from "#lib/core/identity.svelte.js";
+  import type { IconName } from "#lib/ui/icons.js";
 
   let { id, fallbackName, fallbackIcon, sub }: { id: string; fallbackName: string; fallbackIcon: IconName; sub?: string } = $props();
 

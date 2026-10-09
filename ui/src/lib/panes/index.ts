@@ -1,9 +1,9 @@
 // Every pane this build provides. Adding a pane: write the component, add a
 // line here; it appears in every "Add pane" menu and the palette.
 
-import { identity } from "$lib/core/identity.svelte";
-import { cluster } from "$lib/stores/cluster.svelte";
-import { definePane } from "$lib/workspace/panes";
+import { identity } from "#lib/core/identity.svelte.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
+import { definePane } from "#lib/workspace/panes.js";
 import BoardPane from "./BoardPane.svelte";
 import CalibrationPane from "./CalibrationPane.svelte";
 import CameraControlsPane from "./CameraControlsPane.svelte";

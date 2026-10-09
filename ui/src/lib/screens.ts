@@ -2,8 +2,8 @@
 // version is kept; "Reset" brings this one back. Start is the simple one new
 // users begin with; the rest are added from the gallery when needed.
 
-import { col, pane, row, stack, workspaces, type LayoutNode, type Workspace } from "$lib/core/workspace.svelte";
-import type { IconName } from "$lib/ui/icons";
+import { col, pane, row, stack, workspaces, type LayoutNode, type Workspace } from "#lib/core/workspace.svelte.js";
+import type { IconName } from "#lib/ui/icons.js";
 
 function ws(id: string, name: string, icon: IconName, color: number, summary: string, root: LayoutNode): () => Workspace {
   return () => ({ id, name, icon, color, summary, root });

@@ -1,10 +1,10 @@
 <script lang="ts">
   // An empty spot in a layout: suggests panes to put here.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { pane as makePane, workspaces } from "$lib/core/workspace.svelte";
-  import { NEW_PANE_MIME } from "$lib/workspace/library";
-  import { allPanes } from "$lib/workspace/panes";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { pane as makePane, workspaces } from "#lib/core/workspace.svelte.js";
+  import { NEW_PANE_MIME } from "#lib/workspace/library.js";
+  import { allPanes } from "#lib/workspace/panes.js";
+  import type { PaneProps } from "#lib/workspace/panes.js";
 
   let { pane, ws }: PaneProps = $props();
   const panes = $derived(allPanes().filter((p) => p.type !== "welcome"));

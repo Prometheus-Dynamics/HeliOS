@@ -2,8 +2,8 @@
 // camera and resolution. Capture and solve are simulated here; on a robot the
 // device runs them (Eidos) and the UI shows the same steps.
 
-import { loadRaw, save } from "$lib/core/persist";
-import type { Camera } from "$lib/api/model";
+import { loadRaw, save } from "#lib/core/persist.js";
+import type { Camera } from "#lib/api/model.js";
 import { cluster } from "./cluster.svelte";
 import { toasts } from "./toasts.svelte";
 

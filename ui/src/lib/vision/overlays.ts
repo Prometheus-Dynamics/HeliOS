@@ -1,4 +1,4 @@
-import type { MenuItem } from "$lib/core/menu.svelte";
+import type { MenuItem } from "#lib/core/menu.svelte.js";
 
 export interface Overlays {
   outlines: boolean;

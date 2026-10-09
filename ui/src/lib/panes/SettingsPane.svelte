@@ -1,26 +1,26 @@
 <script lang="ts">
   // Device security, look and feel, names and colours for everything, layouts,
   // and backups.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import SecuritySection from "$lib/components/security/SecuritySection.svelte";
-  import { exportAll, importAll } from "$lib/core/backup";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { prefs, THEMES } from "$lib/core/prefs.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import { downloadJson, pickJson } from "$lib/files";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import Swatch from "$lib/kit/Swatch.svelte";
-  import IdentityEditor from "$lib/kit/IdentityEditor.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { exportWorkspace, importWorkspace } from "$lib/shell/workspace-actions";
-  import Num from "$lib/kit/Num.svelte";
-  import { team } from "$lib/core/team.svelte";
-  import { gallery } from "$lib/shell/gallery.svelte";
-  import { help } from "$lib/shell/help.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import SecuritySection from "#lib/components/security/SecuritySection.svelte";
+  import { exportAll, importAll } from "#lib/core/backup.js";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import { downloadJson, pickJson } from "#lib/files.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import Swatch from "#lib/kit/Swatch.svelte";
+  import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { exportWorkspace, importWorkspace } from "#lib/shell/workspace-actions.js";
+  import Num from "#lib/kit/Num.svelte";
+  import { team } from "#lib/core/team.svelte.js";
+  import { gallery } from "#lib/shell/gallery.svelte.js";
+  import { help } from "#lib/shell/help.svelte.js";
 
   const ACCENTS = ["#ff6b6b", "#ff7a3d", "#f5a524", "#3ccf7e", "#2dd4bf", "#4c8dff", "#9775fa", "#f783ac"];
   let identityKind = $state<"cameras" | "pipelines" | "devices">("cameras");

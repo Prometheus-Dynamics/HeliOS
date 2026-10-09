@@ -1,31 +1,31 @@
 <script lang="ts">
   // Whatever is selected, anywhere: its identity, live facts, settings and
   // actions. Everyday things first; deeper sections are closed below.
-  import { CATALOG_BY_ID } from "$lib/api/catalog";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { duration } from "$lib/format";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { drafts } from "$lib/graph/drafts.svelte";
-  import { CATEGORY_COLORS, CATEGORY_ICONS, portColor, portTypeLabel } from "$lib/graph/graph";
-  import Badge from "$lib/kit/Badge.svelte";
-  import Choice from "$lib/kit/Choice.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import IdentityEditor from "$lib/kit/IdentityEditor.svelte";
-  import Meter from "$lib/kit/Meter.svelte";
-  import ParamControl from "$lib/kit/ParamControl.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Slider from "$lib/kit/Slider.svelte";
-  import Spark from "$lib/kit/Spark.svelte";
-  import Switch from "$lib/kit/Switch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { system } from "$lib/stores/system.svelte";
-  import { field } from "$lib/stores/field.svelte";
-  import Num from "$lib/kit/Num.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { CATALOG_BY_ID } from "#lib/api/catalog.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { duration } from "#lib/format.js";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { drafts } from "#lib/graph/drafts.svelte.js";
+  import { CATEGORY_COLORS, CATEGORY_ICONS, portColor, portTypeLabel } from "#lib/graph/graph.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import Choice from "#lib/kit/Choice.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
+  import Meter from "#lib/kit/Meter.svelte";
+  import ParamControl from "#lib/kit/ParamControl.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Slider from "#lib/kit/Slider.svelte";
+  import Spark from "#lib/kit/Spark.svelte";
+  import Switch from "#lib/kit/Switch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { system } from "#lib/stores/system.svelte.js";
+  import { field } from "#lib/stores/field.svelte.js";
+  import Num from "#lib/kit/Num.svelte";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
 
   let {}: PaneProps = $props();

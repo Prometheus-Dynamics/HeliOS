@@ -1,20 +1,20 @@
 <script lang="ts">
   import { SvelteFlowProvider } from "@xyflow/svelte";
-  import { identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { drafts } from "$lib/graph/drafts.svelte";
-  import GraphCanvas from "$lib/graph/GraphCanvas.svelte";
-  import { TEMPLATES, tableFor, templateGraph } from "$lib/graph/graph";
-  import Badge from "$lib/kit/Badge.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import type { GraphDocument } from "$lib/api/model";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import { downloadJson, pickJson } from "$lib/files";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { drafts } from "#lib/graph/drafts.svelte.js";
+  import GraphCanvas from "#lib/graph/GraphCanvas.svelte";
+  import { TEMPLATES, tableFor, templateGraph } from "#lib/graph/graph.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import type { GraphDocument } from "#lib/api/model.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import { downloadJson, pickJson } from "#lib/files.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

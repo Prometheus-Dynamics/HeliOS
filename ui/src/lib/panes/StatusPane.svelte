@@ -1,15 +1,15 @@
 <script lang="ts">
   // The robot at a glance: what needs attention, then one line per device
   // with its load, so problems are visible before anyone goes looking.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { nodeIcon } from "$lib/present";
-  import Spark from "$lib/kit/Spark.svelte";
-  import Swatch from "$lib/kit/Swatch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { problems } from "$lib/core/fixes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { nodeIcon } from "#lib/present.js";
+  import Spark from "#lib/kit/Spark.svelte";
+  import Swatch from "#lib/kit/Swatch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { problems } from "#lib/core/fixes.js";
 
   const list = $derived(problems());
   const running = $derived(cluster.workloads.filter((w) => w.state === "running").length);

@@ -1,9 +1,9 @@
 <script lang="ts">
   // Pick a device password (twice) and secure the device. Used by Settings and
   // by first-run setup.
-  import { errorText } from "$lib/api/client";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { auth, MIN_PASSWORD } from "$lib/stores/auth.svelte";
+  import { errorText } from "#lib/api/client.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { auth, MIN_PASSWORD } from "#lib/stores/auth.svelte.js";
 
   let { ondone, oncancel }: { ondone?: () => void; oncancel?: () => void } = $props();
 

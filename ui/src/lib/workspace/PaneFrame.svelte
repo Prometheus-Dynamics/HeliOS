@@ -2,8 +2,8 @@
   // Any pane, embedded in a page: a slim header carrying the pane's own
   // toolbar, then the pane. The same panes power pages and the Workbench.
   import { untrack, type Snippet } from "svelte";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
   import { setBarSlot } from "./bar";
   import { paneDef } from "./panes";
 

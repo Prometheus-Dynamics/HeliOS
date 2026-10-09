@@ -1,8 +1,8 @@
 // One file with everything you set up in this UI: look, identities, layouts,
 // camera mounts, field, calibrations and camera settings.
 
-import { cluster } from "$lib/stores/cluster.svelte";
-import { toasts } from "$lib/stores/toasts.svelte";
+import { cluster } from "#lib/stores/cluster.svelte.js";
+import { toasts } from "#lib/stores/toasts.svelte.js";
 import { loadRaw, save } from "./persist";
 
 const KEYS = ["prefs", "identities", "workspaces", "workspaces-modified", "placements", "field", "calibrations", "cal-board"];

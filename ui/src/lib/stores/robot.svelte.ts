@@ -4,10 +4,10 @@
 // pick (GLB, glTF, STL, OBJ, PLY or 3MF) and kept for the session.
 
 import type * as THREE from "three";
-import { api, errorText } from "$lib/api/client";
-import type { CameraMount } from "$lib/api/types";
-import { loadRaw, save } from "$lib/core/persist";
-import { defaultPlacement, type Placement } from "$lib/three/mounts";
+import { api, errorText } from "#lib/api/client.js";
+import type { CameraMount } from "#lib/api/types.js";
+import { loadRaw, save } from "#lib/core/persist.js";
+import { defaultPlacement, type Placement } from "#lib/three/mounts.js";
 import { cluster } from "./cluster.svelte";
 import { liveState } from "./live.svelte";
 import { toasts } from "./toasts.svelte";
@@ -132,7 +132,7 @@ class RobotStore {
       return;
     }
     try {
-      const { loadModelFile } = await import("$lib/three/loaders");
+      const { loadModelFile } = await import("#lib/three/loaders.js");
       const { object, parts, triangles, guessUnit } = await loadModelFile(file, ext);
       this.model = object;
       this.info = { name: file.name, unit: guessUnit, up: ext === "glb" || ext === "gltf" || ext === "obj" ? "y" : "z", offset: [0, 0, 0], yaw: 0, parts, triangles };

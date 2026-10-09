@@ -3,23 +3,23 @@
   // now, trails, and your CAD model. Pick mode attaches the selected camera
   // to the part you click.
   import type * as THREE from "three";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { prefs } from "$lib/core/prefs.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import { pickFile } from "$lib/files";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { robot } from "$lib/stores/robot.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import { cssVarColor } from "$lib/three/colors";
-  import { mountsFor, placeTag, type PlacedTag } from "$lib/three/mounts";
-  import Scene3D from "$lib/three/Scene3D.svelte";
-  import type { ViewPreset } from "$lib/three/scene";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { prefs } from "#lib/core/prefs.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import { pickFile } from "#lib/files.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { robot } from "#lib/stores/robot.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import { cssVarColor } from "#lib/three/colors.js";
+  import { mountsFor, placeTag, type PlacedTag } from "#lib/three/mounts.js";
+  import Scene3D from "#lib/three/Scene3D.svelte";
+  import type { ViewPreset } from "#lib/three/scene.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
 
   let { pane, ws }: PaneProps = $props();
   const opts = $derived({ frustums: true, trails: true, grid: true, labels: true, ...((pane.props?.view as object) ?? {}) });

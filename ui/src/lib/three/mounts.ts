@@ -4,7 +4,7 @@
 // ground). The scene puts the robot frame into three.js's y-up world.
 
 import * as THREE from "three";
-import type { Camera, TagPose } from "$lib/api/model";
+import type { Camera, TagPose } from "#lib/api/model.js";
 
 /** AprilTag 36h11 FRC tag edge, metres. */
 export const TAG_SIZE = 0.1651;

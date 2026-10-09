@@ -2,18 +2,18 @@
   // The field from above: drag tags to move them, drag the arrow to turn
   // them, double-click empty floor to add one. The robot and its cameras'
   // fields of view show what it can see from where it stands (drag it too).
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import { downloadJson, pickJson } from "$lib/files";
-  import { menu } from "$lib/core/menu.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { field } from "$lib/stores/field.svelte";
-  import { robot } from "$lib/stores/robot.svelte";
-  import { CAMERA_HFOV_DEG } from "$lib/three/mounts";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import { downloadJson, pickJson } from "#lib/files.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { field } from "#lib/stores/field.svelte.js";
+  import { robot } from "#lib/stores/robot.svelte.js";
+  import { CAMERA_HFOV_DEG } from "#lib/three/mounts.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
 
   let { pane, ws }: PaneProps = $props();
   const snap = $derived((pane.props?.snap as boolean) ?? true);

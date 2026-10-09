@@ -1,8 +1,8 @@
 <script lang="ts">
   // Renders the open menu, clamped inside the window. Keyboard: arrows, Enter,
   // Escape, Right/Left for submenus.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { menu, type MenuItem } from "$lib/core/menu.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { menu, type MenuItem } from "#lib/core/menu.svelte.js";
 
   let el = $state<HTMLDivElement>();
   let sub = $state<{ index: number; top: number } | null>(null);

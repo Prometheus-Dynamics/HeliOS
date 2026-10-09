@@ -2,10 +2,10 @@
 // inspector, catalog and profiler panes all work on the same draft, so a
 // change in one shows in the others. Deploy turns the draft into a revision.
 
-import { CATALOG_BY_ID, type NodeType } from "$lib/api/catalog";
-import type { GraphDocument } from "$lib/api/model";
-import { cluster } from "$lib/stores/cluster.svelte";
-import { toasts } from "$lib/stores/toasts.svelte";
+import { CATALOG_BY_ID, type NodeType } from "#lib/api/catalog.js";
+import type { GraphDocument } from "#lib/api/model.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
+import { toasts } from "#lib/stores/toasts.svelte.js";
 import { fingerprint, newNode, toFlow, toGraphDocument, type FlowEdge, type FlowNode, type ParamValue } from "./graph";
 import { autoLayout } from "./layout";
 

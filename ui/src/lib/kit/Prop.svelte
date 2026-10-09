@@ -2,7 +2,7 @@
   // One property row: label on the left, control on the right. Optional help
   // (tooltip), reset-to-default (shown only when changed) and a changed marker.
   import type { Snippet } from "svelte";
-  import Icon from "$lib/components/common/Icon.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
 
   let {
     label,

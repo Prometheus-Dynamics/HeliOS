@@ -1,10 +1,10 @@
 <script lang="ts">
   // An object picker for a pane toolbar: identity swatch + name, opens a menu
   // of the options (each with its colour). Shows a pin when pinned.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import type { IconName } from "#lib/ui/icons.js";
 
   let {
     value,

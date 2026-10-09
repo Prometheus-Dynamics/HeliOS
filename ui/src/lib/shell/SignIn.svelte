@@ -1,9 +1,9 @@
 <script lang="ts">
   // Shown instead of everything else when the device is secured and this
   // browser is not signed in. One field: the device password.
-  import { errorText } from "$lib/api/client";
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { auth } from "$lib/stores/auth.svelte";
+  import { errorText } from "#lib/api/client.js";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { auth } from "#lib/stores/auth.svelte.js";
 
   let password = $state("");
   let busy = $state(false);

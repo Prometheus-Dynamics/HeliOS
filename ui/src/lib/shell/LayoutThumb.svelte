@@ -1,8 +1,8 @@
 <script lang="ts">
   // A small picture of a layout: boxes in place, each labelled with its panes.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import type { LayoutNode } from "$lib/core/workspace.svelte";
-  import { paneDef } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import type { LayoutNode } from "#lib/core/workspace.svelte.js";
+  import { paneDef } from "#lib/workspace/panes.js";
   import LayoutThumb from "./LayoutThumb.svelte";
 
   let { node }: { node: LayoutNode } = $props();

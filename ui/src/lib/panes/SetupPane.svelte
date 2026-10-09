@@ -1,10 +1,10 @@
 <script lang="ts">
   // The setup checklist: what a new robot still needs, each step one click
   // from the screen that does it.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { guide } from "$lib/core/guide.svelte";
-  import { shell } from "$lib/core/shell.svelte";
-  import { pane, workspaces } from "$lib/core/workspace.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { guide } from "#lib/core/guide.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
 
   const steps = $derived(guide.checklist);
   const done = $derived(steps.filter((s) => s.done).length);

@@ -1,16 +1,16 @@
 <script lang="ts">
   // Every device in the robot, one row each, live: health, link, CPU (per
   // core), memory, temperature, clock and recovery. Click to inspect.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { LINK_ICON } from "$lib/devices";
-  import { nodeIcon } from "$lib/present";
-  import Swatch from "$lib/kit/Swatch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { system } from "$lib/stores/system.svelte";
-  import type { ClusterNode } from "$lib/api/model";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { LINK_ICON } from "#lib/devices.js";
+  import { nodeIcon } from "#lib/present.js";
+  import Swatch from "#lib/kit/Swatch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { system } from "#lib/stores/system.svelte.js";
+  import type { ClusterNode } from "#lib/api/model.js";
 
   const HEALTH = { online: "var(--ok)", degraded: "var(--warn)", offline: "var(--err)" };
 

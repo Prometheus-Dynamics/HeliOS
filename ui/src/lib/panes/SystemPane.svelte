@@ -1,23 +1,23 @@
 <script lang="ts">
   // One device's software: boot slots and updates, services, recovery
   // guarantees, and its whole configuration as a file.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { duration } from "$lib/format";
-  import { identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { RECOVERY } from "$lib/devices";
-  import { downloadJson, pickJson } from "$lib/files";
-  import Badge from "$lib/kit/Badge.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { liveState } from "$lib/stores/live.svelte";
-  import { system } from "$lib/stores/system.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { duration } from "#lib/format.js";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { RECOVERY } from "#lib/devices.js";
+  import { downloadJson, pickJson } from "#lib/files.js";
+  import Badge from "#lib/kit/Badge.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { liveState } from "#lib/stores/live.svelte.js";
+  import { system } from "#lib/stores/system.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import { follow } from "./follow.svelte";
 
   let { pane, ws }: PaneProps = $props();

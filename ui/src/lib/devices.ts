@@ -1,6 +1,6 @@
 // Device vocabulary shared by the device screens: recovery levels, kinds, links.
-import type { Link, NodeKind, RecoveryLevel } from "$lib/api/model";
-import type { IconName } from "$lib/ui/icons";
+import type { Link, NodeKind, RecoveryLevel } from "#lib/api/model.js";
+import type { IconName } from "#lib/ui/icons.js";
 
 export const RECOVERY: Record<RecoveryLevel, { title: string; detail: string }> = {
   R1: { title: "Faults contained", detail: "A crashing service or pipeline is restarted or quarantined; the rest of the device keeps running." },

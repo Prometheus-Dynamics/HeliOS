@@ -1,7 +1,7 @@
 <script lang="ts">
   // A compact icon button with a tooltip. `active` for toggles, `tone` for intent.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import type { IconName } from "#lib/ui/icons.js";
 
   let {
     icon,

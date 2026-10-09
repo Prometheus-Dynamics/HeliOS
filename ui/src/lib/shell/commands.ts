@@ -1,16 +1,16 @@
 // What the palette can do: go to screens, open panes, jump to any camera,
 // pipeline or device, and run actions.
 
-import { exportAll } from "$lib/core/backup";
-import { commands } from "$lib/core/commands.svelte";
-import { identity } from "$lib/core/identity.svelte";
-import { prefs, THEMES } from "$lib/core/prefs.svelte";
-import { selection } from "$lib/core/selection.svelte";
-import { shell } from "$lib/core/shell.svelte";
-import { pane, workspaces } from "$lib/core/workspace.svelte";
-import { downloadJson } from "$lib/files";
-import { cluster } from "$lib/stores/cluster.svelte";
-import { allPanes } from "$lib/workspace/panes";
+import { exportAll } from "#lib/core/backup.js";
+import { commands } from "#lib/core/commands.svelte.js";
+import { identity } from "#lib/core/identity.svelte.js";
+import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
+import { selection } from "#lib/core/selection.svelte.js";
+import { shell } from "#lib/core/shell.svelte.js";
+import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+import { downloadJson } from "#lib/files.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
+import { allPanes } from "#lib/workspace/panes.js";
 import { gallery } from "./gallery.svelte";
 import { help } from "./help.svelte";
 

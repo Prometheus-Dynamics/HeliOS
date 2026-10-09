@@ -2,10 +2,10 @@
   // A live camera frame fitted into its box (letterboxed, never cropped) with
   // detection overlays, an ROI you can draw and drag, a crosshair, a grid and
   // a luminance histogram. Overlays draw in sensor pixels via one SVG.
-  import type { Camera, Detection } from "$lib/api/model";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
+  import type { Camera, Detection } from "#lib/api/model.js";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { Overlays } from "./overlays";
 
 

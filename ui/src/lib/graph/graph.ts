@@ -3,10 +3,10 @@
 // functions; the editor owns the reactive state.
 
 import type { Connection, Edge, Node } from "@xyflow/svelte";
-import { CATALOG_BY_ID, PORT_COLORS, defaults, type NodeType, type Param, type PortType } from "$lib/api/catalog";
-import type { GraphDocument, GraphEdge, GraphNode } from "$lib/api/model";
-import { tagGraph } from "$lib/api/mock";
-import type { IconName } from "$lib/ui/icons";
+import { CATALOG_BY_ID, PORT_COLORS, defaults, type NodeType, type Param, type PortType } from "#lib/api/catalog.js";
+import type { GraphDocument, GraphEdge, GraphNode } from "#lib/api/model.js";
+import { tagGraph } from "#lib/api/mock.js";
+import type { IconName } from "#lib/ui/icons.js";
 
 export type ParamValue = number | string | boolean;
 

@@ -1,12 +1,12 @@
 // Plain-language entries for the palette: type the problem ("image too
 // dark") or the goal ("calibrate") and land on the screen and control for it.
 
-import { commands } from "$lib/core/commands.svelte";
-import { selection } from "$lib/core/selection.svelte";
-import { shell } from "$lib/core/shell.svelte";
-import { pane, workspaces } from "$lib/core/workspace.svelte";
-import type { IconName } from "$lib/ui/icons";
-import { cluster } from "$lib/stores/cluster.svelte";
+import { commands } from "#lib/core/commands.svelte.js";
+import { selection } from "#lib/core/selection.svelte.js";
+import { shell } from "#lib/core/shell.svelte.js";
+import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+import type { IconName } from "#lib/ui/icons.js";
+import { cluster } from "#lib/stores/cluster.svelte.js";
 
 function camera() {
   if (!selection.last.camera && cluster.cameras[0]) selection.select({ kind: "camera", id: cluster.cameras[0].resourceId });

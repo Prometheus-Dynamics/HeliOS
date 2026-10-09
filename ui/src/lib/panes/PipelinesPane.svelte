@@ -1,18 +1,18 @@
 <script lang="ts">
   // Every pipeline on the robot with its health and speed, and the controls
   // to start, stop, restart or roll back. Click to edit it everywhere.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { drafts } from "$lib/graph/drafts.svelte";
-  import { tableFor, templateGraph, TEMPLATES } from "$lib/graph/graph";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Spark from "$lib/kit/Spark.svelte";
-  import Swatch from "$lib/kit/Swatch.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import type { Workload } from "$lib/api/model";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { drafts } from "#lib/graph/drafts.svelte.js";
+  import { tableFor, templateGraph, TEMPLATES } from "#lib/graph/graph.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Spark from "#lib/kit/Spark.svelte";
+  import Swatch from "#lib/kit/Swatch.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import type { Workload } from "#lib/api/model.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
 
   const STATE_COLOR = { running: "var(--ok)", starting: "var(--info)", quarantined: "var(--err)", stopped: "var(--fg-4)" };
 

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import Icon from "$lib/components/common/Icon.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import type { IconName } from "#lib/ui/icons.js";
   import type { Snippet } from "svelte";
   let { icon = "circle-dashed", text, children }: { icon?: IconName; text: string; children?: Snippet } = $props();
 </script>

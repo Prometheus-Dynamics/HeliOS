@@ -2,19 +2,19 @@
   // Where every camera sits on the robot, as numbers you can type or scrub,
   // plus the CAD model's units and placement. Exports robot-to-camera
   // transforms for robot code.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { downloadJson, pickFile } from "$lib/files";
-  import Choice from "$lib/kit/Choice.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Num from "$lib/kit/Num.svelte";
-  import Prop from "$lib/kit/Prop.svelte";
-  import Section from "$lib/kit/Section.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { robot, UNITS } from "$lib/stores/robot.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { downloadJson, pickFile } from "#lib/files.js";
+  import Choice from "#lib/kit/Choice.svelte";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Num from "#lib/kit/Num.svelte";
+  import Prop from "#lib/kit/Prop.svelte";
+  import Section from "#lib/kit/Section.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { robot, UNITS } from "#lib/stores/robot.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
 
   const cm = (m: number) => Math.round(m * 1000) / 10;
   const MODEL_TYPES = ".glb,.gltf,.stl,.obj,.ply,.3mf,.step,.stp";

@@ -1,8 +1,8 @@
 <script lang="ts">
   // Ctrl+K: screens, panes, cameras, pipelines, devices, actions, and plain
   // descriptions of problems ("image too dark").
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { commands, type Command } from "$lib/core/commands.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { commands, type Command } from "#lib/core/commands.svelte.js";
 
   let query = $state("");
   let index = $state(0);

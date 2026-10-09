@@ -1,14 +1,14 @@
 <script lang="ts">
   // A tab stack: tabs (drag to reorder, move, or dock beside another stack),
   // the active pane's toolbar in the same row, and the pane itself.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import { colorVar, identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { pane as makePane, workspaces, type DropZone, type LayoutNode, type PaneRef } from "$lib/core/workspace.svelte";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { pane as makePane, workspaces, type DropZone, type LayoutNode, type PaneRef } from "#lib/core/workspace.svelte.js";
   import { setBarSlot } from "./bar";
   import { NEW_PANE_MIME, PANE_MIME, addPaneTo, paneMenu } from "./library";
   import { paneDef } from "./panes";
-  import { help } from "$lib/shell/help.svelte";
+  import { help } from "#lib/shell/help.svelte.js";
 
   let { stack, ws }: { stack: Extract<LayoutNode, { kind: "stack" }>; ws: string } = $props();
 

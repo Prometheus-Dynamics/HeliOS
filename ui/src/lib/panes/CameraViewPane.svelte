@@ -1,18 +1,18 @@
 <script lang="ts">
   // One camera, big: follows the selected camera or stays pinned. Overlays,
   // ROI drawing, snapshot and quick exposure in the tab row.
-  import { identity } from "$lib/core/identity.svelte";
-  import { menu } from "$lib/core/menu.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import IconButton from "$lib/kit/IconButton.svelte";
-  import Picker from "$lib/kit/Picker.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { toasts } from "$lib/stores/toasts.svelte";
-  import Feed from "$lib/vision/Feed.svelte";
-  import { DEFAULT_OVERLAYS, overlayMenu, type Overlays } from "$lib/vision/overlays";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { menu } from "#lib/core/menu.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import IconButton from "#lib/kit/IconButton.svelte";
+  import Picker from "#lib/kit/Picker.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
+  import Feed from "#lib/vision/Feed.svelte";
+  import { DEFAULT_OVERLAYS, overlayMenu, type Overlays } from "#lib/vision/overlays.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

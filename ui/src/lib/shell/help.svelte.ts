@@ -1,6 +1,6 @@
 // Help: the first-run setup, the guided tour, and "what's on this screen".
 
-import { loadRaw, save } from "$lib/core/persist";
+import { loadRaw, save } from "#lib/core/persist.js";
 
 export interface TourStep {
   /** CSS selector of the element to point at (first match). */

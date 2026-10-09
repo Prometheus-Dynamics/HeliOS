@@ -1,17 +1,17 @@
 <script lang="ts">
   // Where a pipeline's time goes: each node's share of the tick, in graph
   // order, against the frame budget. Click a row to select the node.
-  import { CATALOG_BY_ID } from "$lib/api/catalog";
-  import { identity } from "$lib/core/identity.svelte";
-  import { selection } from "$lib/core/selection.svelte";
-  import { CATEGORY_COLORS } from "$lib/graph/graph";
-  import Picker from "$lib/kit/Picker.svelte";
-  import Spark from "$lib/kit/Spark.svelte";
-  import Seg from "$lib/kit/Seg.svelte";
-  import { cluster } from "$lib/stores/cluster.svelte";
-  import { workspaces } from "$lib/core/workspace.svelte";
-  import PaneBar from "$lib/workspace/PaneBar.svelte";
-  import type { PaneProps } from "$lib/workspace/panes";
+  import { CATALOG_BY_ID } from "#lib/api/catalog.js";
+  import { identity } from "#lib/core/identity.svelte.js";
+  import { selection } from "#lib/core/selection.svelte.js";
+  import { CATEGORY_COLORS } from "#lib/graph/graph.js";
+  import Picker from "#lib/kit/Picker.svelte";
+  import Spark from "#lib/kit/Spark.svelte";
+  import Seg from "#lib/kit/Seg.svelte";
+  import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { workspaces } from "#lib/core/workspace.svelte.js";
+  import PaneBar from "#lib/workspace/PaneBar.svelte";
+  import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import { follow } from "./follow.svelte";
 

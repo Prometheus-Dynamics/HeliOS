@@ -3,10 +3,10 @@
 // With `?mock=1` (or VITE_HELIOS_MOCK=1) it runs the simulated robot from
 // mock.ts instead, for UI work without a device.
 
-import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "$lib/api/mock";
-import { MOCK } from "$lib/api/mode";
+import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "#lib/api/mock.js";
+import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
-import type { Camera, CameraSettings, ClusterNode, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "$lib/api/model";
+import type { Camera, CameraSettings, ClusterNode, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
 import { toasts } from "./toasts.svelte";
 
 interface FeedData {

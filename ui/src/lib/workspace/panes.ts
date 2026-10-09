@@ -3,8 +3,8 @@
 // id; it puts its tools in the tab row with <PaneBar>.
 
 import type { Component } from "svelte";
-import type { PaneRef } from "$lib/core/workspace.svelte";
-import type { IconName } from "$lib/ui/icons";
+import type { PaneRef } from "#lib/core/workspace.svelte.js";
+import type { IconName } from "#lib/ui/icons.js";
 
 export interface PaneProps {
   pane: PaneRef;

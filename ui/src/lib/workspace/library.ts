@@ -1,7 +1,7 @@
 // Menus for adding panes, shared by stack menus, the top bar and the palette.
 
-import { menu, type MenuItem } from "$lib/core/menu.svelte";
-import { pane, workspaces, type DropZone } from "$lib/core/workspace.svelte";
+import { menu, type MenuItem } from "#lib/core/menu.svelte.js";
+import { pane, workspaces, type DropZone } from "#lib/core/workspace.svelte.js";
 import { allPanes, type PaneDef } from "./panes";
 
 export const PANE_MIME = "application/x-helios-pane";

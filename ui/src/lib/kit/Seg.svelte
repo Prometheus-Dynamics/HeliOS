@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends string">
   // A compact segmented control.
-  import Icon from "$lib/components/common/Icon.svelte";
-  import type { IconName } from "$lib/ui/icons";
+  import Icon from "#lib/components/common/Icon.svelte";
+  import type { IconName } from "#lib/ui/icons.js";
 
   let {
     value = $bindable(),

@@ -1,6 +1,6 @@
 <script lang="ts">
   // The right control for a catalog parameter.
-  import type { Param } from "$lib/api/catalog";
+  import type { Param } from "#lib/api/catalog.js";
   import Choice from "./Choice.svelte";
   import Num from "./Num.svelte";
   import Slider from "./Slider.svelte";

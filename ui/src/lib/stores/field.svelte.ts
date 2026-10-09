@@ -1,7 +1,7 @@
 // The field: its size and where every tag is. Imports and exports WPILib's
 // AprilTag field layout JSON, so robot code and HeliOS share one file.
 
-import { loadRaw, save } from "$lib/core/persist";
+import { loadRaw, save } from "#lib/core/persist.js";
 import { toasts } from "./toasts.svelte";
 
 export interface FieldTag {
