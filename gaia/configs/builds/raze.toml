@@ -44,10 +44,12 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev b9eb154, after 527b165: Lemnos b4d6cfe's
-# lemnosd owns the LED ring, fan and sensors, with the fan released back to
-# the kernel governor while lemnosd runs and self-test LEDs on the test layer;
-# board-agent, the Orion device agent, as a Gaia artifact, with an orion-node
+# Raze board package (Atlas dev e12b079: Lemnos 62c3caf's lemnosd owns the LED
+# ring, fan and sensors, with the fan released back to the kernel governor
+# while lemnosd runs and self-test LEDs on the test layer; its layers ask for
+# Gaia >=2.0.0; board-agent, the Orion device agent, as a Gaia artifact
+# (static aarch64 musl, built in Docker; BR2_PACKAGE_BOARD_AGENT is gone, and
+# HeliOS never set it), with an orion-node
 # drop-in setting ORION_NODE_LOCAL_AUTH_ALLOW=root (HeliOS sets no allow-list
 # of its own, so that drop-in stands); the device machinery named board-*;
 # network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
@@ -60,16 +62,15 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "b9eb15414bd5d1df1ff5408afa2e2469612b86c6"
+rev = "e12b079bb22489e80bf29e674d5d79818b49824f"
 
 # Lemnos (dev 62c3caf). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
-# sources, so it is declared here. The Atlas package is tested with b4d6cfe
-# (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev in
-# the Raze manifest); 62c3caf is b4d6cfe plus packaging fixes (its layer asks
-# for Gaia >=2.0.0 instead of the nonexistent 2.1, one cargo build group for
-# lemnosd and lemnos-ctl, the host-build layer imported below), with the same
-# client API and daemon. backend/Cargo.lock pins the same commit for
+# sources, so it is declared here, at the commit the Atlas package is tested
+# with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
+# in the Raze manifest): b4d6cfe's daemon and client API with packaging fixes
+# (Gaia >=2.0.0, one cargo build group for lemnosd and lemnos-ctl, the
+# host-build layer imported above). backend/Cargo.lock pins the same commit for
 # lemnos-ipc, the lemnosd client helios-peripherals uses.
 [[sources]]
 id = "lemnos"

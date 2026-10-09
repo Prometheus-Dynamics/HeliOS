@@ -28,7 +28,11 @@ config_overrides = [
   # e2fsck, mke2fs and tune2fs are always built; resize2fs is optional.
   ["BR2_PACKAGE_E2FSPROGS", "y"],
   ["BR2_PACKAGE_E2FSPROGS_RESIZE2FS", "y"],
-  ["BR2_PACKAGE_LINUX_FIRMWARE", "y"],
+  # No linux-firmware: it was selected with no blob, so it only cost a
+  # download and extract per build. The Raze needs none: Wi-Fi and Bluetooth
+  # are off (disable-wifi-pi5, disable-bt-pi5 in config.txt), networking is
+  # Ethernet and the USB gadget, the OV9782 has no firmware, and the VPU
+  # firmware comes from rpi-firmware. Select only the blob if one is needed.
   ["BR2_PACKAGE_OPENSSH", "y"],
   ["BR2_PACKAGE_PARTED", "y"],
   ["BR2_PACKAGE_UTIL_LINUX", "y"],
