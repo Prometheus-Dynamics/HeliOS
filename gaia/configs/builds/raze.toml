@@ -38,7 +38,7 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package (Atlas dev 3c97fa0: the pd-device machinery renamed
+# Raze board package (Atlas dev 3c97fa0: the device machinery renamed
 # board-*; network discovery keeps _pd-device._tcp and /.well-known/pd-device):
 # EROFS, 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2 with the Raze trims
 # and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915, libcamera 0.7.2, the
