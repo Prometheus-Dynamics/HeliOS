@@ -67,6 +67,40 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] OTA through the device package's writer: `/v1/update/*` and `/v1/ota/*` stage an uploaded `.img.xz` with its sha256 (`update stage`), apply it (`update apply`, through systemd-run) and report `/run/board/update.json`.
 - [ ] OTA: optional image signatures (Atlas open question: where the key lives).
 
+## Multi-camera (planned, not built)
+
+Today a workload with several camera bindings ticks on its primary camera and batches each
+secondary camera's latest frame (at most 500 ms old) with it: neither simultaneous nor shared.
+The plan, on the pinned Daedalus bcc9f33 and Styx 185ad43:
+
+- [ ] **One `ExecutionDomain` per camera** (Daedalus `docs/node-authoring.md`, "Sharing
+  Preprocessing Across Graphs"), owned by that camera's graph thread: the camera's pipelines
+  (AprilTag, ArUco, later ML) become graphs of one domain instead of separate workloads with
+  separate `FrameClient`s. Load them with `ExecutionDomain::load_shared_documents`, so nodes
+  they compute identically (mask prep, pyramid, candidate quads; Eidos marks them `shareable`)
+  move into one upstream `shared` graph (Eidos does not mark its nodes `shareable` yet: Upstream); route the camera's `frame` to every graph (one push,
+  `Arc` clones); per-camera context (calibration, mount) as held inputs routed to the graphs
+  that need it. Enabling or disabling a pipeline is `add_graph`/`remove_graph` between ticks,
+  with no recompile of the others. Engine: group the resident workloads by camera binding;
+  a domain per (camera, request) with its own poll loop; publish per graph as today, plus the
+  domain's `explain()` and `stats()` (`avoided_runs`, `saved_time`) in the `plan`/`metrics`
+  artifacts. Needs: Eidos's tracked group to share its preprocessing (today one
+  `tracked_detect` node, so only the full-search groups dedupe; see Upstream).
+- [ ] **Cross-camera graphs** (stereo, multi-view field pose): a separate workload whose graph
+  has one frame input per camera (`cam0`, `cam1`, ...). Frames grouped by capture timestamp with
+  Styx's `styx::multicam::FrameGrouper` over the cameras' `FrameClient`s (its fds go into the
+  same `poll(2)`; `GroupPolicy::Strict` or partial, tolerance half a frame period, `deadline_ns`
+  for a stalled camera) and pushed as one batch with `styx_core::daedalus::push_group` (plus
+  `FrameGroupInfo` on a `sync` port for spread and offsets); or with Daedalus's
+  `MultiCamera::synchronized` on the graph's host bridge (`poll_timeout()` as the poll timeout,
+  `tick_ready_cameras`). Pick one: they do the same grouping (see Upstream). Per-camera
+  outputs (detections, poses) can also feed it through domain links instead of raw frames.
+- [ ] API: a pipeline with several camera bindings declares `sync` (`independent` |
+  `synchronized`, tolerance); the UI shows the group spread and drops from `FrameGrouper::report()`.
+- [ ] Measure on the CM5 with two cameras: per-camera latency unchanged by the other camera,
+  shared preprocessing saving one mask prep per extra detector, group spread for free-running
+  OV9782s (expect up to half a frame period) and with a hardware frame-sync input.
+
 ## Upstream
 
 - [x] Styx: `ControlClient` (controls without frames) and non-blocking reconnecting clients (`request_nonblocking`, `controls_nonblocking`), used by helios-api and the engine.
@@ -80,6 +114,13 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Orion client: reconnecting under the same local address resumes the session (c22fa42); helios-api uses one fixed address again.
 - [x] Atlas: `BOARD_PACKAGE_COMMIT` for a source import: HeliOS writes it (`${source.atlas.commit}`) to `/etc/default/board-package.env`, linked as `/etc/board/board-package.env`.
 - [ ] Gaia: `@source:` inside quoted Buildroot values (HeliOS keeps its own copy of Orion's users table); building related rust artifacts in one cargo invocation (engine and plugins).
+- [ ] Eidos: mark the deterministic stage nodes (mask prep, quads, decode, refine) `#[node(shareable)]` so `ExecutionDomain::load_shared_documents` dedupes them across a camera's detectors.
+- [ ] Eidos: the tracked detector groups expand to one node (`eidos:detectors.tracked_detect`), so per-stage profiling (AGENTS.md rule 5) and `ExecutionDomain` sharing of mask prep and quads are lost on the default (tracked) path; split it into stage nodes, or report per-stage telemetry from the node.
+- [ ] Eidos: pose nodes take the camera as 13 scalar config ports and the mount as 7, and their templates bake them in as constants; HeliOS rewires them to host inputs. A structured `eidos:camera_calibration` / `eidos:camera_mount` input (or a template option exposing them as host inputs) would let a host push one held calibration value. Also a WPILib/fmap field-layout import (HeliOS converts `FRC2026_ANDYMARK.fmap` itself in its template test).
+- [ ] Daedalus: a pushed `String` does not convert into an enum-typed config port (constants do): `push("frame_lens", "fisheye")` fails the node with "missing lens". HeliOS inlines named context as constants at compile time instead (a lens change recompiles).
+- [ ] Orion: `TypedConfigValue` has no float; HeliOS writes camera context numbers as decimal strings.
+- [ ] Styx/Daedalus: `styx::multicam::FrameGrouper` (+ `push_group`) and Daedalus `MultiCamera::synchronized` both group camera frames by timestamp; say which a host should use (HeliOS's plan prefers the grouper, which owns the `FrameClient` fds).
+- [ ] Atlas: the Raze `sensors.toml` (`/usr/share/board/raze/sensors.toml`) should use Lemnos 8a126d3's I2C selectors for the IMU (`bus = "i2c:compatible=i2c-gpio"`, accel 0x18, gyro 0x68); BMM150 0x10 and INA238 0x40 stay on i2c-1. HeliOS ships no sensors file.
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 
 ## PhotonVision image
