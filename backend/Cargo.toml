@@ -123,13 +123,17 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (bcc9f33, plugin ABI 9), Styx dev (185ad43), Eidos main (624cab4),
-#   Orion v4 main (c22fa42; also the Gaia `orion` source), Lemnos dev (8a126d3).
+#   Daedalus 3.0 dev (bcc9f33, plugin ABI 9), Styx dev (185ad43), Eidos main (d3e4b4a5b),
+#   Orion v4 main (ec91d0a; also the Gaia `orion` source), Lemnos dev (b4d6cfe).
+# Updating another library tends to move Daedalus to its dev head: re-pin it with
+# `cargo update -p daedalus-rs --precise bcc9f33`, and check `cargo tree -d`.
 daedalus = { package = "daedalus-rs", version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-macros = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-planner = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev", default-features = false }
 lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
+# lemnosd's client (devices, controls, LED intents) for helios-peripherals.
+lemnos-ipc = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev" }
 orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "main", default-features = false }
 styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }

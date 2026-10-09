@@ -44,9 +44,10 @@ kind = "buildroot"
 # orion-node.service runs as the `orion` user. The root filesystem is a
 # read-only EROFS slot, so the user is created at build time rather than by
 # systemd-sysusers (Orion packaging/README.md, "The orion user"), from Orion's
-# own users table.
+# own users table. The value replaces os/base.toml's, so it lists lemnosd's
+# table too.
 config_overrides = [
-  ["BR2_ROOTFS_USERS_TABLES", "\"${source.orion.path}/packaging/buildroot/orion-users.table\""],
+  ["BR2_ROOTFS_USERS_TABLES", "\"${project.root_dir}/gaia/assets/os/buildroot/lemnos-users.table ${source.orion.path}/packaging/buildroot/orion-users.table\""],
 ]
 
 [image.feed]

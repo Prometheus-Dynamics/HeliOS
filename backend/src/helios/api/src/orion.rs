@@ -183,6 +183,8 @@ pub fn config_value_json(value: &orion::control_plane::TypedConfigValue) -> serd
         TypedConfigValue::Bool(value) => serde_json::Value::Bool(*value),
         TypedConfigValue::Int(value) => serde_json::Value::from(*value),
         TypedConfigValue::UInt(value) => serde_json::Value::from(*value),
+        // JSON has no NaN or infinity: those become null.
+        TypedConfigValue::F64(value) => serde_json::Number::from_f64(*value).map_or(serde_json::Value::Null, serde_json::Value::Number),
         TypedConfigValue::String(value) => serde_json::Value::String(value.clone()),
         TypedConfigValue::Bytes(bytes) => serde_json::Value::Array(bytes.iter().map(|byte| serde_json::Value::from(*byte)).collect()),
     }

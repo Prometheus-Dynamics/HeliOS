@@ -15,6 +15,7 @@ target = "raze"
 # against checkouts:
 #   --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 #   --set sources.orion.path=$PWD/../Orion
+#   --set sources.lemnos.path=$PWD/../lemnos
 imports = [
   "../layers/base-os.toml",
   { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },
@@ -38,21 +39,38 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev 3c97fa0: the device machinery renamed
-# board-*; network discovery keeps _pd-device._tcp and /.well-known/pd-device):
-# EROFS, 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2 with the Raze trims
-# and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915, libcamera 0.7.2, the
-# A/B update writer (/usr/lib/board/update, board-image-slots) for the same
-# .img.xz that is flashed, read-only-root-safe device services, no udev hwdb,
-# optional Vulkan layer.
+# Raze board package (Atlas dev b9eb154, after 527b165: Lemnos b4d6cfe's
+# lemnosd owns the LED ring, fan and sensors, with the fan released back to
+# the kernel governor while lemnosd runs and self-test LEDs on the test layer;
+# board-agent, the Orion device agent, as a Gaia artifact, with an orion-node
+# drop-in setting ORION_NODE_LOCAL_AUTH_ALLOW=root (HeliOS sets no allow-list
+# of its own, so that drop-in stands); the device machinery named board-*;
+# network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
+# 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2
+# with the Raze trims and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915,
+# libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
+# board-image-slots) for the same .img.xz that is flashed,
+# read-only-root-safe device services, no udev hwdb, optional Vulkan layer.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "3c97fa0c45a76323199aabf1f153e86b3d46e2c9"
+rev = "b9eb15414bd5d1df1ff5408afa2e2469612b86c6"
 
-# Orion v4 (main c22fa42: observed-state watch, session resume on reconnect,
-# CPU and temperature host metrics, operator access,
+# Lemnos (dev b4d6cfe). The Raze layer imports Lemnos's lemnosd layer from a
+# source named `lemnos`, and Gaia lets only local files declare import
+# sources, so it is declared here, at the commit the Atlas package is tested
+# with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
+# in the Raze manifest). backend/Cargo.lock pins the same commit for
+# lemnos-ipc, the lemnosd client helios-peripherals uses.
+[[sources]]
+id = "lemnos"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
+rev = "b4d6cfee3afe77fc649e55db4ab592d0ab94cb0e"
+
+# Orion v4 (main ec91d0a: TypedConfigValue::F64, observed-state watch, session
+# resume on reconnect, CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node, orionctl and the HeliOS services speak the same control
 # protocol, and its layout changed within v4.
@@ -60,7 +78,7 @@ rev = "3c97fa0c45a76323199aabf1f153e86b3d46e2c9"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "c22fa42a8dd4176805d292796e1580f5c865e23f"
+rev = "ec91d0a6999389a0aaef0cd11e05c9e419b96b99"
 
 [inputs.profile]
 description = "Build profile"

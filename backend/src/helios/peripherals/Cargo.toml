@@ -31,6 +31,7 @@ notify = { workspace = true }
 
 orion = { workspace = true, default-features = false, features = ["client"] }
 lemnos = { workspace = true, default-features = false, features = ["builtin-drivers", "linux", "linux-hotplug", "tokio"] }
+lemnos-ipc = { workspace = true }
 styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg"] }
 
 [dev-dependencies]
