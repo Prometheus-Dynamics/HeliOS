@@ -126,7 +126,7 @@ tempfile = "3.27.0"
 #   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (4e8e19c), Eidos main (3546efbf9,
 #   tracking overrides and tracked stage nodes; on Daedalus c927136), Orion v4 main (4fadba9:
 #   request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`; also the Gaia
-#   `orion` source), Lemnos dev (e5d5b3b: fault reasons and the lemnosd -> Orion bridge; also the
+#   `orion` source), Lemnos dev (b2634fc: fault reasons and the lemnosd -> Orion bridge; also the
 #   Gaia `lemnos` source).
 # The engine and the plugin libraries must come from the same Daedalus commit: the image builds
 # them in one cargo invocation (Gaia build_group "helios-backend").

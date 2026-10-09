@@ -74,7 +74,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "3175ad9c2f912ac2d2d4b113d2efbae5e610c6c7"
 
-# Lemnos (dev e5d5b3b: fault reasons and lemnosd's Orion bridge, `lemnos-orion`). The Raze layer imports Lemnos's lemnosd layer from a
+# Lemnos (dev b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
 # sources, so it is declared here, at the commit the Atlas package is tested
 # with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
@@ -88,7 +88,7 @@ rev = "3175ad9c2f912ac2d2d4b113d2efbae5e610c6c7"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "e5d5b3b42837d2c7b537d0a24dd16a909a9110b5"
+rev = "b2634fc1368b659f7ce25b5efdcc90980012c34a"
 
 # Orion v4 (main 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
 # `ActionCaller`), a wire change, so every Orion consumer moves together. Earlier, 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
