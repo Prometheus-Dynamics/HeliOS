@@ -107,7 +107,7 @@ pub enum SearchMode {
 /// of a missed track to a full search (`loss_full_search_after` 0), and the search window keeps
 /// growing over 6 misses (`margin_growth_misses` 6). On the CM5 (the recorded test video, one
 /// thread) it finds 3463 of the reference tags at about 0.324 ms per frame, 98.1% of the 3531 that
-/// full search every frame finds at about 0.84 ms. New tags are found at most 7 frames after they
+/// full search every frame finds at about 0.76 ms p50 (0.94 ms p99). New tags are found at most 7 frames after they
 /// appear.
 pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 8;
 /// See [`DEFAULT_FULL_SEARCH_EVERY`].

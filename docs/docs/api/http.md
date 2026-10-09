@@ -390,7 +390,7 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
 
   | Search | Mean per frame | Reference tags found | New tag found within |
   |---|---|---|---|
-  | `full` (every frame) | 0.84 ms | 3531 | the same frame |
+  | `full` (every frame) | 0.76 ms p50, 0.94 ms p99 | 3531 | the same frame |
   | `tracked`, `full_search_every` 8, k0g6 (default) | 0.324 ms | 3463 (98.1% of full search) | 7 frames |
 
   A new tag is found at most `full_search_every - 1` frames after it appears. The API switches the
