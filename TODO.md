@@ -11,9 +11,9 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | Piece | Where | State |
 |---|---|---|
 | HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned in lockstep (one source each in the lock; the engine and the plugin libraries come from the same Daedalus commit, one cargo build in the image): Daedalus 3.0 `dev` (66659f7, plugin ABI 9: smaller `#[node]` expansions, `declare_plugin!` without `paste`; re-pin it after updating other libraries), Styx `dev` (40069d0: on Daedalus 66659f7, CI pass, the recorder fix), Eidos `main` (52d0c9e60: dormant tracks on by default from 2bbad728d, `max_missed_frames` 12; on Daedalus 66659f7), Orion v4 `main` (973ced7: CI and test fixes, the wire of 4a6945a; also the Gaia `orion` source; they must match), Lemnos `dev` (cca50f7: raw GPIO/PWM/I2C/SPI through lemnosd, writes and claims that end with the connection, `MockLemnosd`; also the Gaia `lemnos` source) |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned in lockstep (one source each in the lock; the engine and the plugin libraries come from the same Daedalus commit, one cargo build in the image): Daedalus 3.0 `dev` (c927136, plugin ABI 9: schedule order by node index, per-instance node state, resources and metrics; re-pin it after updating other libraries, Styx updates move it), Styx `dev` (4e8e19c: on Daedalus c927136), Eidos `main` (52d0c9e60: dormant tracks on by default from 2bbad728d, `max_missed_frames` 12; on Daedalus 66659f7), Orion v4 `main` (973ced7: CI and test fixes, the wire of 4a6945a; also the Gaia `orion` source; they must match), Lemnos `dev` (cca50f7: raw GPIO/PWM/I2C/SPI through lemnosd, writes and claims that end with the connection, `MockLemnosd`; also the Gaia `lemnos` source) |
 | UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
-| Raze board package | Atlas `dev` (934f538: Lemnos cca50f7; the `lemnos` user from Lemnos's own users table through the device package (42d91e2, quoted in 934f538); the self-test's chip-id reads brokered through lemnosd; no free GPIO/PWM/spidev named; board-agent as a Gaia artifact with `ORION_NODE_LOCAL_AUTH_ALLOW=root`; the `board-*` machinery; discovery keeps `_pd-device._tcp` and `/.well-known/pd-device`) | pinned by HeliOS: A/B update writer (board update), EROFS root, read-only-safe services, lemnosd (HeliOS declares the `lemnos` source and builds lemnosd on the host with Lemnos's `lemnosd-host.toml`; the device package creates the `lemnos` user at build time) |
+| Raze board package | Atlas `dev` (3175ad9: Orion `clock.set`, eased LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2 (HeliOS selects `BR2_PACKAGE_JPEG` itself), the trimmed kernel with the config guard; since 934f538: Lemnos cca50f7; the `lemnos` user from Lemnos's own users table through the device package (42d91e2, quoted in 934f538); the self-test's chip-id reads brokered through lemnosd; no free GPIO/PWM/spidev named; board-agent as a Gaia artifact with `ORION_NODE_LOCAL_AUTH_ALLOW=root`; the `board-*` machinery; discovery keeps `_pd-device._tcp` and `/.well-known/pd-device`) | pinned by HeliOS: A/B update writer (board update), EROFS root, read-only-safe services, lemnosd (HeliOS declares the `lemnos` source and builds lemnosd on the host with Lemnos's `lemnosd-host.toml`; the device package creates the `lemnos` user at build time) |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
 | Gaia | `main` (2.0.0, d82a9b7) | installed in `~/.cargo/bin` |
 
@@ -79,7 +79,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 Today a workload with several camera bindings ticks on its primary camera and batches each
 secondary camera's latest frame (at most 500 ms old) with it: neither simultaneous nor shared.
-The plan, on the pinned Daedalus 66659f7 and Styx 40069d0:
+The plan, on the pinned Daedalus c927136 and Styx 4e8e19c:
 
 - [ ] **One `ExecutionDomain` per camera** (Daedalus `docs/node-authoring.md`, "Sharing
   Preprocessing Across Graphs"), owned by that camera's graph thread: the camera's pipelines
@@ -137,6 +137,8 @@ The plan, on the pinned Daedalus 66659f7 and Styx 40069d0:
 - [ ] Styx/Daedalus: `styx::multicam::FrameGrouper` (+ `push_group`) and Daedalus `MultiCamera::synchronized` both group camera frames by timestamp; say which a host should use (HeliOS's plan prefers the grouper, which owns the `FrameClient` fds).
 - [x] Atlas: the Raze `sensors.toml` is obsolete for HeliOS: HeliOS ships and reads no sensors file; its sensors come from lemnosd's board definition (`/etc/lemnos/board.toml`, with the IMU on `i2c:compatible=i2c-gpio`).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
+
+- [ ] Gaia (pending, not added): `[providers.buildroot.host_tools] ccache = "system,build"` for the Buildroot side. HeliOS's own build image gets `ccache` now (`gaia/docker/aarch64/Dockerfile.aarch64-rpi4`); add the key to `gaia/configs/workspace/base.toml` once Gaia ships it.
 
 ## PhotonVision image
 

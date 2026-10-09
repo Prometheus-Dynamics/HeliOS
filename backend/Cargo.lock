@@ -68,7 +68,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -79,7 +79,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -454,7 +454,7 @@ dependencies = [
 [[package]]
 name = "daedalus-core"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "crossbeam-queue",
  "portable-atomic",
@@ -467,7 +467,7 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "base64 0.23.1",
  "hashbrown",
@@ -483,7 +483,7 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -503,7 +503,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-core"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-data",
  "daedalus-transport",
@@ -515,7 +515,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-host"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-data",
  "daedalus-ffi-core",
@@ -532,7 +532,7 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-wgsl-infer",
  "proc-macro-crate",
@@ -544,7 +544,7 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -580,7 +580,7 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -593,7 +593,7 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -613,7 +613,7 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "crossbeam-queue",
  "daedalus-core",
@@ -637,7 +637,7 @@ dependencies = [
 [[package]]
 name = "daedalus-transport"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 dependencies = [
  "daedalus-core",
  "hashbrown",
@@ -651,7 +651,7 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "3.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#66659f7ef987408d9e6c729de39831da5e14175e"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#c927136599786cb05aed8ce919b0efd91c7b715d"
 
 [[package]]
 name = "data-encoding"
@@ -939,7 +939,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1970,7 +1970,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2438,7 +2438,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2633,7 +2633,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2667,7 +2667,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "bytes",
  "futures-core",
@@ -2698,7 +2698,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "libm",
  "serde",
@@ -2710,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "serde",
  "smallvec",
@@ -2720,7 +2720,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "parking_lot",
  "serde",
@@ -2736,7 +2736,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "crossbeam-queue",
  "daedalus-rs",
@@ -2755,7 +2755,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "libm",
  "thiserror 2.0.21",
@@ -2764,7 +2764,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "futures-core",
  "libc",
@@ -2774,7 +2774,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2784,7 +2784,7 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "libc",
 ]
@@ -2792,7 +2792,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -2808,7 +2808,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "bytemuck",
  "serde",
@@ -2828,7 +2828,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "bytemuck",
  "libm",
@@ -2838,7 +2838,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -2850,7 +2850,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2867,7 +2867,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "serde",
  "styx-core-rs",
@@ -2877,7 +2877,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#40069d0ffc6f5960ba4c74c8526331bdee82596f"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#4e8e19c2e5a35313ea4765c5fb30ddf6b4b9b414"
 dependencies = [
  "libc",
  "smallvec",
@@ -2955,7 +2955,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3492,7 +3492,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

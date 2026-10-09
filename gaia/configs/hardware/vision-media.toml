@@ -21,6 +21,7 @@ config_overrides = [
   ["BR2_PACKAGE_LIBPISP", "y"],
   ["BR2_PACKAGE_LIBYUV", "y"],
   ["BR2_PACKAGE_BZIP2", "y"],
+  ["BR2_PACKAGE_JPEG", "y"],
   ["BR2_PACKAGE_X264", "y"],
   ["BR2_PACKAGE_X265", "y"],
   ["BR2_PACKAGE_CORALTPU", "y"],

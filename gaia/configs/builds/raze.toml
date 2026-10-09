@@ -44,7 +44,12 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev 934f538: Lemnos cca50f7, with the `lemnos`
+# Raze board package (Atlas dev 3175ad9; since 934f538: Orion `clock.set`, the eased
+# LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2 (HeliOS selects
+# BR2_PACKAGE_JPEG, BR2_PACKAGE_LIBYUV and BR2_PACKAGE_BZIP2 itself in
+# hardware/vision-media.toml), uncompressed modules, no KVM, the trimmed kernel
+# (330 modules) with the config guard that respects package fixups.
+# Earlier, 934f538: Lemnos cca50f7, with the `lemnos`
 # user created at build time from Lemnos's own Buildroot users table through
 # the device package (BR2_RAZE_LEMNOS_USERS_TABLE, quoted so olddefconfig keeps
 # it; HeliOS keeps no copy), the
@@ -67,7 +72,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "934f5381a252c1b48619f7552b94eca147644054"
+rev = "3175ad9c2f912ac2d2d4b113d2efbae5e610c6c7"
 
 # Lemnos (dev cca50f7). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import

@@ -8,6 +8,8 @@ This file is the aggregate release log for HeliOS images.
 
 ## [Unreleased]
 
+- Pins (round 6, one source each): Daedalus dev c927136 (schedule order by node index; per-instance state, resources and metrics, so `ExecutionContext::node_id` is an `id@label` instance key when ids repeat; HeliOS reads no node id from the context), Styx dev 4e8e19c, Atlas dev 3175ad9 (`gaia/configs/builds/raze.toml`; Orion `clock.set`, eased LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2, the trimmed kernel). Eidos main 52d0c9e60, Lemnos dev cca50f7 and Orion main 973ced7 unchanged for now.
+- Image: the vision/media layer selects `BR2_PACKAGE_JPEG` for helios-api's and helios-peripherals' turbojpeg codec, since Atlas's libcamera no longer pulls libjpeg in. The build image (`gaia/docker/aarch64/Dockerfile.aarch64-rpi4`) installs `ccache`.
 - Pins (lockstep, one source each): Daedalus dev 66659f7 (smaller `#[node]` expansions, plugin ABI 9; `paste` dropped), Styx dev 40069d0, Eidos main 52d0c9e60 (dormant tracks from 2bbad728d), Lemnos dev cca50f7 (crates and the Gaia `lemnos` source), Orion main 973ced7 (crates and the Gaia `orion` source), Atlas dev 934f538 (`e453fe3d`, `8cacdcfa`).
 - Image: the `lemnos` user now comes from Lemnos's own Buildroot users table through the device package; HeliOS's `lemnos-users.table` is gone (`e453fe3d`, `8cacdcfa`).
 - Tag search: the stored templates and camera pipelines default to a full search every 4th frame, with Eidos's defaults for track loss and dormant tracks. CM5, one thread, the recorded test video: 0.40-0.41 ms mean per frame, p99 about 1.0 ms, 3012 of 3149 reference tags (full search every frame: 3034 at 0.84 ms); new tags within 3 frames (`fd6d2e65`).

@@ -208,7 +208,7 @@ fn bridge_publishes_devices_holds_the_status_and_runs_a_timed_override() {
     rt.block_on(bridge.fan_override("fan", FanOverrideRequest { duty: 0.5, duration: Duration::from_secs(60) })).expect("override");
     write(&sys, "devices/virtual/thermal/cooling_device0/cur_state", "3");
     assert_eq!(rt.block_on(bridge.fan_release("fan")), Ok(()));
-    assert!(bridge.state().overrides.is_empty());
+    wait_until("the explicit release", || bridge.state().overrides.is_empty());
     assert_eq!(read(&sys, "class/thermal/cooling_device0/cur_state"), "1");
 
     // Another client writing the fan ends the override without a release: the fan is theirs.
