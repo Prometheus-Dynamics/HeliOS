@@ -22,7 +22,7 @@ use daedalus::{
 use eidos_aruco::{ArucoDictionaryKind, BitGrid, dictionary};
 use eidos_daedalus::{
     aruco::{Dictionary, MultiTagPoseConfig, PoseConfig},
-    templates::{CameraInput, MultiTagPoseTemplate, StructuredInput, TrackedDetectorTemplate, tracked_detector_graph},
+    templates::{CameraInput, MultiTagPoseTemplate, StructuredInput, TrackedDetectorTemplate, TrackingOverrides, tracked_detector_graph},
     types::KnownTagPoses,
 };
 use helios_field::{FRC_TAG_SIDE_M, FieldLayout};
@@ -129,13 +129,17 @@ impl FrameSource for ChannelFrameSource {
 /// Camera calibration fields of Eidos's pose nodes that HeliOS's templates take as camera
 /// context host inputs (`frame_<field>`), fed by the engine from the camera binding.
 /// A HeliOS detector template, built with Eidos's template API alone: the tracked detector group
-/// (full search every 4th frame, Eidos's defaults for track loss and dormant tracks) with its tag
+/// (full search every 8th frame, no escalation of a missed track to a full search, window growth
+/// over 6 misses: the "k0g6" default; the rest are Eidos's) with its tag
 /// pose tail (FRC's 0.1651 m tags) and, given a field
 /// layout, its multi-tag pose tail against the layout's tags (`helios_field`, reference = the
 /// field). The camera and the extrinsics are held host inputs (`camera`, `extrinsics`), which the
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
-    let mut template = TrackedDetectorTemplate::new(dictionary, 4);
+    let mut template = TrackedDetectorTemplate {
+        tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
+        ..TrackedDetectorTemplate::new(dictionary, 8)
+    };
     template.pose = Some(PoseConfig { tag_size_m: FRC_TAG_SIDE_M, ..PoseConfig::default() });
     template.camera = CameraInput::GraphInput;
     template.multi_tag_pose =
@@ -596,9 +600,13 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
     assert_eq!(camera["type_key"], "eidos:camera_calibration");
     let outputs = plan["host_outputs"].as_array().expect("host outputs").iter().map(|port| port["name"].as_str().unwrap_or_default().to_string()).collect::<Vec<_>>();
     assert!(outputs.contains(&"detections".to_string()) && outputs.contains(&"refined_corners".to_string()), "{outputs:?}");
-    // Eidos's tracked group expands to one node (`eidos:detectors.tracked_detect`), then the pose
-    // and multi-tag pose stages.
-    assert!(plan["plan"]["nodes"].as_array().is_some_and(|nodes| nodes.len() >= 3), "{plan}");
+    // The stored document holds Eidos's tracked group as one node; the planner expands it into its
+    // stage nodes (`eidos:detectors.track_plan`, ...), so each stage has its own telemetry, then the
+    // pose and multi-tag pose stages.
+    let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
+    assert!(plan_nodes.len() > 4, "tracked group expanded into stages: {plan}");
+    assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan" || node["label"] == "eidos:detectors.track_plan"), "{plan}");
+    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "tracked group is stage nodes, not tracked_detect: {plan}");
     assert!(plan["adapter_edges"].is_array());
     assert_eq!(plan["requires"][0]["id"], "eidos");
 

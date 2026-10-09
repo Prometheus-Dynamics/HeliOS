@@ -322,9 +322,13 @@ export interface PipelineSpec {
   graph: DaedalusGraphDocument;
   bindings: Record<string, Binding>;
   enabled?: boolean;
-  /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 4) or `full`. */
+  /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 8) or `full`. */
   search_mode?: SearchMode;
   full_search_every?: number;
+  /** Tracked only: misses after which a track's recovery escalates to a full search (default 0, never). */
+  loss_full_search_after?: number;
+  /** Tracked only: misses over which a track's search window keeps growing (default 6). */
+  margin_growth_misses?: number;
   /** The field layout (`/v1/field-layouts`) of the graph's multi-tag pose; unset follows the selected one. */
   field_layout?: string;
 }
@@ -398,6 +402,8 @@ export interface Pipeline {
   outputs: PipelineOutput[];
   search_mode: SearchMode | null;
   full_search_every: number | null;
+  loss_full_search_after: number | null;
+  margin_growth_misses: number | null;
   pose: PoseSummary | null;
   managed: boolean;
 }

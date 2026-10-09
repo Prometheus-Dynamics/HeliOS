@@ -80,11 +80,12 @@ First boot may take longer than normal. The image provisions the on-device disk 
 ## Tag pipeline defaults
 
 The built-in AprilTag and ArUco pipelines use tracked search: a full search of the frame every
-4th frame, and only windows around the tags already tracked in between. A new tag is found at
-most 3 frames after it appears. On the CM5 (one thread, the recorded test video) that takes about
-0.4 ms per frame on average instead of 0.84 ms for a full search every frame, and finds 3012 of
-3149 reference tags against 3034. A pipeline can choose another interval or full search
-(`search_mode`, `full_search_every`; see [HTTP API > Pipelines](/api/http)).
+8th frame, and only windows around the tags already tracked in between. A new tag is found at
+most 7 frames after it appears. On the CM5 (one thread, the recorded test video) that takes
+0.324 ms per frame instead of 0.84 ms for a full search every frame, and finds 3463 of the tags
+that a full search finds (3531, 98.1%). A pipeline can choose another interval, full search, or
+the other tracking settings (`search_mode`, `full_search_every`, `loss_full_search_after`,
+`margin_growth_misses`; see [HTTP API > Pipelines](/api/http)).
 
 ## If You Get Stuck
 

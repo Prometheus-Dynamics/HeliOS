@@ -370,7 +370,7 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   or neither) and `pyramid` shape the frames the engine asks the camera service for. A camera
   binding also carries the camera's context (calibration and mount, see
   [Calibration and camera context](#calibration-and-camera-context)).
-- `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 4) set how the
+- `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 8) set how the
   graph's Eidos detector groups (`eidos:detectors.apriltag`, `eidos:detectors.aruco` and their
   `_tracked` versions) search: `tracked` searches the whole frame every `full_search_every`
   frames (and after a lost tag, a scene change or on request) and only windows around tracked
@@ -378,20 +378,24 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   what a full search would for the tags it tracks (same ids, identical corners), and a new tag is
   found at most `full_search_every - 1` frames after it appears (Eidos `docs/daedalus.md`,
   "Tracked detector groups"). Unset, the graph keeps its mode, except that a camera pipeline's
-  untracked groups become `tracked` with a full search every 4th frame; the stored templates
-  use the same. The cost and what it finds, on the CM5 (Eidos 2bbad728d, one thread, the
-  recorded test video, Eidos's defaults for track loss and dormant tracks; reference: 3149
-  tags):
+  untracked groups become `tracked` with the defaults below; the stored templates use the same.
+- `loss_full_search_after` (0 to 100000, default 0) and `margin_growth_misses` (1 to 100000,
+  default 6) are the tracked group's other settings (Eidos's `loss_full_search_after` and
+  `margin_growth_misses`; tracked only). `loss_full_search_after` is the consecutive misses of a
+  track after which its recovery escalates to a full search (0 never escalates);
+  `margin_growth_misses` is the misses over which its search window keeps growing. The default,
+  `full_search_every` 8 with `loss_full_search_after` 0 and `margin_growth_misses` 6 (k0g6), is
+  the tracked configuration the stored templates carry. The cost and what it finds, on the CM5
+  (one thread, the recorded test video; reference: 3531 tags found by full search):
 
   | Search | Mean per frame | Reference tags found | New tag found within |
   |---|---|---|---|
-  | `full` (every frame) | 0.84 ms | 3034 | the same frame |
-  | `tracked`, `full_search_every` 4 (default) | 0.40 to 0.41 ms (p99 about 1.0 ms) | 3012 | 3 frames |
-  | `tracked`, `full_search_every` 8 | 0.33 ms | 2988 | 7 frames |
-  | `tracked`, `full_search_every` 16 | 0.28 to 0.29 ms | 2967 | 15 frames |
+  | `full` (every frame) | 0.84 ms | 3531 | the same frame |
+  | `tracked`, `full_search_every` 8, k0g6 (default) | 0.324 ms | 3463 (98.1% of full search) | 7 frames |
 
-  The API switches the group node in the stored graph; a pipeline reports the mode its graph has
-  (`search_mode`, `full_search_every`).
+  A new tag is found at most `full_search_every - 1` frames after it appears. The API switches the
+  group node in the stored graph; a pipeline reports the mode its graph has (`search_mode`,
+  `full_search_every`, `loss_full_search_after`, `margin_growth_misses`).
 - `field_layout` names the [field layout](#field-layouts) the graph's multi-tag pose
   (`eidos:aruco.multi_tag_pose`) solves against; unset, the pipeline uses the selected layout and
   follows the selection. The API writes the layout's tags into the node's `known_tags` constant
@@ -409,7 +413,7 @@ The pipeline the API returns:
   "session": { "status": "running", "message": null, "observed_at_ms": 1760000000000 },
   "telemetry": { "fps": 59.8, "last_tick_ms": 0.71, "frames_processed": 3600, "source_connected": true },
   "outputs": [{ "pipeline": "tags-front", "port": "pose_solutions", "value": { "...": "..." }, "observed_at_ms": 1760000000000 }],
-  "search_mode": "tracked", "full_search_every": 4, "field_layout": "frc2026-andymark",
+  "search_mode": "tracked", "full_search_every": 8, "loss_full_search_after": 0, "margin_growth_misses": 6, "field_layout": "frc2026-andymark",
   "pose": { "status": "calibrated",
             "tags": [{ "id": 7, "translation": { "x": 0.12, "y": -0.05, "z": 2.31 }, "rotation": { "w": 0.02, "x": 0.01, "y": 0.99, "z": 0.0 }, "error_px": 0.21, "ambiguity": 0.08 }],
             "field_valid": true, "field_rms_px": 0.4, "field_inlier_tags": 2, "field_ambiguity": 0.1,

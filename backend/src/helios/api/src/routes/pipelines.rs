@@ -75,13 +75,21 @@ pub struct PipelineSpec {
     /// How the graph's Eidos detector groups search each frame: `tracked` (full search every
     /// `full_search_every` frames, windows around tracked tags in between) or `full` (every
     /// frame). Unset keeps what the graph has, except that a camera pipeline's untracked groups
-    /// become `tracked` with `full_search_every` 4.
+    /// become `tracked` with `full_search_every` 8 (and the default tracking settings).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_mode: Option<SearchMode>,
     /// Tracked search only: full search at least every this many frames (1 to 100000; default
-    /// 4). New tags are found at most `full_search_every - 1` frames after they appear.
+    /// 8). New tags are found at most `full_search_every - 1` frames after they appear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_search_every: Option<u32>,
+    /// Tracked search only: consecutive misses of a track after which its recovery escalates to a
+    /// full search (0 to 100000; default 0, never). Eidos's `loss_full_search_after`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss_full_search_after: Option<u32>,
+    /// Tracked search only: misses over which a track's search window keeps growing (1 to 100000;
+    /// default 6). Eidos's `margin_growth_misses`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_growth_misses: Option<u32>,
     /// The field layout (`/v1/field-layouts`) the graph's multi-tag pose solves against; unset
     /// uses the selected layout, and follows it when the selection changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,18 +103,38 @@ pub enum SearchMode {
     Tracked,
 }
 
-/// Default tracked search interval: a full search every 4th frame. On the CM5 (Eidos 2bbad728d,
-/// one thread, the recorded test video, track-loss recovery and dormant tracks) it takes 0.40 to
-/// 0.41 ms per frame on average (p99 about 1.0 ms) and finds 3012 of the 3149 reference tags,
-/// against 3034 at 0.84 ms for full search every frame (N=8: 2988 at 0.33 ms; N=16: 2967 at
-/// 0.28 to 0.29 ms). New tags are found at most 3 frames after they appear.
-pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 4;
+/// Default tracked search, "k0g6" (the user's choice): a full search every 8th frame, no escalation
+/// of a missed track to a full search (`loss_full_search_after` 0), and the search window keeps
+/// growing over 6 misses (`margin_growth_misses` 6). On the CM5 (the recorded test video, one
+/// thread) it finds 3463 of the reference tags at about 0.324 ms per frame, 98.1% of the 3531 that
+/// full search every frame finds at about 0.84 ms. New tags are found at most 7 frames after they
+/// appear.
+pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 8;
+/// See [`DEFAULT_FULL_SEARCH_EVERY`].
+pub const DEFAULT_LOSS_FULL_SEARCH_AFTER: u32 = 0;
+/// See [`DEFAULT_FULL_SEARCH_EVERY`].
+pub const DEFAULT_MARGIN_GROWTH_MISSES: u32 = 6;
+
+/// The tracked group's settings a spec can change (the defaults are [`DEFAULT_FULL_SEARCH_EVERY`],
+/// [`DEFAULT_LOSS_FULL_SEARCH_AFTER`] and [`DEFAULT_MARGIN_GROWTH_MISSES`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchTuning {
+    pub full_search_every: u32,
+    pub loss_full_search_after: u32,
+    pub margin_growth_misses: u32,
+}
+
+impl Default for SearchTuning {
+    fn default() -> Self {
+        Self { full_search_every: DEFAULT_FULL_SEARCH_EVERY, loss_full_search_after: DEFAULT_LOSS_FULL_SEARCH_AFTER, margin_growth_misses: DEFAULT_MARGIN_GROWTH_MISSES }
+    }
+}
 
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
 /// Config ports the tracked groups have and the full ones do not (Eidos docs/daedalus.md,
 /// "Tracked detector groups").
-const TRACKED_ONLY_PORTS: [&str; 16] = [
+const TRACKED_ONLY_PORTS: [&str; 17] = [
     "full_search_every",
     "roi_margin",
     "roi_margin_side",
@@ -122,6 +150,7 @@ const TRACKED_ONLY_PORTS: [&str; 16] = [
     "change_threshold",
     "change_step",
     "constant_velocity",
+    "loss_escalation_change",
     "full_search",
 ];
 
@@ -144,10 +173,28 @@ pub fn search_mode_of(graph: &serde_json::Value) -> Option<(SearchMode, Option<u
     })
 }
 
+/// The tracked group's `loss_full_search_after` and `margin_growth_misses`, when `graph` has a
+/// tracked group (the defaults where it sets none).
+pub fn search_tuning_of(graph: &serde_json::Value) -> Option<SearchTuning> {
+    let nodes = graph.get("graph")?.get("nodes")?.as_array()?;
+    let node = nodes.iter().find(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id)))?;
+    let value = |name: &str| {
+        node.get("const_inputs")
+            .and_then(|c| c.as_array())
+            .and_then(|consts| consts.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some(name)))
+            .and_then(|entry| entry.get(1)?.get("value")?.as_u64())
+    };
+    Some(SearchTuning {
+        full_search_every: value("full_search_every").map_or(DEFAULT_FULL_SEARCH_EVERY, |v| v as u32),
+        loss_full_search_after: value("loss_full_search_after").map_or(DEFAULT_LOSS_FULL_SEARCH_AFTER, |v| v as u32),
+        margin_growth_misses: value("margin_growth_misses").map_or(DEFAULT_MARGIN_GROWTH_MISSES, |v| v as u32),
+    })
+}
+
 /// Switch every Eidos detector group in `graph` to `mode`: the full and tracked groups have the
 /// same ports apart from the tracking ones, so the node keeps its edges and its other constants.
 /// Returns how many groups it changed or set.
-pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, full_search_every: u32) -> usize {
+pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning: &SearchTuning) -> usize {
     let Some(nodes) = graph.get_mut("graph").and_then(|g| g.get_mut("nodes")).and_then(|n| n.as_array_mut()) else {
         return 0;
     };
@@ -171,13 +218,16 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, full_s
                 if node.get("const_inputs").and_then(|c| c.as_array()).is_none() {
                     node["const_inputs"] = serde_json::json!([]);
                 }
-                let consts = node["const_inputs"].as_array_mut().expect("just ensured");
-                consts.retain(|entry| entry.get(0).and_then(|n| n.as_str()) != Some("full_search_every"));
-                consts.push(serde_json::json!(["full_search_every", { "type": "Int", "value": full_search_every }]));
-                if let Some(inputs) = node.get_mut("inputs").and_then(|c| c.as_array_mut())
-                    && !inputs.iter().any(|port| port.as_str() == Some("full_search_every"))
+                for (name, value) in [("full_search_every", tuning.full_search_every), ("loss_full_search_after", tuning.loss_full_search_after), ("margin_growth_misses", tuning.margin_growth_misses)]
                 {
-                    inputs.push("full_search_every".into());
+                    let consts = node["const_inputs"].as_array_mut().expect("just ensured");
+                    consts.retain(|entry| entry.get(0).and_then(|n| n.as_str()) != Some(name));
+                    consts.push(serde_json::json!([name, { "type": "Int", "value": value }]));
+                    if let Some(inputs) = node.get_mut("inputs").and_then(|c| c.as_array_mut())
+                        && !inputs.iter().any(|port| port.as_str() == Some(name))
+                    {
+                        inputs.push(name.into());
+                    }
                 }
             }
         }
@@ -188,22 +238,33 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, full_s
 /// The graph a spec deploys: its search mode applied (see `PipelineSpec::search_mode`).
 pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde_json::Value> {
     let mut graph = spec.graph.clone();
-    let every = spec.full_search_every.unwrap_or(DEFAULT_FULL_SEARCH_EVERY);
-    if !(1..=100_000).contains(&every) {
+    let tuning = SearchTuning {
+        full_search_every: spec.full_search_every.unwrap_or(DEFAULT_FULL_SEARCH_EVERY),
+        loss_full_search_after: spec.loss_full_search_after.unwrap_or(DEFAULT_LOSS_FULL_SEARCH_AFTER),
+        margin_growth_misses: spec.margin_growth_misses.unwrap_or(DEFAULT_MARGIN_GROWTH_MISSES),
+    };
+    if !(1..=100_000).contains(&tuning.full_search_every) {
         return Err(ApiError::unprocessable("full_search_every is 1 to 100000 frames"));
     }
-    if spec.full_search_every.is_some() && spec.search_mode == Some(SearchMode::Full) {
-        return Err(ApiError::unprocessable("full_search_every applies to search_mode \"tracked\" only"));
+    if spec.loss_full_search_after.is_some_and(|after| after > 100_000) {
+        return Err(ApiError::unprocessable("loss_full_search_after is 0 to 100000 misses"));
+    }
+    if !spec.margin_growth_misses.is_none_or(|misses| (1..=100_000).contains(&misses)) {
+        return Err(ApiError::unprocessable("margin_growth_misses is 1 to 100000 misses"));
+    }
+    let tracked_settings = spec.full_search_every.is_some() || spec.loss_full_search_after.is_some() || spec.margin_growth_misses.is_some();
+    if tracked_settings && spec.search_mode == Some(SearchMode::Full) {
+        return Err(ApiError::unprocessable("full_search_every, loss_full_search_after and margin_growth_misses apply to search_mode \"tracked\" only"));
     }
     let mode = match spec.search_mode {
         Some(mode) => Some(mode),
-        None if spec.full_search_every.is_some() => Some(SearchMode::Tracked),
+        None if tracked_settings => Some(SearchMode::Tracked),
         // Camera pipelines track by default.
         None if search_mode_of(&graph).is_some_and(|(mode, _)| mode == SearchMode::Full) && camera_inputs(spec, view).next().is_some() => Some(SearchMode::Tracked),
         None => None,
     };
     if let Some(mode) = mode {
-        let changed = apply_search_mode(&mut graph, mode, every);
+        let changed = apply_search_mode(&mut graph, mode, &tuning);
         if changed == 0 && spec.search_mode.is_some() {
             return Err(ApiError::unprocessable("search_mode needs an Eidos detector group in the graph (eidos:detectors.apriltag or eidos:detectors.aruco, tracked or not)"));
         }
@@ -290,10 +351,14 @@ pub struct Pipeline {
     /// helios-engine's frame statistics (fps, last tick, frame counts, source status).
     pub telemetry: Option<serde_json::Value>,
     pub outputs: Vec<Output>,
-    /// The graph's detector search: `full` or `tracked` (with `full_search_every`); `null`
-    /// without an Eidos detector group.
+    /// The graph's detector search: `full` or `tracked` (with `full_search_every` and the tracking
+    /// settings); `null` without an Eidos detector group.
     pub search_mode: Option<SearchMode>,
     pub full_search_every: Option<u32>,
+    /// The tracked group's `loss_full_search_after` and `margin_growth_misses`; `null` unless
+    /// `search_mode` is `tracked`.
+    pub loss_full_search_after: Option<u32>,
+    pub margin_growth_misses: Option<u32>,
     /// Tag and field poses from the latest outputs (`pose_solutions`, `multi_tag_pose`), with
     /// the calibration status; `null` when the graph has no pose stage.
     pub pose: Option<serde_json::Value>,
@@ -455,6 +520,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         observed_at_ms: record.state.as_ref().map(|s| s.observed_at_ms).unwrap_or_default(),
     });
     let (search_mode, full_search_every) = graph.as_ref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
+    let tuning = graph.as_ref().and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
     let outputs = outputs_of(view, &workload_id);
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
@@ -478,6 +544,8 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         outputs,
         search_mode,
         full_search_every,
+        loss_full_search_after: tuning.map(|tuning| tuning.loss_full_search_after),
+        margin_growth_misses: tuning.map(|tuning| tuning.margin_growth_misses),
         workload_id,
     }
 }
@@ -769,6 +837,8 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
                 enabled: pipeline.enabled,
                 search_mode: None,
                 full_search_every: None,
+                loss_full_search_after: None,
+                margin_growth_misses: None,
                 field_layout: pipeline.field_layout,
             }
         }
@@ -881,6 +951,8 @@ mod tests {
             enabled: true,
             search_mode: None,
             full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
             field_layout: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
@@ -926,13 +998,51 @@ mod tests {
     }
 
     #[test]
+    fn tracking_settings_reach_the_tracked_group() {
+        let view = view_with_camera();
+        let camera = BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]);
+        let mut spec = PipelineSpec {
+            name: "x".into(),
+            graph: group_document("eidos:detectors.apriltag"),
+            bindings: camera,
+            enabled: true,
+            search_mode: Some(SearchMode::Tracked),
+            full_search_every: None,
+            loss_full_search_after: Some(2),
+            margin_growth_misses: Some(9),
+            field_layout: None,
+        };
+        let graph = effective_graph(&spec, &view).expect("tracked");
+        assert_eq!(search_tuning_of(&graph), Some(SearchTuning { full_search_every: DEFAULT_FULL_SEARCH_EVERY, loss_full_search_after: 2, margin_growth_misses: 9 }));
+        assert_eq!(search_mode_of(&graph), Some((SearchMode::Tracked, Some(DEFAULT_FULL_SEARCH_EVERY))));
+
+        spec.margin_growth_misses = Some(0);
+        assert!(effective_graph(&spec, &view).is_err(), "margin_growth_misses is at least 1");
+        spec.margin_growth_misses = None;
+        spec.loss_full_search_after = Some(100_001);
+        assert!(effective_graph(&spec, &view).is_err(), "loss_full_search_after is at most 100000");
+        spec.loss_full_search_after = Some(1);
+        spec.search_mode = Some(SearchMode::Full);
+        assert!(effective_graph(&spec, &view).is_err(), "tracking settings with full search");
+    }
+
+    #[test]
     fn search_mode_switches_detector_groups() {
         let view = view_with_camera();
         let tracked = group_document("eidos:detectors.apriltag_tracked");
         assert_eq!(search_mode_of(&tracked), Some((SearchMode::Tracked, Some(4))));
         let camera = BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]);
-        let mut spec =
-            PipelineSpec { name: "x".into(), graph: tracked.clone(), bindings: camera.clone(), enabled: true, search_mode: Some(SearchMode::Full), full_search_every: None, field_layout: None };
+        let mut spec = PipelineSpec {
+            name: "x".into(),
+            graph: tracked.clone(),
+            bindings: camera.clone(),
+            enabled: true,
+            search_mode: Some(SearchMode::Full),
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+        };
 
         let full = effective_graph(&spec, &view).expect("full");
         assert_eq!(full["graph"]["nodes"][1]["id"], "eidos:detectors.apriltag");
@@ -945,10 +1055,11 @@ mod tests {
         spec.full_search_every = Some(12);
         assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("tracked")), Some((SearchMode::Tracked, Some(12))));
 
-        // Unset on a camera pipeline: untracked groups track with a full search every 4th frame.
+        // Unset on a camera pipeline: untracked groups track with a full search every 8th frame.
         spec.search_mode = None;
         spec.full_search_every = None;
         assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("default")), Some((SearchMode::Tracked, Some(DEFAULT_FULL_SEARCH_EVERY))));
+        assert_eq!(search_tuning_of(&effective_graph(&spec, &view).expect("default")), Some(SearchTuning::default()));
         // Without a camera binding the graph is kept.
         spec.bindings.clear();
         assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("kept")), Some((SearchMode::Full, None)));
@@ -1001,6 +1112,8 @@ mod tests {
             enabled: true,
             search_mode: None,
             full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
             field_layout: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("bare graph JSON");
@@ -1015,7 +1128,17 @@ mod tests {
         let mut view = view_with_camera();
         let runtime = ResourceRecord::builder("engine.runtime.node-local", "execution.runtime", "provider.engine.node-local").label("helios.plugin.loaded=styx.frames").build();
         view.resources.insert("engine.runtime.node-local".into(), runtime);
-        let spec = PipelineSpec { name: "x".into(), graph: sample_document(), bindings: BTreeMap::new(), enabled: true, search_mode: None, full_search_every: None, field_layout: None };
+        let spec = PipelineSpec {
+            name: "x".into(),
+            graph: sample_document(),
+            bindings: BTreeMap::new(),
+            enabled: true,
+            search_mode: None,
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+        };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("eidos is not loaded");
         assert!(error.message.contains("eidos"));
     }
@@ -1030,6 +1153,8 @@ mod tests {
             enabled: true,
             search_mode: None,
             full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
             field_layout: None,
         };
         assert!(validate_spec(&spec, &view, "node-local", None).is_err());

@@ -77,9 +77,9 @@ session state, artifacts, and telemetry back into Orion.
   provides one of its nodes (what `PluginRegistry::graph_document` fills in),
   and is checked against the loaded plugins before compiling. The stored
   graphs in `graphs/` are built with Eidos's template API alone
-  (`TrackedDetectorTemplate`, a full search every 4th frame, Eidos's
-  defaults for track loss (`recover`) and dormant tracks (`max_missed_frames`
-  12)): the tag pose tail (`eidos:aruco.pose`, 0.1651 m tags) and, for
+  (`TrackedDetectorTemplate` with `full_search_every` 8, `loss_full_search_after`
+  0 and `margin_growth_misses` 6 (k0g6), Eidos's other defaults for track loss
+  (`recover`) and dormant tracks (`max_missed_frames` 12)): the tag pose tail (`eidos:aruco.pose`, 0.1651 m tags) and, for
   AprilTag 36h11, the multi-tag pose tail (`eidos:aruco.multi_tag_pose`,
   output `multi_tag_pose`) against the FRC 2026 AndyMark layout as a
   `known_tags` constant (`helios_field`: the field is the reference frame;
@@ -90,6 +90,12 @@ session state, artifacts, and telemetry back into Orion.
   (`StructuredInput::GraphInput`), fed from the camera binding (camera
   context, below). The tests build them from Eidos's templates and check them
   (`UPDATE_GOLDEN=1 cargo test -p helios-engine graph_documents_are_eidos_templates`).
+- **per-stage profiling on the tracked path**: the stored document keeps Eidos's tracked
+  group as one node, and the planner expands it into its stage nodes
+  (`eidos:detectors.track_plan`, the detect, loss and refine stages, ...), so each stage
+  has its own node in the `plan` and `metrics` artifacts (`handler_duration` per stage at
+  `HELIOS_ENGINE_METRICS_LEVEL=detailed`). The engine test
+  `apriltag_graph_detects_markers_through_the_frame_driver` asserts the stage nodes.
 - each workload's graph is compiled once, with a host bridge of its own, and
   stays resident until the decoded workload changes or disappears.
 - **input-driven execution**: every workload graph runs serially on one thread of
