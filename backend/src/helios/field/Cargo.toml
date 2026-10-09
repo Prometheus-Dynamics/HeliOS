@@ -1,0 +1,21 @@
+[package]
+name = "helios-field"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "FRC field layouts (WPILib AprilTag JSON, Limelight .fmap) as Eidos known tag poses, and the robot-frame camera mount as Eidos extrinsics"
+
+[lib]
+name = "helios_field"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# Eidos's pose types and solver (no Daedalus): KnownTagPoses, CameraExtrinsics, Se3Transform.
+eidos-calibration = { workspace = true }
