@@ -10,7 +10,7 @@ RUN apt-get update -y && apt-get upgrade -y
 
 # 3. Install essential build tools and dependencies for both architectures
 RUN apt-get update -y && \
-    apt-get install -y build-essential curl clang pkg-config mold sccache crossbuild-essential-arm64 libc-dev-arm64-cross gcc-aarch64-linux-gnu libc6-dev 
+    apt-get install -y build-essential curl clang pkg-config mold sccache ccache crossbuild-essential-arm64 libc-dev-arm64-cross gcc-aarch64-linux-gnu libc6-dev 
 
 # GCC may look for a target-prefixed mold wrapper when using `-fuse-ld=mold`.
 RUN ln -sf /usr/bin/mold /usr/bin/aarch64-linux-gnu-ld.mold
