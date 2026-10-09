@@ -8,10 +8,11 @@ This file is the aggregate release log for HeliOS images.
 
 ## [Unreleased]
 
-- Pins: Eidos main d3e4b4a5b, Orion main 4a6945a (crates and the Gaia `orion` source), Lemnos dev 62c3caf (crates and a new Gaia `lemnos` source), Styx dev 185ad43, Daedalus dev bcc9f33, Atlas dev e12b079 (`f9e98b69`, `118d37d6`, `278b12ae`, `5482b8a4`).
+- Pins: Eidos main d3e4b4a5b, Orion main 4a6945a (crates and the Gaia `orion` source), Lemnos dev 62c3caf (crates and a new Gaia `lemnos` source), Styx dev 185ad43, Daedalus dev bcc9f33, Atlas dev e12b079 (`f9e98b69`, `118d37d6`, `278b12ae`, `cd5173d5`).
 - Pose: the stored graphs are Eidos's templates with `aruco.multi_tag_pose` and held structured `camera`/`extrinsics` inputs; camera context is Orion F64 (`camera.*`, `mount.*`), pushed without recompiling (`76ac0161`).
 - Field layouts: `helios-field` converts WPILib AprilTag JSON and Limelight `.fmap` into Eidos known tag poses (the FRC 2026 AndyMark field built in); `/v1/field-layouts` uploads, lists and selects them; the pipeline `pose` summary's camera and robot in the field come from the multi-tag pose (`d8bf4eb8`, `ac3e06b1`).
 - Image: systemd-sysusers and a build-time `lemnos` user; lemnosd built on the host; no empty linux-firmware selection.
+- Gates: `tools/gates.sh`; dev builds keep line tables only, binaries without tests and libraries without doc tests build no test harness or rustdoc pass (`930e283a`). Field layouts parse with exact floats, so the stored graphs do not depend on feature unification (`643b049a`).
 - helios-peripherals reaches the hardware only through lemnosd (`lemnos-ipc`, client `helios`): one Orion resource per board device with its readings, the fan read-only with a timed `fan.override` that always ends in a release to the kernel governor, and HeliOS's status on lemnosd's status layer. The in-process Lemnos runtime, the hwmon fan driver, raw GPIO/PWM/I2C/SPI actions, `HELIOS_SENSOR_CONFIG_PATHS` and the unit's sysfs fan `ExecStopPost` are gone.
 
 ## v2026.1.0
