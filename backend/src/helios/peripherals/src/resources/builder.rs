@@ -1,4 +1,4 @@
-use crate::model::{NodeId, ResourceDescriptor, ResourceId, ResourceKind, ResourceStatus};
+use crate::model::{NodeId, ResourceDescriptor, ResourceId, ResourceKind, ResourceObservation, ResourceStatus};
 
 pub struct ResourceBuilder {
     resource: ResourceDescriptor,
@@ -31,6 +31,11 @@ impl ResourceBuilder {
 
     pub fn link(mut self, target: ResourceId, relation: impl Into<String>) -> Self {
         self.resource.add_link(target, relation.into());
+        self
+    }
+
+    pub fn observation(mut self, observation: ResourceObservation) -> Self {
+        self.resource.observation = Some(observation);
         self
     }
 

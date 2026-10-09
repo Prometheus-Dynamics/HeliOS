@@ -4,7 +4,7 @@ use helios_peripherals::{
     config::PeripheralConfig,
     model::NodeId,
     provider::OrionPeripheralPublisher,
-    resources::{CaptureProbe, DiscoveryProbe, LemnosPeripheralStack, probe_capture_devices},
+    resources::{CaptureProbe, DiscoveryProbe, probe_capture_devices},
     runtime::build_inventory_service,
 };
 use orion::client::LocalNodeRuntime;
@@ -69,10 +69,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let service = build_inventory_service(&config)?;
             println!("probe_names={}", service.probe_names().join(","));
         }
-        "lemnos-stack" => {
-            let node_id = NodeId::new("probe-node");
-            let _stack = LemnosPeripheralStack::new(node_id)?;
-            println!("lemnos_stack=initialized");
+        "lemnosd-list" => {
+            let config = PeripheralConfig::from_env();
+            let mut client = lemnos_ipc::DeviceClient::connect(&config.lemnosd_socket_path, helios_peripherals::config::LEMNOSD_CLIENT_NAME)?;
+            let devices = client.list()?;
+            println!("lemnosd_board={} devices={}", client.board(), devices.len());
+            for device in devices {
+                println!("lemnosd_device id={} class={} status={}", device.id, device.class, device.status.name());
+            }
         }
         "orion-publisher-new" => {
             let config = PeripheralConfig::from_env();
@@ -147,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         other => {
             return Err(format!(
-                "unknown mode '{other}', expected idle|config|orion-snapshot|inventory-linux-off|inventory-linux-on|styx-capture-probe|styx-probe-raw|codec-registry|camera-service|capture-open|capture-read-loop"
+                "unknown mode '{other}', expected idle|config|orion-snapshot|inventory-linux-off|inventory-linux-on|lemnosd-list|styx-capture-probe|styx-probe-raw|codec-registry|camera-service|capture-open|capture-read-loop"
             )
             .into());
         }

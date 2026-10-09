@@ -91,11 +91,11 @@ mod tests {
     fn inventory_service_merges_probe_results() {
         let local_node_id = NodeId::new("node1");
         let mut service = PeripheralInventoryService::new(local_node_id.clone());
-        let gpio = ResourceBuilder::new(local_node_id.clone(), ResourceKind::GpioLine, "gpio0", "GPIO 0").expect("gpio").capability("power", None::<String>).build();
-        let pwm = ResourceBuilder::new(local_node_id, ResourceKind::PwmChannel, "pwm0", "PWM 0").expect("pwm").capability("fan", None::<String>).build();
-        service.register_probe(Arc::new(StaticProbe { name: "gpio", resources: vec![gpio] })).register_probe(Arc::new(StaticProbe { name: "pwm", resources: vec![pwm] }));
+        let imu = ResourceBuilder::new(local_node_id.clone(), ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").capability("power", None::<String>).build();
+        let fan = ResourceBuilder::new(local_node_id, ResourceKind::LemnosDevice, "fan", "Fan").expect("fan").capability("fan", None::<String>).build();
+        service.register_probe(Arc::new(StaticProbe { name: "imu", resources: vec![imu] })).register_probe(Arc::new(StaticProbe { name: "fan", resources: vec![fan] }));
         let report = service.refresh_report(123);
-        assert_eq!(service.probe_names(), vec!["gpio", "pwm"]);
+        assert_eq!(service.probe_names(), vec!["imu", "fan"]);
         assert_eq!(report.snapshot.resources.len(), 2);
         assert_eq!(service.snapshot().resources.len(), 2);
     }
@@ -104,8 +104,8 @@ mod tests {
     fn inventory_service_reports_probe_failures_without_losing_other_resources() {
         let local_node_id = NodeId::new("node1");
         let mut service = PeripheralInventoryService::new(local_node_id.clone());
-        let gpio = ResourceBuilder::new(local_node_id, ResourceKind::GpioLine, "gpio0", "GPIO 0").expect("gpio").build();
-        service.register_probe(Arc::new(StaticProbe { name: "gpio", resources: vec![gpio] })).register_probe(Arc::new(FailingProbe));
+        let imu = ResourceBuilder::new(local_node_id, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        service.register_probe(Arc::new(StaticProbe { name: "imu", resources: vec![imu] })).register_probe(Arc::new(FailingProbe));
         let report = service.refresh_report(123);
         assert_eq!(report.snapshot.resources.len(), 1);
         assert!(report.probe_reports.iter().any(|probe| probe.error.is_some()));

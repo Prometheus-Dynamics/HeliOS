@@ -6,6 +6,10 @@ This file is the aggregate release log for HeliOS images.
 - New releases should be added at the top
 - Detailed docs-site release notes live under `docs/src/pages/release-notes/`
 
+## [Unreleased]
+
+- helios-peripherals reaches the hardware only through lemnosd (`lemnos-ipc`, client `helios`): one Orion resource per board device with its readings, the fan read-only with a timed `fan.override` that always ends in a release to the kernel governor, and HeliOS's status on lemnosd's status layer. The in-process Lemnos runtime, the hwmon fan driver, raw GPIO/PWM/I2C/SPI actions, `HELIOS_SENSOR_CONFIG_PATHS` and the unit's sysfs fan `ExecStopPost` are gone.
+
 ## v2026.1.0
 
 Date: March 15, 2026

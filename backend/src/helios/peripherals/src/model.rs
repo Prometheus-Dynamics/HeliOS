@@ -4,36 +4,18 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
-    GpioChip,
-    GpioLine,
-    PwmChip,
-    PwmChannel,
-    I2cBus,
-    I2cDevice,
-    SpiBus,
-    SpiDevice,
-    UsbBus,
-    UsbDevice,
-    UsbInterface,
+    /// A camera, served through a Styx `CameraService`.
     CaptureDevice,
+    /// A device of lemnosd's board definition (sensor, fan, light, GPIO line).
+    LemnosDevice,
     Virtual,
 }
 
 impl ResourceKind {
     pub const fn id_kind(self) -> &'static str {
         match self {
-            Self::GpioChip => "gpio_chip",
-            Self::GpioLine => "gpio_line",
-            Self::PwmChip => "pwm_chip",
-            Self::PwmChannel => "pwm_channel",
-            Self::I2cBus => "i2c_bus",
-            Self::I2cDevice => "i2c_device",
-            Self::SpiBus => "spi_bus",
-            Self::SpiDevice => "spi_device",
-            Self::UsbBus => "usb_bus",
-            Self::UsbDevice => "usb_device",
-            Self::UsbInterface => "usb_interface",
             Self::CaptureDevice => "capture_device",
+            Self::LemnosDevice => "lemnos_device",
             Self::Virtual => "virtual",
         }
     }
@@ -64,7 +46,23 @@ pub struct ResourceLink {
     pub relation: Box<str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// An observed value published as resource state (a lemnosd reading, the fan override).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ObservedValue {
+    Bool(bool),
+    UInt(u64),
+    F64(f64),
+    String(String),
+}
+
+/// What a resource reports right now, published as its Orion resource state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResourceObservation {
+    pub observed_at_ms: u64,
+    pub values: BTreeMap<String, ObservedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResourceDescriptor {
     pub id: ResourceId,
     pub owner: NodeId,
@@ -75,6 +73,7 @@ pub struct ResourceDescriptor {
     pub labels: BTreeMap<String, Box<str>>,
     pub endpoints: Vec<ResourceEndpoint>,
     pub links: Vec<ResourceLink>,
+    pub observation: Option<ResourceObservation>,
 }
 
 impl ResourceDescriptor {
@@ -89,11 +88,16 @@ impl ResourceDescriptor {
             labels: BTreeMap::new(),
             endpoints: Vec::new(),
             links: Vec::new(),
+            observation: None,
         })
     }
 
     pub fn add_capability(&mut self, name: impl Into<String>, detail: Option<String>) {
         self.capabilities.push(ResourceCapability { name: name.into().into_boxed_str(), detail: detail.map(String::into_boxed_str) });
+    }
+
+    pub fn has_capability(&self, name: &str) -> bool {
+        self.capabilities.iter().any(|capability| capability.name.as_ref() == name)
     }
 
     pub fn set_label(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -117,151 +121,17 @@ impl ResourceDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResourceControlData {
-    Bool(bool),
-    Bytes(Vec<u8>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlStatus {
-    Applied,
-    Read,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceControlResult {
+/// The result of a resource action, published as the resource's `action_result`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResourceActionOutcome {
     pub resource_id: ResourceId,
-    pub control: Box<str>,
-    pub status: ControlStatus,
-    pub data: Option<ResourceControlData>,
+    pub action_kind: Box<str>,
+    /// The value lemnosd applied (a fan duty, a control value), if any.
+    pub value: Option<f64>,
 }
 
-impl ResourceControlResult {
-    pub fn applied(resource_id: ResourceId, control: impl Into<String>) -> Self {
-        Self { resource_id, control: control.into().into_boxed_str(), status: ControlStatus::Applied, data: None }
-    }
-
-    pub fn read(resource_id: ResourceId, control: impl Into<String>, data: ResourceControlData) -> Self {
-        Self { resource_id, control: control.into().into_boxed_str(), status: ControlStatus::Read, data: Some(data) }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GpioDirection {
-    Input,
-    Output,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GpioControl {
-    Read,
-    Write { high: bool },
-    ConfigureDirection { direction: GpioDirection, initial_high: Option<bool> },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GpioControlRequest {
-    pub resource_id: ResourceId,
-    pub owner: Option<String>,
-    pub lease_generation: Option<u64>,
-    pub control: GpioControl,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PwmControl {
-    Enable { enabled: bool },
-    SetPeriodNs { period_ns: u64 },
-    SetDutyCycleNs { duty_cycle_ns: u64 },
-    Configure { period_ns: u64, duty_cycle_ns: u64, enabled: bool },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PwmControlRequest {
-    pub resource_id: ResourceId,
-    pub owner: Option<String>,
-    pub lease_generation: Option<u64>,
-    pub control: PwmControl,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum I2cControl {
-    Read { len: usize },
-    Write { bytes: Vec<u8> },
-    WriteRead { write: Vec<u8>, read_len: usize },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct I2cControlRequest {
-    pub resource_id: ResourceId,
-    pub owner: Option<String>,
-    pub lease_generation: Option<u64>,
-    pub control: I2cControl,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpiControl {
-    Transfer { bytes: Vec<u8> },
-    Write { bytes: Vec<u8> },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpiControlRequest {
-    pub resource_id: ResourceId,
-    pub owner: Option<String>,
-    pub lease_generation: Option<u64>,
-    pub control: SpiControl,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResourceControlRequest {
-    Gpio(GpioControlRequest),
-    Pwm(PwmControlRequest),
-    I2c(I2cControlRequest),
-    Spi(SpiControlRequest),
-}
-
-impl ResourceControlRequest {
-    pub fn resource_id(&self) -> &ResourceId {
-        match self {
-            Self::Gpio(request) => &request.resource_id,
-            Self::Pwm(request) => &request.resource_id,
-            Self::I2c(request) => &request.resource_id,
-            Self::Spi(request) => &request.resource_id,
-        }
-    }
-
-    pub fn control_kind(&self) -> &'static str {
-        match self {
-            Self::Gpio(_) => "gpio",
-            Self::Pwm(_) => "pwm",
-            Self::I2c(_) => "i2c",
-            Self::Spi(_) => "spi",
-        }
-    }
-
-    pub fn action_kind(&self) -> String {
-        match self {
-            Self::Gpio(request) => match request.control {
-                GpioControl::Read => "gpio.read".into(),
-                GpioControl::Write { .. } => "gpio.write".into(),
-                GpioControl::ConfigureDirection { .. } => "gpio.configure_direction".into(),
-            },
-            Self::Pwm(request) => match request.control {
-                PwmControl::Enable { .. } => "pwm.enable".into(),
-                PwmControl::SetPeriodNs { .. } => "pwm.set_period_ns".into(),
-                PwmControl::SetDutyCycleNs { .. } => "pwm.set_duty_cycle_ns".into(),
-                PwmControl::Configure { .. } => "pwm.configure".into(),
-            },
-            Self::I2c(request) => match request.control {
-                I2cControl::Read { .. } => "i2c.read".into(),
-                I2cControl::Write { .. } => "i2c.write".into(),
-                I2cControl::WriteRead { .. } => "i2c.write_read".into(),
-            },
-            Self::Spi(request) => match request.control {
-                SpiControl::Transfer { .. } => "spi.transfer".into(),
-                SpiControl::Write { .. } => "spi.write".into(),
-            },
-        }
+impl ResourceActionOutcome {
+    pub fn applied(resource_id: ResourceId, action_kind: impl Into<String>, value: Option<f64>) -> Self {
+        Self { resource_id, action_kind: action_kind.into().into_boxed_str(), value }
     }
 }

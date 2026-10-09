@@ -5,14 +5,14 @@ use orion::{
     client::{ClientError, LocalNodeRuntime, LocalRuntimePublisher, ProviderResource},
     control_plane::{
         AvailabilityState, CustomEndpointScheme, ExecutorRecord, HealthState, LeaseRecord, LeaseState, ProviderRecord, ResourceActionResult, ResourceActionStatus, ResourceCapability,
-        ResourceOwnershipMode, ResourceRecord, ResourceState, TypedConfigValue,
+        ResourceConfigState, ResourceOwnershipMode, ResourceRecord, ResourceState, TypedConfigValue,
     },
     core::{CapabilityId, ExecutorId, NodeId, ProviderId},
 };
 
 use crate::{
     config::PeripheralConfig,
-    model::{ControlStatus, ResourceControlData, ResourceControlResult, ResourceDescriptor, ResourceKind, ResourceStatus},
+    model::{ObservedValue, ResourceActionOutcome, ResourceDescriptor, ResourceKind, ResourceObservation, ResourceStatus},
     provider::camera_service::{StyxFramesEndpoint, camera_service_socket_path, serves_camera_frames},
     resources::DiscoverySnapshot,
 };
@@ -30,15 +30,12 @@ pub struct ResourceActionFeedback {
 }
 
 impl ResourceActionFeedback {
-    pub fn applied(observed_at_ms: u64, result: &ResourceControlResult) -> Self {
+    pub fn applied(observed_at_ms: u64, outcome: &ResourceActionOutcome) -> Self {
         Self {
             state: ResourceState::new(observed_at_ms).with_action_result(ResourceActionResult {
-                action_kind: result.control.as_ref().to_string(),
-                status: match result.status {
-                    ControlStatus::Applied => ResourceActionStatus::Applied,
-                    ControlStatus::Read => ResourceActionStatus::Read,
-                },
-                data: result.data.as_ref().map(control_data_value),
+                action_kind: outcome.action_kind.as_ref().to_string(),
+                status: ResourceActionStatus::Applied,
+                data: outcome.value.map(TypedConfigValue::F64),
                 error: None,
             }),
         }
@@ -166,8 +163,8 @@ impl OrionPeripheralPublisher {
             builder = builder.label(format!("{LINK_PREFIX}{}={}", link.relation, link.target));
         }
 
-        if let Some(feedback) = feedback {
-            builder = builder.state(feedback.state.clone());
+        if let Some(state) = resource_state(resource.observation.as_ref(), feedback) {
+            builder = builder.state(state);
         }
 
         builder.build()
@@ -187,10 +184,28 @@ impl OrionPeripheralPublisher {
     }
 }
 
-fn control_data_value(data: &ResourceControlData) -> TypedConfigValue {
-    match data {
-        ResourceControlData::Bool(value) => TypedConfigValue::Bool(*value),
-        ResourceControlData::Bytes(bytes) => TypedConfigValue::Bytes(bytes.clone()),
+/// The resource's state: its observation (readings) as config values, and the last action's
+/// result.
+fn resource_state(observation: Option<&ResourceObservation>, feedback: Option<&ResourceActionFeedback>) -> Option<ResourceState> {
+    let mut state = match (observation, feedback) {
+        (None, None) => return None,
+        (_, Some(feedback)) => feedback.state.clone(),
+        (Some(observation), None) => ResourceState::new(observation.observed_at_ms),
+    };
+    if let Some(observation) = observation {
+        state.observed_at_ms = state.observed_at_ms.max(observation.observed_at_ms);
+        let payload = observation.values.iter().map(|(key, value)| (key.clone(), observed_value(value))).collect();
+        state = state.with_config(ResourceConfigState { payload });
+    }
+    Some(state)
+}
+
+fn observed_value(value: &ObservedValue) -> TypedConfigValue {
+    match value {
+        ObservedValue::Bool(value) => TypedConfigValue::Bool(*value),
+        ObservedValue::UInt(value) => TypedConfigValue::UInt(*value),
+        ObservedValue::F64(value) => TypedConfigValue::F64(*value),
+        ObservedValue::String(value) => TypedConfigValue::String(value.clone()),
     }
 }
 
@@ -208,18 +223,8 @@ fn provider_resource_types(snapshot: &DiscoverySnapshot) -> BTreeSet<&'static st
 
 fn resource_type_for(kind: ResourceKind) -> &'static str {
     match kind {
-        ResourceKind::GpioChip => "gpio.chip",
-        ResourceKind::GpioLine => "gpio.line",
-        ResourceKind::PwmChip => "pwm.chip",
-        ResourceKind::PwmChannel => "pwm.channel",
-        ResourceKind::I2cBus => "i2c.bus",
-        ResourceKind::I2cDevice => "i2c.device",
-        ResourceKind::SpiBus => "spi.bus",
-        ResourceKind::SpiDevice => "spi.device",
-        ResourceKind::UsbBus => "usb.bus",
-        ResourceKind::UsbDevice => "usb.device",
-        ResourceKind::UsbInterface => "usb.interface",
         ResourceKind::CaptureDevice => "camera.device",
+        ResourceKind::LemnosDevice => "lemnos.device",
         ResourceKind::Virtual => "virtual.resource",
     }
 }
@@ -265,12 +270,12 @@ mod tests {
     #[test]
     fn provider_record_collects_distinct_resource_types_from_snapshot() {
         let owner = NodeId::new("node1");
-        let gpio = ResourceBuilder::new(owner.clone(), ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").build();
+        let imu = ResourceBuilder::new(owner.clone(), ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
         let capture = ResourceBuilder::new(owner, ResourceKind::CaptureDevice, "cam0", "Camera 0").expect("camera").build();
-        let snapshot = DiscoverySnapshot::new(vec![gpio, capture]);
+        let snapshot = DiscoverySnapshot::new(vec![imu, capture]);
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let provider = publisher.provider_record(&snapshot);
-        assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "gpio.line"));
+        assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "lemnos.device"));
         assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "camera.device"));
     }
 
@@ -278,9 +283,9 @@ mod tests {
     fn camera_resources_advertise_their_styx_frames_endpoint() {
         let owner = NodeId::new("node1");
         let camera = ResourceBuilder::new(owner.clone(), ResourceKind::CaptureDevice, "cam0", "Front Camera").expect("camera").build();
-        let gpio = ResourceBuilder::new(owner, ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").build();
+        let imu = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
         let publisher = OrionPeripheralPublisher::new("client", "node1").with_stream_dir("/run/helios/streams");
-        let records = publisher.resource_records(&DiscoverySnapshot::new(vec![camera, gpio]), &[], &BTreeMap::new());
+        let records = publisher.resource_records(&DiscoverySnapshot::new(vec![camera, imu]), &[], &BTreeMap::new());
         assert_eq!(records.len(), 2, "cameras no longer publish a derived stream channel");
 
         let camera = records.iter().find(|record| record.resource_type.as_str() == "camera.device").expect("camera record");
@@ -288,24 +293,24 @@ mod tests {
         let endpoint = camera.endpoint::<StyxFramesEndpoint>().expect("typed styx frames endpoint");
         assert_eq!(endpoint.socket_path, PathBuf::from("/run/helios/streams/capture_device_node1_cam0.styx.sock"));
 
-        let gpio = records.iter().find(|record| record.resource_type.as_str() == "gpio.line").expect("gpio record");
-        assert!(gpio.endpoints.iter().all(|endpoint| !endpoint.starts_with("styx-frames+unix://")));
+        let imu = records.iter().find(|record| record.resource_type.as_str() == "lemnos.device").expect("lemnos record");
+        assert!(imu.endpoints.iter().all(|endpoint| !endpoint.starts_with("styx-frames+unix://")));
     }
 
     #[test]
     fn resource_record_translation_preserves_hardware_facts() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").label("gpiochip", "gpiochip0").endpoint("sysfs", "/sys/class/gpio/gpio17").build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").label("lemnos.class", "imu").endpoint("lemnos+unix", "/run/lemnos/lemnosd.sock").build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, Some(LeaseState::Leased), None);
-        assert!(record.labels.iter().any(|label| label == "helios.label.gpiochip=gpiochip0"));
-        assert!(record.endpoints.iter().any(|endpoint| endpoint == "sysfs:///sys/class/gpio/gpio17"));
+        assert!(record.labels.iter().any(|label| label == "helios.label.lemnos.class=imu"));
+        assert!(record.endpoints.iter().any(|endpoint| endpoint == "lemnos+unix:///run/lemnos/lemnosd.sock"));
     }
 
     #[test]
     fn lease_overlay_updates_translated_resource_lease_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
         let lease = LeaseRecord::builder(resource.id.clone()).lease_state(LeaseState::Leased).build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let records = publisher.resource_records(&DiscoverySnapshot::new(vec![resource]), &[lease], &BTreeMap::new());
@@ -315,22 +320,47 @@ mod tests {
     #[test]
     fn resource_action_feedback_sets_typed_resource_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").build();
-        let feedback = ResourceActionFeedback::failed(42, "gpio.write", "write failed");
+        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let feedback = ResourceActionFeedback::failed(42, "fan.override", "lemnosd refused: not allowed");
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, None, Some(&feedback));
         let result = record.state.and_then(|state| state.action_result).expect("action result");
-        assert_eq!(result.action_kind, "gpio.write");
+        assert_eq!(result.action_kind, "fan.override");
         assert_eq!(result.status, ResourceActionStatus::Failed);
     }
 
     #[test]
     fn missing_resources_translate_to_unavailable_failed_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::SpiDevice, "imu0", "IMU").expect("spi device").status(ResourceStatus::Missing).build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").status(ResourceStatus::Missing).build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, None, None);
         assert_eq!(record.availability, AvailabilityState::Unavailable);
         assert_eq!(record.health, HealthState::Failed);
+    }
+
+    #[test]
+    fn observations_become_typed_resource_state_next_to_the_action_result() {
+        let owner = NodeId::new("node1");
+        let mut values = BTreeMap::new();
+        values.insert("reading.duty".to_string(), ObservedValue::F64(0.7));
+        values.insert("fan.override.active".to_string(), ObservedValue::Bool(true));
+        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "fan", "Fan").expect("fan").observation(ResourceObservation { observed_at_ms: 100, values }).build();
+        let publisher = OrionPeripheralPublisher::new("client", "node1");
+
+        let state = publisher.resource_record(&resource, None, None).state.expect("state");
+        assert_eq!(state.observed_at_ms, 100);
+        let config = state.config.expect("config");
+        assert_eq!(config.payload.get("reading.duty"), Some(&TypedConfigValue::F64(0.7)));
+        assert_eq!(config.payload.get("fan.override.active"), Some(&TypedConfigValue::Bool(true)));
+
+        let outcome = ResourceActionOutcome::applied(resource.id.clone(), "fan.override", Some(1.0));
+        let feedback = ResourceActionFeedback::applied(50, &outcome);
+        let state = publisher.resource_record(&resource, None, Some(&feedback)).state.expect("state");
+        assert_eq!(state.observed_at_ms, 100);
+        let action = state.action_result.expect("action result");
+        assert_eq!(action.status, ResourceActionStatus::Applied);
+        assert_eq!(action.data, Some(TypedConfigValue::F64(1.0)));
+        assert!(state.config.is_some_and(|config| config.payload.contains_key("reading.duty")));
     }
 }

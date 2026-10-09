@@ -38,9 +38,10 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 ## Backend
 
-- [x] Fan: the hwmon fan driver is read-only by default; `fan.override` (`{pwm, duration_ms}`, at most 10 min) is the only write, and automatic mode (`pwm1_enable=2`) always comes back (release, timeout, drop, next bind, `ExecStopPost`). It binds only hwmon fan devices. A Lemnos fan controller is designed separately.
-- [ ] Fan: check the override and its automatic restore on hardware (`pwm-fan` `pwm1_enable=2`).
-- [ ] LEDs: nothing drives the ring yet; use the package's `raze-leds` (status, locate) rather than writing `/dev/leds0`.
+- [x] Fan through lemnosd: helios-peripherals publishes the fan read-only (a `lemnos.device` resource); `fan.override` (`{pwm | duty, duration_ms}`, at most 10 min) is the only write (`DeviceClient::set(fan, "duty")`), and `DeviceClient::release(fan)` hands it back to the kernel governor on `fan.release`, timeout, service stop and lemnosd reconnect (a crashed run's override is released on the next start). HeliOS's hwmon fan driver and the unit's sysfs `ExecStopPost` are gone. A Lemnos fan controller is designed separately.
+- [ ] Fan: check on hardware that an override sets the duty through lemnosd (client `helios` in the fan's `writers`) and that the release, timeout and a `helios-peripherals` stop hand the fan back to the governor.
+- [x] LEDs: helios-peripherals holds HeliOS's status on lemnosd's status layer (`LedClient::status`: busy while starting, ok when registered with Orion, warn when a watch stops, error on failure), re-sent after lemnosd restarts. HeliOS never writes `/dev/leds0`.
+- [ ] LEDs: check the status looks on the ring, and that they give way to the updater's system states, locate and the self-test.
 - [x] Per-service releases (`/var/lib/helios/bin`) are gone: services run `/usr/bin` from the image; developer deploys use runtime drop-ins (tools/deploy-live.sh).
 - [x] Camera preview: `GET /v1/cameras/{id}/preview` (MJPEG) and `/preview/ws` (Styx `SPV1` WebSocket messages) from a `styx::preview::Preview::from_service` per camera, a low-priority client of the peripherals `CameraService` (one socket per camera, which the engine and the API both connect to): 640x400, 15 fps, q70 by default (`HELIOS_API_PREVIEW_*`), connected only while watched; the UI camera pane shows it.
 - [ ] Camera preview on the CM5: Styx `docs/preview.md` measurement plan (the engine's frame rate and latency unchanged with a viewer, no restart, preview CPU), and a WebSocket viewer in the UI if MJPEG proves awkward.
@@ -51,7 +52,8 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Engine: one blocking `poll(2)` loop per graph thread over its cameras' Styx `FrameClient` fds and Daedalus's `inbound_fd()` (`tick_ready()` when it is readable); cameras are reconnecting `request_nonblocking` clients, so a missing camera (primary or secondary) never blocks the thread; `stop()` ends the loop through the inbound fd. No async runtime, no feeder thread.
 - [ ] Engine: measure on the CM5 that the poll loop keeps the old per-frame latency and CPU (`helios-vision-probe` drives from a capture thread; the engine's `telemetry` artifact has `last_tick_ms`, input push to tick end).
 - [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
-- [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/board/raze/sensors.toml`.
+- [x] Peripherals on lemnosd: no in-process Lemnos runtime (and no raw GPIO/PWM/I2C/SPI actions); one Orion resource per lemnosd device (board device id, class and channel units as labels, readings as resource state), offline while lemnosd is disconnected; `control.set` for other devices' controls; the unit runs in the `lemnos` group after `lemnosd.service`. Tests run against a fake lemnosd socket.
+- [ ] Peripherals: check the IMU, magnetometer, power monitor, fan and CPU thermal resources and their readings on the Raze, and a `systemctl restart lemnosd` (devices go missing, then come back with the LED status).
 - [x] Application API v1 (docs/docs/api/http.md) and the UI on it (mocks behind `?mock=1`); Atlas's identity and OTA (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`).
 - [x] helios-api camera controls: `GET`/`PATCH`/`DELETE /v1/cameras/{id}/settings` on a Styx `ControlClient` per camera (no frames, no plan change, no buffers), changes as SSE `camera` events; the UI's camera pane uses them in live mode.
 - [x] Camera settings persist across reboots (HeliOS owns it): values set through the API are stored in `/var/lib/helios/api/camera-settings.json` and re-applied whenever a camera service appears (boot, service restart); `DELETE` resets to defaults and forgets them (docs/docs/api/http.md).
@@ -121,7 +123,7 @@ The plan, on the pinned Daedalus bcc9f33 and Styx 185ad43:
 - [ ] Daedalus: a pushed `String` does not convert into an enum-typed config port (constants do): `push("frame_lens", "fisheye")` fails the node with "missing lens". HeliOS inlines named context as constants at compile time instead (a lens change recompiles).
 - [ ] Orion: `TypedConfigValue` has no float; HeliOS writes camera context numbers as decimal strings.
 - [ ] Styx/Daedalus: `styx::multicam::FrameGrouper` (+ `push_group`) and Daedalus `MultiCamera::synchronized` both group camera frames by timestamp; say which a host should use (HeliOS's plan prefers the grouper, which owns the `FrameClient` fds).
-- [ ] Atlas: the Raze `sensors.toml` (`/usr/share/board/raze/sensors.toml`) should use Lemnos 8a126d3's I2C selectors for the IMU (`bus = "i2c:compatible=i2c-gpio"`, accel 0x18, gyro 0x68); BMM150 0x10 and INA238 0x40 stay on i2c-1. HeliOS ships no sensors file.
+- [x] Atlas: the Raze `sensors.toml` is obsolete for HeliOS: HeliOS ships and reads no sensors file; its sensors come from lemnosd's board definition (`/etc/lemnos/board.toml`, with the IMU on `i2c:compatible=i2c-gpio`).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 
 ## PhotonVision image

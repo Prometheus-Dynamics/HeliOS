@@ -5,6 +5,10 @@ pub const DEFAULT_IPC_DIR_ENV: &str = "HELIOS_IPC_DIR";
 pub const DEFAULT_IPC_DIR_NAME: &str = "helios-ipc";
 const DEFAULT_ORION_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const DEFAULT_ORION_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
+/// The client name HeliOS gives lemnosd. The fan's board `writers` must list it (Atlas's Raze
+/// board.toml does).
+pub const LEMNOSD_CLIENT_NAME: &str = "helios";
+const LEMNOSD_FAN_MARKER_NAME: &str = "lemnosd-fan-override";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeripheralConfig {
@@ -13,10 +17,12 @@ pub struct PeripheralConfig {
     pub stream_dir: PathBuf,
     pub orion_ipc_socket_path: PathBuf,
     pub orion_ipc_stream_socket_path: PathBuf,
+    /// Probe local cameras (Styx).
     pub enable_linux_probes: bool,
-    pub sensor_config_paths: Vec<PathBuf>,
-    pub driver_sample_cache_ttl_ms: u64,
-    pub driver_sample_interval_ms: u64,
+    /// lemnosd's socket (sensors, fan, status light).
+    pub lemnosd_socket_path: PathBuf,
+    /// The lemnosd subscription period, and the most often readings are republished to Orion.
+    pub lemnosd_reading_interval_ms: u64,
     pub lease_ttl_ms: u64,
     pub camera_idle_pause_ms: u64,
 }
@@ -31,9 +37,8 @@ impl Default for PeripheralConfig {
             orion_ipc_socket_path: PathBuf::from(DEFAULT_ORION_IPC_SOCKET_PATH),
             orion_ipc_stream_socket_path: PathBuf::from(DEFAULT_ORION_IPC_STREAM_SOCKET_PATH),
             enable_linux_probes: true,
-            sensor_config_paths: Vec::new(),
-            driver_sample_cache_ttl_ms: 25,
-            driver_sample_interval_ms: 250,
+            lemnosd_socket_path: PathBuf::from(lemnos_ipc::DEFAULT_SOCKET),
+            lemnosd_reading_interval_ms: 250,
             lease_ttl_ms: 5_000,
             camera_idle_pause_ms: 2_000,
         }
@@ -52,8 +57,7 @@ impl PeripheralConfig {
         V: Into<String>,
     {
         let env = iter.into_iter().map(|(k, v)| (k.into(), v.into())).collect::<std::collections::BTreeMap<String, String>>();
-        let mut config = Self { sensor_config_paths: Vec::new(), ..Self::default() };
-        config.node_id = env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string());
+        let mut config = Self { node_id: env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string()), ..Self::default() };
         if let Some(ipc_dir) = env.get(DEFAULT_IPC_DIR_ENV) {
             config.ipc_dir = PathBuf::from(ipc_dir);
             config.stream_dir = default_stream_dir_for(&config.ipc_dir);
@@ -70,14 +74,11 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_ENABLE_LINUX_PROBES") {
             config.enable_linux_probes = !matches!(value.as_str(), "0" | "false" | "False" | "FALSE" | "no" | "NO");
         }
-        if let Some(paths) = env.get("HELIOS_SENSOR_CONFIG_PATHS") {
-            config.sensor_config_paths = parse_path_list(paths);
+        if let Some(path) = env.get("HELIOS_PERIPHERALS_LEMNOSD_SOCKET").filter(|path| !path.is_empty()) {
+            config.lemnosd_socket_path = PathBuf::from(path);
         }
-        if let Some(value) = env.get("HELIOS_DRIVER_SAMPLE_CACHE_TTL_MS").and_then(|v| v.parse::<u64>().ok()) {
-            config.driver_sample_cache_ttl_ms = value;
-        }
-        if let Some(value) = env.get("HELIOS_DRIVER_SAMPLE_INTERVAL_MS").and_then(|v| v.parse::<u64>().ok()) {
-            config.driver_sample_interval_ms = value;
+        if let Some(value) = env.get("HELIOS_PERIPHERALS_LEMNOSD_READING_MS").and_then(|v| v.parse::<u64>().ok()).filter(|value| *value > 0) {
+            config.lemnosd_reading_interval_ms = value;
         }
         if let Some(value) = env.get("HELIOS_LEASE_TTL_MS").or_else(|| env.get("HELIOS_CLAIM_TTL_MS")).and_then(|v| v.parse::<u64>().ok()) {
             config.lease_ttl_ms = value;
@@ -87,6 +88,11 @@ impl PeripheralConfig {
         }
         config
     }
+
+    /// Records the fans HeliOS still has to hand back to the kernel, across a crash.
+    pub fn lemnosd_fan_marker_path(&self) -> PathBuf {
+        self.ipc_dir.join(LEMNOSD_FAN_MARKER_NAME)
+    }
 }
 
 fn default_ipc_dir() -> PathBuf {
@@ -95,10 +101,6 @@ fn default_ipc_dir() -> PathBuf {
 
 fn default_stream_dir_for(root: impl Into<PathBuf>) -> PathBuf {
     root.into().join("streams")
-}
-
-fn parse_path_list(paths: &str) -> Vec<PathBuf> {
-    paths.split(',').map(str::trim).filter(|path| !path.is_empty()).map(PathBuf::from).collect()
 }
 
 #[cfg(test)]
@@ -114,9 +116,8 @@ mod tests {
             ("ORION_NODE_IPC_SOCKET", "/tmp/orion/control.sock"),
             ("ORION_NODE_IPC_STREAM_SOCKET", "/tmp/orion/control-stream.sock"),
             ("HELIOS_ENABLE_LINUX_PROBES", "false"),
-            ("HELIOS_SENSOR_CONFIG_PATHS", "/etc/helios/sensors.toml,/tmp/override.toml"),
-            ("HELIOS_DRIVER_SAMPLE_CACHE_TTL_MS", "50"),
-            ("HELIOS_DRIVER_SAMPLE_INTERVAL_MS", "125"),
+            ("HELIOS_PERIPHERALS_LEMNOSD_SOCKET", "/tmp/lemnos/lemnosd.sock"),
+            ("HELIOS_PERIPHERALS_LEMNOSD_READING_MS", "125"),
             ("HELIOS_LEASE_TTL_MS", "7500"),
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
         ]);
@@ -126,16 +127,18 @@ mod tests {
         assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/tmp/orion/control.sock"));
         assert_eq!(config.orion_ipc_stream_socket_path, PathBuf::from("/tmp/orion/control-stream.sock"));
         assert!(!config.enable_linux_probes);
-        assert_eq!(config.sensor_config_paths, vec![PathBuf::from("/etc/helios/sensors.toml"), PathBuf::from("/tmp/override.toml")]);
-        assert_eq!(config.driver_sample_cache_ttl_ms, 50);
-        assert_eq!(config.driver_sample_interval_ms, 125);
+        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/tmp/lemnos/lemnosd.sock"));
+        assert_eq!(config.lemnosd_reading_interval_ms, 125);
+        assert_eq!(config.lemnosd_fan_marker_path(), PathBuf::from("/tmp/helios-peripherals/lemnosd-fan-override"));
         assert_eq!(config.lease_ttl_ms, 7_500);
         assert_eq!(config.camera_idle_pause_ms, 3_000);
     }
 
     #[test]
-    fn config_defaults_stream_dir_from_ipc_dir() {
+    fn config_defaults_stream_dir_from_ipc_dir_and_lemnosd_to_its_socket() {
         let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]);
         assert_eq!(config.stream_dir, PathBuf::from("/tmp/helios-peripherals/streams"));
+        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/run/lemnos/lemnosd.sock"));
+        assert_eq!(config.lemnosd_reading_interval_ms, 250);
     }
 }
