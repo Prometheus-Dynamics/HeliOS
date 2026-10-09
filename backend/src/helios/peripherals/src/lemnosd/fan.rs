@@ -7,14 +7,15 @@
 //! - `fan.override` `{pwm: 0-255 | duty: 0.0-1.0, duration_ms: 1000-600000}` (default 60 s):
 //!   `DeviceClient::set(fan, "duty", ..)`.
 //! - It ends with `DeviceClient::release(fan)` (back to the governor) on `fan.release`, when
-//!   `duration_ms` runs out, when helios-peripherals stops, and after a lemnosd reconnect. A
-//!   release that cannot be sent (lemnosd gone) is owed and sent on the next connection; a
-//!   marker file next to the IPC sockets carries it across a helios-peripherals crash.
+//!   `duration_ms` runs out and when helios-peripherals stops.
+//! - lemnosd ties the write to HeliOS's connection: when the connection closes (a crash, a
+//!   `kill -9`, a lemnosd restart), lemnosd undoes it and the fan goes back to the governor. So a
+//!   lost connection simply ends the override, with nothing left to release and nothing kept on
+//!   disk; a reconnect never resumes it.
 //! - Another client writing the fan (a self-test, `lemnos-ctl`) ends the override without a
 //!   release: the fan is theirs now.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 pub const FAN_OVERRIDE_ACTION: &str = "fan.override";
@@ -63,26 +64,23 @@ pub struct ActiveOverride {
     pub until_ms: u64,
 }
 
-/// The running overrides per fan device, and the releases still owed to lemnosd.
+/// The running overrides per fan device.
 #[derive(Debug, Default)]
 pub struct FanOverrides {
     active: BTreeMap<String, ActiveOverride>,
-    owed: BTreeSet<String>,
 }
 
 impl FanOverrides {
     /// An override was applied: it runs for `duration` from `now`.
     pub fn start(&mut self, device: &str, duty: f64, now: Instant, now_ms: u64, duration: Duration) -> ActiveOverride {
         let active = ActiveOverride { duty, until: now + duration, until_ms: now_ms.saturating_add(duration.as_millis() as u64) };
-        self.owed.remove(device);
         self.active.insert(device.to_string(), active);
         active
     }
 
-    /// The fan is back with the governor (a release went through): nothing more to do.
+    /// The override is over (released, refused, or the fan is with the governor again).
     pub fn end(&mut self, device: &str) {
         self.active.remove(device);
-        self.owed.remove(device);
     }
 
     /// Another client wrote the fan: the override is over, and the fan is theirs (no release).
@@ -90,17 +88,10 @@ impl FanOverrides {
         self.active.remove(device).is_some()
     }
 
-    /// A release could not be sent: send it on the next connection.
-    pub fn owe(&mut self, device: &str) {
-        self.active.remove(device);
-        self.owed.insert(device.to_string());
-    }
-
-    /// The connection to lemnosd is gone: every running override ends, and its release is owed
-    /// (lemnosd hands fans back when it stops, but a reconnect must not resume an override).
+    /// The connection to lemnosd is gone: lemnosd undid HeliOS's writes, so every override is
+    /// over (a reconnect does not resume it).
     pub fn disconnected(&mut self) {
-        let devices = std::mem::take(&mut self.active);
-        self.owed.extend(devices.into_keys());
+        self.active.clear();
     }
 
     /// The overrides whose time ran out at `now`.
@@ -116,35 +107,10 @@ impl FanOverrides {
         self.active.iter().map(|(device, active)| (device.as_str(), active))
     }
 
-    pub fn owed(&self) -> Vec<String> {
-        self.owed.iter().cloned().collect()
+    /// The fans to release when helios-peripherals stops.
+    pub fn devices(&self) -> Vec<String> {
+        self.active.keys().cloned().collect()
     }
-
-    /// Every fan that needs a release if helios-peripherals stopped now (running and owed).
-    pub fn needing_release(&self) -> Vec<String> {
-        self.active.keys().chain(self.owed.iter()).cloned().collect::<BTreeSet<_>>().into_iter().collect()
-    }
-}
-
-/// The fans a previous helios-peripherals left overridden (one device id per line).
-pub fn read_marker(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path).map(|text| text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect()).unwrap_or_default()
-}
-
-/// Records the fans that need a release; removes the marker when there are none.
-pub fn write_marker(path: &Path, devices: &[String]) -> std::io::Result<()> {
-    if devices.is_empty() {
-        return match std::fs::remove_file(path) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
-        };
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut text = devices.join("\n");
-    text.push('\n');
-    std::fs::write(path, text)
 }
 
 #[cfg(test)]
@@ -175,43 +141,25 @@ mod tests {
         assert_eq!(fans.expired(now + Duration::from_secs(5)), vec!["fan".to_string()]);
         fans.end("fan");
         assert!(!fans.is_active("fan"));
-        assert!(fans.needing_release().is_empty());
+        assert!(fans.devices().is_empty());
     }
 
     #[test]
-    fn a_disconnect_ends_overrides_and_owes_their_release() {
+    fn a_disconnect_ends_overrides_without_a_release() {
         let mut fans = FanOverrides::default();
         let now = Instant::now();
         fans.start("fan", 0.8, now, 0, Duration::from_secs(60));
         fans.disconnected();
         assert!(!fans.is_active("fan"), "a reconnect must not resume the override");
-        assert_eq!(fans.owed(), vec!["fan".to_string()]);
-        assert_eq!(fans.needing_release(), vec!["fan".to_string()]);
-        fans.end("fan");
-        assert!(fans.owed().is_empty());
+        assert!(fans.devices().is_empty(), "lemnosd undid the write with the connection");
     }
 
     #[test]
-    fn a_new_override_cancels_an_owed_release_and_another_writer_takes_over_without_one() {
+    fn another_writer_takes_over_without_a_release() {
         let mut fans = FanOverrides::default();
-        let now = Instant::now();
-        fans.owe("fan");
-        fans.start("fan", 0.5, now, 0, Duration::from_secs(10));
-        assert!(fans.owed().is_empty());
+        fans.start("fan", 0.5, Instant::now(), 0, Duration::from_secs(10));
         assert!(fans.taken_over("fan"));
-        assert!(fans.needing_release().is_empty(), "the other writer owns the fan now");
+        assert!(fans.devices().is_empty(), "the other writer owns the fan now");
         assert!(!fans.taken_over("fan"));
-    }
-
-    #[test]
-    fn the_marker_round_trips_and_disappears_when_empty() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("ipc").join("lemnosd-fan-override");
-        assert!(read_marker(&path).is_empty());
-        write_marker(&path, &["fan".to_string(), "fan2".to_string()]).expect("write");
-        assert_eq!(read_marker(&path), vec!["fan".to_string(), "fan2".to_string()]);
-        write_marker(&path, &[]).expect("clear");
-        assert!(!path.exists());
-        write_marker(&path, &[]).expect("clearing twice is fine");
     }
 }

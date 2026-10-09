@@ -427,6 +427,28 @@ export interface Resource {
   state: Record<string, unknown> | null;
 }
 
+/** A raw GPIO line or PWM channel claim through lemnosd (`GET /v1/peripherals/io`). */
+export interface RawClaim {
+  id: string;
+  kind: "gpio" | "pwm";
+  target: string;
+  expires_at_ms: number;
+  held: boolean;
+  direction: "input" | "output" | null;
+  value: boolean | null;
+  edges: number | null;
+  last_edge: { rising: boolean; timestamp_ns: number; seq: number } | null;
+  period_ns: number | null;
+  duty_ns: number | null;
+  enabled: boolean | null;
+}
+
+export interface RawIo {
+  resource: string;
+  available: boolean;
+  claims: RawClaim[];
+}
+
 export interface Upload {
   id: string;
   filename: string;

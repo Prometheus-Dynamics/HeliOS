@@ -8,6 +8,8 @@ pub enum ResourceKind {
     CaptureDevice,
     /// A device of lemnosd's board definition (sensor, fan, light, GPIO line).
     LemnosDevice,
+    /// lemnosd's raw GPIO, PWM, I2C and SPI access (one per node), with HeliOS's claims.
+    LemnosRaw,
     Virtual,
 }
 
@@ -16,6 +18,7 @@ impl ResourceKind {
         match self {
             Self::CaptureDevice => "capture_device",
             Self::LemnosDevice => "lemnos_device",
+            Self::LemnosRaw => "lemnos_raw",
             Self::Virtual => "virtual",
         }
     }
@@ -46,13 +49,16 @@ pub struct ResourceLink {
     pub relation: Box<str>,
 }
 
-/// An observed value published as resource state (a lemnosd reading, the fan override).
+/// An observed value published as resource state (a lemnosd reading, the fan override, a raw
+/// claim), or an action's result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObservedValue {
     Bool(bool),
     UInt(u64),
     F64(f64),
     String(String),
+    /// Bytes read (an I2C or SPI transaction).
+    Bytes(Vec<u8>),
 }
 
 /// What a resource reports right now, published as its Orion resource state.
@@ -126,12 +132,13 @@ impl ResourceDescriptor {
 pub struct ResourceActionOutcome {
     pub resource_id: ResourceId,
     pub action_kind: Box<str>,
-    /// The value lemnosd applied (a fan duty, a control value), if any.
-    pub value: Option<f64>,
+    /// What the action answered, if anything: the value lemnosd applied (a fan duty, a control
+    /// value), a claim id, a line level, the bytes a transaction read.
+    pub value: Option<ObservedValue>,
 }
 
 impl ResourceActionOutcome {
-    pub fn applied(resource_id: ResourceId, action_kind: impl Into<String>, value: Option<f64>) -> Self {
+    pub fn applied(resource_id: ResourceId, action_kind: impl Into<String>, value: Option<ObservedValue>) -> Self {
         Self { resource_id, action_kind: action_kind.into().into_boxed_str(), value }
     }
 }

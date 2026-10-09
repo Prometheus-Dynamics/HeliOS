@@ -8,7 +8,6 @@ const DEFAULT_ORION_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.so
 /// The client name HeliOS gives lemnosd. The fan's board `writers` must list it (Atlas's Raze
 /// board.toml does).
 pub const LEMNOSD_CLIENT_NAME: &str = "helios";
-const LEMNOSD_FAN_MARKER_NAME: &str = "lemnosd-fan-override";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeripheralConfig {
@@ -23,6 +22,9 @@ pub struct PeripheralConfig {
     pub lemnosd_socket_path: PathBuf,
     /// The lemnosd subscription period, and the most often readings are republished to Orion.
     pub lemnosd_reading_interval_ms: u64,
+    /// How long the first lemnosd connection waits for the service before it keeps trying in the
+    /// background.
+    pub lemnosd_startup_wait_ms: u64,
     pub lease_ttl_ms: u64,
     pub camera_idle_pause_ms: u64,
 }
@@ -39,6 +41,7 @@ impl Default for PeripheralConfig {
             enable_linux_probes: true,
             lemnosd_socket_path: PathBuf::from(lemnos_ipc::DEFAULT_SOCKET),
             lemnosd_reading_interval_ms: 250,
+            lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,
             camera_idle_pause_ms: 2_000,
         }
@@ -80,6 +83,9 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_PERIPHERALS_LEMNOSD_READING_MS").and_then(|v| v.parse::<u64>().ok()).filter(|value| *value > 0) {
             config.lemnosd_reading_interval_ms = value;
         }
+        if let Some(value) = env.get("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS").and_then(|v| v.parse::<u64>().ok()) {
+            config.lemnosd_startup_wait_ms = value;
+        }
         if let Some(value) = env.get("HELIOS_LEASE_TTL_MS").or_else(|| env.get("HELIOS_CLAIM_TTL_MS")).and_then(|v| v.parse::<u64>().ok()) {
             config.lease_ttl_ms = value;
         }
@@ -87,11 +93,6 @@ impl PeripheralConfig {
             config.camera_idle_pause_ms = value;
         }
         config
-    }
-
-    /// Records the fans HeliOS still has to hand back to the kernel, across a crash.
-    pub fn lemnosd_fan_marker_path(&self) -> PathBuf {
-        self.ipc_dir.join(LEMNOSD_FAN_MARKER_NAME)
     }
 }
 
@@ -118,6 +119,7 @@ mod tests {
             ("HELIOS_ENABLE_LINUX_PROBES", "false"),
             ("HELIOS_PERIPHERALS_LEMNOSD_SOCKET", "/tmp/lemnos/lemnosd.sock"),
             ("HELIOS_PERIPHERALS_LEMNOSD_READING_MS", "125"),
+            ("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS", "1500"),
             ("HELIOS_LEASE_TTL_MS", "7500"),
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
         ]);
@@ -129,7 +131,7 @@ mod tests {
         assert!(!config.enable_linux_probes);
         assert_eq!(config.lemnosd_socket_path, PathBuf::from("/tmp/lemnos/lemnosd.sock"));
         assert_eq!(config.lemnosd_reading_interval_ms, 125);
-        assert_eq!(config.lemnosd_fan_marker_path(), PathBuf::from("/tmp/helios-peripherals/lemnosd-fan-override"));
+        assert_eq!(config.lemnosd_startup_wait_ms, 1_500);
         assert_eq!(config.lease_ttl_ms, 7_500);
         assert_eq!(config.camera_idle_pause_ms, 3_000);
     }

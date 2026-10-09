@@ -83,6 +83,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/resources", get(resources::list))
         .route("/v1/resources/{id}", get(resources::get_one))
         .route("/v1/peripherals", get(resources::peripherals))
+        .route("/v1/peripherals/io", get(resources::raw_io))
+        .route("/v1/peripherals/io/actions", post(resources::raw_io_action))
         .route("/v1/peripherals/{id}/actions", post(resources::action))
         .route("/v1/peripherals/fan", get(resources::fan).put(resources::fan))
         .route("/v1/peripherals/leds", get(resources::leds).put(resources::leds))

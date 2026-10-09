@@ -440,30 +440,103 @@ is a `pose` event (see [Event stream](./websockets.md)).
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `execution.session`, ...) |
+| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `lemnos.raw`, `execution.session`, ...) |
 | `GET` | `/v1/resources/{id}` | One resource, including its latest `action_result` |
 | `GET` | `/v1/peripherals` | The resources helios-peripherals publishes |
 | `POST` | `/v1/peripherals/{id}/actions` | `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}` (below) |
+| `GET` | `/v1/peripherals/io` | Raw GPIO/PWM/I2C/SPI access: `{resource, available, claims: [...]}` (below) |
+| `POST` | `/v1/peripherals/io/actions` | A raw action on this node's `lemnos.raw` resource, e.g. `{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output"}}` |
 | `GET` `PUT` | `/v1/peripherals/fan` · `/leds` · `/imu` | **501** |
 
 helios-peripherals publishes the board's devices from lemnosd (the board's hardware service; one
 `lemnos.device` resource each, with labels `lemnos.device_id` and `lemnos.class` and readings in
-its state) and the cameras. Action kinds, on lemnosd devices:
+its state), one `lemnos.raw` resource for raw access (`lemnos_raw_<node>_io`) and the cameras.
+Action kinds, on lemnosd devices:
 
 - `fan.override` (`pwm` 0 to 255 or `duty` 0 to 1, `duration_ms` 1000 to 600000, default 60000):
   the only write to the fan, which is otherwise left to the kernel's thermal governor. When the
-  override ends (its time, `fan.release`, helios-peripherals stopping or lemnosd restarting) the
-  fan is released back to the governor.
+  override ends (its time, `fan.release`, helios-peripherals stopping) the fan is released back
+  to the governor. lemnosd ties the write to helios-peripherals' connection, so a crash, a
+  `kill -9` or a lemnosd restart hands the fan back too; nothing is kept on disk.
 - `fan.release`: end an override now.
-- `control.set` (`control`, `value`): another device's control, e.g. `usb-a-power`'s `level`.
-
-Raw GPIO, PWM, I2C and SPI actions are gone: lemnosd owns those lines and buses.
+- `control.set` (`control`, `value`): another device's control, e.g. `usb-a-power`'s `level`
+  (undone by lemnosd when helios-peripherals' connection ends).
 
 The API runs an action as a short-lived `helios.peripheral.resource_action.v1` workload that
 holds the resource's lease. It waits up to 5 s for the result, then removes the workload and the
 lease. The answer is 200 `{workload_id, resource, done: true, result: {action_kind, status, data, error, observed_at_ms}}`,
-or 202 with `done: false` when helios-peripherals did not report in time. A leased resource
-gets a 409.
+or 202 with `done: false` when helios-peripherals did not report in time. A refused or invalid
+action is a 200 with `result.status` `failed` and the reason in `result.error`. helios-api runs
+one action at a time (its callers queue); a resource leased by someone else gets a 409. `arg` is
+any JSON object: nested objects and arrays reach helios-peripherals as they were sent, and arrays
+of byte values (0 to 255) travel as bytes.
+
+#### Raw GPIO, PWM, I2C and SPI
+
+Raw access goes through lemnosd, the one owner of the board's hardware (Lemnos
+`docs/system-service.md`, "Raw bus and line access"); HeliOS opens no device node. Actions go to
+the `lemnos.raw` resource (`POST /v1/peripherals/io/actions`, or
+`/v1/peripherals/{id}/actions` with its id). `result.data` is what the action returns.
+
+| Kind | `arg` | `data` |
+|---|---|---|
+| `gpio.claim` | `line` (a board `[[lines]]` name or a kernel line name) or `chip` (`gpiochipN` or a label such as `pinctrl-rp1`) and `offset`; `direction` (`input`, default, or `output`), `value` (an output's initial level), `active_low`, `bias` (`as-is`, `pull-up`, `pull-down`, `disabled`), `drive` (`push-pull`, `open-drain`, `open-source`), `edge` (`none`, `rising`, `falling`, `both`; inputs), `debounce_us`, `on_release` (`input`, `low`, `high`, `keep`), `ttl_ms` | the claim id, e.g. `"gpio-3"` |
+| `gpio.configure` | `claim`, any of the line settings above, `ttl_ms` | |
+| `gpio.get` | `claim`, `ttl_ms` | the logical level (`true`/`false`) |
+| `gpio.set` | `claim`, `value`, `ttl_ms` | |
+| `gpio.release` | `claim` | |
+| `pwm.claim` | `pwm` (a board `[[pwms]]` name) or `chip` and `channel`; optional `period_ns`, `duty_ns`, `polarity` (`normal`, `inversed`), `enabled`; `ttl_ms` | the claim id, e.g. `"pwm-4"` |
+| `pwm.configure` | `claim`, any of `period_ns`, `duty_ns`, `polarity`, `enabled`; `ttl_ms` | |
+| `pwm.release` | `claim` | |
+| `i2c.transfer` | `bus` (`1`, `"i2c-1"` or a board selector such as `"i2c:compatible=i2c-gpio"`), `address`, and `ops` (`[{"write": bytes}, {"read": count}, ...]`, one transaction with repeated starts) or `write` and/or `read` (write, then read) | the bytes read, e.g. `[170, 187]` |
+| `spi.transfer` | `bus`, `chip_select`, and `transfers` (`[{tx, rx_len, speed_hz, mode, bits_per_word, cs_change, delay_us}, ...]`, one transaction, one SPI mode) or one transfer's fields | the bytes received |
+| `raw.renew` | `claim`, `ttl_ms` | when the lease now ends (`expires_at_ms`) |
+
+Bytes are arrays of numbers or hex strings (`"9f00"`, `"0x9f 0x00"`). Limits (lemnosd's): 4 KiB
+per I2C transaction, 64 KiB per SPI transaction, 64 claims.
+
+```json
+POST /v1/peripherals/io/actions
+{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output", "value": false, "ttl_ms": 60000}}
+→ {"workload_id": "...", "resource": "lemnos_raw_raze_io", "done": true,
+   "result": {"action_kind": "gpio.claim", "status": "applied", "data": "gpio-1", "error": null, "observed_at_ms": 1760000000000}}
+{"kind": "gpio.set", "arg": {"claim": "gpio-1", "value": true}}
+{"kind": "i2c.transfer", "arg": {"bus": "i2c-1", "address": 80, "ops": [{"write": [16]}, {"read": 2}]}}
+```
+
+`GET /v1/peripherals/io` lists the live claims: `{id, kind, target, expires_at_ms, held,
+direction, value, edges, last_edge: {rising, timestamp_ns, seq}, period_ns, duty_ns, enabled}`.
+Edges on claimed inputs (`edge` set) are counted per claim and published at most every
+reading interval (`HELIOS_PERIPHERALS_LEMNOSD_READING_MS`, 250 ms): watch SSE `gpio` events
+([WebSocket and SSE](/api/websockets)); `seq` and `edges` show edges that fell between two
+events.
+
+**Safety model.**
+
+- **Board-owned resources are refused.** lemnosd derives from the board definition what its
+  devices own (each I2C device's addresses, each SPI device's chip select, each `gpio-*`
+  device's line). Those lines and PWM channels are never handed out, and their I2C/SPI
+  addresses only to clients the device lists in `raw` (HeliOS is not listed on the Raze): the
+  action fails with "a board device owns it". What the kernel holds fails with `busy`; a line or
+  channel another client holds fails with "another client holds it".
+- **Claims are leases.** Every claim has a time to live (`ttl_ms`, default 30 s, 1 s to 10 min).
+  Each action naming it renews it; `raw.renew` only renews. When it runs out,
+  helios-peripherals releases it, so a client that goes away never holds a line longer than its
+  lease.
+- **Claims end with the connection.** When helios-peripherals stops (or crashes), its lemnosd
+  connection closes and lemnosd ends every claim. Claims do not survive a lemnosd restart:
+  helios-peripherals claims each live lease again with its last settings when lemnosd is back
+  (`held` is `false` meanwhile); a claim lemnosd refuses then ends.
+- **Safe states.** A released line goes to the claim's `on_release`, else the board's
+  `[[lines]] safe` (`input`, `low`, `high`), else input with the bias off (high impedance); a
+  released PWM channel is disabled.
+- **Who may.** Raw access follows the device's security setting: open by default (FRC), and
+  with the device secured every raw action needs the session or an API token, as any other
+  write. lemnosd's board-level `raw_clients` can further limit which clients get raw access.
+
+The Raze's board definition names no spare GPIO line, PWM channel or spidev today (Atlas), so
+raw access there is by chip and offset to lines no board device owns, and to unowned I2C
+addresses.
 
 ### Updates (OTA)
 

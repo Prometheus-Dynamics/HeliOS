@@ -35,7 +35,7 @@ impl ResourceActionFeedback {
             state: ResourceState::new(observed_at_ms).with_action_result(ResourceActionResult {
                 action_kind: outcome.action_kind.as_ref().to_string(),
                 status: ResourceActionStatus::Applied,
-                data: outcome.value.map(TypedConfigValue::F64),
+                data: outcome.value.as_ref().map(observed_value),
                 error: None,
             }),
         }
@@ -206,6 +206,7 @@ fn observed_value(value: &ObservedValue) -> TypedConfigValue {
         ObservedValue::UInt(value) => TypedConfigValue::UInt(*value),
         ObservedValue::F64(value) => TypedConfigValue::F64(*value),
         ObservedValue::String(value) => TypedConfigValue::String(value.clone()),
+        ObservedValue::Bytes(value) => TypedConfigValue::Bytes(value.clone()),
     }
 }
 
@@ -225,6 +226,7 @@ fn resource_type_for(kind: ResourceKind) -> &'static str {
     match kind {
         ResourceKind::CaptureDevice => "camera.device",
         ResourceKind::LemnosDevice => "lemnos.device",
+        ResourceKind::LemnosRaw => "lemnos.raw",
         ResourceKind::Virtual => "virtual.resource",
     }
 }
@@ -354,7 +356,7 @@ mod tests {
         assert_eq!(config.payload.get("reading.duty"), Some(&TypedConfigValue::F64(0.7)));
         assert_eq!(config.payload.get("fan.override.active"), Some(&TypedConfigValue::Bool(true)));
 
-        let outcome = ResourceActionOutcome::applied(resource.id.clone(), "fan.override", Some(1.0));
+        let outcome = ResourceActionOutcome::applied(resource.id.clone(), "fan.override", Some(ObservedValue::F64(1.0)));
         let feedback = ResourceActionFeedback::applied(50, &outcome);
         let state = publisher.resource_record(&resource, None, Some(&feedback)).state.expect("state");
         assert_eq!(state.observed_at_ms, 100);

@@ -1243,8 +1243,10 @@ version = "1.0.0"
 dependencies = [
  "chrono",
  "lemnos-ipc",
+ "lemnosd",
  "orion",
  "serde",
+ "serde_json",
  "styx",
  "tempfile",
  "thiserror 2.0.21",
@@ -1581,6 +1583,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
+name = "lemnos-board"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "lemnos-device",
+ "lemnos-drivers-bmi088",
+ "lemnos-drivers-bmm150",
+ "lemnos-drivers-ina2xx",
+ "lemnos-drivers-linux",
+ "lemnos-drivers-vcm",
+ "lemnos-drivers-ws2812",
+ "lemnos-hal",
+ "lemnos-light",
+ "lemnos-linux",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "lemnos-bus"
 version = "2.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
@@ -1623,6 +1646,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "lemnos-drivers-bmi088"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-device",
+ "lemnos-hal",
+]
+
+[[package]]
+name = "lemnos-drivers-bmm150"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-device",
+ "lemnos-hal",
+]
+
+[[package]]
+name = "lemnos-drivers-ina2xx"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-device",
+ "lemnos-hal",
+]
+
+[[package]]
+name = "lemnos-drivers-linux"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "lemnos-device",
+ "lemnos-drivers-ws2812",
+ "lemnos-hal",
+]
+
+[[package]]
 name = "lemnos-drivers-vcm"
 version = "2.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
@@ -1632,6 +1699,14 @@ dependencies = [
  "lemnos-device",
  "lemnos-hal",
  "serde",
+]
+
+[[package]]
+name = "lemnos-drivers-ws2812"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "lemnos-device",
 ]
 
 [[package]]
@@ -1681,6 +1756,22 @@ version = "2.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "lemnosd"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#cca50f73950f66c5606f1573a5c4b0d429bb963b"
+dependencies = [
+ "embedded-hal",
+ "lemnos-board",
+ "lemnos-device",
+ "lemnos-drivers-linux",
+ "lemnos-hal",
+ "lemnos-ipc",
+ "lemnos-light",
+ "lemnos-linux-sys",
+ "serde_json",
 ]
 
 [[package]]

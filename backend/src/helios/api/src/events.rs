@@ -89,6 +89,8 @@ pub struct Digest {
     pub resources: BTreeMap<String, serde_json::Value>,
     /// Pose summary per pipeline (`pose` events).
     pub poses: BTreeMap<String, serde_json::Value>,
+    /// Raw GPIO/PWM claims (`gpio` events: claimed, renewed, set, an edge, released).
+    pub claims: BTreeMap<String, serde_json::Value>,
 }
 
 /// The events that turn `before` into `after`.
@@ -97,6 +99,7 @@ pub fn diff(before: &Digest, after: &Digest) -> Vec<(&'static str, serde_json::V
     diff_maps("pipeline", &before.pipelines, &after.pipelines, &mut out);
     diff_maps("resource", &before.resources, &after.resources, &mut out);
     diff_maps("pose", &before.poses, &after.poses, &mut out);
+    diff_maps("gpio", &before.claims, &after.claims, &mut out);
     out
 }
 
@@ -219,7 +222,12 @@ impl Watch {
                     state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
                     self.seen.orion_up = Some(true);
                 }
-                let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view), poses: routes::pipelines::pose_digest(&view) };
+                let digest = Digest {
+                    pipelines: routes::pipelines::digest(&view),
+                    resources: routes::resources::digest(&view),
+                    poses: routes::pipelines::pose_digest(&view),
+                    claims: routes::resources::claims_digest(&view),
+                };
                 if let Some(before) = &self.seen.last {
                     for (kind, data) in diff(before, &digest) {
                         state.events.publish(kind, data);

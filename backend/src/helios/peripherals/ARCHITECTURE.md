@@ -84,16 +84,20 @@ src/
   hardware.
 - direct frontend API exposure should go through API/orchestrated resources, not
   direct peripherals endpoints.
-- HeliOS opens no I2C bus, LED device or fan sysfs file: there is no
+- HeliOS opens no I2C bus, GPIO chip, PWM channel, spidev, LED device or fan
+  sysfs file: there is no
   in-process Lemnos runtime, hwmon fan driver or `sensors.toml`. lemnosd
   (`lemnos-ipc`, client `helios`, socket `/run/lemnos/lemnosd.sock`, override
   with `HELIOS_PERIPHERALS_LEMNOSD_SOCKET`) is the hardware layer. The unit runs
   with `SupplementaryGroups=lemnos` and after `lemnosd.service`.
 - One thread owns a reconnecting `DeviceClient` and `LedClient`
-  (`src/lemnosd/bridge.rs`). On `Connected` it lists the devices, subscribes to
-  every device with channels (every `HELIOS_PERIPHERALS_LEMNOSD_READING_MS`,
-  default 250), sends owed fan releases and re-sends the LED status. On
-  `Disconnected` the devices stay published as missing, without readings.
+  (`src/lemnosd/bridge.rs`). The first connection waits for lemnosd
+  (`ClientOptions::wait`, `HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS`, default 5000),
+  then keeps trying in the background. On `Connected` it lists the devices,
+  subscribes to every device with channels (every
+  `HELIOS_PERIPHERALS_LEMNOSD_READING_MS`, default 250), re-sends the LED
+  status and claims the live raw claims again. On `Disconnected` the devices
+  stay published as missing, without readings.
 - Each lemnosd device is a `lemnos.device` resource
   (`lemnos_device_<node>_<board device id>`), with labels `lemnos.device_id`,
   `lemnos.class`, `lemnos.model`, `lemnos.status`,
@@ -104,12 +108,27 @@ src/
 - Fan: read-only by default. `fan.override` (`{pwm: 0-255 | duty: 0.0-1.0,
   duration_ms: 1000-600000}`, default 60 s) is the only write
   (`DeviceClient::set(fan, "duty", ..)`); it ends with
-  `DeviceClient::release(fan)` on `fan.release`, at the end of `duration_ms`,
-  when the service stops, and after a lemnosd reconnect. It outlives the
-  action workload (the API removes it once the result is in). A release that
-  cannot be sent is owed; `<HELIOS_IPC_DIR>/lemnosd-fan-override` carries it
-  across a crash. Another client writing the fan ends the override without a
-  release. The resource state shows `fan.override.active|duty|until_ms`.
+  `DeviceClient::release(fan)` on `fan.release`, at the end of `duration_ms`
+  and when the service stops. It outlives the action workload (the API removes
+  it once the result is in). lemnosd ties the write to HeliOS's connection, so
+  a crash, a `kill -9` or a lemnosd restart hands the fan back too; nothing is
+  kept on disk and a reconnect never resumes it. Another client writing the
+  fan ends the override without a release. The resource state shows
+  `fan.override.active|duty|until_ms`.
+- Raw GPIO, PWM, I2C and SPI (`src/lemnosd/raw.rs`): one `lemnos.raw`
+  resource (`lemnos_raw_<node>_io`) takes `gpio.claim|configure|get|set|release`,
+  `pwm.claim|configure|release`, `i2c.transfer`, `spi.transfer` and
+  `raw.renew` (docs/docs/api/http.md, "Raw GPIO, PWM, I2C and SPI"). lemnosd
+  refuses whatever a board device owns. A claim is a HeliOS lease
+  (`gpio-<n>`, `pwm-<n>`; `ttl_ms` default 30 s, 1 s to 10 min) renewed by
+  every action naming it and released when it runs out; lemnosd ends all
+  claims when the connection closes (lines to their safe state, PWM
+  disabled), and after a lemnosd restart the bridge claims each live lease
+  again with its last settings. Edges on claimed inputs are counted per claim
+  and republished like readings. The resource state lists the claims
+  (`claim.<id>.kind|target|expires_at_ms|held|direction|value|edges|edge.*|period_ns|duty_ns|enabled`).
+  Tests run the bridge against `lemnosd::mock::MockLemnosd` (the real service
+  over mock hardware).
 - Other devices with controls take `control.set` (`{control, value}`) under
   lemnosd's write policy; refusals come back as action failures. Each action
   workload runs once.

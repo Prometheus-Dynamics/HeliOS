@@ -22,10 +22,10 @@ use tracing::warn;
 use crate::{
     config::{LEMNOSD_CLIENT_NAME, PeripheralConfig},
     lemnosd::{
-        CONTROL_SET_ACTION, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, FanOverrideRequest, LemnosdBridge, LemnosdOptions, ProviderHealth,
+        CONTROL_SET_ACTION, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, FanOverrideRequest, LemnosdBridge, LemnosdOptions, ProviderHealth, RawAction,
         resources::{DEVICE_ID_LABEL, PROBE_NAME},
     },
-    model::{NodeId, ResourceActionOutcome, ResourceDescriptor, ResourceKind},
+    model::{NodeId, ObservedValue, ResourceActionOutcome, ResourceDescriptor, ResourceKind},
     provider::{CameraServices, OrionPeripheralPublisher, OrionPublishError, ResourceActionFeedback},
     resources::{CaptureProbe, DiscoveryContext, DiscoveryProbe, DiscoverySnapshot, PeripheralInventoryService},
 };
@@ -42,6 +42,8 @@ enum ResourceActionSpec {
     FanRelease,
     /// A control write on a device other than a fan, under lemnosd's write policy.
     ControlSet { control: String, value: f64 },
+    /// Raw GPIO, PWM, I2C or SPI access, on the `lemnos.raw` resource.
+    Raw(RawAction),
 }
 
 impl ResourceActionSpec {
@@ -50,25 +52,16 @@ impl ResourceActionSpec {
             Self::FanOverride(_) => FAN_OVERRIDE_ACTION,
             Self::FanRelease => FAN_RELEASE_ACTION,
             Self::ControlSet { .. } => CONTROL_SET_ACTION,
+            Self::Raw(action) => action.kind(),
         }
     }
 }
 
-/// A resource action bound to its lemnosd device.
+/// A resource action bound to its lemnosd device (none for raw access).
 #[derive(Debug, Clone, PartialEq)]
 struct ResourceActionRequest {
-    device: String,
+    device: Option<String>,
     spec: ResourceActionSpec,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-enum ResourceActionKind {
-    #[serde(rename = "fan.override")]
-    FanOverride,
-    #[serde(rename = "fan.release")]
-    FanRelease,
-    #[serde(rename = "control.set")]
-    ControlSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -89,15 +82,16 @@ struct ResourceActionArgs {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResourceActionTag {
-    kind: ResourceActionKind,
+    kind: String,
 }
 
+/// The workload's config: `action.kind` and the action's `arg.*`, decoded per kind.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResourceActionConfig {
     action: ResourceActionTag,
     #[serde(default)]
-    arg: ResourceActionArgs,
+    arg: serde_json::Value,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -194,7 +188,9 @@ impl PeripheralRuntime {
         let Some(bridge) = &self.lemnosd else { return snapshot };
         let context = DiscoveryContext::new(NodeId::new(self.config.node_id.clone()), chrono::Utc::now().timestamp_millis().max(0) as u64);
         match bridge.probe().discover(&context) {
-            Ok(lemnosd) => DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| resource.kind != ResourceKind::LemnosDevice).collect()).merge(lemnosd),
+            Ok(lemnosd) => {
+                DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::LemnosDevice | ResourceKind::LemnosRaw)).collect()).merge(lemnosd)
+            }
             Err(error) => {
                 warn!(probe = PROBE_NAME, error = %error, "lemnosd resources could not be built");
                 snapshot
@@ -393,13 +389,15 @@ impl PeripheralRuntime {
 
     async fn apply_action(&self, resource: &ResourceDescriptor, request: &ResourceActionRequest) -> Result<ResourceActionOutcome, String> {
         let bridge = self.lemnosd.as_ref().ok_or("lemnosd is not configured")?;
+        let device = request.device.as_deref().unwrap_or_default();
         let value = match &request.spec {
-            ResourceActionSpec::FanOverride(override_request) => Some(bridge.fan_override(&request.device, *override_request).await?),
+            ResourceActionSpec::FanOverride(override_request) => Some(ObservedValue::F64(bridge.fan_override(device, *override_request).await?)),
             ResourceActionSpec::FanRelease => {
-                bridge.fan_release(&request.device).await?;
+                bridge.fan_release(device).await?;
                 None
             }
-            ResourceActionSpec::ControlSet { control, value } => Some(bridge.set_control(&request.device, control, *value).await?),
+            ResourceActionSpec::ControlSet { control, value } => Some(ObservedValue::F64(bridge.set_control(device, control, *value).await?)),
+            ResourceActionSpec::Raw(action) => bridge.raw(action.clone()).await?,
         };
         Ok(ResourceActionOutcome::applied(resource.id.clone(), request.spec.kind(), value))
     }
@@ -481,7 +479,7 @@ fn build_runtime_components(config: &PeripheralConfig) -> Result<(PeripheralInve
         socket: config.lemnosd_socket_path.clone(),
         client: LEMNOSD_CLIENT_NAME.to_string(),
         reading_interval: StdDuration::from_millis(config.lemnosd_reading_interval_ms),
-        fan_marker: Some(config.lemnosd_fan_marker_path()),
+        startup_wait: StdDuration::from_millis(config.lemnosd_startup_wait_ms),
     });
     let mut service = PeripheralInventoryService::new(local_node_id);
     service.register_probe(Arc::new(lemnosd.probe()));
@@ -514,19 +512,27 @@ fn invalid(workload: &WorkloadRecord, message: impl Into<String>) -> PeripheralR
 fn resource_action_request_from_workload(resource: &ResourceDescriptor, workload: &WorkloadRecord, lease: Option<&LeaseRecord>) -> Result<ResourceActionRequest, PeripheralRuntimeError> {
     validate_control_lease(resource, workload, lease)?;
     let spec = resource_action_spec_from_workload(workload)?;
-    if resource.kind != ResourceKind::LemnosDevice {
-        return Err(invalid(workload, format!("resource {} has no actions", resource.id.as_str())));
-    }
-    let device = resource.label(DEVICE_ID_LABEL).ok_or_else(|| invalid(workload, format!("resource {} has no {DEVICE_ID_LABEL} label", resource.id.as_str())))?;
-    let capability = match spec {
+    let device = match resource.kind {
+        ResourceKind::LemnosDevice => Some(resource.label(DEVICE_ID_LABEL).ok_or_else(|| invalid(workload, format!("resource {} has no {DEVICE_ID_LABEL} label", resource.id.as_str())))?.to_string()),
+        ResourceKind::LemnosRaw => None,
+        _ => return Err(invalid(workload, format!("resource {} has no actions", resource.id.as_str()))),
+    };
+    let capability = match &spec {
         ResourceActionSpec::FanOverride(_) | ResourceActionSpec::FanRelease => FAN_OVERRIDE_ACTION,
         ResourceActionSpec::ControlSet { .. } => CONTROL_SET_ACTION,
+        ResourceActionSpec::Raw(action) => action.kind(),
     };
     if !resource.has_capability(capability) {
-        let reason = if resource.has_capability(FAN_OVERRIDE_ACTION) { "the fan's only write is fan.override" } else { "the device does not offer it" };
+        let reason = if resource.has_capability(FAN_OVERRIDE_ACTION) {
+            "the fan's only write is fan.override"
+        } else if matches!(spec, ResourceActionSpec::Raw(_)) {
+            "raw GPIO, PWM, I2C and SPI actions go to the lemnos.raw resource"
+        } else {
+            "the resource does not offer it"
+        };
         return Err(invalid(workload, format!("{} on {}: {reason}", spec.kind(), resource.id.as_str())));
     }
-    Ok(ResourceActionRequest { device: device.to_string(), spec })
+    Ok(ResourceActionRequest { device, spec })
 }
 
 fn validate_control_lease(resource: &ResourceDescriptor, workload: &WorkloadRecord, lease: Option<&LeaseRecord>) -> Result<(), PeripheralRuntimeError> {
@@ -543,14 +549,25 @@ fn validate_control_lease(resource: &ResourceDescriptor, workload: &WorkloadReco
 fn resource_action_spec_from_workload(workload: &WorkloadRecord) -> Result<ResourceActionSpec, PeripheralRuntimeError> {
     let config = workload.config.as_ref().ok_or_else(|| invalid(workload, "missing config payload"))?;
     let decoded: ResourceActionConfig = deserialize_config(&config.payload).map_err(|error| invalid(workload, format!("config decode failed: {error}")))?;
-    let arg = decoded.arg;
-    match decoded.action.kind {
-        ResourceActionKind::FanOverride => FanOverrideRequest::from_args(arg.pwm, arg.duty, arg.duration_ms).map(ResourceActionSpec::FanOverride).map_err(|message| invalid(workload, message)),
-        ResourceActionKind::FanRelease => Ok(ResourceActionSpec::FanRelease),
-        ResourceActionKind::ControlSet => Ok(ResourceActionSpec::ControlSet {
+    let kind = decoded.action.kind.as_str();
+    if let Some(raw) = RawAction::from_kind(kind, decoded.arg.clone()) {
+        return raw.map(ResourceActionSpec::Raw).map_err(|message| invalid(workload, format!("{kind}: {message}")));
+    }
+    if ![FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, CONTROL_SET_ACTION].contains(&kind) {
+        return Err(invalid(workload, format!("unknown action kind {kind:?}")));
+    }
+    let arg: ResourceActionArgs = match decoded.arg {
+        serde_json::Value::Null => ResourceActionArgs::default(),
+        arg => serde_json::from_value(arg).map_err(|error| invalid(workload, format!("config decode failed: arg: {error}")))?,
+    };
+    match kind {
+        FAN_OVERRIDE_ACTION => FanOverrideRequest::from_args(arg.pwm, arg.duty, arg.duration_ms).map(ResourceActionSpec::FanOverride).map_err(|message| invalid(workload, message)),
+        FAN_RELEASE_ACTION => Ok(ResourceActionSpec::FanRelease),
+        CONTROL_SET_ACTION => Ok(ResourceActionSpec::ControlSet {
             control: arg.control.filter(|control| !control.is_empty()).ok_or_else(|| invalid(workload, "missing arg.control"))?,
             value: arg.value.filter(|value| value.is_finite()).ok_or_else(|| invalid(workload, "missing arg.value"))?,
         }),
+        other => Err(invalid(workload, format!("unknown action kind {other:?}"))),
     }
 }
 
@@ -651,7 +668,7 @@ mod tests {
         let fan = fan_resource();
         let workload = action_workload("workload.fan.override", &fan, &[kind("fan.override"), ("arg.pwm", TypedConfigValue::UInt(255)), ("arg.duration_ms", TypedConfigValue::UInt(5_000))]);
         let request = resource_action_request_from_workload(&fan, &workload, Some(&lease_for(&fan, &workload))).expect("request");
-        assert_eq!(request.device, "fan");
+        assert_eq!(request.device.as_deref(), Some("fan"));
         assert_eq!(request.spec, ResourceActionSpec::FanOverride(FanOverrideRequest { duty: 1.0, duration: StdDuration::from_secs(5) }));
 
         let workload = action_workload("workload.fan.duty", &fan, &[kind("fan.override"), ("arg.duty", TypedConfigValue::F64(0.4))]);
@@ -683,7 +700,7 @@ mod tests {
 
         let workload = action_workload("workload.usb.set", &usb, &[kind("control.set"), ("arg.control", TypedConfigValue::String("level".into())), ("arg.value", TypedConfigValue::UInt(0))]);
         let request = resource_action_request_from_workload(&usb, &workload, Some(&lease_for(&usb, &workload))).expect("request");
-        assert_eq!(request, ResourceActionRequest { device: "usb-a-power".into(), spec: ResourceActionSpec::ControlSet { control: "level".into(), value: 0.0 } });
+        assert_eq!(request, ResourceActionRequest { device: Some("usb-a-power".into()), spec: ResourceActionSpec::ControlSet { control: "level".into(), value: 0.0 } });
     }
 
     #[test]
@@ -708,11 +725,59 @@ mod tests {
         assert!(matches!(
             error,
             PeripheralRuntimeError::InvalidResourceActionWorkload { ref message, .. }
-                if message.contains("arg.extra") && message.contains("unknown field")
+                if message.contains("extra") && message.contains("unknown field")
         ));
 
         let workload = action_workload("workload.gpio.write", &fan, &[kind("gpio.write"), ("arg.high", TypedConfigValue::Bool(true))]);
-        assert!(resource_action_request_from_workload(&fan, &workload, Some(&lease_for(&fan, &workload))).is_err(), "raw GPIO/PWM/I2C/SPI actions are gone");
+        let error = resource_action_request_from_workload(&fan, &workload, Some(&lease_for(&fan, &workload))).expect_err("unknown kind");
+        assert!(matches!(error, PeripheralRuntimeError::InvalidResourceActionWorkload { ref message, .. } if message.contains("unknown action kind")));
+    }
+
+    fn raw_resource() -> ResourceDescriptor {
+        let mut builder = ResourceBuilder::new(NodeId::new(DEFAULT_NODE_ID), ResourceKind::LemnosRaw, "io", "Raw").expect("resource");
+        for action in crate::lemnosd::raw::RAW_ACTIONS {
+            builder = builder.capability(action, Some("lemnosd"));
+        }
+        builder.build()
+    }
+
+    #[test]
+    fn raw_actions_go_to_the_raw_resource_only() {
+        let raw = raw_resource();
+        let workload = action_workload(
+            "workload.gpio.claim",
+            &raw,
+            &[kind("gpio.claim"), ("arg.line", TypedConfigValue::String("aux".into())), ("arg.direction", TypedConfigValue::String("output".into())), ("arg.value", TypedConfigValue::Bool(true))],
+        );
+        let request = resource_action_request_from_workload(&raw, &workload, Some(&lease_for(&raw, &workload))).expect("request");
+        assert_eq!(request.device, None);
+        assert!(matches!(request.spec, ResourceActionSpec::Raw(RawAction::GpioClaim { .. })));
+
+        // An I2C transaction with its bytes as Orion carries them (Bytes, or one field per op).
+        let workload = action_workload(
+            "workload.i2c",
+            &raw,
+            &[
+                kind("i2c.transfer"),
+                ("arg.bus", TypedConfigValue::UInt(1)),
+                ("arg.address", TypedConfigValue::UInt(0x50)),
+                ("arg.ops.0.write", TypedConfigValue::Bytes(vec![0x10])),
+                ("arg.ops.1.read", TypedConfigValue::UInt(2)),
+            ],
+        );
+        let request = resource_action_request_from_workload(&raw, &workload, Some(&lease_for(&raw, &workload))).expect("request");
+        assert_eq!(request.spec.kind(), "i2c.transfer");
+
+        let workload = action_workload("workload.i2c.bad", &raw, &[kind("i2c.transfer"), ("arg.bus", TypedConfigValue::UInt(1))]);
+        let error = resource_action_request_from_workload(&raw, &workload, Some(&lease_for(&raw, &workload))).expect_err("no address");
+        assert!(matches!(error, PeripheralRuntimeError::InvalidResourceActionWorkload { ref message, .. } if message.starts_with("i2c.transfer: ")), "{error}");
+
+        // Raw actions are not device actions, and the raw resource takes no fan or control writes.
+        let fan = fan_resource();
+        let workload = action_workload("workload.fan.gpio", &fan, &[kind("gpio.get"), ("arg.claim", TypedConfigValue::String("gpio-1".into()))]);
+        assert!(resource_action_request_from_workload(&fan, &workload, Some(&lease_for(&fan, &workload))).is_err());
+        let workload = action_workload("workload.raw.fan", &raw, &[kind("fan.release")]);
+        assert!(resource_action_request_from_workload(&raw, &workload, Some(&lease_for(&raw, &workload))).is_err());
     }
 
     fn snapshot_with(workloads: Vec<WorkloadRecord>, leases: Vec<LeaseRecord>) -> StateSnapshot {

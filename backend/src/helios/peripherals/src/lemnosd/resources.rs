@@ -1,6 +1,7 @@
 //! lemnosd's board devices as Orion resources: one `lemnos.device` resource per device, keyed by
 //! its board device id, with the device class and channel units as labels and the latest
-//! reading as resource state.
+//! reading as resource state; and one `lemnos.raw` resource for raw GPIO, PWM, I2C and SPI
+//! access, whose state lists HeliOS's live claims.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use lemnos_ipc::{DeviceClass, DeviceDesc, DeviceStatus};
 
 use crate::lemnosd::fan::{FAN_DUTY_CONTROL, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION};
+use crate::lemnosd::raw::RAW_ACTIONS;
 use crate::model::{NodeId, ObservedValue, ResourceDescriptor, ResourceKind, ResourceObservation, ResourceStatus};
 use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder};
 
@@ -18,6 +20,8 @@ pub const CONTROL_SET_ACTION: &str = "control.set";
 pub const DEVICE_ID_LABEL: &str = "lemnos.device_id";
 pub const CLASS_LABEL: &str = "lemnos.class";
 pub const ENDPOINT_PROTOCOL: &str = "lemnos+unix";
+/// The raw-access resource's local id (`lemnos_raw_<node>_io`).
+pub const RAW_LOCAL_ID: &str = "io";
 
 /// The latest reading of one device.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,12 +51,38 @@ pub struct LemnosdState {
     pub devices: Vec<DeviceDesc>,
     pub readings: BTreeMap<String, DeviceReading>,
     pub overrides: BTreeMap<String, OverrideView>,
+    /// HeliOS's live raw claims.
+    pub claims: usize,
+    /// The claims' published values (`claim.<id>.<field>`).
+    pub raw: BTreeMap<String, ObservedValue>,
 }
 
-/// The resources for lemnosd's devices. While lemnosd is disconnected the known devices stay
-/// published as missing, without readings.
+/// The resources for lemnosd's devices and raw access, once lemnosd has been reached. While
+/// lemnosd is disconnected they stay published as missing, without readings.
 pub fn lemnosd_resources(node: &NodeId, state: &LemnosdState) -> Result<Vec<ResourceDescriptor>, DiscoveryError> {
-    state.devices.iter().map(|device| device_resource(node, state, device)).collect()
+    let mut resources = state.devices.iter().map(|device| device_resource(node, state, device)).collect::<Result<Vec<_>, _>>()?;
+    if !state.board.is_empty() {
+        resources.push(raw_resource(node, state)?);
+    }
+    Ok(resources)
+}
+
+/// Raw GPIO, PWM, I2C and SPI access through lemnosd. lemnosd refuses whatever a board device
+/// owns; the state lists HeliOS's claims (`claim.<id>.kind`, `.target`, `.expires_at_ms`,
+/// `.direction`, `.value`, `.edges`, `.edge.*`, PWM `.period_ns`, `.duty_ns`, `.enabled`).
+fn raw_resource(node: &NodeId, state: &LemnosdState) -> Result<ResourceDescriptor, DiscoveryError> {
+    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::LemnosRaw, RAW_LOCAL_ID, "Raw GPIO, PWM, I2C and SPI (lemnosd)")
+        .map_err(|error| DiscoveryError::ProbeFailed { probe: PROBE_NAME.into(), message: format!("raw access: {error}") })?
+        .status(if state.connected { ResourceStatus::Available } else { ResourceStatus::Missing })
+        .label("lemnos.board", state.board.clone())
+        .label("lemnos.status", if state.connected { "available" } else { "disconnected" })
+        .endpoint(ENDPOINT_PROTOCOL, state.socket.display().to_string());
+    for action in RAW_ACTIONS {
+        builder = builder.capability(action, Some("lemnosd"));
+    }
+    let mut values = state.raw.clone();
+    values.insert("claims".into(), ObservedValue::UInt(state.claims as u64));
+    Ok(builder.observation(ResourceObservation { observed_at_ms: 0, values }).build())
 }
 
 fn device_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> Result<ResourceDescriptor, DiscoveryError> {
@@ -247,7 +277,7 @@ pub(crate) mod tests {
     #[test]
     fn one_resource_per_board_device_keyed_by_device_id() {
         let resources = lemnosd_resources(&NodeId::new("node1"), &connected_state()).expect("resources");
-        assert_eq!(resources.len(), 4);
+        assert_eq!(resources.iter().filter(|resource| resource.kind == ResourceKind::LemnosDevice).count(), 4);
         let imu = find(&resources, "imu");
         assert_eq!(imu.id.as_str(), "lemnos_device_node1_imu");
         assert_eq!(imu.kind, ResourceKind::LemnosDevice);
@@ -302,10 +332,29 @@ pub(crate) mod tests {
         state.readings.insert("imu".into(), DeviceReading { observed_at_ms: 1, timestamp_us: 1, values: vec![("acceleration.x".into(), Some(9.8))] });
         state.connected = false;
         let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
-        assert_eq!(resources.len(), 4, "known devices stay published");
+        assert_eq!(resources.len(), 5, "known devices and raw access stay published");
         assert!(resources.iter().all(|resource| resource.status == ResourceStatus::Missing));
         assert_eq!(find(&resources, "imu").label("lemnos.status"), Some("disconnected"));
         assert!(find(&resources, "imu").observation.is_none());
+    }
+
+    #[test]
+    fn raw_access_is_one_resource_listing_the_claims() {
+        assert!(lemnosd_resources(&NodeId::new("node1"), &LemnosdState::default()).expect("resources").is_empty(), "nothing before lemnosd is reached");
+        let mut state = connected_state();
+        state.claims = 1;
+        state.raw.insert("claim.gpio-1.target".into(), ObservedValue::String("aux".into()));
+        let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
+        let raw = resources.iter().find(|resource| resource.kind == ResourceKind::LemnosRaw).expect("raw resource");
+        assert_eq!(raw.id.as_str(), "lemnos_raw_node1_io");
+        assert_eq!(raw.status, ResourceStatus::Available);
+        assert!(RAW_ACTIONS.iter().all(|action| raw.has_capability(action)));
+        let values = &raw.observation.as_ref().expect("claims").values;
+        assert_eq!(values.get("claims"), Some(&ObservedValue::UInt(1)));
+        assert_eq!(values.get("claim.gpio-1.target"), Some(&ObservedValue::String("aux".into())));
+        state.connected = false;
+        let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
+        assert_eq!(resources.iter().find(|resource| resource.kind == ResourceKind::LemnosRaw).map(|raw| raw.status), Some(ResourceStatus::Missing));
     }
 
     #[test]
