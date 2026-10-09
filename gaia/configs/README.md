@@ -35,7 +35,23 @@ Manager (1.5.0), `devices/raze/gaia/device.toml`, imported from the git source
   through `/etc/ssh/sshd_config.d/50-board.conf`), the hardware watchdog,
   the default hostname, and the **A/B update writer**
   (`/usr/lib/board/update`, `board-image-slots`,
-  `board-update-confirm.service`).
+  `board-update-confirm.service`);
+- **lemnosd**, the board's hardware service (LED ring, fan, sensors, GPIO;
+  `/etc/lemnos/board.toml`, socket `/run/lemnos/lemnosd.sock`, group
+  `lemnos`), from Lemnos's own layer, which the device layer imports from a
+  second git source, `lemnos`, declared in `builds/raze.toml` (Gaia lets only
+  local files declare import sources) at the commit `backend/Cargo.lock`
+  pins for `lemnos-ipc`. `builds/raze.toml` also imports Lemnos's
+  `packaging/gaia/lemnosd-host.toml`, so lemnosd and lemnos-ctl build on the
+  host (`rustup target add aarch64-unknown-linux-musl`) instead of in Docker.
+  The `lemnos` user is created at build time from
+  `gaia/assets/os/buildroot/lemnos-users.table` (`os/base.toml`; the
+  read-only root cannot run systemd-sysusers, which the image still ships).
+  helios-peripherals reaches the hardware only through lemnosd and runs with
+  `SupplementaryGroups=lemnos`;
+- **board-agent**, the Orion device agent (a Gaia artifact built from the
+  `atlas` source), with the drop-in `ORION_NODE_LOCAL_AUTH_ALLOW=root`.
+  HeliOS sets no allow-list of its own; one that does must list `root` too.
 
 HeliOS layers are imported after it and override its defaults:
 
@@ -127,7 +143,8 @@ source. HeliOS overrides them in later layers:
   `ORION_NODE_HOST_FACTS_REFRESH_MS=2000` for the UI's live metrics, state in
   `/var/lib/helios/orion`), and adds Orion's
   `packaging/buildroot/orion-users.table` to `BR2_ROOTFS_USERS_TABLES` for the
-  `orion` user (the read-only root has no runtime sysusers);
+  `orion` user (the read-only root has no runtime sysusers), next to
+  lemnosd's table (the value replaces `os/base.toml`'s);
 - `storage/update.toml` adds the drop-in
   `orion-node.service.d/10-helios-state.conf` (state directory on `/data`);
 - helios-engine and helios-peripherals run with `Group=orion`, which the node
