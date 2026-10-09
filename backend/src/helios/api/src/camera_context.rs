@@ -1,11 +1,13 @@
 //! Camera calibration (stored per camera and resolution) and the camera context the API writes
-//! into a pipeline's camera bindings for helios-engine: `binding.<input>.context.<field>`, fed to
-//! the graph's host inputs `<input>_<field>`, which HeliOS's templates connect to the camera
-//! ports of Eidos's pose nodes (`eidos:aruco.pose`, `eidos:aruco.field_pose`): the intrinsics
-//! and lens model of the calibration matching the binding's frame size, and the camera mount.
+//! into a pipeline's camera bindings for helios-engine: `binding.<input>.context.<field>`, which
+//! the engine turns into the structured values of the graph's held `camera`
+//! (`eidos:camera_calibration`) and `extrinsics` (`eidos:camera_extrinsics`) inputs: the
+//! calibration matching the binding's frame size (`camera.*`) and the camera's mount on the robot
+//! (`mount.*`). Numbers are Orion `TypedConfigValue::F64`, with the unit in the key.
 //!
 //! Without a matching calibration the context says `fx = fy = 0`, which Eidos reports as
-//! `status: "uncalibrated"` with no poses (it never assumes a camera).
+//! `status: "uncalibrated"` with no poses (it never assumes a camera). Without a mount there are
+//! no `mount.*` fields, and the multi-tag pose has no robot pose.
 
 use std::collections::BTreeMap;
 
@@ -161,32 +163,34 @@ pub fn match_calibration(calibrations: &[CameraCalibration], size: Option<(u32, 
     }
 }
 
-/// The context fields for a camera binding: Eidos's camera port names (`fx` ... `p2`, `lens`) and
-/// mount ports (`mount`, `mount_x` ... `mount_yaw`). Numbers go as decimal strings (Orion config
-/// values have no floats); the engine pushes them as held `f64` values. The API's mount (metres
-/// and degrees, x forward, y left, z up) is the camera body frame's pose on the robot: Eidos's
-/// `mount = body`, angles in radians.
+/// The context fields for a camera binding: `camera.lens` (`pinhole` | `fisheye`),
+/// `camera.fx_px`, `camera.fy_px`, `camera.cx_px`, `camera.cy_px`, `camera.k1` ... `camera.k6`,
+/// `camera.p1`, `camera.p2`, `camera.width_px`, `camera.height_px` (the calibrated image size;
+/// Eidos reports `image_size_mismatch` for frames of another size), and with a mount
+/// `mount.x_m`, `mount.y_m`, `mount.z_m`, `mount.roll_rad`, `mount.pitch_rad`, `mount.yaw_rad`:
+/// the API's mount (metres and degrees, WPILib's robot frame: x forward, y left, z up;
+/// `Rotation3d(roll, pitch, yaw)`) is the pose of the camera's forward-left-up frame on the
+/// robot (`helios_field::CameraMount`).
 pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&CameraMount>) -> BTreeMap<String, TypedConfigValue> {
-    let number = |value: f64| TypedConfigValue::String(format!("{value}"));
     let mut fields = BTreeMap::new();
-    let (lens, intrinsics, distortion) = match calibration {
-        Some(c) => (c.model, [c.fx, c.fy, c.cx, c.cy], c.distortion),
-        None => (LensModel::Pinhole, [0.0; 4], Distortion::default()),
+    let (lens, intrinsics, distortion, size) = match calibration {
+        Some(c) => (c.model, [c.fx, c.fy, c.cx, c.cy], c.distortion, (c.width, c.height)),
+        None => (LensModel::Pinhole, [0.0; 4], Distortion::default(), (0, 0)),
     };
-    fields.insert("lens".to_string(), TypedConfigValue::String(lens.name().into()));
-    for (name, value) in ["fx", "fy", "cx", "cy"].into_iter().zip(intrinsics) {
-        fields.insert(name.to_string(), number(value));
+    fields.insert("camera.lens".to_string(), TypedConfigValue::String(lens.name().into()));
+    for (name, value) in ["fx_px", "fy_px", "cx_px", "cy_px"].into_iter().zip(intrinsics) {
+        fields.insert(format!("camera.{name}"), TypedConfigValue::F64(value));
     }
     for (name, value) in distortion.fields() {
-        fields.insert(name.to_string(), number(value));
+        fields.insert(format!("camera.{name}"), TypedConfigValue::F64(value));
     }
-    let (kind, pose) = match mount {
-        Some(m) => ("body", [m.x, m.y, m.z, m.roll.to_radians(), m.pitch.to_radians(), m.yaw.to_radians()]),
-        None => ("none", [0.0; 6]),
-    };
-    fields.insert("mount".to_string(), TypedConfigValue::String(kind.into()));
-    for (name, value) in ["mount_x", "mount_y", "mount_z", "mount_roll", "mount_pitch", "mount_yaw"].into_iter().zip(pose) {
-        fields.insert(name.to_string(), number(value));
+    fields.insert("camera.width_px".to_string(), TypedConfigValue::Int(i64::from(size.0)));
+    fields.insert("camera.height_px".to_string(), TypedConfigValue::Int(i64::from(size.1)));
+    if let Some(m) = mount {
+        let pose = [("x_m", m.x), ("y_m", m.y), ("z_m", m.z), ("roll_rad", m.roll.to_radians()), ("pitch_rad", m.pitch.to_radians()), ("yaw_rad", m.yaw.to_radians())];
+        for (name, value) in pose {
+            fields.insert(format!("mount.{name}"), TypedConfigValue::F64(value));
+        }
     }
     fields
 }
@@ -233,17 +237,20 @@ mod tests {
     }
 
     #[test]
-    fn context_fields_are_eidos_ports() {
+    fn context_fields_are_typed_with_units() {
         let mount = CameraMount { x: 0.3, y: 0.0, z: 0.25, roll: 0.0, pitch: -15.0, yaw: 180.0 };
         let fields = context_fields(Some(&calibration(1280, 800)), Some(&mount));
-        assert_eq!(fields["lens"], TypedConfigValue::String("fisheye".into()));
-        assert_eq!(fields["fx"], TypedConfigValue::String("560".into()));
-        assert_eq!(fields["k1"], TypedConfigValue::String("0.1".into()));
-        assert_eq!(fields["mount"], TypedConfigValue::String("body".into()));
-        assert_eq!(fields["mount_yaw"], TypedConfigValue::String(format!("{}", std::f64::consts::PI)));
+        assert_eq!(fields["camera.lens"], TypedConfigValue::String("fisheye".into()));
+        assert_eq!(fields["camera.fx_px"], TypedConfigValue::F64(560.0));
+        assert_eq!(fields["camera.k1"], TypedConfigValue::F64(0.1));
+        assert_eq!(fields["camera.width_px"], TypedConfigValue::Int(1280));
+        assert_eq!(fields["mount.x_m"], TypedConfigValue::F64(0.3));
+        assert_eq!(fields["mount.yaw_rad"], TypedConfigValue::F64(std::f64::consts::PI));
+        assert_eq!(fields.len(), 21);
         let uncalibrated = context_fields(None, None);
-        assert_eq!(uncalibrated["fx"], TypedConfigValue::String("0".into()));
-        assert_eq!(uncalibrated["mount"], TypedConfigValue::String("none".into()));
-        assert_eq!(uncalibrated.len(), 20);
+        assert_eq!(uncalibrated["camera.fx_px"], TypedConfigValue::F64(0.0));
+        assert_eq!(uncalibrated["camera.width_px"], TypedConfigValue::Int(0));
+        assert!(!uncalibrated.keys().any(|key| key.starts_with("mount.")), "no mount, no mount fields");
+        assert_eq!(uncalibrated.len(), 15);
     }
 }

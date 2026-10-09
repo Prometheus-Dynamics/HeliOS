@@ -37,7 +37,8 @@ The API keeps very little state of its own. It reads other parts of the device a
 
 The API stores only a few things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`, on
 the data partition): pipeline revision history (used for rollback), camera mounts, camera
-calibrations and the camera control values set through the API. The device security file is
+calibrations, the camera control values set through the API, and the uploaded field layouts with
+the selected one. The device security file is
 separate (`/var/lib/helios/auth/auth.json`, see below).
 
 ## Errors
@@ -105,7 +106,7 @@ as unavailable and not retry.
 | `GET` | `/v1/cameras/{id}/settings` | Styx + API store | The camera's controls (range, default, value now, standard control, `writable`, `persisted`) plus the capture's mode, fps and measured exposure and gains, and the values kept across reboots (`persisted`) |
 | `PATCH` | `/v1/cameras/{id}/settings` | Styx + API store | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`) and the values now kept across reboots. Resolution and pyramid levels are set per pipeline (see bindings) |
 | `DELETE` | `/v1/cameras/{id}/settings` | Styx + API store | Reset to defaults: every writable control back to its default, and the stored values forgotten. Same answer as `PATCH` |
-| `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees (x forward, y left, z up) |
+| `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees: the camera's pose on the robot in WPILib's robot frame (x forward, y left, z up; angles as WPILib's `Rotation3d(roll, pitch, yaw)`, a positive pitch tilts the camera down) |
 | `GET` | `/v1/cameras/{id}/preview` | Styx preview | MJPEG (`multipart/x-mixed-replace; boundary=styxpreview`) for an `<img>`. See [Camera preview](#camera-preview) |
 | `GET` | `/v1/cameras/{id}/preview/ws` | Styx preview | The same frames over a WebSocket, one binary `SPV1` message each |
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/calibration` | API store | Camera calibrations, one per image size (intrinsics, `pinhole` or `fisheye`, distortion), kept on `/data`; which one each pipeline gets. See [Calibration](#calibration-and-camera-context) |
@@ -274,15 +275,43 @@ camera's context to the binding (`binding.<input>.context.<field>` in the engine
 calibration for the pipeline's frame size (the binding's `output_width` x `output_height`;
 without one, the largest calibration) and the mount. A calibration at exactly that size is used,
 else the largest one with the same aspect ratio, scaled (focal lengths and principal point;
-distortion is unchanged). The fields are the camera ports of Eidos's pose nodes: `fx`, `fy`,
-`cx`, `cy`, `lens`, `k1` to `k6`, `p1`, `p2`, and the mount `mount` (`body`, the API's x forward,
-y left, z up frame, or `none`), `mount_x`, `mount_y`, `mount_z` (metres) and `mount_roll`,
-`mount_pitch`, `mount_yaw` (radians). helios-engine feeds each to the graph's host input
-`<input>_<field>` (`frame_fx`, ...), which HeliOS's templates connect to `eidos:aruco.pose` and
-`eidos:aruco.field_pose`; numbers are pushed into the running graph, so a new calibration or
-mount takes effect on the next frame without a new revision (a new lens model recompiles the
-graph). A camera without a matching calibration gets `fx = fy = 0`: Eidos then reports
-`status: "uncalibrated"` and no poses; it never guesses a camera.
+distortion is unchanged). Numbers are Orion `F64` config values with the unit in the key:
+
+- `camera.lens` (`pinhole` | `fisheye`), `camera.fx_px`, `camera.fy_px`, `camera.cx_px`,
+  `camera.cy_px`, `camera.k1` to `camera.k6`, `camera.p1`, `camera.p2`, `camera.width_px`,
+  `camera.height_px` (the calibrated image size);
+- with a mount, `mount.x_m`, `mount.y_m`, `mount.z_m`, `mount.roll_rad`, `mount.pitch_rad`,
+  `mount.yaw_rad`.
+
+helios-engine turns them into one structured value each and pushes it into the graph's held host
+inputs: `camera` (Eidos's `eidos:camera_calibration`) and `extrinsics` (`eidos:camera_extrinsics`,
+the camera's optical frame on the robot, from the mount as the pose of the camera's
+forward-left-up frame). HeliOS's templates connect them to `eidos:aruco.pose` and
+`eidos:aruco.multi_tag_pose`. A new calibration, lens model or mount takes effect on the next
+frame without a new revision and without recompiling (adding or removing a mount recompiles). A
+camera without a matching calibration gets `fx = fy = 0`: Eidos then reports
+`status: "uncalibrated"` and no poses; it never guesses a camera. Frames of another size than the
+calibration's report `image_size_mismatch`. A camera without a mount gets no robot pose.
+
+### Field layouts
+
+Where the AprilTags are on the field, for the multi-tag (field) pose. The FRC 2026 AndyMark field
+is built in (`frc2026-andymark`, from Limelight's `FRC2026_ANDYMARK.fmap`); others are uploaded
+as a WPILib AprilTag field layout JSON (the file WPILib's `AprilTagFieldLayout` loads) or a
+Limelight `.fmap`, and kept in `/var/lib/helios/api/field-layouts/`. HeliOS converts them
+(`helios-field`): poses are in WPILib's blue-origin field frame (a `.fmap` is field-centred and
+is moved by half its field size), and each tag's WPILib frame (it faces +x, z up) becomes Eidos's
+tag frame (it faces −z, y down, x along the top edge).
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/field-layouts` | `{selected, layouts: [{id, name, format, builtin, selected, saved_at_ms, length_m, width_m, tags, tag_ids}]}` |
+| `GET` | `/v1/field-layouts/{id}` | One layout with `layout` (`{length_m, width_m, tags: [{id, side_m, field_from_tag}]}`, WPILib frames) and `known_tags` (what Eidos solves against) |
+| `POST` | `/v1/field-layouts?name=&id=&tag_side_m=` | The file as the body (WPILib JSON or `.fmap`, told apart by their keys); 201. `id` defaults from the name; a WPILib JSON has no tag size, so its tags get `tag_side_m` (default 0.1651, FRC's 6.5 in). Replacing an uploaded layout updates the pipelines that use it. The built-in layout cannot be replaced (409) |
+| `DELETE` | `/v1/field-layouts/{id}` | Forget an uploaded layout; 409 for the built-in or selected layout, or one a pipeline uses |
+| `GET` `PUT` | `/v1/field-layouts/selected` | `{id}`: the layout every pipeline without its own `field_layout` uses (default `frc2026-andymark`). A `PUT` redeploys those pipelines with it (same revision) and answers `{id, pipelines}` |
+
+Changes are `field_layout` events (`{id, change: "saved" | "deleted" | "selected"}`).
 
 ### Pipelines and outputs
 
@@ -349,10 +378,16 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   what a full search would for the tags it tracks (same ids, identical corners), and a new tag is
   found at most `full_search_every - 1` frames after it appears (Eidos `docs/daedalus.md`,
   "Tracked detector groups"). Unset, the graph keeps its mode, except that a camera pipeline's
-  untracked groups become `tracked` every 8 frames: on the CM5 that gives the same detections as
-  full search at 0.345 ms per frame on average instead of 0.84 ms (p99 about 1.0 ms either way),
-  with new tags within 7 frames. The API switches the group node in the stored graph; a pipeline
+  untracked groups become `tracked` every 8 frames. On the CM5 (Eidos 80fe40318, with track-loss
+  recovery) that costs 0.31 to 0.32 ms per frame on average instead of 0.84 ms for full search
+  every frame (p99 about 1.0 ms). Tracked search trades some new-tag latency (a new tag is found
+  within 7 frames): on the recorded robot video it reports 3305 detections against 3531 for full
+  search every frame. Scoring against reference poses is pending in Eidos. The API switches the group node in the stored graph; a pipeline
   reports the mode its graph has (`search_mode`, `full_search_every`).
+- `field_layout` names the [field layout](#field-layouts) the graph's multi-tag pose
+  (`eidos:aruco.multi_tag_pose`) solves against; unset, the pipeline uses the selected layout and
+  follows the selection. The API writes the layout's tags into the node's `known_tags` constant
+  when it deploys the pipeline; the pipeline reports the layout in use (`field_layout`).
 
 The pipeline the API returns:
 
@@ -366,10 +401,12 @@ The pipeline the API returns:
   "session": { "status": "running", "message": null, "observed_at_ms": 1760000000000 },
   "telemetry": { "fps": 59.8, "last_tick_ms": 0.71, "frames_processed": 3600, "source_connected": true },
   "outputs": [{ "pipeline": "tags-front", "port": "pose_solutions", "value": { "...": "..." }, "observed_at_ms": 1760000000000 }],
-  "search_mode": "tracked", "full_search_every": 8,
+  "search_mode": "tracked", "full_search_every": 8, "field_layout": "frc2026-andymark",
   "pose": { "status": "calibrated",
-            "tags": [{ "id": 7, "translation": [0.12, -0.05, 2.31], "rotation": [0.01, 0.99, 0.0, 0.02], "error_px": 0.21, "ambiguity": 0.08 }],
-            "field_valid": true, "camera_in_field": { "...": "..." }, "robot_in_field": { "...": "..." }, "observed_at_ms": 1760000000000 },
+            "tags": [{ "id": 7, "translation": { "x": 0.12, "y": -0.05, "z": 2.31 }, "rotation": { "w": 0.02, "x": 0.01, "y": 0.99, "z": 0.0 }, "error_px": 0.21, "ambiguity": 0.08 }],
+            "field_valid": true, "field_rms_px": 0.4, "field_inlier_tags": 2, "field_ambiguity": 0.1,
+            "camera_in_field": { "translation": { "...": "..." }, "rotation": { "...": "..." } },
+            "robot_in_field": { "translation": { "...": "..." }, "rotation": { "...": "..." } }, "observed_at_ms": 1760000000000 },
   "managed": true
 }
 ```
@@ -378,30 +415,41 @@ The pipeline the API returns:
 `completed` or `failed`. Output values are JSON. Frames are described, never sent.
 
 `pose` summarizes the pose outputs of HeliOS's templates (`pose_solutions` from
-`eidos:aruco.pose`, `field_pose` from `eidos:aruco.field_pose`; `null` when the graph has
-neither): Eidos's `status` (`calibrated`, or `uncalibrated` when the camera has no calibration
-for the pipeline's frame size, with no poses), each tag's best pose in the camera's optical
-frame (`translation` in metres, `rotation` a quaternion `x, y, z, w`; tag frame: origin at the
-centre, x along the top edge, y down, z into the tag), its reprojection error and planar
-ambiguity, and from the field pose whether it is `field_valid`, `camera_in_field` and
-`robot_in_field` (the robot through the camera's mount). The full outputs are in `outputs`, and
-every change is a `pose` event (see [Event stream](./websockets.md)).
+`eidos:aruco.pose`, `multi_tag_pose` from `eidos:aruco.multi_tag_pose`; `null` when the graph has
+neither): Eidos's `status` (`calibrated`; `uncalibrated` when the camera has no calibration for
+the pipeline's frame size, or `image_size_mismatch`, with no poses), each tag's best pose in the
+camera's optical frame (`translation` in metres, `rotation` a quaternion `{w, x, y, z}`; camera
+frame x right, y down, z forward; tag frame: origin at the centre, x along the top edge, y down,
+z into the tag), its reprojection error and planar ambiguity, and from the multi-tag pose against
+the pipeline's field layout whether it is `field_valid`, its error, inlier tags and ambiguity,
+`camera_in_field` (the camera's optical frame in the field, `reference_from_camera`) and
+`robot_in_field` (WPILib's robot frame through the camera's mount, `reference_from_rig`; `null`
+when the camera has no mount). Poses are `{translation: {x, y, z}, rotation: {w, x, y, z}}`; both
+field poses are `null` without a valid solve. The full outputs are in `outputs`, and every change
+is a `pose` event (see [Event stream](./websockets.md)).
 
 ### Resources and peripherals
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `gpio.line`, `pwm.channel`, `execution.session`, ...) |
+| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `execution.session`, ...) |
 | `GET` | `/v1/resources/{id}` | One resource, including its latest `action_result` |
 | `GET` | `/v1/peripherals` | The resources helios-peripherals publishes |
-| `POST` | `/v1/peripherals/{id}/actions` | `{"kind": "gpio.write", "arg": {"high": true}}` (below) |
+| `POST` | `/v1/peripherals/{id}/actions` | `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}` (below) |
 | `GET` `PUT` | `/v1/peripherals/fan` · `/leds` · `/imu` | **501** |
 
-Action kinds: `gpio.read`, `gpio.write` (`high`), `gpio.configure_direction` (`direction`:
-`input`/`output`, `initial_high`), `pwm.enable` (`enabled`), `pwm.set_period_ns`,
-`pwm.set_duty_cycle_ns`, `pwm.configure` (`period_ns`, `duty_cycle_ns`, `enabled`),
-`i2c.read` (`len`), `i2c.write` (`bytes`), `i2c.write_read` (`write`, `read_len`),
-`spi.transfer` (`bytes`), and `spi.write` (`bytes`).
+helios-peripherals publishes the board's devices from lemnosd (the board's hardware service; one
+`lemnos.device` resource each, with labels `lemnos.device_id` and `lemnos.class` and readings in
+its state) and the cameras. Action kinds, on lemnosd devices:
+
+- `fan.override` (`pwm` 0 to 255 or `duty` 0 to 1, `duration_ms` 1000 to 600000, default 60000):
+  the only write to the fan, which is otherwise left to the kernel's thermal governor. When the
+  override ends (its time, `fan.release`, helios-peripherals stopping or lemnosd restarting) the
+  fan is released back to the governor.
+- `fan.release`: end an override now.
+- `control.set` (`control`, `value`): another device's control, e.g. `usb-a-power`'s `level`.
+
+Raw GPIO, PWM, I2C and SPI actions are gone: lemnosd owns those lines and buses.
 
 The API runs an action as a short-lived `helios.peripheral.resource_action.v1` workload that
 holds the resource's lease. It waits up to 5 s for the result, then removes the workload and the

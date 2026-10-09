@@ -180,3 +180,45 @@ async fn bad_ids_are_rejected() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "bad_request");
 }
+
+#[tokio::test]
+async fn field_layouts_list_upload_and_read() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    let (status, body) = call(&state, "GET", "/v1/field-layouts", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["selected"], "frc2026-andymark");
+    assert_eq!(body["layouts"][0]["builtin"], true);
+    assert_eq!(body["layouts"][0]["tags"], 32);
+
+    let wpilib = serde_json::json!({
+        "tags": [{ "ID": 7, "pose": { "translation": { "x": 1.0, "y": 2.0, "z": 0.5 }, "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } } } }],
+        "field": { "length": 16.5, "width": 8.0 }
+    });
+    let (status, body) = call(&state, "POST", "/v1/field-layouts?name=Practice%20field", Some(wpilib)).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["id"], "practice-field");
+    assert_eq!(body["format"], "wpilib");
+    assert_eq!(body["tags"], 1);
+
+    let (status, body) = call(&state, "GET", "/v1/field-layouts/practice-field", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["layout"]["tags"][0]["id"], 7);
+    assert!((body["layout"]["tags"][0]["side_m"].as_f64().expect("side") - 0.1651).abs() < 1e-12, "FRC tag size by default");
+    // Eidos's tag frame for a tag facing +X: q = (1/2, -1/2, -1/2, 1/2).
+    assert!((body["known_tags"][0]["reference_from_tag"]["rotation"]["y"].as_f64().expect("y") + 0.5).abs() < 1e-12, "{body}");
+    let (status, body) = call(&state, "GET", "/v1/field-layouts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["layouts"].as_array().map(Vec::len), Some(2), "{body}");
+
+    let (status, _) = call(&state, "POST", "/v1/field-layouts?name=x", Some(serde_json::json!({ "nope": 1 }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(&state, "POST", "/v1/field-layouts?name=x&id=frc2026-andymark", Some(serde_json::json!({ "fiducials": [] }))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "the built-in layout cannot be replaced");
+    let (status, _) = call(&state, "DELETE", "/v1/field-layouts/frc2026-andymark", None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = call(&state, "GET", "/v1/field-layouts/nope", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(&state, "PUT", "/v1/field-layouts/selected", Some(serde_json::json!({ "id": "nope" }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

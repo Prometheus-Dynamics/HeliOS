@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod cameras;
+pub mod field_layouts;
 pub mod logs;
 pub mod pipelines;
 pub mod resources;
@@ -61,6 +62,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/cameras/{id}/preview/ws", get(cameras::preview_ws))
         .route("/v1/cameras/{id}/calibration", get(cameras::get_calibration).put(cameras::put_calibration).delete(cameras::delete_calibration))
         .route("/v1/cameras/{id}/calibration/capture", post(cameras::capture_calibration))
+        // Field layouts for the multi-tag (field) pose
+        .route("/v1/field-layouts", get(field_layouts::list).post(field_layouts::upload))
+        .route("/v1/field-layouts/selected", get(field_layouts::get_selected).put(field_layouts::put_selected))
+        .route("/v1/field-layouts/{id}", get(field_layouts::get_one).delete(field_layouts::remove))
         // Pipelines (Daedalus graphs run by helios-engine) and their outputs
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))

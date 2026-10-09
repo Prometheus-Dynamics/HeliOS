@@ -14,6 +14,7 @@ pub mod camera_preview;
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod field_layouts;
 pub mod host;
 pub mod orion;
 pub mod routes;

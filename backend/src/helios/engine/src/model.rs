@@ -99,12 +99,14 @@ pub struct ExecutionWorkload {
 }
 
 impl ExecutionWorkload {
-    /// The workload as its compiled graph depends on it: everything but the camera context,
-    /// which is pushed into the running graph instead.
+    /// The workload as its compiled graph depends on it: the camera context's values are pushed
+    /// into the running graph instead, so only which groups it has (`camera`, `mount`) count. A
+    /// held input cannot be emptied again, so a group that goes away (a mount removed)
+    /// recompiles the graph.
     pub fn compiled_shape(&self) -> Self {
         let mut shape = self.clone();
         for binding in &mut shape.bindings {
-            binding.context.clear();
+            binding.context = binding.context.keys().map(|key| (key.split('.').next().unwrap_or_default().to_string(), ContextValue::Name(String::new()))).collect();
         }
         shape
     }

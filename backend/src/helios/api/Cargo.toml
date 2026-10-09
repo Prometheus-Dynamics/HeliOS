@@ -40,6 +40,10 @@ tracing-subscriber = { workspace = true }
 
 # Graph documents are validated with Daedalus's own parser (versioned `GraphDocument`).
 daedalus-planner = { workspace = true, features = ["std"] }
+# Graph values (a field layout's `known_tags` constant).
+daedalus-data = { workspace = true }
+# FRC field layouts (WPILib JSON, Limelight .fmap) as Eidos known tag poses.
+helios-field = { path = "../field" }
 # Orion is the device's state store: resources, workloads, the updater and host facts.
 orion = { workspace = true, default-features = false, features = ["client"] }
 # Camera list, live camera metrics, controls and previews from the Styx camera services (no

@@ -1,7 +1,8 @@
 //! What only the API owns, persisted under its state directory (`/var/lib/helios/api`, on the
 //! data partition, so it survives reboots and OTA updates): the revision history of each
 //! pipeline (for rollback), where each camera is mounted on the robot, each camera's
-//! calibrations, and the camera control values set through the API.
+//! calibrations, the camera control values set through the API, and the uploaded field layouts
+//! with the one selected for every pipeline that names none.
 
 use std::{
     collections::BTreeMap,
@@ -14,6 +15,7 @@ use tokio::sync::Mutex;
 use crate::{
     camera_context::CameraCalibration,
     error::{ApiError, ApiResult},
+    field_layouts::StoredLayout,
 };
 
 /// Revisions kept per pipeline.
@@ -231,6 +233,69 @@ impl Store {
         write_json(&path, &all).await?;
         Ok(left)
     }
+}
+
+impl Store {
+    fn field_layouts_dir(&self) -> PathBuf {
+        self.dir.join("field-layouts")
+    }
+
+    fn field_layout_selection_path(&self) -> PathBuf {
+        self.dir.join("field-layout.json")
+    }
+
+    /// The uploaded field layouts (the built-in ones are not stored).
+    pub async fn field_layouts(&self) -> ApiResult<Vec<StoredLayout>> {
+        let _guard = self.lock.lock().await;
+        let mut layouts = Vec::new();
+        let mut entries = match tokio::fs::read_dir(self.field_layouts_dir()).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(layouts),
+            Err(error) => return Err(error.into()),
+        };
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json")
+                && let Some(layout) = read_json::<StoredLayout>(&path).await?
+            {
+                layouts.push(layout);
+            }
+        }
+        layouts.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(layouts)
+    }
+
+    pub async fn put_field_layout(&self, layout: &StoredLayout) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.field_layouts_dir().join(format!("{}.json", file_stem(&layout.id))), layout).await
+    }
+
+    /// Forget an uploaded layout; false when there was none.
+    pub async fn delete_field_layout(&self, id: &str) -> ApiResult<bool> {
+        let _guard = self.lock.lock().await;
+        match tokio::fs::remove_file(self.field_layouts_dir().join(format!("{}.json", file_stem(id)))).await {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// The layout selected for pipelines that name none; `None` until one is selected.
+    pub async fn selected_field_layout(&self) -> ApiResult<Option<String>> {
+        let _guard = self.lock.lock().await;
+        let selection: Option<FieldLayoutSelection> = read_json(&self.field_layout_selection_path()).await?;
+        Ok(selection.map(|s| s.selected))
+    }
+
+    pub async fn select_field_layout(&self, id: &str) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.field_layout_selection_path(), &FieldLayoutSelection { selected: id.to_string() }).await
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FieldLayoutSelection {
+    selected: String,
 }
 
 fn file_stem(id: &str) -> String {

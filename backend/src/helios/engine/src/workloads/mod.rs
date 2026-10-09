@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(context.get("camera.lens"), Some(&ContextValue::Name("fisheye".into())));
         assert_eq!(context.get("mount.pitch_rad"), Some(&ContextValue::Number(-0.25)));
         let shape = decoded.compiled_shape();
-        assert!(shape.bindings[0].context.is_empty(), "context is pushed, never compiled in");
+        assert_eq!(shape.bindings[0].context.keys().collect::<Vec<_>>(), ["camera", "mount"], "values are pushed, only the groups count");
     }
 
     #[test]

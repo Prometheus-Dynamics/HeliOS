@@ -325,18 +325,32 @@ export interface PipelineSpec {
   /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 8) or `full`. */
   search_mode?: SearchMode;
   full_search_every?: number;
+  /** The field layout (`/v1/field-layouts`) of the graph's multi-tag pose; unset follows the selected one. */
+  field_layout?: string;
 }
 
 export type SearchMode = "full" | "tracked";
 
-/** A pipeline's tag and field poses (from its `pose_solutions` and `field_pose` outputs). */
+/** A rigid transform as Eidos's values show it (`a_from_b`). */
+export interface Pose3 {
+  translation: { x: number; y: number; z: number };
+  rotation: { w: number; x: number; y: number; z: number };
+}
+
+/** A pipeline's tag and field poses (from its `pose_solutions` and `multi_tag_pose` outputs). */
 export interface PoseSummary {
-  /** `calibrated`, or `uncalibrated` (no calibration for the camera at the pipeline's frame size: no poses). */
-  status: "calibrated" | "uncalibrated" | null;
-  tags: { id: number; translation: [number, number, number] | null; rotation: [number, number, number, number] | null; error_px: number | null; ambiguity: number | null }[];
+  /** `calibrated`; `uncalibrated` (no calibration for the camera at the pipeline's frame size) or `image_size_mismatch`: no poses. */
+  status: "calibrated" | "uncalibrated" | "image_size_mismatch" | null;
+  /** Each tag's best pose in the camera's optical frame (x right, y down, z forward). */
+  tags: { id: number; translation: Pose3["translation"] | null; rotation: Pose3["rotation"] | null; error_px: number | null; ambiguity: number | null }[];
   field_valid: boolean | null;
-  camera_in_field: unknown;
-  robot_in_field: unknown;
+  field_rms_px?: number | null;
+  field_inlier_tags?: number | null;
+  field_ambiguity?: number | null;
+  /** The camera's optical frame in the field (WPILib blue-origin frame); `null` without a valid pose. */
+  camera_in_field: Pose3 | null;
+  /** WPILib's robot frame in the field, through the camera's mount; `null` without a mount or a valid pose. */
+  robot_in_field: Pose3 | null;
   observed_at_ms: number | null;
 }
 

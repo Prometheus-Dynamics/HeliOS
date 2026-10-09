@@ -120,7 +120,7 @@ pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -
     view.resources.get(&id).map(|r| Json(resource_dto(r, &view))).ok_or_else(|| ApiError::not_found(format!("no resource {id}")))
 }
 
-/// The resources helios-peripherals publishes (GPIO, PWM, I2C, SPI, USB, cameras).
+/// The resources helios-peripherals publishes (lemnosd's board devices, cameras).
 pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec<ResourceDto>>> {
     let view = state.orion.view().await?;
     Ok(Json(view.resources.values().filter(|r| r.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX)).map(|r| resource_dto(r, &view)).collect()))
@@ -128,8 +128,11 @@ pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec
 
 // --- actions -------------------------------------------------------------------
 
-/// A peripheral action: `{"kind": "gpio.write", "arg": {"high": true}}`. Kinds and arguments are
-/// helios-peripherals' resource actions.
+/// A peripheral action: `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}`.
+/// Kinds and arguments are helios-peripherals' resource actions on lemnosd devices:
+/// `fan.override` (`pwm` 0-255 or `duty` 0-1, `duration_ms` 1000-600000; the fan goes back to the
+/// kernel governor when it ends), `fan.release`, and `control.set` (`control`, `value`) for other
+/// devices' controls.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ActionRequest {
@@ -141,32 +144,14 @@ pub struct ActionRequest {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ActionArgs {
-    pub high: Option<bool>,
-    pub direction: Option<String>,
-    pub initial_high: Option<bool>,
-    pub enabled: Option<bool>,
-    pub period_ns: Option<u64>,
-    pub duty_cycle_ns: Option<u64>,
-    pub len: Option<u64>,
-    pub bytes: Option<Vec<u8>>,
-    pub write: Option<Vec<u8>>,
-    pub read_len: Option<u64>,
+    pub pwm: Option<u64>,
+    pub duty: Option<f64>,
+    pub duration_ms: Option<u64>,
+    pub control: Option<String>,
+    pub value: Option<f64>,
 }
 
-pub const ACTION_KINDS: &[&str] = &[
-    "gpio.read",
-    "gpio.write",
-    "gpio.configure_direction",
-    "pwm.enable",
-    "pwm.set_period_ns",
-    "pwm.set_duty_cycle_ns",
-    "pwm.configure",
-    "i2c.read",
-    "i2c.write",
-    "i2c.write_read",
-    "spi.transfer",
-    "spi.write",
-];
+pub const ACTION_KINDS: &[&str] = &["fan.override", "fan.release", "control.set"];
 
 pub fn action_config(request: &ActionRequest) -> ApiResult<WorkloadConfig> {
     if !ACTION_KINDS.contains(&request.kind.as_str()) {
@@ -174,28 +159,21 @@ pub fn action_config(request: &ActionRequest) -> ApiResult<WorkloadConfig> {
     }
     let mut config = WorkloadConfig::new("helios.peripheral.resource_action.config.v1").field("action.kind", TypedConfigValue::String(request.kind.clone()));
     let arg = &request.arg;
-    let bools = [("high", arg.high), ("initial_high", arg.initial_high), ("enabled", arg.enabled)];
-    for (name, value) in bools {
-        if let Some(value) = value {
-            config = config.field(format!("arg.{name}"), TypedConfigValue::Bool(value));
-        }
-    }
-    let uints = [("period_ns", arg.period_ns), ("duty_cycle_ns", arg.duty_cycle_ns), ("len", arg.len), ("read_len", arg.read_len)];
-    for (name, value) in uints {
+    for (name, value) in [("pwm", arg.pwm), ("duration_ms", arg.duration_ms)] {
         if let Some(value) = value {
             config = config.field(format!("arg.{name}"), TypedConfigValue::UInt(value));
         }
     }
-    for (name, value) in [("bytes", &arg.bytes), ("write", &arg.write)] {
+    for (name, value) in [("duty", arg.duty), ("value", arg.value)] {
         if let Some(value) = value {
-            config = config.field(format!("arg.{name}"), TypedConfigValue::Bytes(value.clone()));
+            if !value.is_finite() {
+                return Err(ApiError::bad_request(format!("arg.{name} must be a finite number")));
+            }
+            config = config.field(format!("arg.{name}"), TypedConfigValue::F64(value));
         }
     }
-    if let Some(direction) = &arg.direction {
-        if direction != "input" && direction != "output" {
-            return Err(ApiError::bad_request("arg.direction is input or output"));
-        }
-        config = config.field("arg.direction", TypedConfigValue::String(direction.clone()));
+    if let Some(control) = &arg.control {
+        config = config.field("arg.control", TypedConfigValue::String(control.clone()));
     }
     Ok(config)
 }
@@ -276,13 +254,13 @@ mod tests {
 
     #[test]
     fn action_config_encodes_typed_args() {
-        let config =
-            action_config(&ActionRequest { kind: "pwm.configure".into(), arg: ActionArgs { period_ns: Some(20_000), duty_cycle_ns: Some(5_000), enabled: Some(true), ..ActionArgs::default() } })
-                .expect("config");
-        assert_eq!(config.payload.get("action.kind"), Some(&TypedConfigValue::String("pwm.configure".into())));
-        assert_eq!(config.payload.get("arg.period_ns"), Some(&TypedConfigValue::UInt(20_000)));
-        assert_eq!(config.payload.get("arg.enabled"), Some(&TypedConfigValue::Bool(true)));
-        assert!(action_config(&ActionRequest { kind: "fan.set".into(), arg: ActionArgs::default() }).is_err());
-        assert!(action_config(&ActionRequest { kind: "gpio.configure_direction".into(), arg: ActionArgs { direction: Some("sideways".into()), ..ActionArgs::default() } }).is_err());
+        let config = action_config(&ActionRequest { kind: "fan.override".into(), arg: ActionArgs { duty: Some(0.8), duration_ms: Some(60_000), ..ActionArgs::default() } }).expect("config");
+        assert_eq!(config.payload.get("action.kind"), Some(&TypedConfigValue::String("fan.override".into())));
+        assert_eq!(config.payload.get("arg.duty"), Some(&TypedConfigValue::F64(0.8)));
+        assert_eq!(config.payload.get("arg.duration_ms"), Some(&TypedConfigValue::UInt(60_000)));
+        let config = action_config(&ActionRequest { kind: "control.set".into(), arg: ActionArgs { control: Some("level".into()), value: Some(1.0), ..ActionArgs::default() } }).expect("config");
+        assert_eq!(config.payload.get("arg.control"), Some(&TypedConfigValue::String("level".into())));
+        assert!(action_config(&ActionRequest { kind: "gpio.write".into(), arg: ActionArgs::default() }).is_err(), "raw GPIO is lemnosd's");
+        assert!(action_config(&ActionRequest { kind: "control.set".into(), arg: ActionArgs { value: Some(f64::NAN), ..ActionArgs::default() } }).is_err());
     }
 }

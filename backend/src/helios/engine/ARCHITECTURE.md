@@ -133,9 +133,10 @@ session state, artifacts, and telemetry back into Orion.
     the robot). The primary camera's go into the held host inputs `camera`
     and `extrinsics`, every camera's into `<input>_camera` and
     `<input>_extrinsics` when the graph has them, whenever they change and
-    without recompiling: the next frame's tick uses them. Context never
-    changes the compiled graph (`ExecutionWorkload::compiled_shape`), the lens
-    model included. Without `camera.*` the pose nodes see no camera and report
+    without recompiling: the next frame's tick uses them, the lens model
+    included. Only a group appearing or going away (a mount removed: a held
+    input cannot be emptied) recompiles the graph
+    (`ExecutionWorkload::compiled_shape`). Without `camera.*` the pose nodes see no camera and report
     `status: "uncalibrated"` (as with `fx`/`fy` 0); without `mount.*` the
     multi-tag pose has no rig pose. The values are pushed as Eidos's Rust
     types (a Daedalus host cannot push a `Value` into a structured port), so
