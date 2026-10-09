@@ -19,6 +19,11 @@ target = "raze"
 imports = [
   "../layers/base-os.toml",
   { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },
+  # lemnosd and lemnos-ctl (imported by the device layer from the `lemnos`
+  # source) built on the build host instead of in Docker: static aarch64 musl
+  # binaries, the same as the Docker build. The host needs
+  # `rustup target add aarch64-unknown-linux-musl --toolchain 1.99.0` once.
+  { source = "lemnos", path = "packaging/gaia/lemnosd-host.toml", when = { target = "raze" } },
   # Mesa (EGL/GLES/GBM) and Vulkan (loader + v3dv) for the CM5 GPU: Daedalus's
   # GPU path (wgpu, dmabuf import, fence waits) needs Vulkan.
   { source = "atlas", path = "devices/raze/gaia/gpu.toml", when = { profile = "full" } },
@@ -57,17 +62,20 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "b9eb15414bd5d1df1ff5408afa2e2469612b86c6"
 
-# Lemnos (dev b4d6cfe). The Raze layer imports Lemnos's lemnosd layer from a
+# Lemnos (dev 62c3caf). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
-# sources, so it is declared here, at the commit the Atlas package is tested
-# with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
-# in the Raze manifest). backend/Cargo.lock pins the same commit for
+# sources, so it is declared here. The Atlas package is tested with b4d6cfe
+# (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev in
+# the Raze manifest); 62c3caf is b4d6cfe plus packaging fixes (its layer asks
+# for Gaia >=2.0.0 instead of the nonexistent 2.1, one cargo build group for
+# lemnosd and lemnos-ctl, the host-build layer imported below), with the same
+# client API and daemon. backend/Cargo.lock pins the same commit for
 # lemnos-ipc, the lemnosd client helios-peripherals uses.
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "b4d6cfee3afe77fc649e55db4ab592d0ab94cb0e"
+rev = "62c3caf677c4bf9cef47fcb02b36d0e98f3248ef"
 
 # Orion v4 (main ec91d0a: TypedConfigValue::F64, observed-state watch, session
 # resume on reconnect, CPU and temperature host metrics, operator access,
