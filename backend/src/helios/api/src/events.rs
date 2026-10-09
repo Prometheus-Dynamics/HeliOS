@@ -12,7 +12,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     convert::Infallible,
-    sync::Arc,
     time::Duration,
 };
 
@@ -130,11 +129,11 @@ struct Feed {
 }
 
 impl Feed {
-    fn spawn(orion: Orion, hub: Arc<EventHub>) -> Self {
+    fn spawn(orion: Orion) -> Self {
         let (tx, rx) = mpsc::channel(64);
         let task = tokio::spawn(async move {
             loop {
-                let message = match follow(&orion, &hub, &tx).await {
+                let message = match follow(&orion, &tx).await {
                     Ok(()) => return, // The watcher is gone.
                     Err(message) => message,
                 };
@@ -151,40 +150,19 @@ impl Feed {
 /// One connection to Orion's event stream: forwards state snapshots and host changes until the
 /// stream fails (`Err`) or the watcher goes away (`Ok`).
 ///
-/// Orion's state watch fires on desired-state changes only; observed changes (a pipeline's
-/// session state, resource health and leases) are not pushed. So the state is also read once
-/// when the stream connects (the baseline, and `orion` reachable at once) and again with every
-/// host-metrics sample the node pushes (`ORION_NODE_HOST_FACTS_REFRESH_MS`), which bounds how
-/// late an observed change shows up. Nobody subscribed, nothing is re-read.
-async fn follow(orion: &Orion, hub: &EventHub, tx: &mpsc::Sender<OrionFeed>) -> Result<(), String> {
+/// The state subscription includes observed changes (a pipeline's session state, resource
+/// health and leases), starting with a bootstrap snapshot, so nothing is re-read or polled.
+async fn follow(orion: &Orion, tx: &mpsc::Sender<OrionFeed>) -> Result<(), String> {
     let mut events = orion.state_and_host_events().await.map_err(|error| error.message)?;
-    let snapshot = orion.snapshot().await.map_err(|error| error.message)?;
-    if tx.send(OrionFeed::State(Box::new(snapshot))).await.is_err() {
-        return Ok(());
-    }
     loop {
         let batch = events.next_events().await.map_err(|error| format!("Orion's event stream ended: {error}"))?;
-        let mut saw_state = false;
-        let mut saw_host = false;
         for event in batch {
             let item = match event.event {
-                ClientEventKind::StateSnapshot(snapshot) => {
-                    saw_state = true;
-                    OrionFeed::State(snapshot)
-                }
-                ClientEventKind::Status(change) => {
-                    saw_host = true;
-                    OrionFeed::Host(change)
-                }
+                ClientEventKind::StateSnapshot(snapshot) => OrionFeed::State(snapshot),
+                ClientEventKind::Status(change) => OrionFeed::Host(change),
                 _ => continue,
             };
             if tx.send(item).await.is_err() {
-                return Ok(());
-            }
-        }
-        if saw_host && !saw_state && hub.subscribers() > 0 {
-            let snapshot = orion.snapshot().await.map_err(|error| error.message)?;
-            if tx.send(OrionFeed::State(Box::new(snapshot))).await.is_err() {
                 return Ok(());
             }
         }
@@ -320,8 +298,9 @@ pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
             let active = state.events.subscribers() > 0;
             if active != watch.seen.active {
                 watch.seen = Seen { active, ..Seen::default() };
-                // A new feed reads its own baseline. A running one re-reads only with the next host
-                // sample, so read it now: the new subscriber gets `orion` and a baseline at once.
+                // A new feed starts with Orion's bootstrap snapshot. A running one pushes the next
+                // snapshot only on a change, so read it once now: the new subscriber gets `orion`
+                // and a baseline at once.
                 if active && watch.feed.is_some() {
                     match state.orion.snapshot().await {
                         Ok(snapshot) => watch.on_orion(&state, OrionFeed::State(Box::new(snapshot))),
@@ -332,7 +311,7 @@ pub fn spawn_state_watcher(state: SharedState) -> tokio::task::JoinHandle<()> {
                     }
                 }
             }
-            let feed = watch.feed.get_or_insert_with(|| Feed::spawn(state.orion.clone(), state.events.clone()));
+            let feed = watch.feed.get_or_insert_with(|| Feed::spawn(state.orion.clone()));
             let item = tokio::select! {
                 item = feed.rx.recv() => Some(item),
                 _ = interval.tick() => None,

@@ -2,11 +2,7 @@
 //! peripherals service and the updater publish is read from here, and pipeline/update/peripheral
 //! requests are written here as desired state.
 
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use orion::{
     Revision,
@@ -53,21 +49,18 @@ impl Orion {
         Ok(StateView::from_snapshot(self.snapshot().await?))
     }
 
-    /// An event stream on the node's stream socket, subscribed to desired/observed state changes
-    /// (a full snapshot each) and to this node's `host.*` metrics (Orion `docs/host-facts.md`,
-    /// "Following host metrics without polling").
+    /// An event stream on the node's stream socket, subscribed to desired and observed state
+    /// changes (`subscribe_state_and_observed`: a full snapshot each, starting with a bootstrap
+    /// snapshot) and to this node's `host.*` metrics (Orion `docs/host-facts.md`, "Following
+    /// host metrics without polling").
     ///
-    /// Every connection gets its own local address: orion-node keeps a disconnected client's
-    /// state (its watches and queued events) for `ORION_NODE_LOCAL_SESSION_TTL_MS` and flushes that
-    /// queue into a reconnect under the same address ahead of the subscription replies, which the
-    /// client then refuses ("no control message available"). A fresh address starts clean, also
-    /// after a helios-api restart.
+    /// The local address is fixed: reconnecting under it (or after a helios-api restart) resumes
+    /// the node's session for this client, which first delivers the events queued while it was
+    /// away; the subscriptions here then start again with new bootstraps.
     pub async fn state_and_host_events(&self) -> ApiResult<ControlPlaneEventStream> {
-        static CONNECTIONS: AtomicU64 = AtomicU64::new(0);
         let fail = |error| unreachable(&self.stream_socket, error);
-        let address = format!("orion-client.control-plane.{EVENTS_CLIENT_NAME}.{}.{}", std::process::id(), CONNECTIONS.fetch_add(1, Ordering::Relaxed));
-        let mut events = ControlPlaneEventStream::connect_at_with_local_address(&self.stream_socket, EVENTS_CLIENT_NAME, address).await.map_err(fail)?;
-        events.subscribe_state(Revision::ZERO).await.map_err(fail)?;
+        let mut events = ControlPlaneEventStream::connect_at(&self.stream_socket, EVENTS_CLIENT_NAME).await.map_err(fail)?;
+        events.subscribe_state_and_observed(Revision::ZERO).await.map_err(fail)?;
         let node = events.node_id().clone();
         events.subscribe_status(StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host.")).await.map_err(fail)?;
         Ok(events)

@@ -51,7 +51,8 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "3c97fa0c45a76323199aabf1f153e86b3d46e2c9"
 
-# Orion v4 (main 7f9c88a: CPU and temperature host metrics, operator access,
+# Orion v4 (main c22fa42: observed-state watch, session resume on reconnect,
+# CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node, orionctl and the HeliOS services speak the same control
 # protocol, and its layout changed within v4.
@@ -59,7 +60,7 @@ rev = "3c97fa0c45a76323199aabf1f153e86b3d46e2c9"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "7f9c88aff861235c61e985220090bb5000c5c646"
+rev = "c22fa42a8dd4176805d292796e1580f5c865e23f"
 
 [inputs.profile]
 description = "Build profile"

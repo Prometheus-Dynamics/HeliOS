@@ -11,7 +11,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | Piece | Where | State |
 |---|---|---|
 | HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (bcc9f33, plugin ABI 9: multi-camera ticks, shared upstream `ExecutionDomain`, node fusion, `daedalus:frame` v2), Styx `dev` (ab6af18: `FrameGrouper`, `styx::preview`, styx-record, connection events), Eidos `main` (853aa0d: fisheye/pinhole pose, `aruco.pose`, `aruco.field_pose`), Orion v4 `main` (7f9c88a, also the Gaia `orion` source; they must match), Lemnos `dev` (cd72ad0); one source each in the lock |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (bcc9f33, plugin ABI 9: multi-camera ticks, shared upstream `ExecutionDomain`, node fusion, `daedalus:frame` v2), Styx `dev` (0b531c9: `FrameGrouper`, `styx::preview`, styx-record, connection events, the Lemnos switch-over), Eidos `main` (624cab4: fisheye/pinhole pose, `aruco.pose`, `aruco.field_pose`, tracked search), Orion v4 `main` (c22fa42, also the Gaia `orion` source; they must match: the archive layout and fingerprint changed), Lemnos `dev` (8a126d3); one source each in the lock |
 | UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
 | Raze board package | Atlas `dev` (3c97fa0, the `pd-device` machinery renamed `board-*`: `/usr/lib/board`, `/run/board`, `/etc/board`, `/data/board`, `board-*` units, `BOARD_*`; discovery keeps `_pd-device._tcp` and `/.well-known/pd-device`) | pinned by HeliOS: A/B update writer (board update), EROFS root, read-only-safe services |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
@@ -71,8 +71,8 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [x] Eidos: faster pipeline, bare CM5 p99 0.98–1.01 ms, detections unchanged (306fea6); the stored templates are unchanged (golden test passes).
 
 - [x] Orion: `orionctl` Gaia layer, root and supplementary-group admission, CPU and temperature host metrics, host metrics on the status lane (3cf27ed, 7f9c88a). HeliOS imports the layer; helios-api reads CPU and temperatures from Orion and follows Orion with a `ControlPlaneEventStream` instead of polling it.
-- [ ] Orion: an observed-state watch. `WatchState` fires on desired-revision changes only, so helios-api re-reads the state snapshot with every host sample to catch pipeline session and resource health changes.
-- [ ] Orion client: reconnecting a `ControlPlaneEventStream` under the same local address fails while the node still holds the old session (its queued events are flushed ahead of the subscription's `Accepted`, which `subscribe_and_expect_accepted` reports as `NoMessageAvailable`, until `ORION_NODE_LOCAL_SESSION_TTL_MS` expires). helios-api uses a fresh address per connection; the host-facts doc's reconnect advice hits this.
+- [x] Orion: an observed-state watch (c22fa42): helios-api subscribes with `subscribe_state_and_observed` and no longer re-reads the snapshot with every host sample.
+- [x] Orion client: reconnecting under the same local address resumes the session (c22fa42); helios-api uses one fixed address again.
 - [x] Atlas: `BOARD_PACKAGE_COMMIT` for a source import: HeliOS writes it (`${source.atlas.commit}`) to `/etc/default/board-package.env`, linked as `/etc/board/board-package.env`.
 - [ ] Gaia: `@source:` inside quoted Buildroot values (HeliOS keeps its own copy of Orion's users table); building related rust artifacts in one cargo invocation (engine and plugins).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
