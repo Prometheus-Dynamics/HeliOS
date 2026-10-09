@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, deserialize_config};
 use serde::Deserialize;
 
-use crate::model::{EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PluginRequirement};
+use crate::model::{ContextValue, EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PluginRequirement};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -53,7 +53,22 @@ struct BindingConfig {
     /// Camera frame sources only: half-size pyramid levels to attach to each frame.
     #[serde(default)]
     pyramid: Option<u8>,
+    /// Camera frame sources only: context fed to the graph's `<input>_<field>` host inputs
+    /// (numbers pushed as held `f64` values, names set as constants when compiling). Orion's
+    /// config values have no floats, so a number is a decimal string (`"612.5"`) or an int; any
+    /// other string is a name.
+    #[serde(default)]
+    context: BTreeMap<String, ContextConfig>,
 }
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+enum ContextConfig {
+    Number(f64),
+    Name(String),
+}
+
+impl Eq for ContextConfig {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -131,7 +146,8 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
     for (input, binding) in &decoded.binding {
         let node_id = bound_nodes.get(&binding.resource_id).cloned().unwrap_or_else(|| record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default());
         let frame_request = decode_frame_request(record, input, binding)?;
-        bindings.push(ExecutionBinding { input: input.clone(), resource_id: binding.resource_id.clone(), node_id, frame_request });
+        let context = decode_context(record, input, binding)?;
+        bindings.push(ExecutionBinding { input: input.clone(), resource_id: binding.resource_id.clone(), node_id, frame_request, context });
     }
 
     if bindings.is_empty() {
@@ -140,6 +156,7 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
             resource_id: binding.resource_id.as_str().to_string(),
             node_id: binding.node_id.as_str().to_string(),
             frame_request: FrameRequestOptions::default(),
+            context: BTreeMap::new(),
         }));
     }
 
@@ -159,6 +176,31 @@ fn decode_frame_request(record: &WorkloadRecord, input: &str, binding: &BindingC
         }
     };
     Ok(FrameRequestOptions { camera: binding.camera.clone().filter(|camera| !camera.is_empty()), output_resolution, pyramid_levels: binding.pyramid.filter(|levels| *levels > 0) })
+}
+
+fn decode_context(record: &WorkloadRecord, input: &str, binding: &BindingConfig) -> Result<BTreeMap<String, ContextValue>, WorkloadDecodeError> {
+    binding
+        .context
+        .iter()
+        .map(|(field, value)| {
+            let invalid =
+                |message: &str| WorkloadDecodeError::InvalidField { workload_id: record.workload_id.as_str().to_string(), field: format!("binding.{input}.context.{field}"), message: message.into() };
+            if field.is_empty() || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(invalid("context field names are letters, digits and '_'"));
+            }
+            let value = match value {
+                ContextConfig::Number(number) if number.is_finite() => ContextValue::Number(*number),
+                ContextConfig::Number(_) => return Err(invalid("context numbers must be finite")),
+                ContextConfig::Name(text) => match text.trim().parse::<f64>() {
+                    Ok(number) if number.is_finite() => ContextValue::Number(number),
+                    Ok(_) => return Err(invalid("context numbers must be finite")),
+                    Err(_) if text.is_empty() => return Err(invalid("context names must not be empty")),
+                    Err(_) => ContextValue::Name(text.clone()),
+                },
+            };
+            Ok((field.clone(), value))
+        })
+        .collect()
 }
 
 fn decode_plugin_requirements(decoded: &EngineWorkloadConfig) -> Vec<PluginRequirement> {
@@ -262,6 +304,29 @@ mod tests {
             )
             .build();
         assert!(matches!(decode_assigned_workload(&half, NODE_ID), Err(WorkloadDecodeError::InvalidField { .. })));
+    }
+
+    #[test]
+    fn decode_assigned_workload_reads_camera_context() {
+        let record = WorkloadRecord::builder(WorkloadId::new("workload.pose"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.pose"))
+            .desired_state(DesiredState::Running)
+            .assigned_to(NODE_ID)
+            .config(
+                WorkloadConfig::new("schema.exec")
+                    .field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into()))
+                    .field("binding.frame.context.fx", TypedConfigValue::String("612.5".into()))
+                    .field("binding.frame.context.mount_x", TypedConfigValue::Int(0))
+                    .field("binding.frame.context.lens", TypedConfigValue::String("fisheye".into())),
+            )
+            .build();
+        let decoded = decode_assigned_workload(&record, NODE_ID).expect("decode");
+        let context = &decoded.bindings[0].context;
+        assert_eq!(context.get("fx"), Some(&ContextValue::Number(612.5)));
+        assert_eq!(context.get("mount_x"), Some(&ContextValue::Number(0.0)));
+        assert_eq!(context.get("lens"), Some(&ContextValue::Name("fisheye".into())));
+        assert_eq!(decoded.bindings[0].context_port("fx"), "frame_fx");
+        let shape = decoded.compiled_shape();
+        assert_eq!(shape.bindings[0].context.keys().collect::<Vec<_>>(), ["lens"], "numbers are pushed, not compiled in");
     }
 
     #[test]

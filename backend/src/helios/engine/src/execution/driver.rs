@@ -129,6 +129,10 @@ pub(crate) struct WorkloadDriver {
     rendered: BTreeMap<String, (u64, String)>,
     /// The revision of each resource input last pushed.
     revisions: BTreeMap<String, String>,
+    /// Host inputs of the graph (for camera context).
+    input_ports: Vec<String>,
+    /// The numeric camera context last pushed, per host input.
+    camera_context: BTreeMap<String, f64>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -168,6 +172,7 @@ impl WorkloadDriver {
         let stop = graph.host_graph.stop_handle();
         let serializers = graph.host_graph.value_serializers().clone();
         let plan_message = graph.plan.to_string();
+        let input_ports = graph.input_ports.clone();
         let planning_ms = graph.planning_ms;
         // Made here, before the thread runs, so a stop at any point makes it readable.
         let inbound = graph.host_graph.inbound_fd().map_err(|error| ExecutionError::Execute(format!("graph inbound fd: {error}")))?;
@@ -176,7 +181,22 @@ impl WorkloadDriver {
             .name(format!("helios-graph-{}", workload.workload_id))
             .spawn(move || graph_loop.run(trigger))
             .map_err(|error| ExecutionError::Execute(format!("failed to start workload driver thread: {error}")))?;
-        Ok(Self { workload, sources, shared, host, stop, serializers, plan_message, planning_ms, started_at_ms, rendered: BTreeMap::new(), revisions: BTreeMap::new(), thread: Some(thread) })
+        Ok(Self {
+            workload,
+            sources,
+            shared,
+            host,
+            stop,
+            serializers,
+            plan_message,
+            planning_ms,
+            started_at_ms,
+            rendered: BTreeMap::new(),
+            revisions: BTreeMap::new(),
+            input_ports,
+            camera_context: BTreeMap::new(),
+            thread: Some(thread),
+        })
     }
 
     /// Hand the bound resources to the graph when one of them changed: a frame-driven graph's
@@ -199,6 +219,29 @@ impl WorkloadDriver {
             }
         }
         self.revisions = inputs.into_iter().map(|input| (input.input, input.revision)).collect();
+    }
+
+    /// Push the numeric camera context of `workload`'s frame bindings (calibration, mount) into
+    /// the graph's held host inputs `<input>_<field>` that changed. Every tick after a push sees
+    /// the new value; a push never ticks the graph. Fields the graph has no host input for are
+    /// ignored.
+    pub fn update_camera_context(&mut self, workload: &ExecutionWorkload) {
+        for binding in workload.bindings.iter().filter(|binding| self.sources.iter().any(|source| source.input == binding.input)) {
+            for (field, value) in &binding.context {
+                let Some(number) = value.as_number() else { continue };
+                let port = binding.context_port(field);
+                if !self.input_ports.contains(&port) || self.camera_context.get(&port) == Some(&number) {
+                    continue;
+                }
+                let outcome = self.host.push(port.clone(), number);
+                if matches!(outcome, daedalus::transport::FeedOutcome::Rejected(_)) {
+                    self.record_error(format!("camera context {port} rejected: {outcome:?}"));
+                    continue;
+                }
+                self.camera_context.insert(port, number);
+            }
+        }
+        self.workload.bindings.clone_from(&workload.bindings);
     }
 
     fn record_error(&self, error: String) {

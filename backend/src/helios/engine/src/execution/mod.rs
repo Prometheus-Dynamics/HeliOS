@@ -98,7 +98,9 @@ impl ResidentExecutionSet {
     pub fn sync_workloads(&mut self, plugins: &ExecutionPlugins<'_>, workloads: &[ExecutionWorkload], state_snapshot: Option<&StateSnapshot>, observed_at_ms: u64) -> ExecutionSnapshot {
         let resources = state_snapshot.map(resources_for_execution).unwrap_or_default();
         let workload_by_id = workloads.iter().map(|workload| (workload.workload_id.as_str(), workload)).collect::<BTreeMap<_, _>>();
-        self.drivers.retain(|workload_id, resident| workload_by_id.get(workload_id.as_str()).is_some_and(|workload| resident.workload == **workload));
+        // Numeric camera context (calibration, mount) is pushed into the running graph; any
+        // other change recompiles it.
+        self.drivers.retain(|workload_id, resident| workload_by_id.get(workload_id.as_str()).is_some_and(|workload| resident.workload.compiled_shape() == workload.compiled_shape()));
 
         let mut snapshot = ExecutionSnapshot { sessions: Vec::with_capacity(workloads.len()), artifacts: Vec::new() };
         for workload in workloads {
@@ -141,6 +143,7 @@ impl ResidentExecutionSet {
             self.drivers.insert(id.to_string(), driver);
         }
         let driver = self.drivers.get_mut(id).expect("driver was just ensured");
+        driver.update_camera_context(workload);
         driver.update_context(resolved.resources);
         Ok(driver.snapshot())
     }

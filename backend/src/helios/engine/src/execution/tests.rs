@@ -21,8 +21,9 @@ use daedalus::{
 };
 use eidos_aruco::{ArucoDictionaryKind, BitGrid, dictionary};
 use eidos_daedalus::{
-    aruco::Dictionary,
-    templates::{DetectorTemplate, detector_document},
+    aruco::{Dictionary, FieldPoseConfig, Mount, PoseConfig},
+    templates::{FieldPoseTemplate, TrackedDetectorTemplate, tracked_detector_graph},
+    types::{FieldLayout, FieldLayoutTag},
 };
 use orion::control_plane::{ClusterStateEnvelope, ObservedClusterState, ResourceActionResult, ResourceActionStatus, ResourceRecord, ResourceState, TypedConfigValue};
 use styx::{
@@ -37,7 +38,7 @@ use super::{
     *,
 };
 use crate::{
-    model::{ExecutionBinding, FrameRequestOptions, GraphRef, PluginRequirement},
+    model::{ContextValue, ExecutionBinding, FrameRequestOptions, GraphRef, PluginRequirement},
     plugins::{PluginLoadResult, load_plugins},
 };
 
@@ -124,6 +125,107 @@ impl FrameSource for ChannelFrameSource {
     }
 }
 
+/// Camera calibration fields of Eidos's pose nodes that HeliOS's templates take as camera
+/// context host inputs (`frame_<field>`), fed by the engine from the camera binding.
+const CALIBRATION_FIELDS: [&str; 13] = ["fx", "fy", "cx", "cy", "lens", "k1", "k2", "k3", "k4", "k5", "k6", "p1", "p2"];
+/// The camera mount fields of `aruco.field_pose`, also camera context.
+const MOUNT_FIELDS: [&str; 7] = ["mount", "mount_x", "mount_y", "mount_z", "mount_roll", "mount_pitch", "mount_yaw"];
+/// FRC 2026 tag edge length (the fmap's 165.1 mm).
+const FRC_TAG_SIDE_M: f64 = 0.1651;
+
+/// The FRC 2026 AndyMark field (`FRC2026_ANDYMARK.fmap`, field-centred, WPILib tag frames) as an
+/// Eidos field layout. WPILib's tag frame has `x` out of the tag, `z` up; Eidos's has `x` along
+/// the top edge (the viewer's right, WPILib `+y`), `y` down (`-z`) and `z` into the tag (`-x`).
+fn frc_2026_layout() -> FieldLayout {
+    let fmap =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../gaia/assets/runtime-services/core/usr/share/helios/media/FRC2026_ANDYMARK.fmap")).expect("FRC 2026 fmap");
+    let fmap: serde_json::Value = serde_json::from_str(&fmap).expect("fmap json");
+    let wpilib_from_eidos = [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]];
+    let tags = fmap["fiducials"]
+        .as_array()
+        .expect("fiducials")
+        .iter()
+        .map(|tag| {
+            let t = tag["transform"].as_array().expect("transform").iter().map(|v| v.as_f64().expect("number")).collect::<Vec<_>>();
+            let field_from_wpilib = [[t[0], t[1], t[2]], [t[4], t[5], t[6]], [t[8], t[9], t[10]]];
+            let mut r = [[0.0; 3]; 3];
+            for (i, row) in r.iter_mut().enumerate() {
+                for (j, cell) in row.iter_mut().enumerate() {
+                    *cell = (0..3).map(|k| field_from_wpilib[i][k] * wpilib_from_eidos[k][j]).sum();
+                }
+            }
+            let [qw, qx, qy, qz] = quaternion(r);
+            let round = |v: f64| (v * 1e9).round() / 1e9;
+            FieldLayoutTag {
+                id: tag["id"].as_u64().expect("id") as u32,
+                side: tag["size"].as_f64().expect("size") / 1000.0,
+                x: round(t[3]),
+                y: round(t[7]),
+                z: round(t[11]),
+                qw: round(qw),
+                qx: round(qx),
+                qy: round(qy),
+                qz: round(qz),
+            }
+        })
+        .collect();
+    FieldLayout { tags }
+}
+
+/// The unit quaternion `[w, x, y, z]` of rotation matrix `r` (`qw >= 0`).
+fn quaternion(r: [[f64; 3]; 3]) -> [f64; 4] {
+    let trace = r[0][0] + r[1][1] + r[2][2];
+    let q = if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        [s / 4.0, (r[2][1] - r[1][2]) / s, (r[0][2] - r[2][0]) / s, (r[1][0] - r[0][1]) / s]
+    } else if r[0][0] > r[1][1] && r[0][0] > r[2][2] {
+        let s = (1.0 + r[0][0] - r[1][1] - r[2][2]).sqrt() * 2.0;
+        [(r[2][1] - r[1][2]) / s, s / 4.0, (r[0][1] + r[1][0]) / s, (r[0][2] + r[2][0]) / s]
+    } else if r[1][1] > r[2][2] {
+        let s = (1.0 + r[1][1] - r[0][0] - r[2][2]).sqrt() * 2.0;
+        [(r[0][2] - r[2][0]) / s, (r[0][1] + r[1][0]) / s, s / 4.0, (r[1][2] + r[2][1]) / s]
+    } else {
+        let s = (1.0 + r[2][2] - r[0][0] - r[1][1]).sqrt() * 2.0;
+        [(r[1][0] - r[0][1]) / s, (r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s, s / 4.0]
+    };
+    let norm = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let sign = if q[0] < 0.0 { -1.0 } else { 1.0 };
+    q.map(|v| sign * v / norm)
+}
+
+/// A HeliOS detector template: Eidos's tracked detector group (full search every 8 frames) with
+/// its tag pose tail and, given a layout, its field pose tail (mount in the camera's body frame,
+/// as the API stores mounts), where the pose nodes' camera calibration and mount ports are host
+/// inputs `frame_<field>` instead of constants, so the engine feeds them from the camera binding.
+fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<FieldLayout>) -> String {
+    let mut template = TrackedDetectorTemplate::new(dictionary, 8);
+    template.pose = Some(PoseConfig { tag_size_m: FRC_TAG_SIDE_M, ..PoseConfig::default() });
+    template.field_pose = layout.map(|layout| FieldPoseTemplate { config: FieldPoseConfig { mount: Mount::Body, ..FieldPoseConfig::default() }, layout });
+    let has_field = template.field_pose.is_some();
+    let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("tracked detector graph"));
+    let title = format!("HeliOS {} tracked detector with tag pose{}", dictionary.name(), if has_field { " and field pose" } else { "" });
+    document.metadata.insert("title".into(), title.into());
+    let mut json = serde_json::to_value(&document).expect("document json");
+    let graph = &mut json["graph"];
+    let host = graph["nodes"].as_array().expect("nodes").iter().position(|node| node["label"] == "host").expect("host bridge");
+    let mut wires = Vec::new();
+    for (label, fields) in [("pose", CALIBRATION_FIELDS.to_vec()), ("field_pose", [CALIBRATION_FIELDS.as_slice(), MOUNT_FIELDS.as_slice()].concat())] {
+        let Some(node) = graph["nodes"].as_array().expect("nodes").iter().position(|node| node["label"] == label) else { continue };
+        graph["nodes"][node]["const_inputs"].as_array_mut().expect("const inputs").retain(|entry| !fields.contains(&entry[0].as_str().unwrap_or_default()));
+        wires.extend(fields.into_iter().map(|field| (node, field)));
+    }
+    for (node, field) in wires {
+        let port = format!("frame_{field}");
+        let outputs = graph["nodes"][host]["outputs"].as_array_mut().expect("host outputs");
+        if !outputs.iter().any(|output| output.as_str() == Some(port.as_str())) {
+            outputs.push(port.clone().into());
+        }
+        graph["edges"].as_array_mut().expect("edges").push(serde_json::json!({ "from": { "node": host, "port": port }, "to": { "node": node, "port": field } }));
+    }
+    let document = daedalus::planner::GraphDocument::from_json(&json.to_string()).expect("template document");
+    document.to_json_pretty().expect("document json")
+}
+
 /// `libhelios_eidos_plugin.so`: `HELIOS_EIDOS_PLUGIN`, else the one `cargo test` built next to
 /// this test binary (it is a dev-dependency, so it comes from the same build).
 fn eidos_plugin_path() -> PathBuf {
@@ -178,7 +280,7 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
 }
 
 fn binding(input: &str, resource_id: &str) -> ExecutionBinding {
-    ExecutionBinding { input: input.into(), resource_id: resource_id.into(), node_id: "node-local".into(), frame_request: FrameRequestOptions::default() }
+    ExecutionBinding { input: input.into(), resource_id: resource_id.into(), node_id: "node-local".into(), frame_request: FrameRequestOptions::default(), context: Default::default() }
 }
 
 fn state_with(resources: Vec<ResourceRecord>) -> StateSnapshot {
@@ -284,12 +386,10 @@ fn eidos_plugin_library_installs_through_the_rust_abi() {
 fn graph_documents_are_eidos_templates() {
     let plugins = TestPlugins::load();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for (file, template, stored) in [
-        ("graphs/apriltag-36h11.graph.json", DetectorTemplate::apriltag(), APRILTAG_GRAPH_DOCUMENT),
-        ("graphs/aruco-4x4_50.graph.json", DetectorTemplate::aruco(Dictionary::Aruco4x4_50), ARUCO_GRAPH_DOCUMENT),
+    for (file, json, stored) in [
+        ("graphs/apriltag-36h11.graph.json", helios_template(plugins.registry(), Dictionary::AprilTag36h11, Some(frc_2026_layout())), APRILTAG_GRAPH_DOCUMENT),
+        ("graphs/aruco-4x4_50.graph.json", helios_template(plugins.registry(), Dictionary::Aruco4x4_50, None), ARUCO_GRAPH_DOCUMENT),
     ] {
-        let document = detector_document(plugins.registry(), &template).expect("template document");
-        let json = document.to_json_pretty().expect("document json");
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");
             continue;
@@ -572,16 +672,16 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
     assert_eq!(plan["host_inputs"][0]["type_key"], "styx:framelease");
     let outputs = plan["host_outputs"].as_array().expect("host outputs").iter().map(|port| port["name"].as_str().unwrap_or_default().to_string()).collect::<Vec<_>>();
     assert!(outputs.contains(&"detections".to_string()) && outputs.contains(&"refined_corners".to_string()), "{outputs:?}");
-    assert!(plan["plan"]["nodes"].as_array().is_some_and(|nodes| nodes.len() >= 5), "{plan}");
+    // Eidos's tracked group expands to one node (`eidos:detectors.tracked_detect`), then the pose
+    // and field pose stages.
+    assert!(plan["plan"]["nodes"].as_array().is_some_and(|nodes| nodes.len() >= 3), "{plan}");
     assert!(plan["adapter_edges"].is_array());
     assert_eq!(plan["requires"][0]["id"], "eidos");
 
     let metrics = artifact_json(&artifacts, "execution.metrics");
     assert_eq!(metrics["metrics_level"], "Detailed");
     let nodes = metrics["total"]["nodes"].as_array().expect("node metrics");
-    for stage in ["mask_prep", "quads", "decode", "validate", "refine"] {
-        assert!(nodes.iter().any(|node| node["label"] == stage && node["calls"] == 3), "{stage} metrics in {metrics}");
-    }
+    assert!(nodes.iter().any(|node| node["label"].as_str().is_some_and(|label| label.starts_with("detector")) && node["calls"] == 3), "detector metrics in {metrics}");
     assert_eq!(metrics["total"]["ticks"], 3);
     // Daedalus's frame-path overhead rides along whenever metrics are on.
     assert_eq!(plan["frame_overhead"], true);
@@ -779,4 +879,75 @@ fn camera_service_started_after_the_workload_is_picked_up() {
     let last = sync_until(&mut resident, &execution, &workloads, Some(&state), "frames from the late camera", |snapshot| snapshot.sessions[0].status == ExecutionSessionStatus::Running);
     let telemetry = artifact_json(&last.artifacts, "execution.telemetry");
     assert_eq!(telemetry["source_connected"], true, "{telemetry}");
+}
+
+fn camera_binding(context: &[(&str, ContextValue)]) -> ExecutionBinding {
+    ExecutionBinding { context: context.iter().map(|(field, value)| (field.to_string(), value.clone())).collect(), ..binding("frame", "camera.test") }
+}
+
+fn calibration_context(fx: f64, lens: &str) -> Vec<(&'static str, ContextValue)> {
+    let mut context =
+        vec![("fx", ContextValue::Number(fx)), ("fy", ContextValue::Number(fx)), ("cx", ContextValue::Number(320.0)), ("cy", ContextValue::Number(240.0)), ("lens", ContextValue::Name(lens.into()))];
+    context.extend(["k1", "k2", "k3", "k4", "k5", "k6", "p1", "p2"].map(|field| (field, ContextValue::Number(0.0))));
+    context.extend([("mount", ContextValue::Name("body".into())), ("mount_x", ContextValue::Number(0.3)), ("mount_z", ContextValue::Number(0.5))]);
+    context.extend(["mount_y", "mount_roll", "mount_pitch", "mount_yaw"].map(|field| (field, ContextValue::Number(0.0))));
+    context
+}
+
+#[test]
+fn camera_context_feeds_pose_and_field_pose() {
+    let plugins = TestPlugins::load();
+    let mut apriltag = workload("workload.pose", APRILTAG_GRAPH_DOCUMENT.into(), vec![camera_binding(&calibration_context(600.0, "pinhole"))]);
+    apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
+    let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &apriltag, &["frame".to_string()], GraphSettings::default()).expect("compile");
+    // Named context (the lens model, the mount frame) is compiled in; numbers are host inputs.
+    assert!(!graph.input_ports.contains(&"frame_lens".to_string()) && !graph.input_ports.contains(&"frame_mount".to_string()), "{:?}", graph.input_ports);
+    assert!(graph.input_ports.contains(&"frame_fx".to_string()) && graph.input_ports.contains(&"frame_mount_yaw".to_string()), "{:?}", graph.input_ports);
+    let (sender, receiver) = test_camera();
+    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("driver");
+    driver.update_camera_context(&apriltag);
+
+    sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
+    wait_for("the frame", || driver.stats().ticks_processed == 1);
+    let (_, artifacts) = driver.snapshot();
+    let solutions = artifact_json(&artifacts, "host_output:pose_solutions");
+    assert_eq!(solutions["status"], "calibrated", "{solutions}");
+    assert_eq!(solutions["tags"][0]["id"], 1, "{solutions}");
+    let translation = solutions["tags"][0]["best"]["translation"][2].as_f64().expect("z");
+    assert!(translation > 0.1, "the tag is in front of the camera: {solutions}");
+    let field = artifact_json(&artifacts, "host_output:field_pose");
+    assert_eq!(field["status"], "calibrated", "{field}");
+
+    // A new calibration is pushed into the running graph: no recompile, the next frame uses it.
+    let uncalibrated = workload("workload.pose", APRILTAG_GRAPH_DOCUMENT.into(), vec![camera_binding(&calibration_context(0.0, "pinhole"))]);
+    assert_eq!(uncalibrated.compiled_shape().bindings, apriltag.compiled_shape().bindings);
+    driver.update_camera_context(&uncalibrated);
+    sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 2)).expect("send frame");
+    wait_for("the frame", || driver.stats().ticks_processed == 2);
+    let (_, artifacts) = driver.snapshot();
+    let solutions = artifact_json(&artifacts, "host_output:pose_solutions");
+    assert_eq!(solutions["status"], "uncalibrated", "{solutions}");
+    assert_eq!(solutions["tags"].as_array().map(Vec::len), Some(0), "uncalibrated: no poses: {solutions}");
+    assert_eq!(artifact_json(&artifacts, "host_output:field_pose")["status"], "uncalibrated");
+}
+
+#[test]
+fn frc_2026_layout_converts_wpilib_tag_frames() {
+    let layout = frc_2026_layout();
+    assert_eq!(layout.tags.len(), 32);
+    let tag = layout.tags.iter().find(|tag| tag.id == 1).expect("tag 1");
+    assert!((tag.side - FRC_TAG_SIDE_M).abs() < 1e-9);
+    // Tag 1 faces -x (WPILib yaw 180 degrees): its Eidos z (into the tag) points +x in the
+    // field, its x (the viewer's right) +y... rotated by 180: -y, and its y (down) -z.
+    let r = eidos_rotation(tag);
+    assert!((r[0][2] - 1.0).abs() < 1e-9 && (r[1][0] + 1.0).abs() < 1e-9 && (r[2][1] + 1.0).abs() < 1e-9, "{r:?}");
+}
+
+fn eidos_rotation(tag: &FieldLayoutTag) -> [[f64; 3]; 3] {
+    let (w, x, y, z) = (tag.qw, tag.qx, tag.qy, tag.qz);
+    [
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+    ]
 }

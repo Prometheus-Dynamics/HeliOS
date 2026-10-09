@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use orion::{control_plane::WorkloadObservedState, orion_resource_type, orion_runtime_type};
 
@@ -36,6 +36,54 @@ pub struct ExecutionBinding {
     pub node_id: String,
     /// What to ask a camera frame source for; ignored for other resources.
     pub frame_request: FrameRequestOptions,
+    /// Camera context (`binding.<input>.context.<field>`): values that go with this camera's
+    /// frames, such as its calibration and mount, fed to the graph's host input
+    /// `<input>_<field>` when it has one. Frame bindings only.
+    pub context: BTreeMap<String, ContextValue>,
+}
+
+impl ExecutionBinding {
+    /// The host input a context field of this binding feeds.
+    pub fn context_port(&self, field: &str) -> String {
+        context_port(&self.input, field)
+    }
+}
+
+/// The host input camera context `field` of frame input `input` feeds: `<input>_<field>`.
+pub fn context_port(input: &str, field: &str) -> String {
+    format!("{input}_{field}")
+}
+
+/// A camera context value.
+///
+/// - **Numbers** are pushed into held host inputs (`f64`) whenever they change; the graph is not
+///   recompiled, and every tick after the push sees the new value.
+/// - **Names** (enum values such as a lens model) cannot be pushed into enum-typed node inputs,
+///   so they are set as constants on the nodes the host input feeds when the graph is compiled;
+///   changing one recompiles the graph.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContextValue {
+    Number(f64),
+    Name(String),
+}
+
+// Numbers are checked to be finite when decoded, so equality is reflexive.
+impl Eq for ContextValue {}
+
+impl ContextValue {
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Number(value) => Some(*value),
+            Self::Name(_) => None,
+        }
+    }
+
+    pub fn as_name(&self) -> Option<&str> {
+        match self {
+            Self::Number(_) => None,
+            Self::Name(name) => Some(name),
+        }
+    }
 }
 
 /// Optional per-binding frame requirements. The default asks for 8-bit luma at the
@@ -64,6 +112,18 @@ pub struct ExecutionWorkload {
     pub graph_ref: GraphRef,
     pub bindings: Vec<ExecutionBinding>,
     pub plugin_requirements: Vec<PluginRequirement>,
+}
+
+impl ExecutionWorkload {
+    /// The workload as its compiled graph depends on it: everything but the numeric camera
+    /// context, which is pushed into the running graph instead.
+    pub fn compiled_shape(&self) -> Self {
+        let mut shape = self.clone();
+        for binding in &mut shape.bindings {
+            binding.context.retain(|_, value| matches!(value, ContextValue::Name(_)));
+        }
+        shape
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -76,8 +76,14 @@ session state, artifacts, and telemetry back into Orion.
   rejected. A document's `requires` must name every installed plugin that
   provides one of its nodes (what `PluginRegistry::graph_document` fills in),
   and is checked against the loaded plugins before compiling. The stored
-  graphs in `graphs/` are Eidos's detector templates (AprilTag 36h11, ArUco
-  4x4_50), checked against the templates by the tests
+  graphs in `graphs/` are Eidos's tracked detector templates
+  (`TrackedDetectorTemplate`, full search every 8 frames) with the tag pose
+  tail (`eidos:aruco.pose`, 0.1651 m tags) and, for AprilTag 36h11, the field
+  pose tail (`eidos:aruco.field_pose`, the FRC 2026 AndyMark layout from
+  `FRC2026_ANDYMARK.fmap`, mount in the camera's body frame); ArUco 4x4_50 has
+  the tag pose tail only. Their pose nodes' camera calibration and mount ports
+  are host inputs `frame_<field>` (camera context, below) instead of
+  constants. The tests build them from Eidos's templates and check them
   (`UPDATE_GOLDEN=1 cargo test -p helios-engine graph_documents_are_eidos_templates`).
 - each workload's graph is compiled once, with a host bridge of its own, and
   stays resident until the decoded workload changes or disappears.
@@ -112,6 +118,19 @@ session state, artifacts, and telemetry back into Orion.
     held push never ticks the graph. A secondary camera's latest frame (at
     most 500 ms old) goes in one atomic batch (`HostGraph::batch`) with the
     primary frame, so both land in the same tick.
+  - camera context: a frame binding's `binding.<input>.context.<field>`
+    values (written by helios-api from the camera's stored calibration and
+    mount) feed the graph's host input `<input>_<field>` when it has one
+    (`frame_fx`, `frame_k1`, `frame_mount_yaw`, ...). Numbers (decimal strings
+    or ints: Orion config values have no floats) are pushed into held `f64`
+    inputs whenever they change, without recompiling: the next frame's tick
+    uses them. Names (enum values: `lens` `pinhole`/`fisheye`, `mount`
+    `none`/`body`) cannot be pushed into enum-typed node inputs, so they are
+    set as constants on the nodes their host input feeds when the graph is
+    compiled, and changing one recompiles it
+    (`ExecutionWorkload::compiled_shape`). A graph whose context inputs get no
+    value never runs the nodes behind them. With `fx`/`fy` 0 (no calibration)
+    Eidos's pose nodes report `status: "uncalibrated"` and no poses.
   - resource-driven workloads: the bound resources are pushed as one batch
     into latest-only inputs whenever one changes, which makes the inbound fd
     readable; the same loop, with no cameras, ticks once per batch. Graphs
