@@ -67,12 +67,6 @@ enum Command {
         device: String,
         reply: Reply<()>,
     },
-    Set {
-        device: String,
-        control: String,
-        value: f64,
-        reply: Reply<f64>,
-    },
     Raw {
         action: RawAction,
         reply: Reply<Option<ObservedValue>>,
@@ -137,12 +131,6 @@ impl LemnosdBridge {
     pub async fn fan_release(&self, device: &str) -> Result<(), String> {
         let (reply, answer) = oneshot::channel();
         self.request(Command::FanRelease { device: device.into(), reply }, answer).await
-    }
-
-    /// A control write under the device's write policy; answers the value applied.
-    pub async fn set_control(&self, device: &str, control: &str, value: f64) -> Result<f64, String> {
-        let (reply, answer) = oneshot::channel();
-        self.request(Command::Set { device: device.into(), control: control.into(), value, reply }, answer).await
     }
 
     /// A raw GPIO, PWM, I2C or SPI action; answers what it returns (a claim id, a level, the
@@ -461,10 +449,6 @@ impl Worker {
                 if result.is_ok() {
                     info!(device = %device, "fan released to the kernel governor");
                 }
-                let _ = reply.send(result);
-            }
-            Command::Set { device, control, value, reply } => {
-                let result = self.connected().and_then(|devices| devices.set(&device, &control, value).map_err(describe));
                 let _ = reply.send(result);
             }
             Command::Raw { action, reply } => {

@@ -1,7 +1,8 @@
-//! lemnosd's board devices as Orion resources: one `lemnos.device` resource per device, keyed by
-//! its board device id, with the device class and channel units as labels and the latest
-//! reading as resource state; and one `lemnos.raw` resource for raw GPIO, PWM, I2C and SPI
-//! access, whose state lists HeliOS's live claims.
+//! lemnosd's devices as HeliOS sees them, for two things HeliOS does itself over lemnosd: the
+//! fan override (`helios.fan`, one resource per overridable fan: the override, its state and the
+//! fan's availability) and raw GPIO, PWM, I2C and SPI access (`lemnos.raw`, one per node, with
+//! HeliOS's claims). The devices' readings and controls are not mirrored here: lemnosd's own Orion
+//! bridge publishes them as `lemnos.device` resources (Lemnos `docs/orion.md`).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -15,10 +16,7 @@ use crate::model::{NodeId, ObservedValue, ResourceDescriptor, ResourceKind, Reso
 use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder};
 
 pub const PROBE_NAME: &str = "lemnosd";
-/// The generic control write, for devices other than fans.
-pub const CONTROL_SET_ACTION: &str = "control.set";
 pub const DEVICE_ID_LABEL: &str = "lemnos.device_id";
-pub const CLASS_LABEL: &str = "lemnos.class";
 pub const ENDPOINT_PROTOCOL: &str = "lemnos+unix";
 /// The raw-access resource's local id (`lemnos_raw_<node>_io`).
 pub const RAW_LOCAL_ID: &str = "io";
@@ -57,10 +55,10 @@ pub struct LemnosdState {
     pub raw: BTreeMap<String, ObservedValue>,
 }
 
-/// The resources for lemnosd's devices and raw access, once lemnosd has been reached. While
-/// lemnosd is disconnected they stay published as missing, without readings.
+/// The resources for lemnosd's fans (the override) and raw access, once lemnosd has been reached.
+/// While lemnosd is disconnected they stay published as missing.
 pub fn lemnosd_resources(node: &NodeId, state: &LemnosdState) -> Result<Vec<ResourceDescriptor>, DiscoveryError> {
-    let mut resources = state.devices.iter().map(|device| device_resource(node, state, device)).collect::<Result<Vec<_>, _>>()?;
+    let mut resources = state.devices.iter().filter(|device| is_overridable_fan(device)).map(|device| fan_resource(node, state, device)).collect::<Result<Vec<_>, _>>()?;
     if !state.board.is_empty() {
         resources.push(raw_resource(node, state)?);
     }
@@ -85,80 +83,32 @@ fn raw_resource(node: &NodeId, state: &LemnosdState) -> Result<ResourceDescripto
     Ok(builder.observation(ResourceObservation { observed_at_ms: 0, values }).build())
 }
 
-fn device_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> Result<ResourceDescriptor, DiscoveryError> {
+/// A HeliOS fan resource: its availability is the device's, its one write is the override, and
+/// its state lists the running override (`fan.override.active|duty|until_ms`).
+fn fan_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> Result<ResourceDescriptor, DiscoveryError> {
     let display_name = if device.label.is_empty() { device.id.clone() } else { device.label.clone() };
-    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::LemnosDevice, sanitize_local_component(&device.id), display_name)
-        .map_err(|error| DiscoveryError::ProbeFailed { probe: PROBE_NAME.into(), message: format!("device {}: {error}", device.id) })?
+    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::Fan, sanitize_local_component(&device.id), display_name)
+        .map_err(|error| DiscoveryError::ProbeFailed { probe: PROBE_NAME.into(), message: format!("fan {}: {error}", device.id) })?
         .status(if state.connected { resource_status(device.status) } else { ResourceStatus::Missing })
         .label(DEVICE_ID_LABEL, device.id.clone())
-        .label(CLASS_LABEL, device.class.name())
         .label("lemnos.status", if state.connected { device.status.name() } else { "disconnected" })
-        .endpoint(ENDPOINT_PROTOCOL, state.socket.display().to_string());
+        .endpoint(ENDPOINT_PROTOCOL, state.socket.display().to_string())
+        .capability(FAN_OVERRIDE_ACTION, Some("lemnosd"))
+        .capability(FAN_RELEASE_ACTION, Some("lemnosd"));
     if !state.board.is_empty() {
         builder = builder.label("lemnos.board", state.board.clone());
     }
     if !device.model.is_empty() {
         builder = builder.label("lemnos.model", device.model.clone());
     }
-    if device.pixels > 0 {
-        builder = builder.label("lemnos.pixels", device.pixels.to_string());
-    }
-    for channel in &device.channels {
-        builder = builder.label(format!("lemnos.channel.{}.quantity", channel.name), channel.quantity.name());
-        let unit = channel.quantity.unit().symbol();
-        if !unit.is_empty() {
-            builder = builder.label(format!("lemnos.channel.{}.unit", channel.name), unit);
-        }
-    }
-    for control in &device.controls {
-        builder = builder
-            .label(format!("lemnos.control.{}.quantity", control.name), control.quantity.name())
-            .label(format!("lemnos.control.{}.min", control.name), scaled(control.min, control.exponent).to_string())
-            .label(format!("lemnos.control.{}.max", control.name), scaled(control.max, control.exponent).to_string());
-        let unit = control.quantity.unit().symbol();
-        if !unit.is_empty() {
-            builder = builder.label(format!("lemnos.control.{}.unit", control.name), unit);
-        }
-    }
-
-    let fan = is_overridable_fan(device);
-    if !device.channels.is_empty() {
-        builder = builder.capability("sensor", Some("lemnosd"));
-    }
-    if fan {
-        builder = builder.capability(FAN_OVERRIDE_ACTION, Some("lemnosd")).capability(FAN_RELEASE_ACTION, Some("lemnosd"));
-    } else if !device.controls.is_empty() {
-        builder = builder.capability(CONTROL_SET_ACTION, Some("lemnosd"));
-    }
-
-    if let Some(observation) = observation(state, device, fan) {
-        builder = builder.observation(observation);
-    }
-    Ok(builder.build())
-}
-
-fn observation(state: &LemnosdState, device: &DeviceDesc, fan: bool) -> Option<ResourceObservation> {
-    let reading = state.connected.then(|| state.readings.get(&device.id)).flatten();
     let mut values = BTreeMap::new();
-    let mut observed_at_ms = 0;
-    if let Some(reading) = reading {
-        observed_at_ms = reading.observed_at_ms;
-        values.insert("reading.timestamp_us".to_string(), ObservedValue::UInt(reading.timestamp_us));
-        for (channel, value) in &reading.values {
-            if let Some(value) = value {
-                values.insert(format!("reading.{channel}"), ObservedValue::F64(*value));
-            }
-        }
+    let active = state.overrides.get(&device.id);
+    values.insert("fan.override.active".to_string(), ObservedValue::Bool(active.is_some()));
+    if let Some(active) = active {
+        values.insert("fan.override.duty".to_string(), ObservedValue::F64(active.duty));
+        values.insert("fan.override.until_ms".to_string(), ObservedValue::UInt(active.until_ms));
     }
-    if fan {
-        let active = state.overrides.get(&device.id);
-        values.insert("fan.override.active".to_string(), ObservedValue::Bool(active.is_some()));
-        if let Some(active) = active {
-            values.insert("fan.override.duty".to_string(), ObservedValue::F64(active.duty));
-            values.insert("fan.override.until_ms".to_string(), ObservedValue::UInt(active.until_ms));
-        }
-    }
-    (!values.is_empty()).then_some(ResourceObservation { observed_at_ms, values })
+    Ok(builder.observation(ResourceObservation { observed_at_ms: 0, values }).build())
 }
 
 /// A fan HeliOS may override: the fan class with lemnosd's `duty` control.
@@ -172,11 +122,6 @@ fn resource_status(status: DeviceStatus) -> ResourceStatus {
         DeviceStatus::Degraded => ResourceStatus::Degraded,
         DeviceStatus::Faulted | DeviceStatus::Missing => ResourceStatus::Missing,
     }
-}
-
-fn scaled(raw: i32, exponent: i8) -> f64 {
-    let scale = 10f64.powi(i32::from(exponent.unsigned_abs()));
-    if exponent < 0 { f64::from(raw) / scale } else { f64::from(raw) * scale }
 }
 
 fn sanitize_local_component(value: &str) -> String {
@@ -279,67 +224,37 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn one_resource_per_board_device_keyed_by_device_id() {
+    fn only_the_overridable_fan_and_raw_access_are_published() {
         let resources = lemnosd_resources(&NodeId::new("node1"), &connected_state()).expect("resources");
-        assert_eq!(resources.iter().filter(|resource| resource.kind == ResourceKind::LemnosDevice).count(), 4);
-        let imu = find(&resources, "imu");
-        assert_eq!(imu.id.as_str(), "lemnos_device_node1_imu");
-        assert_eq!(imu.kind, ResourceKind::LemnosDevice);
-        assert_eq!(imu.display_name.as_ref(), "IMU");
-        assert_eq!(imu.label(CLASS_LABEL), Some("imu"));
-        assert_eq!(imu.label("lemnos.model"), Some("BMI088"));
-        assert_eq!(imu.label("lemnos.board"), Some("raze"));
-        assert_eq!(imu.label("lemnos.channel.acceleration.x.unit"), Some("m/s²"));
-        assert_eq!(imu.label("lemnos.channel.angular-rate.z.unit"), Some("rad/s"));
-        assert_eq!(imu.label("lemnos.channel.acceleration.x.quantity"), Some("acceleration"));
-        assert_eq!(imu.endpoint(ENDPOINT_PROTOCOL), Some("/run/lemnos/lemnosd.sock"));
-        assert!(imu.has_capability("sensor"));
-        assert!(!imu.has_capability(FAN_OVERRIDE_ACTION));
-        assert!(imu.observation.is_none(), "no reading yet");
-
-        let ring = find(&resources, "status-ring");
-        assert_eq!(ring.id.as_str(), "lemnos_device_node1_status-ring");
-        assert_eq!(ring.label("lemnos.pixels"), Some("16"));
-        assert!(ring.capabilities.is_empty(), "HeliOS drives the ring through its status, not resource actions");
-
-        let usb = find(&resources, "usb-a-power");
-        assert_eq!(usb.status, ResourceStatus::Missing);
-        assert!(usb.has_capability(CONTROL_SET_ACTION));
-        assert_eq!(usb.label("lemnos.control.level.max"), Some("1"));
+        assert_eq!(resources.len(), 2, "the fan and raw access; the devices' readings are the Lemnos bridge's");
+        assert!(resources.iter().all(|resource| matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw)), "no per-device mirror");
+        let fan = find(&resources, "fan");
+        assert_eq!(fan.id.as_str(), "helios_fan_node1_fan");
+        assert_eq!(fan.kind, ResourceKind::Fan);
+        assert_eq!(fan.display_name.as_ref(), "fan");
+        assert!(fan.has_capability(FAN_OVERRIDE_ACTION) && fan.has_capability(FAN_RELEASE_ACTION));
+        assert!(!fan.has_capability("control.set"), "the fan's only write is the override");
+        assert_eq!(fan.status, ResourceStatus::Available);
+        assert_eq!(fan.observation.as_ref().expect("observation").values.get("fan.override.active"), Some(&ObservedValue::Bool(false)));
     }
 
     #[test]
-    fn the_fan_offers_only_the_override_and_publishes_its_state() {
+    fn the_fan_publishes_its_override_state() {
         let mut state = connected_state();
-        state.readings.insert("fan".into(), DeviceReading { observed_at_ms: 42, timestamp_us: 7, values: vec![("duty".into(), Some(0.702)), ("rpm".into(), None)] });
-        let fan = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources").into_iter().find(|r| r.label(DEVICE_ID_LABEL) == Some("fan")).expect("fan");
-        assert_eq!(fan.display_name.as_ref(), "fan");
-        assert!(fan.has_capability(FAN_OVERRIDE_ACTION) && fan.has_capability(FAN_RELEASE_ACTION));
-        assert!(!fan.has_capability(CONTROL_SET_ACTION), "the fan's only write is the override");
-        assert_eq!(fan.label("lemnos.control.duty.max"), Some("1"));
-        let observation = fan.observation.as_ref().expect("observation");
-        assert_eq!(observation.observed_at_ms, 42);
-        assert_eq!(observation.values.get("reading.duty"), Some(&ObservedValue::F64(0.702)));
-        assert!(!observation.values.contains_key("reading.rpm"), "unread channels are left out");
-        assert_eq!(observation.values.get("fan.override.active"), Some(&ObservedValue::Bool(false)));
-
         state.overrides.insert("fan".into(), OverrideView { duty: 1.0, until_ms: 99 });
-        let fan = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources").into_iter().find(|r| r.label(DEVICE_ID_LABEL) == Some("fan")).expect("fan");
-        let values = &fan.observation.expect("observation").values;
+        let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
+        let values = &find(&resources, "fan").observation.as_ref().expect("observation").values;
         assert_eq!(values.get("fan.override.active"), Some(&ObservedValue::Bool(true)));
         assert_eq!(values.get("fan.override.until_ms"), Some(&ObservedValue::UInt(99)));
     }
 
     #[test]
-    fn devices_go_missing_without_readings_while_lemnosd_is_disconnected() {
+    fn the_fan_goes_missing_while_lemnosd_is_disconnected() {
         let mut state = connected_state();
-        state.readings.insert("imu".into(), DeviceReading { observed_at_ms: 1, timestamp_us: 1, values: vec![("acceleration.x".into(), Some(9.8))] });
         state.connected = false;
         let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
-        assert_eq!(resources.len(), 5, "known devices and raw access stay published");
-        assert!(resources.iter().all(|resource| resource.status == ResourceStatus::Missing));
-        assert_eq!(find(&resources, "imu").label("lemnos.status"), Some("disconnected"));
-        assert!(find(&resources, "imu").observation.is_none());
+        assert!(resources.iter().filter(|resource| resource.kind == ResourceKind::Fan).all(|resource| resource.status == ResourceStatus::Missing));
+        assert_eq!(find(&resources, "fan").label("lemnos.status"), Some("disconnected"));
     }
 
     #[test]
@@ -367,7 +282,5 @@ pub(crate) mod tests {
         assert_eq!(resource_status(DeviceStatus::Degraded), ResourceStatus::Degraded);
         assert_eq!(resource_status(DeviceStatus::Faulted), ResourceStatus::Missing);
         assert_eq!(resource_status(DeviceStatus::Missing), ResourceStatus::Missing);
-        assert_eq!(sanitize_local_component("CPU Thermal"), "cpu-thermal");
-        assert_eq!(sanitize_local_component(""), "device");
     }
 }

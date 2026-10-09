@@ -16,4 +16,4 @@ pub use bridge::{LemnosdBridge, LemnosdOptions, Notify};
 pub use fan::{FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, FanOverrideRequest};
 pub use led::ProviderHealth;
 pub use raw::RawAction;
-pub use resources::{CONTROL_SET_ACTION, LemnosdProbe, LemnosdState};
+pub use resources::{LemnosdProbe, LemnosdState};

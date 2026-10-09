@@ -18,7 +18,7 @@ use tracing::warn;
 use crate::{
     config::{LEMNOSD_CLIENT_NAME, PeripheralConfig},
     lemnosd::{
-        CONTROL_SET_ACTION, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, FanOverrideRequest, LemnosdBridge, LemnosdOptions, ProviderHealth, RawAction,
+        FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, FanOverrideRequest, LemnosdBridge, LemnosdOptions, ProviderHealth, RawAction,
         resources::{DEVICE_ID_LABEL, PROBE_NAME},
     },
     model::{NodeId, ObservedValue, ResourceActionOutcome, ResourceDescriptor, ResourceKind},
@@ -35,8 +35,6 @@ enum ResourceActionSpec {
     FanOverride(FanOverrideRequest),
     /// Ends the fan override now.
     FanRelease,
-    /// A control write on a device other than a fan, under lemnosd's write policy.
-    ControlSet { control: String, value: f64 },
     /// Raw GPIO, PWM, I2C or SPI access, on the `lemnos.raw` resource.
     Raw(RawAction),
 }
@@ -46,7 +44,6 @@ impl ResourceActionSpec {
         match self {
             Self::FanOverride(_) => FAN_OVERRIDE_ACTION,
             Self::FanRelease => FAN_RELEASE_ACTION,
-            Self::ControlSet { .. } => CONTROL_SET_ACTION,
             Self::Raw(action) => action.kind(),
         }
     }
@@ -68,10 +65,6 @@ struct ResourceActionArgs {
     duty: Option<f64>,
     /// `fan.override`: 1000-600000 (default 60000).
     duration_ms: Option<u64>,
-    /// `control.set`.
-    control: Option<String>,
-    /// `control.set`: in the control's unit.
-    value: Option<f64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -173,9 +166,7 @@ impl PeripheralRuntime {
         let Some(bridge) = &self.lemnosd else { return snapshot };
         let context = DiscoveryContext::new(NodeId::new(self.config.node_id.clone()), chrono::Utc::now().timestamp_millis().max(0) as u64);
         match bridge.probe().discover(&context) {
-            Ok(lemnosd) => {
-                DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::LemnosDevice | ResourceKind::LemnosRaw)).collect()).merge(lemnosd)
-            }
+            Ok(lemnosd) => DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw)).collect()).merge(lemnosd),
             Err(error) => {
                 warn!(probe = PROBE_NAME, error = %error, "lemnosd resources could not be built");
                 snapshot
@@ -476,7 +467,6 @@ async fn apply_action(bridge: &LemnosdBridge, resource: &ResourceDescriptor, req
             bridge.fan_release(device).await?;
             None
         }
-        ResourceActionSpec::ControlSet { control, value } => Some(ObservedValue::F64(bridge.set_control(device, control, *value).await?)),
         ResourceActionSpec::Raw(action) => bridge.raw(action.clone()).await?,
     };
     Ok(ResourceActionOutcome::applied(resource.id.clone(), request.spec.kind(), value))
@@ -491,7 +481,6 @@ fn resource_action_request_from_request(resource: &ResourceDescriptor, request: 
     let spec = resource_action_spec(kind, arg).map_err(|message| format!("{kind}: {message}"))?;
     let capability = match &spec {
         ResourceActionSpec::FanOverride(_) | ResourceActionSpec::FanRelease => FAN_OVERRIDE_ACTION,
-        ResourceActionSpec::ControlSet { .. } => CONTROL_SET_ACTION,
         ResourceActionSpec::Raw(action) => action.kind(),
     };
     if !resource.has_capability(capability) {
@@ -505,7 +494,7 @@ fn resource_action_request_from_request(resource: &ResourceDescriptor, request: 
         return Err(format!("{kind} on {}: {reason}", resource.id.as_str()));
     }
     let device = match resource.kind {
-        ResourceKind::LemnosDevice => Some(resource.label(DEVICE_ID_LABEL).ok_or_else(|| format!("resource {} has no {DEVICE_ID_LABEL} label", resource.id.as_str()))?.to_string()),
+        ResourceKind::Fan => Some(resource.label(DEVICE_ID_LABEL).ok_or_else(|| format!("resource {} has no {DEVICE_ID_LABEL} label", resource.id.as_str()))?.to_string()),
         ResourceKind::LemnosRaw => None,
         _ => return Err(format!("resource {} has no actions", resource.id.as_str())),
     };
@@ -516,7 +505,7 @@ fn resource_action_spec(kind: &str, arg: serde_json::Value) -> Result<ResourceAc
     if let Some(raw) = RawAction::from_kind(kind, arg.clone()) {
         return raw.map(ResourceActionSpec::Raw);
     }
-    if ![FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION, CONTROL_SET_ACTION].contains(&kind) {
+    if ![FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION].contains(&kind) {
         return Err(format!("unknown action kind {kind:?}"));
     }
     let arg: ResourceActionArgs = match arg {
@@ -526,10 +515,6 @@ fn resource_action_spec(kind: &str, arg: serde_json::Value) -> Result<ResourceAc
     match kind {
         FAN_OVERRIDE_ACTION => FanOverrideRequest::from_args(arg.pwm, arg.duty, arg.duration_ms).map(ResourceActionSpec::FanOverride),
         FAN_RELEASE_ACTION => Ok(ResourceActionSpec::FanRelease),
-        CONTROL_SET_ACTION => Ok(ResourceActionSpec::ControlSet {
-            control: arg.control.filter(|control| !control.is_empty()).ok_or_else(|| "missing control".to_string())?,
-            value: arg.value.filter(|value| value.is_finite()).ok_or_else(|| "missing value".to_string())?,
-        }),
         other => Err(format!("unknown action kind {other:?}")),
     }
 }
@@ -558,19 +543,11 @@ mod tests {
     use orion::control_plane::TypedConfigValue;
 
     fn fan_resource() -> ResourceDescriptor {
-        ResourceBuilder::new(NodeId::new(DEFAULT_NODE_ID), ResourceKind::LemnosDevice, "fan", "Fan")
+        ResourceBuilder::new(NodeId::new(DEFAULT_NODE_ID), ResourceKind::Fan, "fan", "Fan")
             .expect("resource")
             .label(DEVICE_ID_LABEL, "fan")
             .capability(FAN_OVERRIDE_ACTION, Some("lemnosd"))
             .capability(FAN_RELEASE_ACTION, Some("lemnosd"))
-            .build()
-    }
-
-    fn usb_power_resource() -> ResourceDescriptor {
-        ResourceBuilder::new(NodeId::new(DEFAULT_NODE_ID), ResourceKind::LemnosDevice, "usb-a-power", "USB-A power")
-            .expect("resource")
-            .label(DEVICE_ID_LABEL, "usb-a-power")
-            .capability(CONTROL_SET_ACTION, Some("lemnosd"))
             .build()
     }
 
@@ -637,17 +614,12 @@ mod tests {
     }
 
     #[test]
-    fn the_fan_takes_no_other_write_and_other_devices_no_fan_actions() {
+    fn the_fan_takes_no_other_write() {
         let fan = fan_resource();
-        let usb = usb_power_resource();
+        // lemnosd's generic writes are the Lemnos bridge's resources (`lemnos.<board>.<device>`), not HeliOS's.
         let err = resource_action_request_from_request(&fan, &request(&fan, "control.set", &[("control", TypedConfigValue::String("level".into())), ("value", TypedConfigValue::F64(1.0))]))
-            .expect_err("fan control.set");
-        assert!(err.contains("fan.override"), "{err}");
-        let err = resource_action_request_from_request(&usb, &request(&usb, "fan.override", &[("duty", TypedConfigValue::F64(0.5))])).expect_err("fan on usb");
-        assert!(err.contains("does not offer"), "{err}");
-        let decoded = resource_action_request_from_request(&usb, &request(&usb, "control.set", &[("control", TypedConfigValue::String("level".into())), ("value", TypedConfigValue::F64(0.0))]))
-            .expect("control.set");
-        assert_eq!(decoded.spec, ResourceActionSpec::ControlSet { control: "level".into(), value: 0.0 });
+            .expect_err("control.set");
+        assert!(err.contains("unknown action kind"), "{err}");
     }
 
     #[test]

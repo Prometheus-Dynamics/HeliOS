@@ -73,9 +73,9 @@ mod tests {
     #[test]
     fn merge_prefers_newer_resource_entries() {
         let owner = NodeId::new("node1");
-        let mut first = ResourceDescriptor::from_parts(owner.clone(), ResourceKind::LemnosDevice, "imu", "IMU").expect("resource");
+        let mut first = ResourceDescriptor::from_parts(owner.clone(), ResourceKind::Fan, "imu", "IMU").expect("resource");
         first.add_capability("power", None::<String>);
-        let mut second = ResourceDescriptor::from_parts(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("resource");
+        let mut second = ResourceDescriptor::from_parts(owner, ResourceKind::Fan, "imu", "IMU").expect("resource");
         second.add_capability("reset", None::<String>);
 
         let merged = DiscoverySnapshot::new(vec![first]).merge(DiscoverySnapshot::new(vec![second]));

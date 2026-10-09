@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 pub enum ResourceKind {
     /// A camera, served through a Styx `CameraService`.
     CaptureDevice,
-    /// A device of lemnosd's board definition (sensor, fan, light, GPIO line).
-    LemnosDevice,
+    /// A fan HeliOS overrides through lemnosd (`helios.fan`; the devices' own resources are the
+    /// Lemnos bridge's `lemnos.device`).
+    Fan,
     /// lemnosd's raw GPIO, PWM, I2C and SPI access (one per node), with HeliOS's claims.
     LemnosRaw,
     Virtual,
@@ -17,7 +18,7 @@ impl ResourceKind {
     pub const fn id_kind(self) -> &'static str {
         match self {
             Self::CaptureDevice => "capture_device",
-            Self::LemnosDevice => "lemnos_device",
+            Self::Fan => "helios_fan",
             Self::LemnosRaw => "lemnos_raw",
             Self::Virtual => "virtual",
         }

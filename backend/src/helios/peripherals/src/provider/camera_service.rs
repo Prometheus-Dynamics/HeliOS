@@ -141,7 +141,7 @@ mod tests {
         let owner = NodeId::new("node1");
         let camera = ResourceBuilder::new(owner.clone(), ResourceKind::CaptureDevice, "video0", "Camera 0").expect("camera").build();
         let missing = ResourceBuilder::new(owner.clone(), ResourceKind::CaptureDevice, "video1", "Camera 1").expect("camera").status(ResourceStatus::Missing).build();
-        let imu = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let imu = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").build();
         assert!(serves_camera_frames(&camera));
         assert!(!serves_camera_frames(&missing));
         assert!(!serves_camera_frames(&imu));

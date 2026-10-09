@@ -8,7 +8,7 @@ use orion::{
     Revision,
     client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
     control_plane::{
-        ActionRequest, ActionResult, ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusQuery,
+        ActionRequest, ActionResult, ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusEntry, StatusQuery,
         StatusSubject, WorkloadObservedState, WorkloadRecord,
     },
 };
@@ -100,6 +100,12 @@ impl Orion {
         let node = events.node_id().clone();
         events.subscribe_status(StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host.")).await.map_err(fail)?;
         Ok(events)
+    }
+
+    /// Every live status entry of the node (its status lane: the Lemnos bridge's device readings
+    /// are the entries of `resource/lemnos.<board>.<device>`).
+    pub async fn status_entries(&self) -> ApiResult<Vec<StatusEntry>> {
+        self.client()?.query_status(StatusQuery::all()).await.map_err(|error| unreachable(&self.socket, error))
     }
 
     pub async fn observability(&self) -> ApiResult<NodeObservabilitySnapshot> {

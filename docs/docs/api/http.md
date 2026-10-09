@@ -452,10 +452,12 @@ is a `pose` event (see [Event stream](./websockets.md)).
 | `POST` | `/v1/peripherals/io/actions` | A raw action on this node's `lemnos.raw` resource, e.g. `{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output"}}` |
 | `GET` `PUT` | `/v1/peripherals/fan` · `/leds` · `/imu` | **501** |
 
-helios-peripherals publishes the board's devices from lemnosd (the board's hardware service; one
-`lemnos.device` resource each, with labels `lemnos.device_id` and `lemnos.class` and readings in
-its state), one `lemnos.raw` resource for raw access (`lemnos_raw_<node>_io`) and the cameras.
-Action kinds, on lemnosd devices:
+The board's devices come from lemnosd's own Orion bridge (Lemnos `docs/orion.md`): one
+`lemnos.device` resource per device, `lemnos.<board>.<device>`, with its status and readings as
+status entries, which `GET /v1/peripherals` merges into the resource's `state` (`status`, `reason`,
+`read_us`, one `F64` per channel, `control.<name>`). helios-peripherals publishes the fan override
+(`helios.fan`, `helios_fan_<node>_<device>`: the override and its state), one `lemnos.raw` resource
+for raw access (`lemnos_raw_<node>_io`) and the cameras. Action kinds, on the fan:
 
 - `fan.override` (`pwm` 0 to 255 or `duty` 0 to 1, `duration_ms` 1000 to 600000, default 60000):
   the only write to the fan, which is otherwise left to the kernel's thermal governor. When the
@@ -463,8 +465,9 @@ Action kinds, on lemnosd devices:
   to the governor. lemnosd ties the write to helios-peripherals' connection, so a crash, a
   `kill -9` or a lemnosd restart hands the fan back too; nothing is kept on disk.
 - `fan.release`: end an override now.
-- `control.set` (`control`, `value`): another device's control, e.g. `usb-a-power`'s `level`
-  (undone by lemnosd when helios-peripherals' connection ends).
+
+Other devices' controls are the bridge's `lemnos.<board>.<device>` actions (`set`, `restore`,
+`release`, `read`), not HeliOS's.
 
 The API sends an action to the resource's provider (helios-peripherals) as an Orion request/response
 action (`ActionCaller`, Orion `docs/actions.md`): one control-plane stream shared by all requests, so

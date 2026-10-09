@@ -198,8 +198,8 @@ fn bridge_publishes_devices_holds_the_status_and_runs_a_timed_override() {
     // hands it back (the governor's state from before the write).
     let rt = runtime();
     let sys = root.join("sys");
-    assert_eq!(rt.block_on(bridge.fan_override("fan", FanOverrideRequest { duty: 1.0, duration: Duration::from_millis(300) })), Ok(1.0));
-    assert!(bridge.state().overrides.contains_key("fan"));
+    assert_eq!(rt.block_on(bridge.fan_override("fan", FanOverrideRequest { duty: 1.0, duration: Duration::from_millis(1500) })), Ok(1.0));
+    wait_until("the override is published", || bridge.state().overrides.contains_key("fan"));
     write(&sys, "devices/virtual/thermal/cooling_device0/cur_state", "4"); // the kernel follows pwm1
     wait_until("the release after the override", || bridge.state().overrides.is_empty());
     assert_eq!(read(&sys, "class/thermal/cooling_device0/cur_state"), "1");

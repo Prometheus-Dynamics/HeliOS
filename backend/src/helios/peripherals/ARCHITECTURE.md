@@ -45,8 +45,9 @@ Styx owns:
 
 Peripherals owns:
 - stable resource identity and records
-- the `lemnos-ipc` client (`helios`): one Orion resource per lemnosd device,
-  the fan rule (read-only, timed override), HeliOS's status on the light
+- the `lemnos-ipc` client (`helios`): the fan override (`helios.fan`), raw
+  access (`lemnos.raw`) and HeliOS's status on the light; the devices'
+  resources are lemnosd's Orion bridge's (`lemnos.device`), not HeliOS's
 - action decoding (an Orion action request's typed arguments back to JSON, then per kind)
 - local reconcile/apply
 - observed state publication
@@ -101,13 +102,12 @@ src/
   `HELIOS_PERIPHERALS_LEMNOSD_READING_MS`, default 250), re-sends the LED
   status and claims the live raw claims again. On `Disconnected` the devices
   stay published as missing, without readings.
-- Each lemnosd device is a `lemnos.device` resource
-  (`lemnos_device_<node>_<board device id>`), with labels `lemnos.device_id`,
-  `lemnos.class`, `lemnos.model`, `lemnos.status`,
-  `lemnos.channel.<name>.quantity|unit` and
-  `lemnos.control.<name>.quantity|unit|min|max`, and its latest reading as
-  resource state (`reading.<channel>`, `reading.timestamp_us`). Readings are
-  republished at most once per reading interval.
+- The lemnosd devices are not mirrored: lemnosd's Orion bridge publishes one
+  `lemnos.device` resource per device (`lemnos.<board>.<device>`, Lemnos
+  `docs/orion.md`), and HeliOS's API reads its status entries. helios-peripherals
+  publishes only the fan override (`helios_fan_<node>_<device>`, type `helios.fan`,
+  with the override's state) and `lemnos.raw`, so there is one publisher per
+  resource.
 - Fan: read-only by default. `fan.override` (`{pwm: 0-255 | duty: 0.0-1.0,
   duration_ms: 1000-600000}`, default 60 s) is the only write
   (`DeviceClient::set(fan, "duty", ..)`); it ends with
@@ -132,8 +132,7 @@ src/
   (`claim.<id>.kind|target|expires_at_ms|held|direction|value|edges|edge.*|period_ns|duty_ns|enabled`).
   Tests run the bridge against `lemnosd::mock::MockLemnosd` (the real service
   over mock hardware).
-- Other devices with controls take `control.set` (`{control, value}`) under
-  lemnosd's write policy; refusals come back as action failures.
+- Other devices' controls are the bridge's actions, not HeliOS's.
 - Status light: lemnosd's status layer (`LedClient::status`) from the
   provider's health: busy while starting or connecting to Orion, ok once
   registered and publishing, warn when a watch stops, error when the runtime

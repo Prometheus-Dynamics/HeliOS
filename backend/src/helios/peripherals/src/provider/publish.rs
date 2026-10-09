@@ -225,7 +225,7 @@ fn provider_resource_types(snapshot: &DiscoverySnapshot) -> BTreeSet<&'static st
 fn resource_type_for(kind: ResourceKind) -> &'static str {
     match kind {
         ResourceKind::CaptureDevice => "camera.device",
-        ResourceKind::LemnosDevice => "lemnos.device",
+        ResourceKind::Fan => "helios.fan",
         ResourceKind::LemnosRaw => "lemnos.raw",
         ResourceKind::Virtual => "virtual.resource",
     }
@@ -272,12 +272,12 @@ mod tests {
     #[test]
     fn provider_record_collects_distinct_resource_types_from_snapshot() {
         let owner = NodeId::new("node1");
-        let imu = ResourceBuilder::new(owner.clone(), ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let imu = ResourceBuilder::new(owner.clone(), ResourceKind::Fan, "imu", "IMU").expect("imu").build();
         let capture = ResourceBuilder::new(owner, ResourceKind::CaptureDevice, "cam0", "Camera 0").expect("camera").build();
         let snapshot = DiscoverySnapshot::new(vec![imu, capture]);
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let provider = publisher.provider_record(&snapshot);
-        assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "lemnos.device"));
+        assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "helios.fan"));
         assert!(provider.resource_types.iter().any(|ty| ty.as_str() == "camera.device"));
     }
 
@@ -285,7 +285,7 @@ mod tests {
     fn camera_resources_advertise_their_styx_frames_endpoint() {
         let owner = NodeId::new("node1");
         let camera = ResourceBuilder::new(owner.clone(), ResourceKind::CaptureDevice, "cam0", "Front Camera").expect("camera").build();
-        let imu = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let imu = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").build();
         let publisher = OrionPeripheralPublisher::new("client", "node1").with_stream_dir("/run/helios/streams");
         let records = publisher.resource_records(&DiscoverySnapshot::new(vec![camera, imu]), &[], &BTreeMap::new());
         assert_eq!(records.len(), 2, "cameras no longer publish a derived stream channel");
@@ -295,14 +295,14 @@ mod tests {
         let endpoint = camera.endpoint::<StyxFramesEndpoint>().expect("typed styx frames endpoint");
         assert_eq!(endpoint.socket_path, PathBuf::from("/run/helios/streams/capture_device_node1_cam0.styx.sock"));
 
-        let imu = records.iter().find(|record| record.resource_type.as_str() == "lemnos.device").expect("lemnos record");
+        let imu = records.iter().find(|record| record.resource_type.as_str() == "helios.fan").expect("lemnos record");
         assert!(imu.endpoints.iter().all(|endpoint| !endpoint.starts_with("styx-frames+unix://")));
     }
 
     #[test]
     fn resource_record_translation_preserves_hardware_facts() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").label("lemnos.class", "imu").endpoint("lemnos+unix", "/run/lemnos/lemnosd.sock").build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").label("lemnos.class", "imu").endpoint("lemnos+unix", "/run/lemnos/lemnosd.sock").build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, Some(LeaseState::Leased), None);
         assert!(record.labels.iter().any(|label| label == "helios.label.lemnos.class=imu"));
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn lease_overlay_updates_translated_resource_lease_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").build();
         let lease = LeaseRecord::builder(resource.id.clone()).lease_state(LeaseState::Leased).build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let records = publisher.resource_records(&DiscoverySnapshot::new(vec![resource]), &[lease], &BTreeMap::new());
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn resource_action_feedback_sets_typed_resource_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").build();
         let feedback = ResourceActionFeedback::failed(42, "fan.override", "lemnosd refused: not allowed");
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, None, Some(&feedback));
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn missing_resources_translate_to_unavailable_failed_state() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "imu", "IMU").expect("imu").status(ResourceStatus::Missing).build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::Fan, "imu", "IMU").expect("imu").status(ResourceStatus::Missing).build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
         let record = publisher.resource_record(&resource, None, None);
         assert_eq!(record.availability, AvailabilityState::Unavailable);
@@ -347,7 +347,7 @@ mod tests {
         let mut values = BTreeMap::new();
         values.insert("reading.duty".to_string(), ObservedValue::F64(0.7));
         values.insert("fan.override.active".to_string(), ObservedValue::Bool(true));
-        let resource = ResourceBuilder::new(owner, ResourceKind::LemnosDevice, "fan", "Fan").expect("fan").observation(ResourceObservation { observed_at_ms: 100, values }).build();
+        let resource = ResourceBuilder::new(owner, ResourceKind::Fan, "fan", "Fan").expect("fan").observation(ResourceObservation { observed_at_ms: 100, values }).build();
         let publisher = OrionPeripheralPublisher::new("client", "node1");
 
         let state = publisher.resource_record(&resource, None, None).state.expect("state");

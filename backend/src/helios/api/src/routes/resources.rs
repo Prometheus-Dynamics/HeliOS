@@ -124,10 +124,39 @@ pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -
     view.resources.get(&id).map(|r| Json(resource_dto(r, &view))).ok_or_else(|| ApiError::not_found(format!("no resource {id}")))
 }
 
-/// The resources helios-peripherals publishes (lemnosd's board devices, cameras).
+/// The peripheral resources: helios-peripherals' (the fan override, raw access, cameras) and
+/// lemnosd's devices from the Lemnos bridge (`lemnos.device`), whose readings and statuses are
+/// their status entries (`state`).
 pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec<ResourceDto>>> {
     let view = state.orion.view().await?;
-    Ok(Json(view.resources.values().filter(|r| r.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX)).map(|r| resource_dto(r, &view)).collect()))
+    let mut readings = lemnos_readings(&state).await?;
+    let resources = view
+        .resources
+        .values()
+        .filter(|r| r.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX) || r.resource_type.as_str() == LEMNOS_DEVICE_TYPE)
+        .map(|r| {
+            let mut dto = resource_dto(r, &view);
+            if let Some(entries) = readings.remove(&dto.id) {
+                dto.state.get_or_insert_with(BTreeMap::new).extend(entries);
+            }
+            dto
+        })
+        .collect();
+    Ok(Json(resources))
+}
+
+/// The latest status of each Lemnos bridge resource, by resource id: its `status`, `reason`,
+/// `read_us`, channel readings and `control.<name>` values.
+async fn lemnos_readings(state: &SharedState) -> ApiResult<BTreeMap<String, BTreeMap<String, serde_json::Value>>> {
+    let mut by_resource: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new();
+    for entry in state.orion.status_entries().await? {
+        if let orion::control_plane::StatusSubject::Resource(id) = &entry.subject
+            && id.as_str().starts_with("lemnos.")
+        {
+            by_resource.entry(id.to_string()).or_default().insert(entry.key, config_value_json(&entry.value));
+        }
+    }
+    Ok(by_resource)
 }
 
 // --- actions -------------------------------------------------------------------
@@ -136,8 +165,8 @@ pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec
 /// Kinds and arguments are helios-peripherals' resource actions through lemnosd:
 ///
 /// - on lemnosd devices: `fan.override` (`pwm` 0-255 or `duty` 0-1, `duration_ms`
-///   1000-600000; the fan goes back to the kernel governor when it ends), `fan.release`, and
-///   `control.set` (`control`, `value`) for other devices' controls;
+///   1000-600000; the fan goes back to the kernel governor when it ends) and `fan.release`
+///   (the bridge's `lemnos.<board>.<device>` resources take their own actions);
 /// - on the raw-access resource (`lemnos.raw`, also `/v1/peripherals/io`): `gpio.claim`,
 ///   `gpio.configure`, `gpio.get`, `gpio.set`, `gpio.release`, `pwm.claim`, `pwm.configure`,
 ///   `pwm.release`, `i2c.transfer`, `spi.transfer` and `raw.renew` (docs/docs/api/http.md, "Raw
@@ -152,7 +181,10 @@ pub struct ActionRequest {
     pub arg: serde_json::Map<String, serde_json::Value>,
 }
 
-pub const DEVICE_ACTION_KINDS: &[&str] = &["fan.override", "fan.release", "control.set"];
+pub const DEVICE_ACTION_KINDS: &[&str] = &["fan.override", "fan.release"];
+/// The Lemnos bridge's resource type (`lemnosd`'s board devices, one `lemnos.<board>.<device>` each;
+/// Lemnos `docs/orion.md`). Its readings are status entries, merged into the resource's `state`.
+pub const LEMNOS_DEVICE_TYPE: &str = "lemnos.device";
 pub const RAW_ACTION_KINDS: &[&str] =
     &["gpio.claim", "gpio.configure", "gpio.get", "gpio.set", "gpio.release", "pwm.claim", "pwm.configure", "pwm.release", "i2c.transfer", "spi.transfer", "raw.renew"];
 /// The raw-access resource's type (one per node, from helios-peripherals).
@@ -412,8 +444,8 @@ mod tests {
         let args = action_args(&http_request("fan.override", serde_json::json!({ "duty": 0.8, "duration_ms": 60_000 }))).expect("args");
         assert_eq!(args.get("duty"), Some(&TypedConfigValue::F64(0.8)));
         assert_eq!(args.get("duration_ms"), Some(&TypedConfigValue::UInt(60_000)));
-        let args = action_args(&http_request("control.set", serde_json::json!({ "control": "level", "value": 1.0 }))).expect("args");
-        assert_eq!(args.get("control"), Some(&TypedConfigValue::String("level".into())));
+        // lemnosd's generic writes are the Lemnos bridge's resources, not HeliOS actions.
+        assert!(action_args(&http_request("control.set", serde_json::json!({ "control": "level", "value": 1.0 }))).is_err());
         assert!(action_args(&http_request("gpio.write", serde_json::json!({}))).is_err(), "unknown kind");
     }
 
