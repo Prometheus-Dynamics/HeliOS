@@ -123,7 +123,7 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (bcc9f33, plugin ABI 9), Styx dev (0b531c9), Eidos main (624cab4),
+#   Daedalus 3.0 dev (bcc9f33, plugin ABI 9), Styx dev (185ad43), Eidos main (624cab4),
 #   Orion v4 main (c22fa42; also the Gaia `orion` source), Lemnos dev (8a126d3).
 daedalus = { package = "daedalus-rs", version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { version = "3.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
