@@ -44,9 +44,10 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev 42d91e2: Lemnos cca50f7, with the `lemnos`
+# Raze board package (Atlas dev 934f538: Lemnos cca50f7, with the `lemnos`
 # user created at build time from Lemnos's own Buildroot users table through
-# the device package (BR2_RAZE_LEMNOS_USERS_TABLE; HeliOS keeps no copy), the
+# the device package (BR2_RAZE_LEMNOS_USERS_TABLE, quoted so olddefconfig keeps
+# it; HeliOS keeps no copy), the
 # self-test's chip-id reads brokered through lemnosd, and no free GPIO line,
 # PWM channel or spidev named in the board definition; lemnosd owns the LED
 # ring, fan and sensors, with the fan released back to the kernel governor
@@ -66,7 +67,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "42d91e2fd6c7dd3442d37f1fb562f9da83d119f4"
+rev = "934f5381a252c1b48619f7552b94eca147644054"
 
 # Lemnos (dev cca50f7). The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
