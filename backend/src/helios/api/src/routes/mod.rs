@@ -59,7 +59,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/cameras/{id}/mount", get(cameras::get_mount).put(cameras::put_mount).delete(cameras::delete_mount))
         .route("/v1/cameras/{id}/preview", get(cameras::preview))
         .route("/v1/cameras/{id}/preview/ws", get(cameras::preview_ws))
-        .route("/v1/cameras/{id}/calibration", get(cameras::calibration).post(cameras::calibration))
+        .route("/v1/cameras/{id}/calibration", get(cameras::get_calibration).put(cameras::put_calibration).delete(cameras::delete_calibration))
+        .route("/v1/cameras/{id}/calibration/capture", post(cameras::capture_calibration))
         // Pipelines (Daedalus graphs run by helios-engine) and their outputs
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))

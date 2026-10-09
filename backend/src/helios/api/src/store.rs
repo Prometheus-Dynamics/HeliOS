@@ -1,7 +1,7 @@
 //! What only the API owns, persisted under its state directory (`/var/lib/helios/api`, on the
 //! data partition, so it survives reboots and OTA updates): the revision history of each
-//! pipeline (for rollback), where each camera is mounted on the robot, and the camera control
-//! values set through the API.
+//! pipeline (for rollback), where each camera is mounted on the robot, each camera's
+//! calibrations, and the camera control values set through the API.
 
 use std::{
     collections::BTreeMap,
@@ -11,7 +11,10 @@ use std::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::Mutex;
 
-use crate::error::{ApiError, ApiResult};
+use crate::{
+    camera_context::CameraCalibration,
+    error::{ApiError, ApiResult},
+};
 
 /// Revisions kept per pipeline.
 pub const MAX_REVISIONS: usize = 20;
@@ -183,6 +186,51 @@ impl Store {
     fn camera_settings_path(&self) -> PathBuf {
         self.dir.join("camera-settings.json")
     }
+
+    fn calibrations_path(&self) -> PathBuf {
+        self.dir.join("camera-calibration.json")
+    }
+
+    /// Every camera's calibrations (one per calibrated image size).
+    pub async fn calibrations(&self) -> ApiResult<BTreeMap<String, Vec<CameraCalibration>>> {
+        let _guard = self.lock.lock().await;
+        read_json(&self.calibrations_path()).await.map(Option::unwrap_or_default)
+    }
+
+    /// Keep `calibration` for `camera`, replacing the one of the same image size; returns the
+    /// camera's calibrations.
+    pub async fn put_calibration(&self, camera: &str, calibration: CameraCalibration) -> ApiResult<Vec<CameraCalibration>> {
+        let _guard = self.lock.lock().await;
+        let path = self.calibrations_path();
+        let mut all: BTreeMap<String, Vec<CameraCalibration>> = read_json(&path).await?.unwrap_or_default();
+        let list = all.entry(camera.to_string()).or_default();
+        list.retain(|c| (c.width, c.height) != (calibration.width, calibration.height));
+        list.push(calibration);
+        list.sort_by_key(|c| (c.width, c.height));
+        let list = list.clone();
+        write_json(&path, &all).await?;
+        Ok(list)
+    }
+
+    /// Forget `camera`'s calibration at `size`, or all of them; returns what is left.
+    pub async fn delete_calibration(&self, camera: &str, size: Option<(u32, u32)>) -> ApiResult<Vec<CameraCalibration>> {
+        let _guard = self.lock.lock().await;
+        let path = self.calibrations_path();
+        let mut all: BTreeMap<String, Vec<CameraCalibration>> = read_json(&path).await?.unwrap_or_default();
+        let left = match size {
+            Some(size) => {
+                let list = all.entry(camera.to_string()).or_default();
+                list.retain(|c| (c.width, c.height) != size);
+                list.clone()
+            }
+            None => Vec::new(),
+        };
+        if left.is_empty() {
+            all.remove(camera);
+        }
+        write_json(&path, &all).await?;
+        Ok(left)
+    }
 }
 
 fn file_stem(id: &str) -> String {
@@ -240,6 +288,34 @@ mod tests {
         store.set_mount("camera.a", None).await.expect("clear");
         assert!(store.mounts().await.expect("mounts").is_empty());
         assert!(CameraMount { x: 50.0, ..mount }.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn calibrations_are_kept_per_size_across_a_new_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path());
+        let full = CameraCalibration {
+            width: 1280,
+            height: 800,
+            model: Default::default(),
+            fx: 900.0,
+            fy: 900.0,
+            cx: 640.0,
+            cy: 400.0,
+            distortion: Default::default(),
+            rms_px: None,
+            source: None,
+            saved_at_ms: 1,
+        };
+        store.put_calibration("camera.a", full.clone()).await.expect("put");
+        store.put_calibration("camera.a", CameraCalibration { width: 640, height: 400, ..full.clone() }).await.expect("put");
+        let replaced = store.put_calibration("camera.a", CameraCalibration { fx: 910.0, ..full.clone() }).await.expect("replace");
+        assert_eq!(replaced.len(), 2);
+        let store = Store::new(dir.path());
+        assert_eq!(store.calibrations().await.expect("read")["camera.a"][1].fx, 910.0);
+        assert_eq!(store.delete_calibration("camera.a", Some((640, 400))).await.expect("delete").len(), 1);
+        assert!(store.delete_calibration("camera.a", None).await.expect("delete all").is_empty());
+        assert!(store.calibrations().await.expect("read").is_empty());
     }
 
     #[tokio::test]

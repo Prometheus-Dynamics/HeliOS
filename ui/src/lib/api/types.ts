@@ -322,6 +322,42 @@ export interface PipelineSpec {
   graph: DaedalusGraphDocument;
   bindings: Record<string, Binding>;
   enabled?: boolean;
+  /** Eidos detector groups: `tracked` (full search every `full_search_every` frames, default 8) or `full`. */
+  search_mode?: SearchMode;
+  full_search_every?: number;
+}
+
+export type SearchMode = "full" | "tracked";
+
+/** A pipeline's tag and field poses (from its `pose_solutions` and `field_pose` outputs). */
+export interface PoseSummary {
+  /** `calibrated`, or `uncalibrated` (no calibration for the camera at the pipeline's frame size: no poses). */
+  status: "calibrated" | "uncalibrated" | null;
+  tags: { id: number; translation: [number, number, number] | null; rotation: [number, number, number, number] | null; error_px: number | null; ambiguity: number | null }[];
+  field_valid: boolean | null;
+  camera_in_field: unknown;
+  robot_in_field: unknown;
+  observed_at_ms: number | null;
+}
+
+/** A camera calibration (`GET`/`PUT /v1/cameras/{id}/calibration`). */
+export interface CameraCalibration {
+  width: number;
+  height: number;
+  model: "pinhole" | "fisheye";
+  fx: number;
+  fy: number;
+  cx: number;
+  cy: number;
+  distortion?: Partial<Record<"k1" | "k2" | "k3" | "k4" | "k5" | "k6" | "p1" | "p2", number>>;
+  rms_px?: number;
+  source?: string;
+  saved_at_ms?: number;
+}
+
+export interface CameraCalibrations {
+  calibrations: CameraCalibration[];
+  pipelines: { pipeline: string; input: string; calibration: { status: "calibrated" | "uncalibrated"; width?: number; height?: number; model?: string; scaled_from?: [number, number]; reason?: string } }[];
 }
 
 export interface PipelineOutput {
@@ -346,6 +382,9 @@ export interface Pipeline {
   session: { status: string; message: string | null; observed_at_ms: number } | null;
   telemetry: { fps?: number; last_tick_ms?: number; frames_processed?: number; frames_failed?: number; source_connected?: boolean; last_error?: string | null; [key: string]: unknown } | null;
   outputs: PipelineOutput[];
+  search_mode: SearchMode | null;
+  full_search_every: number | null;
+  pose: PoseSummary | null;
   managed: boolean;
 }
 

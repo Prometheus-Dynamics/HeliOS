@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod auth_state;
 pub mod board_update;
+pub mod camera_context;
 pub mod camera_controls;
 pub mod camera_preview;
 pub mod config;

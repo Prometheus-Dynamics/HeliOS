@@ -20,6 +20,7 @@ use styx::preview::{MJPEG_CONTENT_TYPE, ws_message};
 
 use crate::{
     SharedState,
+    camera_context::{self, CameraCalibration},
     camera_controls::{AppliedCameraControl, CameraClient, CameraControl},
     error::{ApiError, ApiResult},
     orion::{StateView, enum_name, label_map},
@@ -316,6 +317,7 @@ pub async fn put_mount(State(state): State<SharedState>, Path(id): Path<String>,
     mount.validate()?;
     state.store.set_mount(&id, Some(mount)).await?;
     state.events.publish("camera", serde_json::json!({ "id": id, "change": "mount", "mount": mount }));
+    refresh_pipelines(&state, &id).await;
     Ok(Json(mount))
 }
 
@@ -323,6 +325,7 @@ pub async fn delete_mount(State(state): State<SharedState>, Path(id): Path<Strin
     check_id(&id)?;
     state.store.set_mount(&id, None).await?;
     state.events.publish("camera", serde_json::json!({ "id": id, "change": "mount", "mount": null }));
+    refresh_pipelines(&state, &id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -368,11 +371,87 @@ async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::previ
     }
 }
 
-pub async fn calibration(Path(id): Path<String>) -> ApiResult<ApiError> {
+/// Hand a camera's new calibration or mount to the pipelines using it (no new revision). A
+/// pipeline that could not be updated now gets it with its next deploy.
+async fn refresh_pipelines(state: &SharedState, camera: &str) {
+    match super::pipelines::refresh_camera_context(state, camera).await {
+        Ok(updated) if !updated.is_empty() => tracing::info!(camera, pipelines = ?updated, "camera context updated"),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(camera, error = %error.message, "camera context not handed to its pipelines"),
+    }
+}
+
+/// A camera's calibrations, and which one each pipeline using the camera gets.
+#[derive(Debug, Serialize)]
+pub struct CameraCalibrations {
+    pub calibrations: Vec<CameraCalibration>,
+    /// `[{pipeline, input, calibration: {status, width, height, model, scaled_from?} | {status: "uncalibrated", reason}}]`
+    pub pipelines: Vec<serde_json::Value>,
+}
+
+async fn calibrations_of(state: &SharedState, id: &str) -> ApiResult<CameraCalibrations> {
+    let calibrations = state.store.calibrations().await?.remove(id).unwrap_or_default();
+    let pipelines = match state.orion.view().await {
+        Ok(view) => view
+            .workloads
+            .values()
+            .filter(|w| w.runtime_type.as_str() == pipelines::ENGINE_RUNTIME)
+            .flat_map(|w| {
+                pipelines::decode_bindings(w).into_iter().filter(|(_, b)| b.resource_id == id).map(|(input, binding)| {
+                    let matched = camera_context::match_calibration(&calibrations, binding.output_width.zip(binding.output_height));
+                    serde_json::json!({ "pipeline": pipelines::pipeline_id(w.workload_id.as_str()), "input": input, "calibration": pipelines::calibration_note(&matched) })
+                })
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    Ok(CameraCalibrations { calibrations, pipelines })
+}
+
+/// `GET /v1/cameras/{id}/calibration`.
+pub async fn get_calibration(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<CameraCalibrations>> {
+    check_id(&id)?;
+    Ok(Json(calibrations_of(&state, &id).await?))
+}
+
+/// `PUT /v1/cameras/{id}/calibration`: keep a calibration (replacing the one of the same image
+/// size) on the data partition and hand it to the pipelines using the camera.
+pub async fn put_calibration(State(state): State<SharedState>, Path(id): Path<String>, Json(mut calibration): Json<CameraCalibration>) -> ApiResult<Json<CameraCalibrations>> {
+    let _ = find(&state, &id).await?;
+    calibration.validate()?;
+    calibration.saved_at_ms = crate::host::now_ms();
+    state.store.put_calibration(&id, calibration.clone()).await?;
+    state.events.publish("camera", serde_json::json!({ "id": id, "change": "calibration", "calibration": calibration }));
+    refresh_pipelines(&state, &id).await;
+    Ok(Json(calibrations_of(&state, &id).await?))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct CalibrationSize {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// `DELETE /v1/cameras/{id}/calibration[?width=&height=]`: forget one calibration, or all.
+pub async fn delete_calibration(State(state): State<SharedState>, Path(id): Path<String>, axum::extract::Query(size): axum::extract::Query<CalibrationSize>) -> ApiResult<StatusCode> {
+    check_id(&id)?;
+    let size = match (size.width, size.height) {
+        (Some(width), Some(height)) => Some((width, height)),
+        (None, None) => None,
+        _ => return Err(ApiError::bad_request("give both width and height, or neither to forget every calibration")),
+    };
+    state.store.delete_calibration(&id, size).await?;
+    state.events.publish("camera", serde_json::json!({ "id": id, "change": "calibration", "calibration": null, "size": size }));
+    refresh_pipelines(&state, &id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /v1/cameras/{id}/calibration/capture`: not on the device yet.
+pub async fn capture_calibration(Path(id): Path<String>) -> ApiResult<ApiError> {
     check_id(&id)?;
     Ok(ApiError::not_available(
-        "camera calibration is not available on the device yet",
-        "a calibration capture/solve pipeline (Eidos calibration nodes) and storage for intrinsics per camera and resolution",
+        "calibration capture is not available on the device yet; upload a calibration with PUT /v1/cameras/{id}/calibration",
+        "a capture and solve flow (board detection on the camera's frames, an Eidos calibration solve) behind this endpoint",
     ))
 }
 

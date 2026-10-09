@@ -87,6 +87,8 @@ impl EventHub {
 pub struct Digest {
     pub pipelines: BTreeMap<String, serde_json::Value>,
     pub resources: BTreeMap<String, serde_json::Value>,
+    /// Pose summary per pipeline (`pose` events).
+    pub poses: BTreeMap<String, serde_json::Value>,
 }
 
 /// The events that turn `before` into `after`.
@@ -94,6 +96,7 @@ pub fn diff(before: &Digest, after: &Digest) -> Vec<(&'static str, serde_json::V
     let mut out = Vec::new();
     diff_maps("pipeline", &before.pipelines, &after.pipelines, &mut out);
     diff_maps("resource", &before.resources, &after.resources, &mut out);
+    diff_maps("pose", &before.poses, &after.poses, &mut out);
     out
 }
 
@@ -216,7 +219,7 @@ impl Watch {
                     state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
                     self.seen.orion_up = Some(true);
                 }
-                let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view) };
+                let digest = Digest { pipelines: routes::pipelines::digest(&view), resources: routes::resources::digest(&view), poses: routes::pipelines::pose_digest(&view) };
                 if let Some(before) = &self.seen.last {
                     for (kind, data) in diff(before, &digest) {
                         state.events.publish(kind, data);

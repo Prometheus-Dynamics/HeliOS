@@ -35,8 +35,9 @@ The API keeps very little state of its own. It reads other parts of the device a
 | Identity | the **Raze device package** (`/run/board/identity.json`) |
 | OS updates | the Raze board package's A/B writer (board update) (`/usr/lib/board/update`) |
 
-The API stores only two things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`):
-pipeline revision history (used for rollback) and camera mounts. The device security file is
+The API stores only a few things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`, on
+the data partition): pipeline revision history (used for rollback), camera mounts, camera
+calibrations and the camera control values set through the API. The device security file is
 separate (`/var/lib/helios/auth/auth.json`, see below).
 
 ## Errors
@@ -107,7 +108,8 @@ as unavailable and not retry.
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees (x forward, y left, z up) |
 | `GET` | `/v1/cameras/{id}/preview` | Styx preview | MJPEG (`multipart/x-mixed-replace; boundary=styxpreview`) for an `<img>`. See [Camera preview](#camera-preview) |
 | `GET` | `/v1/cameras/{id}/preview/ws` | Styx preview | The same frames over a WebSocket, one binary `SPV1` message each |
-| `GET` `POST` | `/v1/cameras/{id}/calibration` | — | **501** |
+| `GET` `PUT` `DELETE` | `/v1/cameras/{id}/calibration` | API store | Camera calibrations, one per image size (intrinsics, `pinhole` or `fisheye`, distortion), kept on `/data`; which one each pipeline gets. See [Calibration](#calibration-and-camera-context) |
+| `POST` | `/v1/cameras/{id}/calibration/capture` | — | **501**. Capturing and solving a calibration on the device is a later item; upload one with `PUT` |
 
 A camera:
 
@@ -245,6 +247,43 @@ Each camera has one preview, made on its first viewer and shared by all viewers 
 - **It does not block.** A camera service that is down keeps the stream open; frames resume
   when it is back.
 
+#### Calibration and camera context
+
+A camera's calibration is uploaded, not captured (capture on the device is a later item):
+
+```json
+PUT /v1/cameras/{id}/calibration
+{ "width": 1280, "height": 800, "model": "fisheye", "fx": 560.2, "fy": 560.0, "cx": 641.3, "cy": 398.7,
+  "distortion": { "k1": 0.051, "k2": -0.012, "k3": 0.0, "k4": 0.0 }, "rms_px": 0.31, "source": "charuco 2026-10-07" }
+```
+
+- `model` is `pinhole` (Brown-Conrady, OpenCV's 8 coefficients `k1` to `k6`, `p1`, `p2`) or
+  `fisheye` (equidistant, `cv::fisheye`'s `k1` to `k4`; `k5`, `k6`, `p1`, `p2` must be 0).
+  Intrinsics are pixels of a `width` x `height` image. Missing coefficients are 0.
+- One calibration per image size: a `PUT` replaces the one of the same size. `DELETE` forgets
+  them all, or one with `?width=&height=`. They are kept in
+  `/var/lib/helios/api/camera-calibration.json` and survive reboots and OS updates.
+- `GET` answers `{calibrations, pipelines}`: the stored calibrations, and for every pipeline
+  bound to the camera which calibration it gets (`{status: "calibrated", width, height, model,
+  scaled_from?}` or `{status: "uncalibrated", reason}`).
+- Every change is a `camera` event (`change: "calibration"`), and so is a mount change
+  (`change: "mount"`).
+
+**Camera context.** When the API writes a pipeline whose binding is a camera, it adds that
+camera's context to the binding (`binding.<input>.context.<field>` in the engine workload): the
+calibration for the pipeline's frame size (the binding's `output_width` x `output_height`;
+without one, the largest calibration) and the mount. A calibration at exactly that size is used,
+else the largest one with the same aspect ratio, scaled (focal lengths and principal point;
+distortion is unchanged). The fields are the camera ports of Eidos's pose nodes: `fx`, `fy`,
+`cx`, `cy`, `lens`, `k1` to `k6`, `p1`, `p2`, and the mount `mount` (`body`, the API's x forward,
+y left, z up frame, or `none`), `mount_x`, `mount_y`, `mount_z` (metres) and `mount_roll`,
+`mount_pitch`, `mount_yaw` (radians). helios-engine feeds each to the graph's host input
+`<input>_<field>` (`frame_fx`, ...), which HeliOS's templates connect to `eidos:aruco.pose` and
+`eidos:aruco.field_pose`; numbers are pushed into the running graph, so a new calibration or
+mount takes effect on the next frame without a new revision (a new lens model recompiles the
+graph). A camera without a matching calibration gets `fx = fy = 0`: Eidos then reports
+`status: "uncalibrated"` and no poses; it never guesses a camera.
+
 ### Pipelines and outputs
 
 A pipeline is a Daedalus graph run by helios-engine. In Orion it is a
@@ -299,7 +338,21 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
 - Every plugin id in `requires` must be one helios-engine reports as loaded (when the engine is
   running). Plugin versions are not checked yet, because the engine publishes names only.
 - Each binding names an existing resource. `camera`, `output_width`/`output_height` (set both
-  or neither) and `pyramid` shape the frames the engine asks the camera service for.
+  or neither) and `pyramid` shape the frames the engine asks the camera service for. A camera
+  binding also carries the camera's context (calibration and mount, see
+  [Calibration and camera context](#calibration-and-camera-context)).
+- `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 8) set how the
+  graph's Eidos detector groups (`eidos:detectors.apriltag`, `eidos:detectors.aruco` and their
+  `_tracked` versions) search: `tracked` searches the whole frame every `full_search_every`
+  frames (and after a lost tag, a scene change or on request) and only windows around tracked
+  tags in between; `full` searches every frame. **Guarantee:** a tracked frame reports exactly
+  what a full search would for the tags it tracks (same ids, identical corners), and a new tag is
+  found at most `full_search_every - 1` frames after it appears (Eidos `docs/daedalus.md`,
+  "Tracked detector groups"). Unset, the graph keeps its mode, except that a camera pipeline's
+  untracked groups become `tracked` every 8 frames: on the CM5 that gives the same detections as
+  full search at 0.345 ms per frame on average instead of 0.84 ms (p99 about 1.0 ms either way),
+  with new tags within 7 frames. The API switches the group node in the stored graph; a pipeline
+  reports the mode its graph has (`search_mode`, `full_search_every`).
 
 The pipeline the API returns:
 
@@ -312,13 +365,27 @@ The pipeline the API returns:
   "plugins": ["eidos"],
   "session": { "status": "running", "message": null, "observed_at_ms": 1760000000000 },
   "telemetry": { "fps": 59.8, "last_tick_ms": 0.71, "frames_processed": 3600, "source_connected": true },
-  "outputs": [{ "pipeline": "tags-front", "port": "poses", "value": { "...": "..." }, "observed_at_ms": 1760000000000 }],
+  "outputs": [{ "pipeline": "tags-front", "port": "pose_solutions", "value": { "...": "..." }, "observed_at_ms": 1760000000000 }],
+  "search_mode": "tracked", "full_search_every": 8,
+  "pose": { "status": "calibrated",
+            "tags": [{ "id": 7, "translation": [0.12, -0.05, 2.31], "rotation": [0.01, 0.99, 0.0, 0.02], "error_px": 0.21, "ambiguity": 0.08 }],
+            "field_valid": true, "camera_in_field": { "...": "..." }, "robot_in_field": { "...": "..." }, "observed_at_ms": 1760000000000 },
   "managed": true
 }
 ```
 
 `state` is Orion's observed state: `pending`, `assigned`, `starting`, `running`, `stopped`,
 `completed` or `failed`. Output values are JSON. Frames are described, never sent.
+
+`pose` summarizes the pose outputs of HeliOS's templates (`pose_solutions` from
+`eidos:aruco.pose`, `field_pose` from `eidos:aruco.field_pose`; `null` when the graph has
+neither): Eidos's `status` (`calibrated`, or `uncalibrated` when the camera has no calibration
+for the pipeline's frame size, with no poses), each tag's best pose in the camera's optical
+frame (`translation` in metres, `rotation` a quaternion `x, y, z, w`; tag frame: origin at the
+centre, x along the top edge, y down, z into the tag), its reprojection error and planar
+ambiguity, and from the field pose whether it is `field_valid`, `camera_in_field` and
+`robot_in_field` (the robot through the camera's mount). The full outputs are in `outputs`, and
+every change is a `pose` event (see [Event stream](./websockets.md)).
 
 ### Resources and peripherals
 

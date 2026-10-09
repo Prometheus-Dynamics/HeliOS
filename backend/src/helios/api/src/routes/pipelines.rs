@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     SharedState,
+    camera_context::{self, CalibrationMatch},
     error::{ApiError, ApiResult},
     host::now_ms,
     orion::{StateView, enum_name, label_map, label_values},
@@ -68,6 +69,163 @@ pub struct PipelineSpec {
     /// Desired running (default) or stopped.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// How the graph's Eidos detector groups search each frame: `tracked` (full search every
+    /// `full_search_every` frames, windows around tracked tags in between) or `full` (every
+    /// frame). Unset keeps what the graph has, except that a camera pipeline's untracked groups
+    /// become `tracked` with `full_search_every` 8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_mode: Option<SearchMode>,
+    /// Tracked search only: full search at least every this many frames (1 to 100000; default
+    /// 8). New tags are found at most `full_search_every - 1` frames after they appear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_search_every: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMode {
+    Full,
+    Tracked,
+}
+
+/// Default tracked search interval: measured on the CM5 with the same detections as full search
+/// at 0.345 ms per frame on average (0.84 ms always full), new tags within 7 frames.
+pub const DEFAULT_FULL_SEARCH_EVERY: u32 = 8;
+
+/// Eidos's detector groups: (full search group, tracked group).
+const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
+/// Config ports the tracked groups have and the full ones do not (Eidos docs/daedalus.md,
+/// "Tracked detector groups").
+const TRACKED_ONLY_PORTS: [&str; 11] = [
+    "full_search_every",
+    "roi_margin",
+    "roi_margin_side",
+    "roi_margin_velocity",
+    "max_tracks",
+    "max_missed_frames",
+    "loss_search",
+    "change_threshold",
+    "change_step",
+    "constant_velocity",
+    "full_search",
+];
+
+/// The search mode of `graph`'s detector groups, when it has any: `(mode, full_search_every)`.
+pub fn search_mode_of(graph: &serde_json::Value) -> Option<(SearchMode, Option<u32>)> {
+    let nodes = graph.get("graph")?.get("nodes")?.as_array()?;
+    nodes.iter().find_map(|node| {
+        let id = node.get("id")?.as_str()?;
+        if DETECTOR_GROUPS.iter().any(|(full, _)| *full == id) {
+            return Some((SearchMode::Full, None));
+        }
+        if DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id) {
+            let every = node
+                .get("const_inputs")
+                .and_then(|c| c.as_array())
+                .and_then(|consts| consts.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some("full_search_every")).and_then(|entry| entry.get(1)?.get("value")?.as_u64()));
+            return Some((SearchMode::Tracked, Some(every.map_or(DEFAULT_FULL_SEARCH_EVERY, |every| every as u32))));
+        }
+        None
+    })
+}
+
+/// Switch every Eidos detector group in `graph` to `mode`: the full and tracked groups have the
+/// same ports apart from the tracking ones, so the node keeps its edges and its other constants.
+/// Returns how many groups it changed or set.
+pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, full_search_every: u32) -> usize {
+    let Some(nodes) = graph.get_mut("graph").and_then(|g| g.get_mut("nodes")).and_then(|n| n.as_array_mut()) else {
+        return 0;
+    };
+    let mut changed = 0;
+    for node in nodes {
+        let Some(id) = node.get("id").and_then(|id| id.as_str()) else { continue };
+        let Some((full, tracked)) = DETECTOR_GROUPS.iter().find(|(full, tracked)| *full == id || *tracked == id) else { continue };
+        changed += 1;
+        match mode {
+            SearchMode::Full => {
+                node["id"] = (*full).into();
+                if let Some(consts) = node.get_mut("const_inputs").and_then(|c| c.as_array_mut()) {
+                    consts.retain(|entry| !entry.get(0).and_then(|n| n.as_str()).is_some_and(|name| TRACKED_ONLY_PORTS.contains(&name)));
+                }
+                if let Some(inputs) = node.get_mut("inputs").and_then(|c| c.as_array_mut()) {
+                    inputs.retain(|port| !port.as_str().is_some_and(|name| TRACKED_ONLY_PORTS.contains(&name)));
+                }
+            }
+            SearchMode::Tracked => {
+                node["id"] = (*tracked).into();
+                if node.get("const_inputs").and_then(|c| c.as_array()).is_none() {
+                    node["const_inputs"] = serde_json::json!([]);
+                }
+                let consts = node["const_inputs"].as_array_mut().expect("just ensured");
+                consts.retain(|entry| entry.get(0).and_then(|n| n.as_str()) != Some("full_search_every"));
+                consts.push(serde_json::json!(["full_search_every", { "type": "Int", "value": full_search_every }]));
+                if let Some(inputs) = node.get_mut("inputs").and_then(|c| c.as_array_mut())
+                    && !inputs.iter().any(|port| port.as_str() == Some("full_search_every"))
+                {
+                    inputs.push("full_search_every".into());
+                }
+            }
+        }
+    }
+    changed
+}
+
+/// The graph a spec deploys: its search mode applied (see `PipelineSpec::search_mode`).
+pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde_json::Value> {
+    let mut graph = spec.graph.clone();
+    let every = spec.full_search_every.unwrap_or(DEFAULT_FULL_SEARCH_EVERY);
+    if !(1..=100_000).contains(&every) {
+        return Err(ApiError::unprocessable("full_search_every is 1 to 100000 frames"));
+    }
+    if spec.full_search_every.is_some() && spec.search_mode == Some(SearchMode::Full) {
+        return Err(ApiError::unprocessable("full_search_every applies to search_mode \"tracked\" only"));
+    }
+    let mode = match spec.search_mode {
+        Some(mode) => Some(mode),
+        None if spec.full_search_every.is_some() => Some(SearchMode::Tracked),
+        // Camera pipelines track by default.
+        None if search_mode_of(&graph).is_some_and(|(mode, _)| mode == SearchMode::Full) && camera_inputs(spec, view).next().is_some() => Some(SearchMode::Tracked),
+        None => None,
+    };
+    if let Some(mode) = mode {
+        let changed = apply_search_mode(&mut graph, mode, every);
+        if changed == 0 && spec.search_mode.is_some() {
+            return Err(ApiError::unprocessable("search_mode needs an Eidos detector group in the graph (eidos:detectors.apriltag or eidos:detectors.aruco, tracked or not)"));
+        }
+    }
+    Ok(graph)
+}
+
+/// The spec's bindings to camera resources.
+fn camera_inputs<'a>(spec: &'a PipelineSpec, view: &'a StateView) -> impl Iterator<Item = (&'a String, &'a Binding)> + 'a {
+    spec.bindings.iter().filter(|(_, binding)| view.resources.get(&binding.resource_id).is_some_and(|r| r.resource_type.as_str() == super::cameras::CAMERA_RESOURCE_TYPE))
+}
+
+/// The camera context of each camera binding (`camera_context`): the calibration matching its
+/// frame size and the camera's mount, as `binding.<input>.context.*` fields.
+pub type CameraContexts = BTreeMap<String, BTreeMap<String, TypedConfigValue>>;
+
+/// `CameraContexts` for `bindings` (input -> binding) from the stored calibrations and mounts.
+pub async fn camera_contexts<'a>(state: &SharedState, view: &StateView, bindings: impl Iterator<Item = (&'a String, &'a Binding)>) -> ApiResult<CameraContexts> {
+    let calibrations = state.store.calibrations().await?;
+    let mounts = state.store.mounts().await?;
+    Ok(bindings
+        .filter(|(_, binding)| view.resources.get(&binding.resource_id).is_some_and(|r| r.resource_type.as_str() == super::cameras::CAMERA_RESOURCE_TYPE))
+        .map(|(input, binding)| {
+            let size = binding.output_width.zip(binding.output_height);
+            let matched = camera_context::match_calibration(calibrations.get(&binding.resource_id).map(Vec::as_slice).unwrap_or_default(), size);
+            (input.clone(), camera_context::context_fields(matched.calibration(), mounts.get(&binding.resource_id)))
+        })
+        .collect())
+}
+
+/// Which calibration a camera binding uses, for the pipeline DTO.
+pub fn calibration_note(matched: &CalibrationMatch) -> serde_json::Value {
+    match matched {
+        CalibrationMatch::Exact(c) => serde_json::json!({ "status": "calibrated", "width": c.width, "height": c.height, "model": c.model }),
+        CalibrationMatch::Scaled { calibration: c, from } => serde_json::json!({ "status": "calibrated", "width": c.width, "height": c.height, "model": c.model, "scaled_from": [from.0, from.1] }),
+        CalibrationMatch::None(reason) => serde_json::json!({ "status": "uncalibrated", "reason": reason }),
+    }
 }
 
 fn default_true() -> bool {
@@ -117,8 +275,49 @@ pub struct Pipeline {
     /// helios-engine's frame statistics (fps, last tick, frame counts, source status).
     pub telemetry: Option<serde_json::Value>,
     pub outputs: Vec<Output>,
+    /// The graph's detector search: `full` or `tracked` (with `full_search_every`); `null`
+    /// without an Eidos detector group.
+    pub search_mode: Option<SearchMode>,
+    pub full_search_every: Option<u32>,
+    /// Tag and field poses from the latest outputs (`pose_solutions`, `field_pose`), with the
+    /// calibration status; `null` when the graph has no pose stage.
+    pub pose: Option<serde_json::Value>,
     /// Managed by this API (created through `/v1/pipelines`) rather than written by other tools.
     pub managed: bool,
+}
+
+/// The pose summary of a pipeline's outputs: Eidos's `status` (`calibrated` or `uncalibrated`),
+/// the tag poses, and the camera and robot in the field.
+pub fn pose_summary(outputs: &[Output]) -> Option<serde_json::Value> {
+    let solutions = outputs.iter().find(|o| o.port == "pose_solutions");
+    let field = outputs.iter().find(|o| o.port == "field_pose");
+    if solutions.is_none() && field.is_none() {
+        return None;
+    }
+    let status = solutions.and_then(|o| o.value.get("status")).or_else(|| field.and_then(|o| o.value.get("status"))).cloned().unwrap_or(serde_json::Value::Null);
+    let tags = solutions
+        .and_then(|o| o.value.get("tags"))
+        .and_then(|t| t.as_array())
+        .map(|tags| {
+            tags.iter()
+                .map(|tag| serde_json::json!({ "id": tag.get("id"), "translation": tag.pointer("/best/translation"), "rotation": tag.pointer("/best/rotation"), "error_px": tag.get("best_error_px"), "ambiguity": tag.get("ambiguity") }))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let field_value = field.map(|o| &o.value);
+    Some(serde_json::json!({
+        "status": status,
+        "tags": tags,
+        "field_valid": field_value.and_then(|f| f.get("valid")).cloned(),
+        "camera_in_field": field_value.and_then(|f| f.get("camera_in_field")).cloned(),
+        "robot_in_field": field_value.and_then(|f| f.get("robot_in_field")).cloned(),
+        "observed_at_ms": solutions.into_iter().chain(field).map(|o| o.observed_at_ms).max(),
+    }))
+}
+
+/// Pose summary per pipeline, for `pose` events.
+pub fn pose_digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
+    engine_workloads(view).filter_map(|w| pose_summary(&outputs_of(view, w.workload_id.as_str())).map(|pose| (pipeline_id(w.workload_id.as_str()), pose))).collect()
 }
 
 pub fn pipeline_id(workload_id: &str) -> String {
@@ -221,6 +420,8 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         message: state_field(record, "message"),
         observed_at_ms: record.state.as_ref().map(|s| s.observed_at_ms).unwrap_or_default(),
     });
+    let (search_mode, full_search_every) = graph.as_ref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
+    let outputs = outputs_of(view, &workload_id);
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
         .map(|record| parse_message(state_field(record, "message")));
@@ -238,7 +439,10 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         plugins,
         session,
         telemetry,
-        outputs: outputs_of(view, &workload_id),
+        pose: pose_summary(&outputs),
+        outputs,
+        search_mode,
+        full_search_every,
         workload_id,
     }
 }
@@ -267,12 +471,14 @@ pub fn loaded_plugins(view: &StateView, node_id: &str) -> Option<Vec<String>> {
     Some(label_values(&runtime.labels, "helios.plugin.loaded").into_iter().map(str::to_string).collect())
 }
 
-/// Validate a spec against Daedalus's document format and the live state.
+/// Validate a spec against Daedalus's document format and the live state, and return the
+/// document it deploys (its search mode applied).
 pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str) -> ApiResult<GraphDocument> {
     if spec.name.trim().is_empty() || spec.name.len() > 120 {
         return Err(ApiError::unprocessable("name must be 1 to 120 characters"));
     }
-    let text = serde_json::to_string(&spec.graph).map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let graph = effective_graph(spec, view)?;
+    let text = serde_json::to_string(&graph).map_err(|error| ApiError::bad_request(error.to_string()))?;
     let document = GraphDocument::from_json(&text).map_err(|error| ApiError::unprocessable(format!("graph is not a valid Daedalus GraphDocument: {error}")))?;
     if let Some(loaded) = loaded_plugins(view, node_id) {
         let missing: Vec<&str> = document.requires.iter().map(|r| r.id.as_str()).filter(|id| !loaded.iter().any(|p| p == id)).collect();
@@ -295,7 +501,7 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str) -> Ap
 }
 
 /// The Orion records for a pipeline spec.
-pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revision: u64, node_id: &str) -> ApiResult<(ArtifactRecord, WorkloadRecord)> {
+pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revision: u64, node_id: &str, contexts: &CameraContexts) -> ApiResult<(ArtifactRecord, WorkloadRecord)> {
     let workload_id = format!("{WORKLOAD_PREFIX}{id}");
     let artifact_id = format!("{ARTIFACT_PREFIX}{id}");
     let inline = document.to_json().map_err(|error| ApiError::internal(error.to_string()))?;
@@ -327,6 +533,9 @@ pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revi
         if let Some(levels) = binding.pyramid {
             config = config.field(format!("binding.{input}.pyramid"), TypedConfigValue::Int(i64::from(levels)));
         }
+        for (field, value) in contexts.get(input).into_iter().flatten() {
+            config = config.field(format!("binding.{input}.context.{field}"), value.clone());
+        }
         builder = builder.bind_resource(ResourceId::new(binding.resource_id.clone()), NodeId::new(node_id));
     }
     Ok((artifact, builder.config(config).build()))
@@ -336,7 +545,8 @@ async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiResult<
     let view = state.orion.view().await?;
     let document = validate_spec(&spec, &view, &state.config.node_id)?;
     let revision = state.store.history(id).await?.next_revision();
-    let (artifact, workload) = records_for(id, &spec, &document, revision, &state.config.node_id)?;
+    let contexts = camera_contexts(state, &view, spec.bindings.iter()).await?;
+    let (artifact, workload) = records_for(id, &spec, &document, revision, &state.config.node_id, &contexts)?;
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await?;
     let spec_json = serde_json::to_value(&spec).map_err(|error| ApiError::internal(error.to_string()))?;
     state.store.push_revision(id, spec_json, now_ms()).await?;
@@ -430,7 +640,8 @@ pub async fn rollback(State(state): State<SharedState>, Path(id): Path<String>) 
     let spec: PipelineSpec = serde_json::from_value(previous.spec).map_err(|error| ApiError::internal(format!("stored revision {} is unreadable: {error}", previous.revision)))?;
     let view = state.orion.view().await?;
     let document = validate_spec(&spec, &view, &state.config.node_id)?;
-    let (artifact, workload) = records_for(&id, &spec, &document, previous.revision, &state.config.node_id)?;
+    let contexts = camera_contexts(&state, &view, spec.bindings.iter()).await?;
+    let (artifact, workload) = records_for(&id, &spec, &document, previous.revision, &state.config.node_id, &contexts)?;
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await?;
     fetch(&state, &id).await.map(Json)
 }
@@ -464,11 +675,47 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
                 graph: pipeline.graph.ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?,
                 bindings: pipeline.bindings,
                 enabled: pipeline.enabled,
+                search_mode: None,
+                full_search_every: None,
             }
         }
     };
     spec.bindings.insert(input, binding);
     deploy(&state, &id, spec).await.map(Json)
+}
+
+/// Write the current camera context (calibration, mount) of `camera` into every engine workload
+/// bound to it, without a new revision: helios-engine pushes the new numbers into the running
+/// graph (a changed lens model recompiles it). Returns the pipelines updated.
+pub async fn refresh_camera_context(state: &SharedState, camera: &str) -> ApiResult<Vec<String>> {
+    let view = state.orion.view().await?;
+    let mut mutations = Vec::new();
+    let mut updated = Vec::new();
+    for workload in engine_workloads(&view) {
+        let bindings = decode_bindings(workload);
+        let using = bindings.iter().filter(|(_, b)| b.resource_id == camera).collect::<Vec<_>>();
+        if using.is_empty() {
+            continue;
+        }
+        let contexts = camera_contexts(state, &view, using.iter().map(|(input, binding)| (*input, *binding))).await?;
+        let mut record = workload.clone();
+        let Some(config) = record.config.as_mut() else { continue };
+        for (input, _) in &using {
+            let prefix = format!("binding.{input}.context.");
+            config.payload.retain(|key, _| !key.starts_with(&prefix));
+            for (field, value) in contexts.get(*input).into_iter().flatten() {
+                config.payload.insert(format!("{prefix}{field}"), value.clone());
+            }
+        }
+        if record.config != workload.config {
+            updated.push(pipeline_id(workload.workload_id.as_str()));
+            mutations.push(DesiredStateMutation::PutWorkload(record));
+        }
+    }
+    if !mutations.is_empty() {
+        state.orion.apply(mutations).await?;
+    }
+    Ok(updated)
 }
 
 pub async fn pipeline_outputs(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Vec<Output>>> {
@@ -539,9 +786,12 @@ mod tests {
             graph: sample_document(),
             bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None })]),
             enabled: true,
+            search_mode: None,
+            full_search_every: None,
         };
         let document = validate_spec(&spec, &view, "node-local").expect("valid spec");
-        let (artifact, workload) = records_for("tags-front", &spec, &document, 3, "node-local").expect("records");
+        let contexts = BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None))]);
+        let (artifact, workload) = records_for("tags-front", &spec, &document, 3, "node-local", &contexts).expect("records");
         assert_eq!(workload.workload_id.as_str(), "pipeline.tags-front");
         assert_eq!(workload.runtime_type.as_str(), ENGINE_RUNTIME);
         assert_eq!(workload.resource_bindings.len(), 1);
@@ -558,12 +808,85 @@ mod tests {
         assert_eq!(graph["format"], "daedalus.graph");
         assert_eq!(graph["graph"]["nodes"].as_array().map(Vec::len), Some(2));
         assert_eq!(pipelines_using(&view, "camera.front"), vec!["tags-front".to_string()]);
+        let config = workload.config.as_ref().expect("config");
+        assert_eq!(config.payload.get("binding.camera.context.fx"), Some(&TypedConfigValue::String("0".into())), "uncalibrated context");
+        assert_eq!(config.payload.get("binding.camera.context.lens"), Some(&TypedConfigValue::String("pinhole".into())));
+    }
+
+    fn group_document(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "format": "daedalus.graph",
+            "schema_version": 1,
+            "requires": [{ "id": "eidos" }],
+            "metadata": {},
+            "graph": {
+                "nodes": [
+                    { "id": "io.host_bridge", "label": "host", "inputs": [], "outputs": ["frame"], "metadata": { "host_bridge": { "type": "Bool", "value": true } } },
+                    { "id": id, "label": "detector", "inputs": ["dictionary", "frame", "full_search_every", "roi_margin"], "outputs": ["detections"],
+                      "const_inputs": [["dictionary", { "type": "String", "value": "apriltag_36h11" }], ["full_search_every", { "type": "Int", "value": 4 }], ["roi_margin", { "type": "Float", "value": 16.0 }]] }
+                ],
+                "edges": [{ "from": { "node": 0, "port": "frame" }, "to": { "node": 1, "port": "frame" } }]
+            }
+        })
+    }
+
+    #[test]
+    fn search_mode_switches_detector_groups() {
+        let view = view_with_camera();
+        let tracked = group_document("eidos:detectors.apriltag_tracked");
+        assert_eq!(search_mode_of(&tracked), Some((SearchMode::Tracked, Some(4))));
+        let camera = BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]);
+        let mut spec = PipelineSpec { name: "x".into(), graph: tracked.clone(), bindings: camera.clone(), enabled: true, search_mode: Some(SearchMode::Full), full_search_every: None };
+
+        let full = effective_graph(&spec, &view).expect("full");
+        assert_eq!(full["graph"]["nodes"][1]["id"], "eidos:detectors.apriltag");
+        assert_eq!(search_mode_of(&full), Some((SearchMode::Full, None)));
+        assert_eq!(full["graph"]["nodes"][1]["const_inputs"].as_array().map(Vec::len), Some(1), "tracking constants removed: {full}");
+        assert_eq!(full["graph"]["nodes"][1]["inputs"], serde_json::json!(["dictionary", "frame"]));
+
+        spec.graph = full.clone();
+        spec.search_mode = Some(SearchMode::Tracked);
+        spec.full_search_every = Some(12);
+        assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("tracked")), Some((SearchMode::Tracked, Some(12))));
+
+        // Unset on a camera pipeline: untracked groups track every 8 frames.
+        spec.search_mode = None;
+        spec.full_search_every = None;
+        assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("default")), Some((SearchMode::Tracked, Some(DEFAULT_FULL_SEARCH_EVERY))));
+        // Without a camera binding the graph is kept.
+        spec.bindings.clear();
+        assert_eq!(search_mode_of(&effective_graph(&spec, &view).expect("kept")), Some((SearchMode::Full, None)));
+
+        spec.search_mode = Some(SearchMode::Full);
+        spec.full_search_every = Some(3);
+        assert!(effective_graph(&spec, &view).is_err(), "full_search_every with full search");
+        spec.graph = sample_document();
+        spec.full_search_every = None;
+        assert!(effective_graph(&spec, &view).is_err(), "no detector group to switch");
+    }
+
+    #[test]
+    fn pose_summary_reports_status_tags_and_field() {
+        let output = |port: &str, value: serde_json::Value| Output { pipeline: "p".into(), port: port.into(), value, observed_at_ms: 5 };
+        assert_eq!(pose_summary(&[output("detections", serde_json::json!({}))]), None);
+        let summary = pose_summary(&[
+            output("pose_solutions", serde_json::json!({ "status": "calibrated", "tags": [{ "id": 1, "best": { "translation": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0, 1.0] }, "best_error_px": 0.2, "ambiguity": 0.1 }] })),
+            output("field_pose", serde_json::json!({ "status": "calibrated", "valid": true, "camera_in_field": { "x": 1.0 }, "robot_in_field": { "x": 0.7 } })),
+        ])
+        .expect("summary");
+        assert_eq!(summary["status"], "calibrated");
+        assert_eq!(summary["tags"][0]["id"], 1);
+        assert_eq!(summary["tags"][0]["translation"][2], 1.0);
+        assert_eq!(summary["field_valid"], true);
+        assert_eq!(summary["robot_in_field"]["x"], 0.7);
+        let uncalibrated = pose_summary(&[output("pose_solutions", serde_json::json!({ "status": "uncalibrated", "tags": [] }))]).expect("summary");
+        assert_eq!(uncalibrated["status"], "uncalibrated");
     }
 
     #[test]
     fn bare_or_unversioned_graphs_are_rejected() {
         let view = view_with_camera();
-        let mut spec = PipelineSpec { name: "x".into(), graph: serde_json::json!({ "nodes": [], "edges": [] }), bindings: BTreeMap::new(), enabled: true };
+        let mut spec = PipelineSpec { name: "x".into(), graph: serde_json::json!({ "nodes": [], "edges": [] }), bindings: BTreeMap::new(), enabled: true, search_mode: None, full_search_every: None };
         let error = validate_spec(&spec, &view, "node-local").expect_err("bare graph JSON");
         assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
         spec.graph = sample_document();
@@ -576,7 +899,7 @@ mod tests {
         let mut view = view_with_camera();
         let runtime = ResourceRecord::builder("engine.runtime.node-local", "execution.runtime", "provider.engine.node-local").label("helios.plugin.loaded=styx.frames").build();
         view.resources.insert("engine.runtime.node-local".into(), runtime);
-        let spec = PipelineSpec { name: "x".into(), graph: sample_document(), bindings: BTreeMap::new(), enabled: true };
+        let spec = PipelineSpec { name: "x".into(), graph: sample_document(), bindings: BTreeMap::new(), enabled: true, search_mode: None, full_search_every: None };
         let error = validate_spec(&spec, &view, "node-local").expect_err("eidos is not loaded");
         assert!(error.message.contains("eidos"));
     }
@@ -589,6 +912,8 @@ mod tests {
             graph: sample_document(),
             bindings: BTreeMap::from([("camera".into(), Binding { resource_id: "camera.nope".into(), ..Binding::default() })]),
             enabled: true,
+            search_mode: None,
+            full_search_every: None,
         };
         assert!(validate_spec(&spec, &view, "node-local").is_err());
     }
