@@ -12,10 +12,14 @@ doctest = false
 [[bin]]
 name = "helios-peripherals"
 path = "src/main.rs"
+# No tests in the binary: `cargo test` does not build and link a test harness for it
+# (`cargo clippy --all-targets` still checks it).
+test = false
 
 [[bin]]
 name = "peripherals_mem_probe"
 path = "src/bin/peripherals_mem_probe.rs"
+test = false
 
 [lints]
 workspace = true

@@ -110,6 +110,49 @@ slot by itself.
 On the device, `/etc/default/helios-image.env` records the image version and
 the exact HeliOS, device package and Orion commits it was built from.
 
+## 5) Gates
+
+`tools/gates.sh` runs what a change must pass, sharing one target directory:
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace`, the UI's `bun run check` and `bun run build`, and
+`gaia validate` for both profiles (`tools/gates.sh backend|ui|gaia` runs one
+group). There is no separate `cargo check` gate: clippy over all targets
+type-checks everything `cargo check --all-targets` does.
+
+What keeps the backend gates cheap (`backend/Cargo.toml` and the crates'
+manifests):
+
+- Debug builds and tests keep line tables only (`[profile.dev] debug =
+  "line-tables-only"`): panics and backtraces keep file and line; full debug
+  info, most of what the compiler writes and the linker reads per test binary,
+  is gone. `--config profile.dev.debug=true` brings it back for a debugger.
+- Binaries without tests have `test = false` and libraries without doc tests
+  `doctest = false`, so `cargo test` links no empty test harness of the
+  engine, API, peripherals, diagnostics and probe binaries and runs no
+  rustdoc pass. clippy still checks those binaries.
+
+Host-only timings (x86-64, 24 threads, shared and loaded host, load average
+35 to 50, a disk that stalls; one run each from a cold target directory with
+the dependencies already downloaded; CPU is user + system):
+
+| Step | Before wall / CPU | After wall / CPU |
+|---|---|---|
+| `cargo check --workspace --all-targets` (cold) | 56 s / 230 s | dropped (clippy covers it) |
+| `cargo clippy --workspace --all-targets` (cold) | 28 to 37 s / 196 to 204 s | 31 s / 195 s |
+| `cargo test --workspace` (cold) | 74 to 79 s / 523 to 530 s | 67 to 72 s / 383 to 433 s |
+| `cargo test --workspace` after touching the engine | 18 to 22 s / 72 to 73 s | 12 to 14 s / 59 to 60 s |
+| `cargo build --workspace` (cold, dev) | 61 to 71 s / 454 to 489 s | 50 to 51 s / 372 to 380 s |
+| `cargo build --workspace` after touching the engine | 12 to 19 s / 7 to 8 s | 6 to 7 s / 5 to 7 s |
+| dev target directory after a cold build and tests | 5.1 GB | 2.8 GB |
+| `bun run check` / `bun run build` | 149 s / 16 s, 939 s / 19 s (wall is the disk) | unchanged |
+| `gaia validate`, full / base-os | 606 s first run (fetching the import sources) / 0.5 s; under 1.5 s CPU | unchanged |
+
+cargo-nextest was tried and not adopted: the tests themselves run in a few
+seconds, so `cargo nextest run --workspace` (56 s / 403 s cold) saved nothing
+over `cargo test`. Optimizing dependencies in the test profile was not
+adopted either: it adds compile time to save test time the suite does not
+spend.
+
 ## Notes
 
 - Image customization lives in `gaia/configs` and `gaia/assets`; see

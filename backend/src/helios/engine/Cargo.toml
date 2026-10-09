@@ -3,6 +3,18 @@ name = "helios-engine"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+path = "src/lib.rs"
+# No doc tests: `cargo test` does not run rustdoc over the crate.
+doctest = false
+
+[[bin]]
+name = "helios-engine"
+path = "src/main.rs"
+# No tests in the binary: `cargo test` does not build and link a test harness for it
+# (`cargo clippy --all-targets` still checks it).
+test = false
+
 [features]
 default = ["plugins"]
 plugins = []
@@ -17,8 +29,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# Used by Daedalus's `declare_plugin!` expansion.
 paste = { workspace = true }
-memmap2 = { workspace = true }
 notify = { workspace = true }
 orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
 # `engine` (serial executor, no worker pool: graphs run on their driver thread),
@@ -43,3 +55,7 @@ eidos-aruco = { workspace = true }
 # Built by `cargo test` before the engine's tests, in the same build, so the tests can load
 # `libhelios_eidos_plugin.so` through the engine's plugin loader.
 helios-eidos-plugin = { path = "../eidos-plugin" }
+
+[package.metadata.cargo-machete]
+# `declare_plugin!` expands to `paste::paste!`.
+ignored = ["paste"]

@@ -6,10 +6,15 @@ edition = "2024"
 [lib]
 name = "helios_diagnostics"
 path = "src/lib.rs"
+# No doc tests: `cargo test` does not run rustdoc over the crate.
+doctest = false
 
 [[bin]]
 name = "helios-diagnostics"
 path = "src/main.rs"
+# No tests in the binary: `cargo test` does not build and link a test harness for it
+# (`cargo clippy --all-targets` still checks it).
+test = false
 
 [lints]
 workspace = true

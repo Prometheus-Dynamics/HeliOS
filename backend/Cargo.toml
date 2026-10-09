@@ -209,9 +209,13 @@ opt-level = 3
 [profile.release.package.eidos-scratch]
 opt-level = 3
 
+# Debug builds and tests (the gates). Line tables only: backtraces and panics keep file and
+# line, without full variable and type debug info, which is most of what the compiler writes
+# and the linker reads for every test binary. Use `--config profile.dev.debug=true` (or a
+# local override) to step through with a debugger.
 [profile.dev]
 opt-level = 0
-debug = true
+debug = "line-tables-only"
 
 # Faster local iteration profile: keeps release-like behavior while avoiding
 # expensive full LTO during the final link step.

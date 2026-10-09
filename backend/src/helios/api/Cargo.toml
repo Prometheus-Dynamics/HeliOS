@@ -17,6 +17,9 @@ doctest = false
 [[bin]]
 name = "helios-api"
 path = "src/main.rs"
+# No tests in the binary: `cargo test` does not build and link a test harness for it
+# (`cargo clippy --all-targets` still checks it).
+test = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -24,7 +27,6 @@ clap = { workspace = true, features = ["derive"] }
 argon2 = { workspace = true }
 getrandom = { workspace = true }
 subtle = { workspace = true }
-async-trait = { workspace = true }
 axum = { workspace = true, features = ["multipart", "ws"] }
 futures-util = { workspace = true }
 hex = { workspace = true }

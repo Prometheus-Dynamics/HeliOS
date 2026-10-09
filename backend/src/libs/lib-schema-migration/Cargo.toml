@@ -3,6 +3,11 @@ name = "lib-schema-migration"
 version.workspace = true
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+# No doc tests: `cargo test` does not run rustdoc over the crate.
+doctest = false
+
 [lints]
 workspace = true
 

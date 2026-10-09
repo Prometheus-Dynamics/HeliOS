@@ -10,6 +10,9 @@ workspace = true
 
 [[bin]]
 name = "helios-vision-probe"
+# No tests in the binary: `cargo test` does not build and link a test harness for it
+# (`cargo clippy --all-targets` still checks it).
+test = false
 path = "src/main.rs"
 
 [dependencies]
