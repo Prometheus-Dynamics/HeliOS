@@ -77,7 +77,7 @@ The plan, on the pinned Daedalus bcc9f33 and Styx 185ad43:
   Preprocessing Across Graphs"), owned by that camera's graph thread: the camera's pipelines
   (AprilTag, ArUco, later ML) become graphs of one domain instead of separate workloads with
   separate `FrameClient`s. Load them with `ExecutionDomain::load_shared_documents`, so nodes
-  they compute identically (mask prep, pyramid, candidate quads; Eidos marks them `shareable`)
+  they compute identically (mask prep, pyramid, candidate quads)
   move into one upstream `shared` graph (Eidos does not mark its nodes `shareable` yet: Upstream); route the camera's `frame` to every graph (one push,
   `Arc` clones); per-camera context (calibration, mount) as held inputs routed to the graphs
   that need it. Enabling or disabling a pipeline is `add_graph`/`remove_graph` between ticks,
