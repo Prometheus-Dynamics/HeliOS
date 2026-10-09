@@ -78,7 +78,8 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
 rev = "62c3caf677c4bf9cef47fcb02b36d0e98f3248ef"
 
-# Orion v4 (main ec91d0a: TypedConfigValue::F64, observed-state watch, session
+# Orion v4 (main 4a6945a: the node stops its systemd watchdog before
+# STOPPING=1; TypedConfigValue::F64 (ec91d0a), observed-state watch, session
 # resume on reconnect, CPU and temperature host metrics, operator access,
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node, orionctl and the HeliOS services speak the same control
@@ -87,7 +88,7 @@ rev = "62c3caf677c4bf9cef47fcb02b36d0e98f3248ef"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "ec91d0a6999389a0aaef0cd11e05c9e419b96b99"
+rev = "4a6945a00e4acfc9d18dcba1e6f527af81dfefac"
 
 [inputs.profile]
 description = "Build profile"
