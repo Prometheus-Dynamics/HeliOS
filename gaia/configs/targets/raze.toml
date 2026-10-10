@@ -79,15 +79,20 @@ tree = "boot"
 src = "@assets/buildroot/boards/raze/os_config.json"
 dest = "os_config.json"
 
+# start4.elf/fixup4.dat are the Pi 4 GPU firmware. A CM5 boots from its EEPROM
+# bootloader and never reads them, and rpi-firmware installs them only for its
+# Pi 4 variant, so they are optional.
 [[image.assembly.files]]
 tree = "boot"
 src = "$provider.buildroot_output/images/rpi-firmware/start4.elf"
 dest = "start4.elf"
+optional = true
 
 [[image.assembly.files]]
 tree = "boot"
 src = "$provider.buildroot_output/images/rpi-firmware/fixup4.dat"
 dest = "fixup4.dat"
+optional = true
 
 # Kernel-built DTBs (bcm2712-rpi-cm5-cm5io, bcm2712-rpi-cm5l-cm5io), from images/ (the
 # rpi-firmware package installs DTBs there only when it is built; the package's build/ tree is
