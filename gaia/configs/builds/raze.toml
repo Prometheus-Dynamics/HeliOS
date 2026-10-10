@@ -44,7 +44,11 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze board package (Atlas dev e565dcf: hat_map.dtb in images/rpi-firmware/overlays, lemnos-orion enabled (lemnosd devices as Orion
+# Raze board package (Atlas dev e8b2833: A/B updater fixes from hardware, the Lemnos pin
+# (8e59039 in the device package), board events numbered by seq (continuing after a torn log
+# line), board-stream (the push channel on TCP 5898 with the hardware
+# topic; device.toml imports it, and expect-full.toml lists its artifact and install), the
+# board-agent null fix and clock sync. Earlier, e8b4ee0 (same contents without the two items above) and e565dcf: hat_map.dtb in images/rpi-firmware/overlays, lemnos-orion enabled (lemnosd devices as Orion
 # resources), Orion 4fadba9, one Orion node id, orion:* may set the fan, the board hardware
 # snapshot in /status; since 934f538: Orion `clock.set`, the eased
 # LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2 (HeliOS selects
@@ -74,9 +78,11 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "e565dcfb913f4cb468f49c28b9b1cadea9f0ff20"
+rev = "e8b2833d4ab28ec4fd3780cc5ed75196ac8cd1db"
 
-# Lemnos (dev b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`). The Raze layer imports Lemnos's lemnosd layer from a
+# Lemnos (dev 8e59039: subscribe replies return the granted period, boot-clock timestamps and
+# the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
+# The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
 # sources, so it is declared here, at the commit the Atlas package is tested
 # with (Atlas devices/README.md; capabilities.hardware-service.gaia_import.rev
@@ -90,9 +96,10 @@ rev = "e565dcfb913f4cb468f49c28b9b1cadea9f0ff20"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "b2634fc1368b659f7ce25b5efdcc90980012c34a"
+rev = "8e5903954668ad0b77d211e8cdb75747368f7daa"
 
-# Orion v4 (main 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
+# Orion v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
+# 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
 # `ActionCaller`), a wire change, so every Orion consumer moves together. Earlier, 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
 # STOPPING=1; TypedConfigValue::F64 (ec91d0a), observed-state watch, session
 # resume on reconnect, CPU and temperature host metrics, operator access,
@@ -103,7 +110,7 @@ rev = "b2634fc1368b659f7ce25b5efdcc90980012c34a"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "4fadba9fd81d376375dbe9a3c7a6ccc6416685ae"
+rev = "f3efb261151f21b54743cd599d5c2216c5783737"
 
 [inputs.profile]
 description = "Build profile"
