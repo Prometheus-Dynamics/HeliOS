@@ -15,6 +15,9 @@ config_overrides = [
   ["BR2_PACKAGE_STYX_OV9282", "y"],
   ["BR2_PACKAGE_STYX_RP1_CFE", "y"],
   ["BR2_PACKAGE_STYX_PISPBE", "y"],
+  # The device package installs only the overlays it loads (bcm2712d0 plus its
+  # own); HeliOS's config.txt also turns the CM5's radios off, so add those two.
+  ["BR2_PACKAGE_RPI_FIRMWARE_DTB_OVERLAYS", "\"bcm2712d0 disable-wifi-pi5 disable-bt-pi5\""],
   # host veritysetup, for Gaia's dm-verity step on the dynamic-slot root images (a host tool;
   # nothing lands in the target).
   ["BR2_PACKAGE_HOST_CRYPTSETUP", "y"],
