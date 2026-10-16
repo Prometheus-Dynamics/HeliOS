@@ -71,7 +71,7 @@ imports = [
 # network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
 # 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2
 # with the Raze trims and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915,
-# Atlas dev f3a5367: slot-init as the initramfs /init; 2203c3b: lean firmware overlays (only what the board loads), smaller slot-init; 2bf3dfb: kernel release from /proc in the slot /init; 79ac2f9: slot-init finds partitions itself; f393e9f: slot initramfs mounts /proc /sys /dev with a console, logs failures to p1; 2aadd1c: e2fsck with its libraries in the slot initramfs; 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
+# Atlas dev 15d5a11: slot /init refuses cut-short images, lean slot initramfs (73075a5); f3a5367: slot-init as the initramfs /init; 2203c3b: lean firmware overlays (only what the board loads), smaller slot-init; 2bf3dfb: kernel release from /proc in the slot /init; 79ac2f9: slot-init finds partitions itself; f393e9f: slot initramfs mounts /proc /sys /dev with a console, logs failures to p1; 2aadd1c: e2fsck with its libraries in the slot initramfs; 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
 # slot-management and live-stream work.
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
@@ -80,7 +80,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "f3a536750bf16441c73b946b4230862a6caf6731"
+rev = "15d5a111ddb91fc865e090e75b15ee0a140566be"
 
 # Lemnos (dev 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
