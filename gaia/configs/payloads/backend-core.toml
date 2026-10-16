@@ -12,6 +12,15 @@ identity_ignore = ["target", ".gaia"]
 refresh = "never"
 pin = "locked"
 
+# Eidos, a private repository: Gaia fetches it on the host (with the host's
+# credentials) and serves the commit backend/Cargo.lock pins to cargo from its
+# mirror, so the build container needs no credentials.
+[[sources]]
+id = "eidos"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
+branch = "main"
+
 [[artifacts]]
 id = "helios-api"
 kind = "rust"
@@ -20,6 +29,8 @@ source = "backend-workspace"
 # One cargo invocation for every backend package (Gaia build group), so shared
 # crates resolve the same features in the engine and its plugins.
 build_group = "helios-backend"
+# Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-api"
@@ -43,6 +54,8 @@ source = "backend-workspace"
 # One cargo invocation for every backend package (Gaia build group), so shared
 # crates resolve the same features in the engine and its plugins.
 build_group = "helios-backend"
+# Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-engine"
@@ -66,6 +79,8 @@ source = "backend-workspace"
 # One cargo invocation for every backend package (Gaia build group), so shared
 # crates resolve the same features in the engine and its plugins.
 build_group = "helios-backend"
+# Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "helios-diagnostics"
@@ -99,6 +114,8 @@ source = "backend-workspace"
 # One cargo invocation for every backend package (Gaia build group), so shared
 # crates resolve the same features in the engine and its plugins.
 build_group = "helios-backend"
+# Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 target_name = "libhelios_eidos_plugin.so"
