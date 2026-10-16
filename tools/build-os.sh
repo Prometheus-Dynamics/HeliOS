@@ -68,6 +68,9 @@ case "${1:-}" in
     if [[ "$profile" == "full" ]]; then
       ensure_ui_build
     fi
-    exec gaia run "$build_file" --set "input.profile=$profile" "$@"
+    # The slot id carries this checkout's commit (input defaults can't use project tokens).
+    commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+    exec gaia run "$build_file" --set "input.profile=$profile" \
+      --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit" "$@"
     ;;
 esac

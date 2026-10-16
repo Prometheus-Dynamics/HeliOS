@@ -30,6 +30,8 @@ config_overrides = [
   # post-build: the read-only root's fstab, mount points and /run links.
   # post-image: checks rootfs.erofs fits its 512 MiB slot, makes data.ext4.
   ["BR2_ROOTFS_POST_BUILD_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-build.sh\""],
+  # post-fakeroot: /etc/slot.json from the slot identity Gaia stages (slots fragment).
+  ["BR2_ROOTFS_POST_FAKEROOT_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-fakeroot.sh\""],
   ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-image.sh\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/config.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/cmdline.txt\""],
