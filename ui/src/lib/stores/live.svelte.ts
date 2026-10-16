@@ -5,6 +5,7 @@
 
 import { dictionaryLabel } from "#lib/format.js";
 import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
+import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
 import type * as W from "#lib/api/types.js";
@@ -44,8 +45,13 @@ class LiveState {
 
 export const liveState = new LiveState();
 
+/** How often the camera overlays read pipeline outputs: helios-engine publishes them every 250 ms. */
+const OUTPUTS_POLL_MS = 250;
+
 export class LiveCluster {
   private pipelines = new Map<string, W.Pipeline>();
+  /** The latest detections per camera resource, from its running pipeline's `detections` output. */
+  private detections = $state<Record<string, Detection[]>>({});
   private snapshot: Partial<DeviceSnapshot> = {};
   private timers: number[] = [];
   private unsubscribers: (() => void)[] = [];
@@ -77,6 +83,7 @@ export class LiveCluster {
     this.timers.push(window.setInterval(() => void this.refreshDevice(), 10_000));
     this.timers.push(window.setInterval(() => void this.refreshCameras(), 15_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
+    this.timers.push(window.setInterval(() => void this.refreshOutputs(), OUTPUTS_POLL_MS));
     return () => {
       for (const t of this.timers) clearInterval(t);
       for (const u of this.unsubscribers) u();
@@ -170,6 +177,33 @@ export class LiveCluster {
     this.data.streams = toStreams(pipelines);
     const plugins = await this.guard("plugins", () => api.plugins());
     if (plugins) liveState.plugins = plugins.plugins;
+  }
+
+  /** Detections for each camera with a running pipeline (one small request for all of them). */
+  async refreshOutputs() {
+    if (typeof document !== "undefined" && document.hidden) return;
+    const running = [...this.pipelines.values()].filter((p) => p.state === "running");
+    if (!running.length) {
+      if (Object.keys(this.detections).length) this.detections = {};
+      return;
+    }
+    let outputs: W.PipelineOutput[];
+    try {
+      outputs = await api.outputs();
+    } catch {
+      return;
+    }
+    const next: Record<string, Detection[]> = {};
+    for (const p of running) {
+      const camera = Object.values(p.bindings).find((b) => this.data.cameras.some((c) => c.resourceId === b.resource_id))?.resource_id;
+      const out = outputs.find((o) => o.pipeline === p.id && o.port === "detections")?.value as { detections?: { id: number; corners: { x: number; y: number }[] }[] } | undefined;
+      if (camera && out?.detections) next[camera] = out.detections.map((d) => ({ id: d.id, corners: d.corners.map((c) => [c.x, c.y] as [number, number]) }));
+    }
+    this.detections = next;
+  }
+
+  detectionsFor(cameraId: string): Detection[] {
+    return this.detections[cameraId] ?? [];
   }
 
   async refreshResources() {

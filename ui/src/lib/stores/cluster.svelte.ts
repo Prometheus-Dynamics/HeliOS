@@ -127,6 +127,7 @@ class ClusterStore {
   }
 
   detectionsFor(camera: Camera): Detection[] {
+    if (this.live) return this.live.detectionsFor(camera.resourceId);
     return this.feed?.frames[this.feedIndex(camera)]?.markers ?? [];
   }
 
