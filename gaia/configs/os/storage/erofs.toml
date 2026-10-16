@@ -99,3 +99,6 @@ stage_services = ["data-setup-service"]
 # compressed raw disk images in a repo-level output folder for flashing/distribution.
 # The same .img.xz updates a running board (the device package's writer).
 archive_name = "${project.root_dir}/output/${build.name}-${build.version}.img.xz"
+# The A/B disk is the main image; the slots fragment's first-flash disk and bundle
+# are published next to it.
+disk = "sdcard"
