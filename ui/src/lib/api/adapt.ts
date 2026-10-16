@@ -325,7 +325,7 @@ export function nodeTimes(p: W.Pipeline, labels: string[]): Record<string, numbe
   const out: Record<string, number> = {};
   for (const label of labels) {
     const own = nodes.filter((n) => n.label === label || n.label.startsWith(`${label}/`) || n.label.startsWith(`${label}.`) || n.label.startsWith(`${label}:`));
-    if (own.length) out[label] = own.reduce((sum, n) => sum + n.handler_us_per_tick, 0) / 1000;
+    if (own.length) out[label] = own.reduce((sum, n) => sum + (n.handler_us_per_tick || n.total_us_per_tick || 0), 0) / 1000;
   }
   return out;
 }

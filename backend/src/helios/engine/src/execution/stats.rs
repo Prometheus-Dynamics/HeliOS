@@ -249,6 +249,8 @@ impl GraphMetrics {
                     "handler_us_mean": round2(node.handler.as_secs_f64() * 1e6 / calls),
                     "total_us_mean": round2(node.total.as_secs_f64() * 1e6 / calls),
                     "handler_us_per_tick": per_tick(node.handler),
+                    // Wall time in the node per tick (the timing level records totals only).
+                    "total_us_per_tick": per_tick(node.total),
                 })
             })
             .collect::<Vec<_>>();

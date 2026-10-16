@@ -527,6 +527,8 @@ export interface PipelineMetricsNode {
   handler_us_mean: number;
   total_us_mean: number;
   handler_us_per_tick: number;
+  /** Wall time per tick (recorded at every metrics level; handler time needs `detailed`). */
+  total_us_per_tick?: number;
 }
 
 export interface PipelineMetricsWindow {
