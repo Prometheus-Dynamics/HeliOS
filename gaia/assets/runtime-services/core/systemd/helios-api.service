@@ -23,7 +23,10 @@ TimeoutStopSec=45
 User=root
 Group=root
 WorkingDirectory=/var/lib/helios
-StateDirectory=helios
+# No StateDirectory=helios: /var/lib/helios is helios-data-setup's bind of /data/helios,
+# and systemd re-owns a StateDirectory recursively to the unit's user and group,
+# which took orion-node's /var/lib/helios/orion away from the orion user. Root
+# needs no grant to write there (no ProtectSystem=).
 LogsDirectory=helios
 LimitNOFILE=65536
 TasksMax=infinity
