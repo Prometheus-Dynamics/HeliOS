@@ -46,6 +46,11 @@ config_overrides = [
   # copy: two copies make mkusers fail), and in the full profile Orion's
   # (runtime-services/backend-core.toml).
   ["BR2_PACKAGE_SYSTEMD_SYSUSERS", "y"],
+  # No Buildroot login banner: post-build.sh links /etc/issue to /run/helios/issue
+  # (helios-update-issue writes it at boot), and target-finalize writing the
+  # banner through that link (dangling at build time) failed every Buildroot
+  # run after the first.
+  ["BR2_TARGET_GENERIC_ISSUE", "\"\""],
   # With sysusers on, Buildroot's openssh declares `sshd` only for sysusers,
   # so its user comes from a users table (sshd refuses to start without it).
   # runtime-services/backend-core.toml repeats this table in its own list.
