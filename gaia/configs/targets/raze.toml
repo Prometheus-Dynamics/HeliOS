@@ -15,6 +15,8 @@ config_overrides = [
   ["BR2_PACKAGE_STYX_OV9282", "y"],
   ["BR2_PACKAGE_STYX_RP1_CFE", "y"],
   ["BR2_PACKAGE_STYX_PISPBE", "y"],
+  # The device package's kernel trim (pass 2, -O2): smaller kernel and module set, board-tested.
+  ["BR2_RAZE_KERNEL_TRIM", "y"],
   # The device package installs only the overlays it loads (bcm2712d0 plus its
   # own); HeliOS's config.txt also turns the CM5's radios off, so add those two.
   ["BR2_PACKAGE_RPI_FIRMWARE_DTB_OVERLAYS", "\"bcm2712d0 disable-wifi-pi5 disable-bt-pi5\""],
