@@ -51,3 +51,9 @@ export function pct(fraction: number): string {
 export function sentence(text: string): string {
   return text.length ? text[0].toUpperCase() + text.slice(1) : text;
 }
+
+/** "apriltag_16h5" as "AprilTag 16h5". */
+export function dictionaryLabel(d: string): string {
+  const [family, ...rest] = d.split("_");
+  return `${family === "apriltag" ? "AprilTag" : family === "aruco" ? "ArUco" : family} ${rest.join(" ")}`;
+}

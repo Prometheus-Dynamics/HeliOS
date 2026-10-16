@@ -21,7 +21,43 @@ function toValue(value: ParamValue): W.DaedalusValue {
 function fromValue(value: W.DaedalusValue | undefined): ParamValue | undefined {
   if (!value || !("value" in value)) return undefined;
   const v = value.value;
+  // An enum (`{ name, value }`) edits as its variant name.
+  if (value.type === "Enum" && v && typeof v === "object" && typeof (v as { name?: unknown }).name === "string") return (v as { name: string }).name;
   return typeof v === "number" || typeof v === "string" || typeof v === "boolean" ? v : undefined;
+}
+
+/** `value` encoded with the type of the const input it replaces (an enum stays an enum, a
+ * float stays a float even when it is a whole number). */
+function retype(value: ParamValue, original: W.DaedalusValue): W.DaedalusValue {
+  if (fromValue(original) === value) return original;
+  switch (original.type) {
+    case "Enum":
+      return { type: "Enum", value: { name: String(value), value: null } };
+    case "Float":
+      return { type: "Float", value: Number(value) };
+    case "Int":
+      return { type: "Int", value: Math.round(Number(value)) };
+    case "Bool":
+      return { type: "Bool", value: Boolean(value) };
+    case "String":
+      return { type: "String", value: String(value) };
+    default:
+      return toValue(value);
+  }
+}
+
+/** A node's const inputs from its edited parameters, keeping the original types and order. */
+function constInputs(n: GraphNode): [string, W.DaedalusValue][] {
+  const raw = (n.raw as W.DaedalusNode | undefined)?.const_inputs ?? [];
+  const seen = new Set<string>();
+  const out: [string, W.DaedalusValue][] = [];
+  for (const [name, original] of raw) {
+    seen.add(name);
+    if (name in n.params) out.push([name, retype(n.params[name], original)]);
+    else if (fromValue(original) === undefined) out.push([name, original]); // not editable here: kept as is
+  }
+  for (const [name, value] of Object.entries(n.params)) if (!seen.has(name)) out.push([name, toValue(value)]);
+  return out;
 }
 
 /**
@@ -40,22 +76,28 @@ export function toDaedalus(graph: GraphDocument): W.DaedalusGraphDocument {
   return {
     format: "daedalus.graph",
     schema_version: 1,
-    requires: graph.requires.map((r) => ({ id: r.id })),
+    requires: graph.requires.map((r) => (r.version ? { id: r.id, version: r.version } : { id: r.id })),
     metadata: {
+      ...(graph.metadata ?? {}),
       [EDITOR_KEY]: {
         positions: Object.fromEntries(graph.nodes.map((n) => [n.id, { x: Math.round(n.position.x), y: Math.round(n.position.y) }])),
         edges: graph.edges.map((e) => e.id),
       },
     },
     graph: {
-      nodes: graph.nodes.map((n) => ({
-        id: n.type,
-        label: n.id,
-        inputs: ports(n, "inputs"),
-        outputs: ports(n, "outputs"),
-        const_inputs: Object.entries(n.params).map(([name, value]) => [name, toValue(value)] as [string, W.DaedalusValue]),
-        metadata: { "helios.title": { type: "String", value: n.label } },
-      })),
+      nodes: graph.nodes.map((n) => {
+        const raw = n.raw as W.DaedalusNode | undefined;
+        return {
+          ...(raw ?? {}),
+          id: n.type,
+          label: n.id,
+          inputs: raw && raw.id === n.type ? raw.inputs : ports(n, "inputs"),
+          outputs: raw && raw.id === n.type ? raw.outputs : ports(n, "outputs"),
+          const_inputs: constInputs(n),
+          metadata: { ...(raw?.metadata ?? {}), "helios.title": { type: "String", value: n.label } },
+        };
+      }),
+      ...(graph.graphMetadata ? { metadata: graph.graphMetadata } : {}),
       edges: graph.edges
         .filter((e) => index.has(e.from.node) && index.has(e.to.node))
         .map((e) => ({ from: { node: index.get(e.from.node)!, port: e.from.port }, to: { node: index.get(e.to.node)!, port: e.to.port } })),
@@ -81,10 +123,12 @@ export function fromDaedalus(doc: W.DaedalusGraphDocument | null): GraphDocument
       label: typeof title === "string" ? title : (CATALOG_BY_ID[n.id]?.title ?? n.id),
       params,
       position: editor.positions?.[ids[i]] ?? { x: (i % 4) * 270, y: Math.floor(i / 4) * 200 },
+      raw: n,
     };
   });
   const edges: GraphEdge[] = doc.graph.edges.map((e, i) => ({ id: editor.edges?.[i] ?? `e${i + 1}`, from: { node: ids[e.from.node], port: e.from.port }, to: { node: ids[e.to.node], port: e.to.port } }));
-  return { format: "daedalus.graph", schema_version: 1, requires: doc.requires.map((r) => ({ id: r.id })), nodes, edges };
+  const { [EDITOR_KEY]: _editor, ...metadata } = (doc.metadata ?? {}) as Record<string, unknown>;
+  return { format: "daedalus.graph", schema_version: 1, requires: doc.requires.map((r) => ({ id: r.id, version: r.version ?? null })), nodes, edges, metadata, graphMetadata: doc.graph.metadata };
 }
 
 // --- Device ------------------------------------------------------------------
@@ -174,15 +218,23 @@ function mountText(mount: W.CameraMount | null): string {
   return `x ${mount.x.toFixed(2)} y ${mount.y.toFixed(2)} z ${mount.z.toFixed(2)} m · yaw ${Math.round(mount.yaw)}° pitch ${Math.round(mount.pitch)}°`;
 }
 
+/** A camera's display name and detail from the device string Styx reports: "ov9782 (kernel
+ * driver i2c 10-0060)" shows as "OV9782", with "kernel driver i2c 10-0060" as its detail. */
+export function cameraLabel(raw: string): { name: string; detail: string } {
+  const m = /^\s*([A-Za-z0-9_-]+)\s*\((.+)\)\s*$/.exec(raw);
+  return m ? { name: m[1].toUpperCase(), detail: m[2] } : { name: raw, detail: "" };
+}
+
 export function toCamera(camera: W.Camera): Camera {
   const capture = camera.live?.captures[0];
+  const label = cameraLabel(camera.name);
   const mode = parseMode(capture?.mode);
   const ae = capture?.ae_state?.toLowerCase();
   return {
     resourceId: camera.id,
-    name: camera.name,
+    name: label.name,
     nodeId: camera.node_id,
-    sensor: camera.live?.sources[0]?.name ?? camera.labels.sensor ?? camera.name,
+    sensor: label.detail || (camera.live?.sources[0]?.name ?? camera.labels.sensor ?? camera.name),
     backend: camera.backend ? `styx ${camera.backend}` : "styx",
     mount: mountText(camera.mount),
     settings: {
@@ -265,9 +317,30 @@ export function outputStreamId(pipeline: string, port: string): string {
   return `output.${pipeline}.${port}`;
 }
 
+/** Per graph node, the milliseconds per tick its Daedalus stages took over the metrics window.
+ * A node's stages are the planned nodes with its label, or whose label starts with it (a node
+ * group's internal stages: `detector/plan`, `detector.mask`, ...). */
+export function nodeTimes(p: W.Pipeline, labels: string[]): Record<string, number> {
+  const nodes = p.metrics?.window?.nodes ?? [];
+  const out: Record<string, number> = {};
+  for (const label of labels) {
+    const own = nodes.filter((n) => n.label === label || n.label.startsWith(`${label}/`) || n.label.startsWith(`${label}.`) || n.label.startsWith(`${label}:`));
+    if (own.length) out[label] = own.reduce((sum, n) => sum + n.handler_us_per_tick, 0) / 1000;
+  }
+  return out;
+}
+
+/** The q-quantile of a sample (0 for none). */
+function quantile(values: number[], q: number): number {
+  const v = values.filter((x) => x > 0).sort((a, b) => a - b);
+  return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : 0;
+}
+
 export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): Workload {
   const fps = Number(p.telemetry?.fps ?? 0);
   const tick = Number(p.telemetry?.last_tick_ms ?? 0);
+  const graph = fromDaedalus(p.graph);
+  const history = [...(previous?.perf.tickHistory ?? []), tick].slice(-60);
   return {
     id: p.id,
     name: p.name,
@@ -276,9 +349,9 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): 
     state: workloadState(p),
     restarts: previous?.restarts ?? 0,
     bindings: Object.fromEntries(Object.entries(p.bindings).map(([input, b]) => [input, b.resource_id])),
-    graph: fromDaedalus(p.graph),
+    graph,
     outputs: p.outputs.map((o) => outputStreamId(p.id, o.port)),
-    perf: { tickP50Ms: tick, tickP99Ms: tick, fps, memMiB: 0, nodeMs: {}, tickHistory: [...(previous?.perf.tickHistory ?? []), tick].slice(-60) },
+    perf: { tickP50Ms: quantile(history, 0.5), tickP99Ms: quantile(history, 0.99), fps, memMiB: 0, nodeMs: nodeTimes(p, graph.nodes.map((n) => n.id)), tickHistory: history },
   };
 }
 

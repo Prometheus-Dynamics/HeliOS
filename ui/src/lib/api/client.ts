@@ -23,6 +23,7 @@ import type {
   Metrics,
   NewApiToken,
   Pipeline,
+  PipelineTemplate,
   PipelineOutput,
   PipelineSpec,
   ProcessInfo,
@@ -189,6 +190,7 @@ export const api = {
 
   // Pipelines
   pipelines: () => request<Pipeline[]>("GET", "/v1/pipelines"),
+  pipelineTemplates: () => request<PipelineTemplate[]>("GET", "/v1/pipelines/templates"),
   pipeline: (id: string) => request<Pipeline>("GET", `/v1/pipelines/${enc(id)}`),
   createPipeline: (spec: PipelineSpec & { id?: string }) => request<Pipeline>("POST", "/v1/pipelines", { body: spec }),
   putPipeline: (id: string, spec: PipelineSpec) => request<Pipeline>("PUT", `/v1/pipelines/${enc(id)}`, { body: spec }),

@@ -18,7 +18,7 @@
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { calibration } from "#lib/stores/calibration.svelte.js";
   import { robot } from "#lib/stores/robot.svelte.js";
-  import { guide } from "#lib/core/guide.svelte.js";
+  import { DICTIONARIES, guide } from "#lib/core/guide.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
@@ -141,6 +141,12 @@
           <Seg label="Job" value={guide.job(camera)} options={[{ value: "apriltag", label: "AprilTag" }, { value: "aruco", label: "ArUco" }, { value: "view", label: "Video only" }]} onchange={(v) => guide.setJob(camera, v)} />
         {/if}
       </Prop>
+      {#if !camera.foreign && guide.job(camera) !== "view"}
+        {@const job = guide.job(camera) as "apriltag" | "aruco"}
+        <Prop label="Tag family" help="The kind of tags to look for. A family other than the tags' own finds nothing at all.">
+          <Choice label="Tag family" value={guide.dictionary(camera)} options={DICTIONARIES[job]} onchange={(v) => guide.setDictionary(camera, v)} />
+        </Prop>
+      {/if}
       {#if active}
         <Prop label="Pipeline">
           <button type="button" class="link" onclick={() => { selection.select({ kind: "workload", id: active.id }); shell.go("pipelines"); }}>{identity.name(active.id, active.name)} · r{active.revision} · {active.perf.tickP50Ms.toFixed(2)} ms</button>

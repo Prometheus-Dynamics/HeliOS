@@ -3,6 +3,8 @@
 // With `?mock=1` (or VITE_HELIOS_MOCK=1) it runs the simulated robot from
 // mock.ts instead, for UI work without a device.
 
+import { tableFor, templateGraph } from "#lib/graph/graph.js";
+import { dictionaryLabel } from "#lib/format.js";
 import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "#lib/api/mock.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
@@ -232,6 +234,22 @@ class ClusterStore {
     if (!w) return;
     w.bindings = { ...w.bindings, [input]: resourceId };
     this.log(w.nodeId, "helios-runner", "info", `${w.name}: ${input} bound to ${resourceId}`);
+  }
+
+  /** A detection job on a camera, from the device's own template (mock: the demo graph). */
+  async createJob(name: string, nodeId: string, cameraId: string, family: "apriltag" | "aruco", dictionary: string): Promise<string> {
+    if (this.live) return this.live.createJob(name, cameraId, family, dictionary);
+    return this.createWorkload(name, nodeId, cameraId, templateGraph(family, tableFor(nodeId)));
+  }
+
+  /** Change the tag family a pipeline decodes. */
+  async setDictionary(id: string, dictionary: string) {
+    if (this.live) return this.live.setDictionary(id, dictionary);
+    const w = this.workload(id);
+    const node = w?.graph.nodes.find((n) => n.params.dictionary !== undefined);
+    if (!w || !node) return;
+    node.params.dictionary = dictionary;
+    toasts.success(`${w.name} now finds ${dictionaryLabel(dictionary)}`);
   }
 
   async createWorkload(name: string, nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {

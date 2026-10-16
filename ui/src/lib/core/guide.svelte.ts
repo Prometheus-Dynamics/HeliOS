@@ -4,7 +4,6 @@
 
 import type { Camera, Workload } from "#lib/api/model.js";
 import { identity } from "#lib/core/identity.svelte.js";
-import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import type { IconName } from "#lib/ui/icons.js";
 import { calibration } from "#lib/stores/calibration.svelte.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
@@ -20,14 +19,26 @@ export const JOBS: { id: Job; title: string; detail: string; icon: IconName }[] 
   { id: "view", title: "Just show video", detail: "No detection. Use it as a driver camera.", icon: "eye" },
 ];
 
+/** The tag families a job can use, most common first (FRC uses 36h11 since 2024, 16h5 before). */
+export const DICTIONARIES: Record<"apriltag" | "aruco", { value: string; label: string }[]> = {
+  apriltag: [
+    { value: "apriltag_36h11", label: "36h11 (FRC 2024+)" },
+    { value: "apriltag_16h5", label: "16h5 (FRC 2023 and earlier)" },
+    { value: "apriltag_25h9", label: "25h9" },
+    { value: "apriltag_36h10", label: "36h10" },
+  ],
+  aruco: ["4x4", "5x5", "6x6", "7x7"].flatMap((size) => [50, 100, 250, 1000].map((n) => ({ value: `aruco_${size}_${n}`, label: `${size} · ${n}` }))),
+};
+
+/** The dictionary a pipeline's detector decodes ("" without one). */
 function dictionaryOf(w: Workload): string {
-  const d = w.graph.nodes.find((n) => n.type === "eidos:aruco.decode");
+  const d = w.graph.nodes.find((n) => n.params.dictionary !== undefined);
   return String(d?.params.dictionary ?? "");
 }
 
 class GuideStore {
   workloadsFor(c: Camera): Workload[] {
-    return cluster.workloads.filter((w) => w.bindings.camera === c.resourceId);
+    return cluster.workloads.filter((w) => Object.values(w.bindings).includes(c.resourceId));
   }
 
   /** The pipeline doing this camera's job right now, if any. */
@@ -38,7 +49,19 @@ class GuideStore {
   job(c: Camera): Job {
     const w = this.active(c);
     if (!w) return "view";
-    return dictionaryOf(w).startsWith("apriltag") ? "apriltag" : "aruco";
+    const d = dictionaryOf(w);
+    return d.startsWith("aruco") ? "aruco" : d ? "apriltag" : "view";
+  }
+
+  /** The tag family this camera's job decodes ("" with no detection job). */
+  dictionary(c: Camera): string {
+    const w = this.active(c);
+    return w ? dictionaryOf(w) : "";
+  }
+
+  async setDictionary(c: Camera, dictionary: string) {
+    const w = this.active(c);
+    if (w && dictionaryOf(w) !== dictionary) await cluster.setDictionary(w.id, dictionary);
   }
 
   /** Something is wrong with this camera, in words. */
@@ -65,7 +88,7 @@ class GuideStore {
       return;
     }
     const name = `${job === "apriltag" ? "AprilTags" : "ArUco"} · ${identity.name(c.resourceId, c.name)}`;
-    await cluster.createWorkload(name, c.nodeId, c.resourceId, templateGraph(job, tableFor(c.nodeId)));
+    await cluster.createJob(name, c.nodeId, c.resourceId, family, DICTIONARIES[family][0].value);
   }
 
   /** Where this camera's results go for robot code. */

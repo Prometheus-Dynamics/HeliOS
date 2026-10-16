@@ -3,6 +3,7 @@
 // turns the screens' actions into API calls. Features the device has no
 // backend for yet (501) are reported once, as "not available".
 
+import { dictionaryLabel } from "#lib/format.js";
 import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
@@ -290,6 +291,32 @@ export class LiveCluster {
   async bindInput(id: string, input: string, resourceId: string) {
     const existing = this.pipelines.get(id)?.bindings[input];
     await this.act("Bind input", () => api.bindInput(id, input, { ...(existing ?? {}), resource_id: resourceId }), () => `${this.name(id)}: ${input} bound to ${resourceId}`);
+    await this.refreshPipelines();
+  }
+
+  /** Deploy the device's own template for `family` on `cameraId`: its camera input bound (with the
+   * ISP's half level attached, much cheaper than the detector building it) and its tag family set. */
+  async createJob(name: string, cameraId: string, family: "apriltag" | "aruco", dictionary?: string): Promise<string> {
+    const templates = await this.guard("templates", () => api.pipelineTemplates());
+    const template = templates?.find((t) => t.family === family);
+    if (!template) {
+      toasts.error(`This device has no ${family} template`);
+      return "";
+    }
+    const created = await this.act(
+      "Create pipeline",
+      () => api.createPipeline({ name, graph: template.graph, bindings: { [template.camera_input]: { resource_id: cameraId, pyramid: 1 } }, dictionary: dictionary ?? template.dictionary ?? undefined }),
+      (p) => `${p.name} deployed`,
+    );
+    await this.refreshPipelines();
+    return created?.id ?? "";
+  }
+
+  /** Redeploy a pipeline with another tag family (the same graph, bindings and settings). */
+  async setDictionary(id: string, dictionary: string) {
+    const p = this.pipelines.get(id);
+    if (!p?.graph) return;
+    await this.act("Tag family", () => api.putPipeline(id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
     await this.refreshPipelines();
   }
 

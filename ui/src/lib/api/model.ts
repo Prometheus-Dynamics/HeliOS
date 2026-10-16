@@ -123,6 +123,9 @@ export interface GraphNode {
   label: string;
   params: Record<string, number | string | boolean>;
   position: { x: number; y: number };
+  /** The Daedalus node this came from (bundle, compute, metadata, typed const inputs), so
+   * saving writes it back unchanged apart from the parameters edited here. */
+  raw?: unknown;
 }
 
 export interface GraphEdge {
@@ -139,9 +142,13 @@ export interface GraphEdge {
 export interface GraphDocument {
   format: "daedalus.graph";
   schema_version: 1;
-  requires: { id: string }[];
+  requires: { id: string; version?: string | null }[];
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** The document's own metadata (title, ...), kept on save. */
+  metadata?: Record<string, unknown>;
+  /** The graph's metadata, kept on save. */
+  graphMetadata?: Record<string, unknown>;
 }
 
 export type WorkloadState = "running" | "starting" | "quarantined" | "stopped";

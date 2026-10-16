@@ -331,6 +331,17 @@ export interface PipelineSpec {
   margin_growth_misses?: number;
   /** The field layout (`/v1/field-layouts`) of the graph's multi-tag pose; unset follows the selected one. */
   field_layout?: string;
+  /** The tag family the graph's Eidos detector groups decode (`apriltag_16h5`, ...); unset keeps the graph's. */
+  dictionary?: string;
+}
+
+/** `GET /v1/pipelines/templates`: a graph helios-engine ships, deployable with a camera on `camera_input`. */
+export interface PipelineTemplate {
+  id: string;
+  family: "apriltag" | "aruco";
+  dictionary: string | null;
+  camera_input: string;
+  graph: DaedalusGraphDocument;
 }
 
 export type SearchMode = "full" | "tracked";
@@ -399,6 +410,8 @@ export interface Pipeline {
   plugins: string[];
   session: { status: string; message: string | null; observed_at_ms: number } | null;
   telemetry: { fps?: number; last_tick_ms?: number; frames_processed?: number; frames_failed?: number; source_connected?: boolean; last_error?: string | null; [key: string]: unknown } | null;
+  /** Daedalus per-node timings over the last window and since start (null while metrics are off). */
+  metrics?: { window?: PipelineMetricsWindow; total?: PipelineMetricsWindow; [key: string]: unknown } | null;
   outputs: PipelineOutput[];
   search_mode: SearchMode | null;
   full_search_every: number | null;
@@ -504,4 +517,20 @@ export interface ApiEvent<T = unknown> {
   type: string;
   at_ms: number;
   data: T;
+}
+
+export interface PipelineMetricsNode {
+  index: number;
+  label: string;
+  id: string;
+  calls: number;
+  handler_us_mean: number;
+  total_us_mean: number;
+  handler_us_per_tick: number;
+}
+
+export interface PipelineMetricsWindow {
+  ticks?: number;
+  nodes?: PipelineMetricsNode[];
+  [key: string]: unknown;
 }
