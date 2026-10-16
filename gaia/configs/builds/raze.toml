@@ -78,10 +78,10 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "e8b2833d4ab28ec4fd3780cc5ed75196ac8cd1db"
+rev = "8d6c05886537c6f0069e764616da958e9dcf2d73"
 
-# Lemnos (dev 8e59039: subscribe replies return the granted period, boot-clock timestamps and
-# the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
+# Lemnos (dev ce3dda3, the commit the PhotonVision Raze images ship; earlier 8e59039: subscribe
+# replies return the granted period, boot-clock timestamps and the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
 # The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
 # sources, so it is declared here, at the commit the Atlas package is tested
@@ -96,9 +96,11 @@ rev = "e8b2833d4ab28ec4fd3780cc5ed75196ac8cd1db"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "8e5903954668ad0b77d211e8cdb75747368f7daa"
+rev = "ce3dda3e5cee4c0253989ad1485dee4669bf9290"
 
-# Orion v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
+# Orion protocol 5 (live-streams f8d767ac: push sessions, streams with history and backfill,
+# open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
+# Earlier, v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
 # 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
 # `ActionCaller`), a wire change, so every Orion consumer moves together. Earlier, 973ced7: CI and test fixes on 4a6945a's wire; the node stops its systemd watchdog before
 # STOPPING=1; TypedConfigValue::F64 (ec91d0a), observed-state watch, session
@@ -106,11 +108,22 @@ rev = "8e5903954668ad0b77d211e8cdb75747368f7daa"
 # orionctl layer). Must be the commit backend/Cargo.lock pins for the `orion`
 # crate: orion-node, orionctl and the HeliOS services speak the same control
 # protocol, and its layout changed within v4.
+# Styx's out-of-tree kernel modules (kernel-modules/ov9282: the OV9782 1280x480 window mode;
+# kernel-modules/rp1-cfe: the receiver's mid-frame line event for sliced delivery;
+# kernel-modules/pispbe: back end job setup in ~7 us). HeliOS always runs Styx, so all three
+# ship, installed to /lib/modules/<ver>/updates over the stock drivers. The same Styx commit as
+# backend/Cargo.lock's styx crate.
+[[sources]]
+id = "styx"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Styx.git"
+rev = "fca40156dac138aef3f3aadc1d1a0f39e491fc32"
+
 [[sources]]
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "f3efb261151f21b54743cd599d5c2216c5783737"
+rev = "f8d767ac5f7a995fbdc205d727f58dcf719c25dc"
 
 [inputs.profile]
 description = "Build profile"
