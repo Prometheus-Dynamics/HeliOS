@@ -13,6 +13,10 @@ export type PortType =
   | "eidos:refined_corners"
   | "eidos:tag_poses"
   | "eidos:image"
+  | "eidos:camera_calibration"
+  | "eidos:camera_extrinsics"
+  | "eidos:pose_solutions"
+  | "eidos:camera_pose"
   | "any";
 
 export interface Port {
@@ -38,14 +42,11 @@ export interface NodeType {
 }
 
 const dictionaries = [
-  "aruco_4x4_50",
-  "aruco_4x4_100",
-  "aruco_5x5_100",
-  "aruco_6x6_250",
+  "apriltag_36h11",
   "apriltag_16h5",
   "apriltag_25h9",
   "apriltag_36h10",
-  "apriltag_36h11",
+  ...["4x4", "5x5", "6x6", "7x7"].flatMap((size) => [50, 100, 250, 1000].map((n) => `aruco_${size}_${n}`)),
 ];
 
 const maskParams: Param[] = [
@@ -177,16 +178,79 @@ export const CATALOG: NodeType[] = [
     ],
   },
   {
+    id: "io.host_bridge",
+    plugin: "helios",
+    category: "Source",
+    title: "Camera and results",
+    summary: "The bound camera's frames, calibration and mount in; the pipeline's results out to the API and NetworkTables.",
+    inputs: [
+      { name: "detections", type: "eidos:detections" },
+      { name: "rejected", type: "eidos:detections" },
+      { name: "refined_corners", type: "eidos:refined_corners" },
+      { name: "poses", type: "eidos:tag_poses" },
+      { name: "pose_solutions", type: "eidos:pose_solutions" },
+      { name: "multi_tag_pose", type: "eidos:camera_pose" },
+    ],
+    outputs: [
+      { name: "frame", type: "styx:framelease" },
+      { name: "camera", type: "eidos:camera_calibration" },
+      { name: "extrinsics", type: "eidos:camera_extrinsics" },
+    ],
+    params: [],
+  },
+  ...(["apriltag", "aruco"] as const).flatMap((family) =>
+    (["", "_tracked"] as const).map(
+      (mode): NodeType => ({
+        id: `eidos:detectors.${family}${mode}`,
+        plugin: "eidos",
+        category: "Fiducials",
+        title: `${family === "apriltag" ? "AprilTag" : "ArUco"} detector${mode ? "" : " (full search)"}`,
+        summary: mode
+          ? "Finds tags: a full search every few frames, windows around tracked tags in between. A node group: its stages show in the profiler."
+          : "Finds tags with a full search on every frame. A node group: its stages show in the profiler.",
+        inputs: [{ name: "frame", type: "styx:framelease" }],
+        outputs: [
+          { name: "detections", type: "eidos:detections" },
+          { name: "refined_corners", type: "eidos:refined_corners" },
+          { name: "rejected", type: "eidos:detections" },
+        ],
+        params: [
+          { name: "dictionary", kind: "enum", default: family === "apriltag" ? "apriltag_36h11" : "aruco_4x4_50", options: dictionaries.filter((d) => d.startsWith(family)), help: "Tag family. A family other than the tags' own finds nothing." },
+          ...(mode ? [{ name: "full_search_every", kind: "int", default: 8, min: 1, max: 100000, help: "Full search at least every this many frames; new tags appear within that many." } as Param] : []),
+        ],
+      }),
+    ),
+  ),
+  {
+    id: "eidos:aruco.multi_tag_pose",
+    plugin: "eidos",
+    category: "Fiducials",
+    title: "Field pose",
+    summary: "The camera's (and robot's) pose on the field from every visible tag with a known position.",
+    inputs: [
+      { name: "camera", type: "eidos:camera_calibration" },
+      { name: "detections", type: "eidos:detections" },
+      { name: "extrinsics", type: "eidos:camera_extrinsics" },
+      { name: "refined_corners", type: "eidos:refined_corners" },
+    ],
+    outputs: [{ name: "camera_pose", type: "eidos:camera_pose" }],
+    params: [],
+  },
+  {
     id: "eidos:aruco.pose",
     plugin: "eidos",
     category: "Fiducials",
     title: "Tag pose",
     summary: "Camera-frame pose of each tag from refined corners.",
     inputs: [
+      { name: "camera", type: "eidos:camera_calibration" },
       { name: "detections", type: "eidos:detections" },
       { name: "refined_corners", type: "eidos:refined_corners" },
     ],
-    outputs: [{ name: "poses", type: "eidos:tag_poses" }],
+    outputs: [
+      { name: "poses", type: "eidos:tag_poses" },
+      { name: "solutions", type: "eidos:pose_solutions" },
+    ],
     params: [
       { name: "tag_size_m", kind: "float", default: 0.1651, min: 0.01, max: 1, step: 0.0001, help: "Black-border edge length." },
       { name: "calibration", kind: "enum", default: "camera default", options: ["camera default", "none"], help: "Intrinsics from the camera resource." },
@@ -298,6 +362,10 @@ export const PORT_COLORS: Record<PortType, string> = {
   "eidos:refined_corners": "#2dd4bf",
   "eidos:tag_poses": "#fbbf24",
   "eidos:image": "#93c5fd",
+  "eidos:camera_calibration": "#e2e8f0",
+  "eidos:camera_extrinsics": "#cbd5e1",
+  "eidos:pose_solutions": "#f59e0b",
+  "eidos:camera_pose": "#fb923c",
   any: "#9aa0ae",
 };
 
