@@ -67,12 +67,11 @@ impl OrionEnginePublisher {
     }
 
     pub async fn publish_snapshot(&self, snapshot: &EngineSnapshot, workloads: &[WorkloadRecord]) -> Result<(), EnginePublishError> {
-        let provider_resources = std::iter::once(self.runtime_resource(snapshot))
-            .chain(session_resources(self.executor_id.as_str(), self.provider_id.as_str(), &snapshot.sessions))
-            .chain(artifact_resources(self.executor_id.as_str(), self.provider_id.as_str(), &snapshot.artifacts))
-            .collect::<Vec<_>>();
-        self.runtime_publisher().publish_provider_resources(provider_resources).await?;
-        self.runtime_publisher().publish_executor_snapshot(observed_workloads(workloads, &snapshot.sessions), std::iter::empty::<ResourceRecord>()).await?;
+        self.runtime_publisher().publish_provider_resources([self.runtime_resource(snapshot)]).await?;
+        // Sessions and artifacts are realized by the executor, so they go in its snapshot: Orion
+        // drops every resource an executor realized that its latest snapshot doesn't carry.
+        let executor_resources = executor_resources(self.executor_id.as_str(), self.provider_id.as_str(), &snapshot.sessions, &snapshot.artifacts);
+        self.runtime_publisher().publish_executor_snapshot(observed_workloads(workloads, &snapshot.sessions), executor_resources).await?;
         Ok(())
     }
 
@@ -114,6 +113,11 @@ fn observed_workloads(workloads: &[WorkloadRecord], sessions: &[ExecutionSession
             workload
         })
         .collect()
+}
+
+/// What the executor snapshot carries: every resource this executor realizes.
+fn executor_resources(executor_id: &str, provider_id: &str, sessions: &[ExecutionSessionState], artifacts: &[ExecutionArtifactRecord]) -> Vec<ResourceRecord> {
+    session_resources(executor_id, provider_id, sessions).chain(artifact_resources(executor_id, provider_id, artifacts)).collect()
 }
 
 fn session_resources<'a>(executor_id: &'a str, provider_id: &'a str, sessions: &'a [ExecutionSessionState]) -> impl Iterator<Item = ResourceRecord> + 'a {
@@ -222,6 +226,36 @@ mod tests {
         assert_eq!(resource.realized_for_workload_id.as_ref().map(ToString::to_string), Some("workload.test".into()));
         assert_eq!(resource.source_workload_id.as_ref().map(ToString::to_string), Some("workload.test".into()));
         assert_eq!(resource.state.as_ref().and_then(|state| state.config.as_ref()).and_then(|config| config.payload.get("message")).and_then(|value| value.as_str()), Some("{\"value\":42}"));
+    }
+
+    // Orion drops an executor's realized resources that its latest snapshot leaves out, so the
+    // sessions and artifacts must ride in the executor snapshot, realized by that executor.
+    #[test]
+    fn executor_snapshot_carries_sessions_and_artifacts() {
+        let sessions = vec![ExecutionSessionState {
+            workload_id: "workload.test".into(),
+            session_id: "session.workload.test".into(),
+            status: ExecutionSessionStatus::Running,
+            observed_at_ms: 1,
+            graph_ref: GraphRef::InlineSpec("{\"nodes\":[]}".into()),
+            bindings: Vec::new(),
+            plugin_requirements: Vec::new(),
+            message: None,
+        }];
+        let artifacts = vec![ExecutionArtifactRecord {
+            workload_id: "workload.test".into(),
+            session_id: "session.workload.test".into(),
+            artifact_id: "artifact.test".into(),
+            kind: "telemetry".into(),
+            observed_at_ms: 2,
+            message: None,
+            endpoints: Vec::new(),
+        }];
+
+        let resources = executor_resources("executor.test", "provider.test", &sessions, &artifacts);
+
+        assert_eq!(resources.len(), 2);
+        assert!(resources.iter().all(|resource| resource.realized_by_executor_id.as_ref().map(ToString::to_string) == Some("executor.test".into())));
     }
 
     #[test]
