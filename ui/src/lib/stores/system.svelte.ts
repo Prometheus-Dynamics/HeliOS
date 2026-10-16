@@ -74,6 +74,41 @@ export interface DeviceHw {
   } | null;
   power: { rail: string; volts: number; amps: number }[];
   throttled: boolean;
+  /** Switched power outputs (USB ports), read from the device. */
+  switches?: { id: string; name: string; on: boolean }[];
+  /** Readings from a real device: controls it does not offer are hidden. */
+  live?: boolean;
+  /** The fan resource that takes `fan.override` / `fan.release`. */
+  fanResource?: string;
+}
+
+/** The device's lemnos peripherals (fan, status ring, IMU orientation, power monitor, USB power
+ * switches) as the hardware panes show them. */
+function livePeripherals(resources: W.Resource[]) {
+  const state = (id: string) => (resources.find((r) => r.id === id)?.state ?? null) as Record<string, unknown> | null;
+  const num = (s: Record<string, unknown> | null, key: string) => (s && typeof s[key] === "number" ? (s[key] as number) : undefined);
+  const byKind = (suffix: string) => resources.find((r) => r.id.endsWith(suffix))?.id ?? "";
+  const fanState = state(byKind(".fan"));
+  const fanResource = resources.find((r) => r.type === "helios.fan")?.id;
+  const overridden = Boolean(fanResource && state(fanResource)?.["fan.override.active"]);
+  const fan: FanState | null = fanState
+    ? { mode: overridden ? "manual" : "auto", duty: num(fanState, "duty") ?? 0, rpm: Math.round(num(fanState, "speed") ?? 0), curve: [] }
+    : null;
+  const ring = state(byKind(".status-ring"));
+  const leds: LedState[] = ring
+    ? [{ id: "status-ring", name: `Status ring${ring["looks.preset.active"] ? ` · ${ring["looks.preset.active"]}` : ""}`, count: 16, color: "#7dd3fc", pattern: "status", brightness: num(ring, "light.brightness") ?? 0 }]
+    : [];
+  const orientation = state(byKind(".orientation"));
+  const deg = (rad: number | undefined) => ((rad ?? 0) * 180) / Math.PI;
+  const imu: DeviceHw["imu"] = orientation
+    ? { yaw: deg(num(orientation, "yaw")), pitch: deg(num(orientation, "pitch")), roll: deg(num(orientation, "roll")), rateHz: 0, gyroRange: 0, accelRange: 0, lpfHz: 0, mount: [0, 0, 0], gyroBias: [0, 0, 0], temperatureC: Number.NaN }
+    : null;
+  const power = state(byKind(".power"));
+  const rails = power ? [{ rail: "Board input", volts: num(power, "bus_voltage") ?? 0, amps: Math.abs(num(power, "current") ?? 0) }] : [];
+  const switches = resources
+    .filter((r) => /usb-[a-z]-power$/.test(r.id))
+    .map((r) => ({ id: r.id, name: `USB-${r.id.match(/usb-([a-z])-power$/)![1].toUpperCase()} power`, on: (r.state as Record<string, unknown> | null)?.["power.on"] === 1 }));
+  return { fan, leds, imu, power: rails, switches, fanResource };
 }
 
 const CORES: Record<string, number> = { raze: 4, mcu: 2, foreign: 8, coprocessor: 8 };
@@ -179,11 +214,13 @@ class SystemStore {
     if (!node) return;
     let processes: W.ProcessInfo[] = [];
     let metrics: W.Metrics | null = null;
+    let peripherals: W.Resource[] = [];
     try {
-      [processes, metrics] = await Promise.all([api.processes(), api.metrics()]);
+      [processes, metrics, peripherals] = await Promise.all([api.processes(), api.metrics(), api.peripherals().catch(() => [] as W.Resource[])]);
     } catch {
       return;
     }
+    const devices = livePeripherals(peripherals);
     const now = Date.now();
     const bootAt = now - (metrics.uptime_s ?? node.uptimeS) * 1000;
     const procs: Proc[] = processes.map((p) => {
@@ -212,11 +249,14 @@ class SystemStore {
       coreHistory: cores.map((c, i) => [...(prev?.coreHistory[i] ?? []), c].slice(-40)),
       freqMHz: cores.map(() => 0),
       procs,
-      fan: null,
-      leds: [],
+      fan: devices.fan,
+      leds: devices.leds,
       gpio: [],
-      imu: null,
-      power: [],
+      imu: devices.imu,
+      power: devices.power,
+      switches: devices.switches,
+      live: true,
+      fanResource: devices.fanResource,
       throttled: metrics.throttled != null && (metrics.throttled & 0x4) !== 0,
     };
   }
@@ -348,6 +388,22 @@ class SystemStore {
     if (!p) return;
     p.core = core;
     toasts.success(`${p.name} ${core === null ? "may run on any core" : `pinned to core ${core}`}`);
+  }
+
+  /** Fixed duty (an override for 10 minutes, the longest the device allows) or back to its curve. */
+  async setFan(nodeId: string, mode: "auto" | "manual", duty?: number) {
+    const hw = this.hw[nodeId];
+    if (!hw?.fan) return;
+    if (!hw.live || !hw.fanResource) {
+      hw.fan.mode = mode;
+      if (duty !== undefined) hw.fan.duty = duty;
+      return;
+    }
+    const id = hw.fanResource;
+    if (mode === "auto") await this.liveAct("Fan", () => api.peripheralAction(id, "fan.release"), "Fan back on its curve");
+    else await this.liveAct("Fan", () => api.peripheralAction(id, "fan.override", { duty: duty ?? hw.fan!.duty, duration_ms: 600_000 }), `Fan fixed at ${Math.round((duty ?? hw.fan!.duty) * 100)}% for 10 minutes`);
+    hw.fan.mode = mode;
+    if (duty !== undefined) hw.fan.duty = duty;
   }
 
   async calibrateGyro(nodeId: string) {

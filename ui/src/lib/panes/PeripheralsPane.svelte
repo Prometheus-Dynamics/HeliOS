@@ -23,7 +23,7 @@
   const target = follow(() => pane, () => ws, "device", () => cluster.nodes[0]?.id);
   const node = $derived(target.id ? cluster.node(target.id) : undefined);
   const hw = $derived(node ? system.of(node.id) : undefined);
-  const empty = $derived(hw && !hw.fan && !hw.leds.length && !hw.gpio.length && !hw.imu && !hw.power.length);
+  const empty = $derived(hw && !hw.fan && !hw.leds.length && !hw.gpio.length && !hw.imu && !hw.power.length && !hw.switches?.length);
 </script>
 
 <PaneBar>
@@ -43,17 +43,19 @@
     {#if hw.fan}
       {@const fan = hw.fan}
       <Section title="Fan" key="hw-fan">
-        {#snippet actions()}<span class="live"><b>{fan.rpm}</b> rpm · <b>{Math.round(fan.duty * 100)}</b>%</span>{/snippet}
-        <Prop label="Control">
-          <Seg label="Fan control" value={fan.mode} options={[{ value: "auto", label: "Curve" }, { value: "manual", label: "Fixed" }]} onchange={(v) => (fan.mode = v)} />
+        {#snippet actions()}<span class="live">{#if fan.rpm}<b>{fan.rpm}</b> rpm · {/if}<b>{Math.round(fan.duty * 100)}</b>%</span>{/snippet}
+        <Prop label="Control" help={hw.live ? "Curve: the device's thermal governor. Fixed: a set duty for 10 minutes, then back to the curve." : undefined}>
+          <Seg label="Fan control" value={fan.mode} options={[{ value: "auto", label: "Curve" }, { value: "manual", label: "Fixed" }]} onchange={(v) => system.setFan(node.id, v)} />
         </Prop>
         {#if fan.mode === "manual"}
-          <Prop label="Duty"><Slider value={Math.round(fan.duty * 100)} min={0} max={100} unit="%" onchange={(v) => (fan.duty = v / 100)} /></Prop>
+          <Prop label="Duty"><Slider value={Math.round(fan.duty * 100)} min={0} max={100} unit="%" onchange={(v) => system.setFan(node.id, "manual", v / 100)} /></Prop>
         {/if}
+        {#if fan.curve.length}
         <div class="curve">
           <CurveEditor points={fan.curve} xmin={30} xmax={85} xunit="°" marker={{ x: node.tempC, y: fan.duty }} disabled={fan.mode === "manual"} onchange={(p) => (fan.curve = p)} />
           <p class="hint">Drag points · double-click to add or remove · the dashed line is the current temperature ({node.tempC.toFixed(0)} °C).</p>
         </div>
+        {/if}
       </Section>
     {/if}
 
@@ -69,10 +71,14 @@
             <div class="strip" style:--led={led.color} style:opacity={0.25 + led.brightness * 0.75}>
               {#each Array.from({ length: Math.min(led.count, 30) }) as _, i (i)}<i class="p-{led.pattern}" style:animation-delay="{i * 40}ms"></i>{/each}
             </div>
+            {#if hw.live}
+              <Prop label="Brightness"><span class="mono">{Math.round(led.brightness * 100)}%</span></Prop>
+            {:else}
             <div class="led-ctl">
               <Seg label="Pattern" value={led.pattern} options={[{ value: "solid", label: "Solid" }, { value: "blink", label: "Blink" }, { value: "breathe", label: "Breathe" }, { value: "status", label: "Status" }]} onchange={(v) => (led.pattern = v)} />
               <Slider value={Math.round(led.brightness * 100)} min={0} max={100} unit="%" label="Brightness" onchange={(v) => (led.brightness = v / 100)} />
             </div>
+            {/if}
           </div>
         {/each}
       </Section>
@@ -115,14 +121,17 @@
           </svg>
           <div class="att">
             <Prop label="Yaw · pitch · roll"><span class="mono">{imu.yaw.toFixed(2)}° · {imu.pitch.toFixed(2)}° · {imu.roll.toFixed(2)}°</span></Prop>
-            <Prop label="Temperature"><span class="mono">{imu.temperatureC.toFixed(1)} °C</span></Prop>
+            {#if !Number.isNaN(imu.temperatureC)}<Prop label="Temperature"><span class="mono">{imu.temperatureC.toFixed(1)} °C</span></Prop>{/if}
+            {#if !hw.live}
             <Prop label="Gyro bias"><span class="mono">{imu.gyroBias.map((b) => b.toFixed(4)).join(" ")} °/s</span></Prop>
             <Prop label="Actions">
               <button type="button" class="btn" onclick={() => (imu.yaw = 0)}>Zero yaw</button>
               <button type="button" class="btn" onclick={() => system.calibrateGyro(node.id)}>Calibrate gyro</button>
             </Prop>
+            {/if}
           </div>
         </div>
+        {#if !hw.live}
         <Prop label="Output rate"><Choice value={imu.rateHz} options={[100, 200, 400, 1000, 2000].map((v) => ({ value: v, label: `${v} Hz` }))} onchange={(v) => (imu.rateHz = v)} /></Prop>
         <Prop label="Gyro range"><Choice value={imu.gyroRange} options={[125, 250, 500, 1000, 2000].map((v) => ({ value: v, label: `±${v} °/s` }))} onchange={(v) => (imu.gyroRange = v)} /></Prop>
         <Prop label="Accel range"><Choice value={imu.accelRange} options={[3, 6, 12, 24].map((v) => ({ value: v, label: `±${v} g` }))} onchange={(v) => (imu.accelRange = v)} /></Prop>
@@ -132,6 +141,15 @@
             <Num value={imu.mount[i]} min={-180} max={180} step={0.5} width={60} label={["Roll", "Pitch", "Yaw"][i]} onchange={(v) => (imu.mount[i] = v)} />
           {/each}
         </Prop>
+        {/if}
+      </Section>
+    {/if}
+
+    {#if hw.switches?.length}
+      <Section title="Power outputs" key="hw-switches" count={hw.switches.length}>
+        {#each hw.switches as s (s.id)}
+          <Prop label={s.name}><Badge tone={s.on ? "ok" : "neutral"} text={s.on ? "On" : "Off"} /></Prop>
+        {/each}
       </Section>
     {/if}
 
