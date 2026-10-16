@@ -67,11 +67,14 @@ impl OrionEnginePublisher {
     }
 
     pub async fn publish_snapshot(&self, snapshot: &EngineSnapshot, workloads: &[WorkloadRecord]) -> Result<(), EnginePublishError> {
-        self.runtime_publisher().publish_provider_resources([self.runtime_resource(snapshot)]).await?;
-        // Sessions and artifacts are realized by the executor, so they go in its snapshot: Orion
-        // drops every resource an executor realized that its latest snapshot doesn't carry.
-        let executor_resources = executor_resources(self.executor_id.as_str(), self.provider_id.as_str(), &snapshot.sessions, &snapshot.artifacts);
-        self.runtime_publisher().publish_executor_snapshot(observed_workloads(workloads, &snapshot.sessions), executor_resources).await?;
+        // Sessions and artifacts carry both this provider and this executor, and Orion drops a
+        // resource from either side's snapshot when that snapshot leaves it out. So both
+        // snapshots carry them: with only one, every publish removed them for a moment and
+        // flipped each pipeline's session (and its events) four times a second.
+        let derived = executor_resources(self.executor_id.as_str(), self.provider_id.as_str(), &snapshot.sessions, &snapshot.artifacts);
+        let provider_resources = std::iter::once(self.runtime_resource(snapshot)).chain(derived.iter().cloned()).collect::<Vec<_>>();
+        self.runtime_publisher().publish_provider_resources(provider_resources).await?;
+        self.runtime_publisher().publish_executor_snapshot(observed_workloads(workloads, &snapshot.sessions), derived).await?;
         Ok(())
     }
 
@@ -228,8 +231,9 @@ mod tests {
         assert_eq!(resource.state.as_ref().and_then(|state| state.config.as_ref()).and_then(|config| config.payload.get("message")).and_then(|value| value.as_str()), Some("{\"value\":42}"));
     }
 
-    // Orion drops an executor's realized resources that its latest snapshot leaves out, so the
-    // sessions and artifacts must ride in the executor snapshot, realized by that executor.
+    // Orion drops an executor's realized resources that its latest snapshot leaves out (and a
+    // provider's that its snapshot leaves out), so these are realized by the executor and sent
+    // in both snapshots.
     #[test]
     fn executor_snapshot_carries_sessions_and_artifacts() {
         let sessions = vec![ExecutionSessionState {

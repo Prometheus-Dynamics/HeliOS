@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "helios-ui",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "HELIOS_DEVICE=http://172.31.12.81:5800",
+        "bun",
+        "run",
+        "--cwd",
+        "ui",
+        "dev"
+      ],
+      "port": 5810
+    },
+    {
+      "name": "pv-styx-ui",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NODE_ENV=local-network-development",
+        "pnpm",
+        "--dir",
+        "/run/media/sozo/bd1d96d9-fa81-4fac-b25e-193cfcac2dcb/Github/pv-wt-bump-styx-eidos/photon-client",
+        "exec",
+        "vite",
+        "--port",
+        "3011",
+        "--strictPort"
+      ],
+      "port": 3011
+    }
+  ]
+}
