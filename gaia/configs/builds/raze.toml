@@ -71,7 +71,7 @@ imports = [
 # network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
 # 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2
 # with the Raze trims and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915,
-# Atlas dev 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
+# Atlas dev 2aadd1c: e2fsck with its libraries in the slot initramfs; 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
 # slot-management and live-stream work.
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
@@ -80,7 +80,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "01f6d109e51eb7fce0d7b63acdca4f1a8395648d"
+rev = "2aadd1c3f51169115b5571f8f1a384a8efe3f792"
 
 # Lemnos (dev 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
