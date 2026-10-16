@@ -39,6 +39,8 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# The startup file (`startup.rs`).
+toml = { workspace = true }
 
 # Graph documents are validated with Daedalus's own parser (versioned `GraphDocument`).
 daedalus-planner = { workspace = true, features = ["std"] }

@@ -1,84 +1,28 @@
-# HeliOS first-boot startup preset.
-# This file is consumed once by helios-api to seed pipelines/streams on brand-new devices.
+# HeliOS first-boot startup file, read by helios-api when it starts (backend/src/helios/api/src/startup.rs).
+#
+# [default_pipeline] is the pipeline helios-api creates on the first camera when the board has no
+# pipelines yet, with the pipeline id "default". It is created once. If the user deletes it, it stays
+# deleted, through reboots and updates, because helios-api keeps the decision in its state directory
+# (/var/lib/helios/api/default-pipeline.json). Remove that file to have it created again (only while
+# the board has no pipelines).
+#
+# No [default_pipeline] (or enabled = false, or a file helios-api cannot parse) means no pipeline is
+# created; the API still starts. See docs/docs/api/http.md, "First-boot default pipeline".
 
-[[pipelines]]
-id = "4fca14eb-e218-48e4-adf9-b957d645c604"
-name = "Default ArUco Fast"
-templateId = "daedalus_aruco_fast"
+[default_pipeline]
+# Create the pipeline. Default true.
+enabled = true
 
-[[streams]]
-cameraId = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
+# Its name in the API and the UI.
+name = "AprilTag"
 
-[streams.manifest.identity]
-hardware_id = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
+# An embedded golden graph id (backend/src/helios/engine/graphs/). Known: "apriltag-36h11".
+graph = "apriltag-36h11"
 
-[streams.manifest.capture]
-backend = "Libcamera"
-target_fps = 60
-device_keys = ["/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60", "ov9782"]
+# The Eidos tag family the graph decodes: FRC's family since 2024. Optional; the graph's own is kept
+# when unset.
+dictionary = "apriltag_36h11"
 
-[streams.manifest.capture.handle]
-type = "libcamera"
-id = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
-
-[streams.manifest.capture.mode.format]
-code = "NV12"
-color = "Srgb"
-resolution = { width = 1280, height = 800 }
-
-[[streams.manifest.capture.controls]]
-id = 5
-value = { kind = "int", value = 1 }
-
-[[streams.manifest.capture.controls]]
-id = 10002
-value = { kind = "int", value = 1 }
-
-[[streams.manifest.capture.controls]]
-id = 24
-value = { kind = "float", value = 1.25 }
-
-[streams.manifest]
-host_buffer = 8
-internal = false
-pipeline_enabled = true
-active_pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
-active_pipeline_output = "overlay"
-pipeline_wires = []
-pipeline_host_inputs = {}
-encoder_enabled = true
-encoder_id = "turbojpeg"
-decoder_id = "nv12-cpu"
-shadow_recorder_enabled = false
-start_on_boot = false
-
-[[streams.manifest.pipelines]]
-pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
-pipeline_output = "overlay"
-
-[streams.manifest.pipeline_layout]
-rows = 1
-columns = 1
-
-[[streams.manifest.pipeline_layout.slots]]
-row = 0
-column = 0
-pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
-output_key = "overlay"
-
-[streams.manifest.encoder_settings]
-output_resolution = { width = 640, height = 400 }
-
-[streams.manifest.decoder_settings]
-rotation_degrees = 0
-mirror_horizontal = false
-
-[streams.manifest.pose.translation]
-x = 0.0
-y = 0.0
-z = 0.0
-
-[streams.manifest.pose.rotation]
-roll = 0.0
-pitch = 0.0
-yaw = 0.0
+# Half-size pyramid levels attached to each camera frame: Styx's ISP half level, much cheaper than the
+# detector building it itself. Optional; omit it to attach none.
+pyramid = 1

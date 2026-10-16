@@ -14,6 +14,8 @@ pub const DEFAULT_UPLOAD_DIR: &str = "/var/lib/helios/updates";
 pub const DEFAULT_UI_DIR: &str = "/usr/share/helios/ui";
 /// Written by the Raze device package (`/usr/lib/board/identity --write`).
 pub const DEFAULT_BOARD_IDENTITY_PATH: &str = "/run/board/identity.json";
+/// The first-boot startup file (staged by gaia): the default pipeline helios-api creates once.
+pub const DEFAULT_STARTUP_FILE: &str = "/etc/helios/startup.toml";
 
 /// systemd units the API reports and may restart.
 pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
@@ -48,6 +50,8 @@ pub struct ApiConfig {
     pub auth_file: PathBuf,
     /// Camera previews: size, frame rate and JPEG quality.
     pub preview: crate::camera_preview::PreviewSettings,
+    /// The first-boot startup file (`[default_pipeline]`, see `startup.rs`).
+    pub startup_file: PathBuf,
 }
 
 impl Default for ApiConfig {
@@ -69,6 +73,7 @@ impl Default for ApiConfig {
             max_upload_bytes: 8 << 30,
             auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
             preview: crate::camera_preview::PreviewSettings::default(),
+            startup_file: DEFAULT_STARTUP_FILE.into(),
         }
     }
 }
@@ -122,6 +127,9 @@ impl ApiConfig {
         if let Some(value) = env.get(crate::auth_state::AUTH_FILE_ENV) {
             config.auth_file = value.into();
         }
+        if let Some(value) = env.get("HELIOS_API_STARTUP_FILE") {
+            config.startup_file = value.into();
+        }
         if let Some(value) = env.get("HELIOS_API_PREVIEW_SIZE") {
             let (width, height) =
                 crate::camera_preview::PreviewSettings::parse_size(value).ok_or_else(|| anyhow::anyhow!("HELIOS_API_PREVIEW_SIZE must be <width>x<height> (16 to 4096 each), got {value:?}"))?;
@@ -154,6 +162,7 @@ mod tests {
             ("HELIOS_API_UPLOAD_DIR", "/data/updates"),
             ("HELIOS_API_CORS_ORIGIN", ""),
             ("HELIOS_API_UI_DIR", "off"),
+            ("HELIOS_API_STARTUP_FILE", "/data/startup.toml"),
         ])
         .expect("config");
         assert_eq!(config.bind.port(), 5800);
@@ -161,6 +170,7 @@ mod tests {
         assert_eq!(config.upload_dir, PathBuf::from("/data/updates"));
         assert_eq!(config.cors_origin, None);
         assert_eq!(config.ui_dir, None);
+        assert_eq!(config.startup_file, PathBuf::from("/data/startup.toml"));
         assert_eq!(config.preview, crate::camera_preview::PreviewSettings::default());
     }
 

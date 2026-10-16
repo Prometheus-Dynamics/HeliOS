@@ -18,6 +18,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod orion;
 pub mod routes;
+pub mod startup;
 pub mod store;
 pub mod ui;
 

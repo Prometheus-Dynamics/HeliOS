@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use helios_api::{ApiConfig, AppState, auth_state, events, router, routes};
+use helios_api::{ApiConfig, AppState, auth_state, events, router, routes, startup};
 use tracing::info;
 
 /// The HeliOS application API. Without a subcommand it serves `/v1` and the UI.
@@ -82,6 +82,8 @@ async fn serve() -> anyhow::Result<()> {
     let _watcher = events::spawn_state_watcher(state.clone());
     // Stored camera settings are applied whenever a camera service appears.
     let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
+    // The startup file's default pipeline, created once a camera is there and no pipeline is.
+    let _default_pipeline = startup::load_default_pipeline(&state.config.startup_file).map(|default| startup::spawn_default_pipeline(state.clone(), default));
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("failed to bind {bind}"))?;
     info!(%bind, "helios-api listening");
     info!(mode = state.auth.mode().as_str(), "device security");

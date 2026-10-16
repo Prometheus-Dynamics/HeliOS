@@ -475,6 +475,11 @@ pub fn pose_digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
     engine_workloads(view).filter_map(|w| pose_summary(&outputs_of(view, w.workload_id.as_str())).map(|pose| (pipeline_id(w.workload_id.as_str()), pose))).collect()
 }
 
+/// How many pipelines this API manages (created through `/v1/pipelines`), not other tools' ones.
+pub fn managed_pipeline_count(view: &StateView) -> usize {
+    engine_workloads(view).filter(|w| w.workload_id.as_str().starts_with(WORKLOAD_PREFIX)).count()
+}
+
 pub fn pipeline_id(workload_id: &str) -> String {
     workload_id.strip_prefix(WORKLOAD_PREFIX).unwrap_or(workload_id).to_string()
 }
@@ -738,7 +743,8 @@ async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &Pipe
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await
 }
 
-async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiResult<Pipeline> {
+/// Write `spec` as pipeline `id` (a new revision, kept for rollback) and return the pipeline.
+pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiResult<Pipeline> {
     let view = state.orion.view().await?;
     let revision = state.store.history(id).await?.next_revision();
     apply_spec(state, &view, id, &spec, revision).await?;

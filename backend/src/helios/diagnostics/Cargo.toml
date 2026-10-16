@@ -24,6 +24,8 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# The startup file's `[default_pipeline]` (`checks/mod.rs`).
+toml = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 glob = { workspace = true }
 flate2 = { workspace = true }

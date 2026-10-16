@@ -444,6 +444,31 @@ when the camera has no mount). Poses are `{translation: {x, y, z}, rotation: {w,
 field poses are `null` without a valid solve. The full outputs are in `outputs`, and every change
 is a `pose` event (see [Event stream](./websockets.md)).
 
+#### First-boot default pipeline
+
+A board with no pipelines gets one on its first camera: the `[default_pipeline]` of
+`/etc/helios/startup.toml` (`HELIOS_API_STARTUP_FILE`), an AprilTag pipeline with id `default`,
+whose frames are the first camera's (sorted by resource id) at its `pyramid` level:
+
+```toml
+[default_pipeline]
+enabled = true          # default true; false creates none
+name = "AprilTag"       # default "AprilTag"
+graph = "apriltag-36h11" # an embedded golden graph (required; unknown ids are logged and skipped)
+dictionary = "apriltag_36h11"
+pyramid = 1
+```
+
+It is created through the same path as `PUT /v1/pipelines/default`, and only once. The API checks
+every few seconds until it can decide: when Orion has no pipeline of the API's own and a camera is
+there, it creates the default and records that in `default-pipeline.json` under the state
+directory. A board that already has pipelines records that instead, so the default is never created
+there later. Deleting the default is final: it is not created again after a reboot or an update.
+To have it created again, delete `default-pipeline.json` while the board has no pipelines. The file
+is read when helios-api starts; to change it, change the image's copy (`gaia/assets/runtime-services`)
+or replace the pipeline through the API. A missing, unreadable or invalid file creates nothing and
+the API starts anyway (logged). Helios-diagnostics reports whether the file enables a default.
+
 ### Resources and peripherals
 
 | Method | Path | Notes |
@@ -749,6 +774,7 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_NODE_ID` | `node-local` |
 | `HELIOS_ORION_IPC_SOCKET`, `HELIOS_ORION_IPC_STREAM_SOCKET` | `/run/orion/control.sock`, `/run/orion/control-stream.sock` |
 | `HELIOS_API_STATE_DIR` | `/var/lib/helios/api` |
+| `HELIOS_API_STARTUP_FILE` | `/etc/helios/startup.toml` (the first-boot [default pipeline](#first-boot-default-pipeline)) |
 | `HELIOS_API_UPLOAD_DIR` | `/var/lib/helios/updates` (on `/data`) |
 | `HELIOS_BOARD_UPDATE_TOOL` | `/usr/lib/board/update` (the board update writer) |
 | `HELIOS_API_UI_DIR` | `/usr/share/helios/ui`; `off` serves the API only |

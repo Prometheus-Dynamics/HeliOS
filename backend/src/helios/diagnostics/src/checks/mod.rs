@@ -257,12 +257,28 @@ fn collect_identity_report(config: &DiagnosticsConfig) -> IdentityReport {
 }
 
 fn collect_camera_report(config: &DiagnosticsConfig) -> Result<CameraReport> {
-    let startup_preset_declares_camera = fs::read_to_string(&config.startup_preset_path)
-        .map(|content| content.contains("[[streams]]") && (content.contains("cameraId") || content.contains("backend = \"Libcamera\"")))
-        .unwrap_or(false);
+    let startup_preset_declares_camera = fs::read_to_string(&config.startup_preset_path).map(|content| startup_declares_default_pipeline(&content)).unwrap_or(false);
 
     let discovered_camera_resources = count_camera_resources(&config.orion_run_dir)?;
     Ok(CameraReport { startup_preset_declares_camera, discovered_camera_resources })
+}
+
+/// Whether the startup file (`helios-api`'s `startup.rs`) enables a `[default_pipeline]`: the
+/// pipeline the API creates on the first camera. It mirrors the API's reading of the file, so
+/// a file the API would reject (such as the old schema) does not count.
+fn startup_declares_default_pipeline(content: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct StartupFile {
+        default_pipeline: Option<DefaultPipeline>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct DefaultPipeline {
+        enabled: Option<bool>,
+    }
+
+    toml::from_str::<StartupFile>(content).ok().and_then(|file| file.default_pipeline).is_some_and(|default| default.enabled.unwrap_or(true))
 }
 
 fn count_camera_resources(orion_run_dir: &Path) -> Result<usize> {
@@ -517,6 +533,23 @@ mod tests {
     #[test]
     fn successful_governor_oneshot_is_healthy_after_exit() {
         assert!(service_is_healthy(&service("helios-set-governor.service", "inactive", "dead", None)));
+    }
+
+    #[test]
+    fn startup_file_declares_a_default_pipeline_only_when_enabled() {
+        let apriltag = "[default_pipeline]\nenabled = true\nname = \"AprilTag\"\ngraph = \"apriltag-36h11\"\npyramid = 1\n";
+        assert!(startup_declares_default_pipeline(apriltag));
+        assert!(startup_declares_default_pipeline("[default_pipeline]\ngraph = \"apriltag-36h11\"\n"), "enabled by default");
+        assert!(!startup_declares_default_pipeline(&apriltag.replace("enabled = true", "enabled = false")));
+        assert!(!startup_declares_default_pipeline("# no pipeline\n"));
+        assert!(!startup_declares_default_pipeline("[default_pipeline\n"), "not TOML");
+    }
+
+    #[test]
+    fn stale_libcamera_preset_does_not_declare_a_camera() {
+        // The old schema helios-api no longer reads.
+        let stale = "[[pipelines]]\nid = \"x\"\n\n[[streams]]\ncameraId = \"/base/axi/ov9782\"\n\n[streams.manifest.capture]\nbackend = \"Libcamera\"\n";
+        assert!(!startup_declares_default_pipeline(stale));
     }
 
     #[test]

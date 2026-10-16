@@ -1,8 +1,9 @@
 //! What only the API owns, persisted under its state directory (`/var/lib/helios/api`, on the
 //! data partition, so it survives reboots and OTA updates): the revision history of each
 //! pipeline (for rollback), where each camera is mounted on the robot, each camera's
-//! calibrations, the camera control values set through the API, and the uploaded field layouts
-//! with the one selected for every pipeline that names none.
+//! calibrations, the camera control values set through the API, the uploaded field layouts
+//! with the one selected for every pipeline that names none, and the first-boot decision about
+//! the startup file's default pipeline (`startup.rs`).
 
 use std::{
     collections::BTreeMap,
@@ -26,6 +27,15 @@ pub struct PipelineRevision {
     pub revision: u64,
     pub saved_at_ms: u64,
     pub spec: serde_json::Value,
+}
+
+/// The first-boot decision about the startup file's default pipeline. Kept once made, so that a
+/// pipeline the user deletes is not created again.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct DefaultPipelineRecord {
+    /// Whether the default pipeline was created (false: the board already had pipelines).
+    pub created: bool,
+    pub decided_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -87,6 +97,20 @@ impl Store {
 
     fn mounts_path(&self) -> PathBuf {
         self.dir.join("camera-mounts.json")
+    }
+
+    fn default_pipeline_path(&self) -> PathBuf {
+        self.dir.join("default-pipeline.json")
+    }
+
+    pub async fn default_pipeline_record(&self) -> ApiResult<Option<DefaultPipelineRecord>> {
+        let _guard = self.lock.lock().await;
+        read_json(&self.default_pipeline_path()).await
+    }
+
+    pub async fn record_default_pipeline(&self, created: bool, decided_at_ms: u64) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.default_pipeline_path(), &DefaultPipelineRecord { created, decided_at_ms }).await
     }
 
     pub async fn history(&self, id: &str) -> ApiResult<PipelineHistory> {
@@ -340,6 +364,16 @@ mod tests {
         let history = store.history("x").await.expect("history");
         assert_eq!(history.revisions.len(), MAX_REVISIONS);
         assert_eq!(history.latest().expect("latest").revision, (MAX_REVISIONS + 5) as u64);
+    }
+
+    #[tokio::test]
+    async fn default_pipeline_decision_is_kept_across_a_new_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path());
+        assert_eq!(store.default_pipeline_record().await.expect("read"), None);
+        store.record_default_pipeline(true, 7).await.expect("record");
+        let store = Store::new(dir.path());
+        assert_eq!(store.default_pipeline_record().await.expect("read"), Some(DefaultPipelineRecord { created: true, decided_at_ms: 7 }));
     }
 
     #[tokio::test]
