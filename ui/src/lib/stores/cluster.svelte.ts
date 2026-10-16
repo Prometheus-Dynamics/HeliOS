@@ -141,6 +141,15 @@ class ClusterStore {
   camera(id: string) {
     return this.cameras.find((c) => c.resourceId === id);
   }
+  /** The input of `w` bound to a camera (the device's graphs call it `frame`), if any. */
+  cameraInput(w: Workload): string | undefined {
+    return Object.entries(w.bindings).find(([, id]) => this.cameras.some((c) => c.resourceId === id))?.[0];
+  }
+  /** The camera `w` reads, if any. */
+  cameraOf(w: Workload): Camera | undefined {
+    const input = this.cameraInput(w);
+    return input ? this.camera(w.bindings[input]) : undefined;
+  }
   workload(id: string) {
     return this.workloads.find((w) => w.id === id);
   }

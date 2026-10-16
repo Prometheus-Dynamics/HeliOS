@@ -46,7 +46,7 @@
   {#if s?.kind === "camera"}
     {@const c = cluster.camera(s.id)}
     {#if c}
-      {@const uses = cluster.workloads.filter((w) => w.bindings.camera === c.resourceId)}
+      {@const uses = cluster.workloads.filter((w) => Object.values(w.bindings).includes(c.resourceId))}
       <IdentityEditor id={c.resourceId} fallbackName={c.name} fallbackIcon="camera" sub="{c.sensor} · {cluster.node(c.nodeId)?.name}" />
       <Section title="Quick controls" key="insp-cam">
         <Prop label="Auto exposure"><Switch checked={c.settings.autoExposure} onchange={(v) => cluster.setCamera(c.resourceId, { autoExposure: v })} /></Prop>
@@ -82,7 +82,7 @@
       </div>
       <Section title="Inputs and placement" key="insp-wl-bind">
         <Prop label="Camera">
-          <Choice value={w.bindings.camera ?? ""} options={cluster.cameras.map((c) => ({ value: c.resourceId, label: identity.name(c.resourceId, c.name) }))} onchange={(v) => cluster.bindInput(w.id, "camera", v)} />
+          <Choice value={cluster.cameraOf(w)?.resourceId ?? ""} options={cluster.cameras.map((c) => ({ value: c.resourceId, label: identity.name(c.resourceId, c.name) }))} onchange={(v) => cluster.bindInput(w.id, cluster.cameraInput(w) ?? "frame", v)} />
         </Prop>
         <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
           <Choice value={w.nodeId} options={cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId).map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />

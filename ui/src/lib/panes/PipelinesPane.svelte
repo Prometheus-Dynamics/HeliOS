@@ -56,7 +56,7 @@
     <span></span><span>Pipeline</span><span>Camera</span><span class="r">p50</span><span class="r">p99</span><span>trend</span><span class="r">fps</span><span class="r">mem</span><span></span>
   </div>
   {#each cluster.workloads as w (w.id)}
-    {@const cam = cluster.camera(w.bindings.camera ?? "")}
+    {@const cam = cluster.cameraOf(w)}
     {@const sel = selection.last.workload?.id === w.id}
     <div
       class="row"
