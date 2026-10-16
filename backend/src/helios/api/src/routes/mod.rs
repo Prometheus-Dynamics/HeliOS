@@ -70,6 +70,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))
         .route("/v1/pipelines", get(pipelines::list).post(pipelines::create))
+        .route("/v1/pipelines/templates", get(pipelines::templates))
         .route("/v1/pipelines/{id}", get(pipelines::get_one).put(pipelines::put).delete(pipelines::remove))
         .route("/v1/pipelines/{id}/start", post(pipelines::start))
         .route("/v1/pipelines/{id}/stop", post(pipelines::stop))

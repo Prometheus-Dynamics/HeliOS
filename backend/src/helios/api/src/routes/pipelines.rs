@@ -41,6 +41,7 @@ const FIELD_LAYOUT_LABEL: &str = "helios.pipeline.field_layout";
 const SESSION_TYPE: &str = "execution.session";
 const ARTIFACT_TYPE: &str = "execution.artifact";
 const TELEMETRY_KIND: &str = "execution.telemetry";
+const METRICS_KIND: &str = "execution.metrics";
 const HOST_OUTPUT_PREFIX: &str = "host_output:";
 
 /// Frame-source options for a camera binding (all optional).
@@ -404,6 +405,9 @@ pub struct Pipeline {
     pub session: Option<Session>,
     /// helios-engine's frame statistics (fps, last tick, frame counts, source status).
     pub telemetry: Option<serde_json::Value>,
+    /// Daedalus per-node and per-edge timings over the last window (`window`) and since the
+    /// graph started (`total`); `null` while helios-engine runs with metrics off.
+    pub metrics: Option<serde_json::Value>,
     pub outputs: Vec<Output>,
     /// The graph's detector search: `full` or `tracked` (with `full_search_every` and the tracking
     /// settings); `null` without an Eidos detector group.
@@ -587,6 +591,9 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
         .map(|record| parse_message(state_field(record, "message")));
+    let metrics = workload_resources(view, &workload_id, ARTIFACT_TYPE)
+        .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(METRICS_KIND))
+        .map(|record| parse_message(state_field(record, "message")));
     Pipeline {
         id: pipeline_id(&workload_id),
         name: labels.get(NAME_LABEL).cloned().unwrap_or_else(|| pipeline_id(&workload_id)),
@@ -602,6 +609,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         plugins,
         session,
         telemetry,
+        metrics,
         pose: pose_summary(&outputs),
         outputs,
         dictionary,
@@ -1246,4 +1254,29 @@ mod tests {
         assert_eq!(slug("AprilTags · front!"), "apriltags-front");
         assert!(super::super::valid_id(&slug("")));
     }
+}
+
+/// A pipeline template: one of the golden graphs, with the input a camera binds to.
+#[derive(Debug, Serialize)]
+pub struct Template {
+    pub id: String,
+    /// The detector family (`apriltag` or `aruco`).
+    pub family: String,
+    /// The dictionary the graph decodes; a pipeline can change it (`PipelineSpec::dictionary`).
+    pub dictionary: Option<String>,
+    /// The graph input a camera binds to (its host bridge's frame input).
+    pub camera_input: String,
+    pub graph: serde_json::Value,
+}
+
+/// `GET /v1/pipelines/templates`: the graphs helios-engine ships, ready to deploy with a camera
+/// binding on `camera_input`.
+pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
+    let mut out = Vec::new();
+    for (id, json) in crate::startup::GRAPHS {
+        let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
+        let family = if id.starts_with("aruco") { "aruco" } else { "apriltag" };
+        out.push(Template { id: (*id).into(), family: family.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
+    }
+    Ok(Json(out))
 }

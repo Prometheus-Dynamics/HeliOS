@@ -21,7 +21,9 @@ Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=1
 Environment=HELIOS_STREAM_PREVIEW_ENCODE_INTERVAL_MS=4
 Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
-Environment=DAEDALUS_METRICS_LEVEL=detailed
+# Per-node timings for the profiler (the engine reads HELIOS_ENGINE_METRICS_LEVEL; timing is the
+# cheapest level with per-node durations).
+Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
 EnvironmentFile=-/etc/default/helios-engine.env
 ExecStart=/usr/bin/helios-engine
 Restart=always

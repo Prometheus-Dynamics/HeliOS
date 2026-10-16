@@ -27,7 +27,12 @@ const FRAME_INPUT: &str = "frame";
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The golden graphs a startup file can name, by id.
-const GRAPHS: &[(&str, &str)] = &[("apriltag-36h11", include_str!("../../engine/graphs/apriltag-36h11.graph.json"))];
+/// The golden graphs helios-engine ships (`backend/src/helios/engine/graphs`), by id: the
+/// default pipeline's choices and the templates `GET /v1/pipelines/templates` offers.
+pub const GRAPHS: &[(&str, &str)] = &[
+    ("apriltag-36h11", include_str!("../../engine/graphs/apriltag-36h11.graph.json")),
+    ("aruco-4x4_50", include_str!("../../engine/graphs/aruco-4x4_50.graph.json")),
+];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
