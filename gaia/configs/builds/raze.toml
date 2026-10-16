@@ -80,7 +80,8 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "8d6c05886537c6f0069e764616da958e9dcf2d73"
 
-# Lemnos (dev ce3dda3, the commit the PhotonVision Raze images ship; earlier 8e59039: subscribe
+# Lemnos (dev 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
+# on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
 # replies return the granted period, boot-clock timestamps and the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
 # The Raze layer imports Lemnos's lemnosd layer from a
 # source named `lemnos`, and Gaia lets only local files declare import
@@ -96,7 +97,7 @@ rev = "8d6c05886537c6f0069e764616da958e9dcf2d73"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "ce3dda3e5cee4c0253989ad1485dee4669bf9290"
+rev = "384b2b1379b0c81e7d47349c93beb74e69d51bd0"
 
 # Orion protocol 5 (live-streams f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).

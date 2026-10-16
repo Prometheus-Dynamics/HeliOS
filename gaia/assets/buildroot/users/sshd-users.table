@@ -1,0 +1,5 @@
+# sshd's privilege separation user. Buildroot's openssh package declares it
+# only as a systemd-sysusers entry once BR2_PACKAGE_SYSTEMD_SYSUSERS is on
+# (os/base.toml enables it for lemnosd), and sysusers cannot write the
+# read-only root at boot, so the user is made at build time here.
+sshd -1 sshd -1 * /var/empty - - SSH drop priv user

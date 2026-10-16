@@ -46,6 +46,10 @@ config_overrides = [
   # copy: two copies make mkusers fail), and in the full profile Orion's
   # (runtime-services/backend-core.toml).
   ["BR2_PACKAGE_SYSTEMD_SYSUSERS", "y"],
+  # With sysusers on, Buildroot's openssh declares `sshd` only for sysusers,
+  # so its user comes from a users table (sshd refuses to start without it).
+  # runtime-services/backend-core.toml repeats this table in its own list.
+  ["BR2_ROOTFS_USERS_TABLES", "\"${project.root_dir}/gaia/assets/buildroot/users/sshd-users.table\""],
 ]
 
 [image.output]
