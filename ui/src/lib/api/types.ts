@@ -507,7 +507,18 @@ export interface UpdateStatus {
   progress_percent: number | null;
   last_error: string | null;
   updater_available: boolean;
-  slots: { active: string | null; staged: string | null };
+  slots: {
+    active: string | null;
+    staged: string | null;
+    /** `slots` on a dynamic-slots board, `ab` otherwise. */
+    layout?: string;
+    default?: string | null;
+    previous?: string | null;
+    trial?: string | null;
+    free_bytes?: number | null;
+    reserve_bytes?: number | null;
+    installed?: { id: string; family?: string; version?: string; variant?: string; size?: number; flags?: string[]; good?: string }[];
+  };
   version_active: string | null;
   version_staged: string | null;
   task: UpdateTask | null;

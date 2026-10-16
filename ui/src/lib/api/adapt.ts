@@ -147,6 +147,19 @@ export function toService(unit: W.UnitStatus): Service {
 }
 
 function slotsFrom(status: W.UpdateStatus | null, version: string): Slot[] {
+  if (status?.slots.layout === "slots") {
+    return (status.slots.installed ?? []).map((s) => ({
+      name: s.id,
+      version: s.version ?? "",
+      active: s.id === status.slots.active,
+      confirmed: s.good !== "no" && !(s.flags ?? []).includes("trial"),
+      family: s.family,
+      variant: s.variant,
+      isDefault: s.id === status.slots.default,
+      sizeMiB: s.size ? s.size / 1024 / 1024 : undefined,
+      flags: s.flags,
+    }));
+  }
   const active = status?.slots.active?.toUpperCase();
   if (active !== "A" && active !== "B") return [];
   // On a trial boot the running slot is not confirmed until update-health passes.

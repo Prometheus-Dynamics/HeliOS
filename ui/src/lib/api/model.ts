@@ -9,10 +9,17 @@ export type Link = "ethernet" | "usb" | "can" | "uart";
 export type RecoveryLevel = "R1" | "R2" | "R3" | "R4";
 
 export interface Slot {
-  name: "A" | "B";
+  /** A or B on the A/B layout; the slot id on a dynamic-slots board. */
+  name: string;
   version: string;
   active: boolean;
   confirmed: boolean;
+  /** Dynamic slots: the OS family, its variant, a plain boot's slot, size and the writer's flags. */
+  family?: string;
+  variant?: string;
+  isDefault?: boolean;
+  sizeMiB?: number;
+  flags?: string[];
 }
 
 export interface ClusterNode {

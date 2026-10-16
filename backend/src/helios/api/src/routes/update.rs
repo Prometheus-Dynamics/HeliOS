@@ -405,10 +405,21 @@ pub async fn switch_slot() -> ApiError {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Slots {
-    /// A or B: the slot this system booted from; `unknown` off the A/B layout.
+    /// The slot this system booted from: A or B on the A/B layout, a slot id on a slots board.
     pub active: Option<String>,
     /// The slot holding a staged (or on-trial) update.
     pub staged: Option<String>,
+    /// `slots` (a dynamic-slots board) or `ab`.
+    pub layout: String,
+    /// Slots boards: the slot a plain boot starts, the one before it, and a pending trial.
+    pub default: Option<String>,
+    pub previous: Option<String>,
+    pub trial: Option<String>,
+    /// Slots boards: room for more slots, and the space installs must leave free.
+    pub free_bytes: Option<u64>,
+    pub reserve_bytes: Option<u64>,
+    /// Slots boards: every installed slot, as the device package's writer lists it.
+    pub installed: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -455,7 +466,17 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
         progress_percent,
         last_error,
         updater_available: tool_installed(config),
-        slots: Slots { active: board.as_ref().and_then(|board| board.slot_active.clone()), staged: board.as_ref().and_then(|board| board.slot_staged.clone()) },
+        slots: Slots {
+            active: board.as_ref().and_then(|board| board.slot_active.clone()),
+            staged: board.as_ref().and_then(|board| board.slot_staged.clone()),
+            layout: board.as_ref().and_then(|board| board.layout.clone()).unwrap_or_else(|| "ab".into()),
+            default: board.as_ref().and_then(|board| board.slot_default.clone()),
+            previous: board.as_ref().and_then(|board| board.slot_previous.clone()),
+            trial: board.as_ref().and_then(|board| board.slot_trial.clone()),
+            free_bytes: board.as_ref().and_then(|board| board.free_bytes),
+            reserve_bytes: board.as_ref().and_then(|board| board.reserve_bytes),
+            installed: board.as_ref().map(|board| board.slots.clone()).unwrap_or_default(),
+        },
         version_active: board.as_ref().and_then(|board| board.version_active.clone()),
         version_staged: board.as_ref().and_then(|board| board.version_staged.clone()),
         task,

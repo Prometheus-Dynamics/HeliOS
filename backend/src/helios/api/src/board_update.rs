@@ -39,6 +39,23 @@ pub struct BoardUpdateStatus {
     pub progress: u32,
     #[serde(default, deserialize_with = "empty_as_none")]
     pub error: Option<String>,
+    /// `slots` on a dynamic-slots board (slot ids), `ab` (or absent) on the A/B layout.
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub layout: Option<String>,
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub slot_default: Option<String>,
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub slot_previous: Option<String>,
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub slot_trial: Option<String>,
+    #[serde(default)]
+    pub free_bytes: Option<u64>,
+    #[serde(default)]
+    pub reserve_bytes: Option<u64>,
+    /// Every installed slot as the writer lists it (id, family, version, variant, size,
+    /// verity, flags, pinned, good, ...).
+    #[serde(default)]
+    pub slots: Vec<serde_json::Value>,
 }
 
 fn empty_as_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {

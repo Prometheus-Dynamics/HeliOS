@@ -86,12 +86,21 @@
         <div class="slots">
           {#each node.slots as s (s.name)}
             <div class="slot" class:active={s.active}>
-              <span class="sn">{s.name}</span>
-              <span class="sv">
-                <b>{s.version}</b>
-                <i>{s.active ? "running" : "spare"} · {s.confirmed ? "confirmed" : "on trial"}</i>
-              </span>
-              {#if s.active}<Badge tone="ok" text="active" />{:else}<IconButton icon="versions" label="Boot into slot {s.name}" size={22} onclick={() => cluster.switchSlot(node.id)} />{/if}
+              {#if s.family}
+                <span class="sn">{s.family === "photonvision" ? "PV" : s.family === "helios" ? "H" : s.family.slice(0, 2)}</span>
+                <span class="sv">
+                  <b>{s.family === "photonvision" ? "PhotonVision" : s.family === "helios" ? "HeliOS" : s.family} {s.version}{s.variant ? ` · ${s.variant}` : ""}</b>
+                  <i>{s.active ? "running" : s.isDefault ? "default" : "installed"}{s.sizeMiB ? ` · ${Math.round(s.sizeMiB)} MiB` : ""}{s.flags?.includes("failed") ? " · failed its trial" : ""}</i>
+                </span>
+                {#if s.active}<Badge tone="ok" text="active" />{:else if s.isDefault}<Badge tone="neutral" text="default" />{/if}
+              {:else}
+                <span class="sn">{s.name}</span>
+                <span class="sv">
+                  <b>{s.version}</b>
+                  <i>{s.active ? "running" : "spare"} · {s.confirmed ? "confirmed" : "on trial"}</i>
+                </span>
+                {#if s.active}<Badge tone="ok" text="active" />{:else}<IconButton icon="versions" label="Boot into slot {s.name}" size={22} onclick={() => cluster.switchSlot(node.id)} />{/if}
+              {/if}
             </div>
           {/each}
         </div>
@@ -122,10 +131,11 @@
 
     <Section title="Services" key="sys-services" count={node.services.length}>
       {#each node.services as s (s.name)}
+        {@const mem = s.memMiB || (system.of(node.id)?.procs.filter((p) => p.owner.kind === "service" && p.owner.id === s.name).reduce((sum, p) => sum + p.memMiB, 0) ?? 0)}
         <div class="svc">
           <span class="dot s-{s.state}"></span>
           <span class="nm">{s.name}</span>
-          <span class="mono dim">{s.memMiB < 1 ? `${(s.memMiB * 1024).toFixed(0)} KiB` : `${s.memMiB.toFixed(1)} MiB`}</span>
+          <span class="mono dim" data-tip={s.memMiB ? "Memory (systemd)" : "Memory of its processes"}>{!mem ? "—" : mem < 1 ? `${(mem * 1024).toFixed(0)} KiB` : `${mem.toFixed(1)} MiB`}</span>
           <span class="mono dim" data-tip="Restarts since boot">↻{s.restarts}</span>
           <IconButton icon="refresh" label="Restart {s.name}" size={20} onclick={() => cluster.restartService(node.id, s.name)} />
         </div>
