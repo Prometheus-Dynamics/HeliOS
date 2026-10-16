@@ -71,6 +71,8 @@ imports = [
 # network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
 # 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2
 # with the Raze trims and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915,
+# Atlas dev b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
+# slot-management and live-stream work.
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
 # read-only-root-safe device services, no udev hwdb, optional Vulkan layer.
@@ -78,7 +80,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "8d6c05886537c6f0069e764616da958e9dcf2d73"
+rev = "b4d664aa661fd6f1c09c0ada12caed2be21799a0"
 
 # Lemnos (dev 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -99,7 +101,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
 rev = "384b2b1379b0c81e7d47349c93beb74e69d51bd0"
 
-# Orion protocol 5 (live-streams f8d767ac: push sessions, streams with history and backfill,
+# Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
 # Earlier, v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
 # 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
@@ -124,7 +126,7 @@ rev = "fca40156dac138aef3f3aadc1d1a0f39e491fc32"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "f8d767ac5f7a995fbdc205d727f58dcf719c25dc"
+rev = "414834b9abbe666bb86571dde7ca7e79d4fbfaa4"
 
 [inputs.profile]
 description = "Build profile"

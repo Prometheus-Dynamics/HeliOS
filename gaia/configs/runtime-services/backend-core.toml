@@ -18,6 +18,14 @@ dest = "/etc/default/orion-node.env"
 mode = 420
 origin = "static-asset"
 
+# The owners board-data-owners keeps right on /data (orion-node's state).
+[[stage.files]]
+id = "helios-data-owners"
+src = "@assets/runtime-services/core/usr/lib/board/data-owners.d/helios.conf"
+dest = "/usr/lib/board/data-owners.d/helios.conf"
+mode = 420
+origin = "static-asset"
+
 [[stage.services]]
 id = "helios-api-service"
 name = "helios-api.service"
@@ -48,6 +56,7 @@ config_overrides = [
 [image.feed]
 stage_files = [
   "runtime-api-startup",
+  "helios-data-owners",
 ]
 stage_services = [
   "helios-api-service",
