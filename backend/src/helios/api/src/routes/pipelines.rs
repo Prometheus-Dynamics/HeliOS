@@ -94,6 +94,11 @@ pub struct PipelineSpec {
     /// uses the selected layout, and follows it when the selection changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field_layout: Option<String>,
+    /// The tag family the graph's Eidos detector groups decode (Eidos's dictionary names, such as
+    /// `apriltag_36h11`, `apriltag_16h5` or `aruco_4x4_50`); unset keeps the graph's. A family
+    /// other than the tags' own finds nothing: no detections and no rejections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dictionary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -235,6 +240,42 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning
     changed
 }
 
+/// The `dictionary` constant of `graph`'s first Eidos detector group.
+pub fn dictionary_of(graph: &serde_json::Value) -> Option<String> {
+    let nodes = graph.get("graph")?.get("nodes")?.as_array()?;
+    nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(is_detector_group)).find_map(|node| {
+        let entry = node.get("const_inputs")?.as_array()?.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some("dictionary"))?;
+        let value = entry.get(1)?.get("value")?;
+        value.get("name").and_then(|n| n.as_str()).or_else(|| value.as_str()).map(str::to_string)
+    })
+}
+
+fn is_detector_group(id: &str) -> bool {
+    DETECTOR_GROUPS.iter().any(|(full, tracked)| *full == id || *tracked == id)
+}
+
+/// Set the `dictionary` constant of every Eidos detector group in `graph` to `name`. Returns how
+/// many groups it set.
+pub fn apply_dictionary(graph: &mut serde_json::Value, name: &str) -> usize {
+    let Some(nodes) = graph.get_mut("graph").and_then(|g| g.get_mut("nodes")).and_then(|n| n.as_array_mut()) else {
+        return 0;
+    };
+    let mut changed = 0;
+    for node in nodes {
+        if !node.get("id").and_then(|id| id.as_str()).is_some_and(is_detector_group) {
+            continue;
+        }
+        changed += 1;
+        if node.get("const_inputs").and_then(|c| c.as_array()).is_none() {
+            node["const_inputs"] = serde_json::json!([]);
+        }
+        let consts = node["const_inputs"].as_array_mut().expect("just ensured");
+        consts.retain(|entry| entry.get(0).and_then(|n| n.as_str()) != Some("dictionary"));
+        consts.push(serde_json::json!(["dictionary", { "type": "Enum", "value": { "name": name, "value": null } }]));
+    }
+    changed
+}
+
 /// The graph a spec deploys: its search mode applied (see `PipelineSpec::search_mode`).
 pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde_json::Value> {
     let mut graph = spec.graph.clone();
@@ -268,6 +309,19 @@ pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde
         if changed == 0 && spec.search_mode.is_some() {
             return Err(ApiError::unprocessable("search_mode needs an Eidos detector group in the graph (eidos:detectors.apriltag or eidos:detectors.aruco, tracked or not)"));
         }
+    }
+    if let Some(name) = &spec.dictionary {
+        let family = if name.starts_with("apriltag_") { "eidos:detectors.apriltag" } else { "eidos:detectors.aruco" };
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+            return Err(ApiError::unprocessable("dictionary is an Eidos dictionary name such as apriltag_36h11, apriltag_16h5 or aruco_4x4_50"));
+        }
+        let groups = graph.get("graph").and_then(|g| g.get("nodes")).and_then(|n| n.as_array()).map_or(0, |nodes| {
+            nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id.starts_with(family) && is_detector_group(id))).count()
+        });
+        if groups == 0 {
+            return Err(ApiError::unprocessable(format!("dictionary {name} needs a {family} detector group (tracked or not) in the graph")));
+        }
+        apply_dictionary(&mut graph, name);
     }
     Ok(graph)
 }
@@ -364,6 +418,8 @@ pub struct Pipeline {
     pub pose: Option<serde_json::Value>,
     /// The field layout the graph's multi-tag pose solves against; `null` without one.
     pub field_layout: Option<String>,
+    /// The tag family the graph's detector group decodes; `null` without an Eidos detector group.
+    pub dictionary: Option<String>,
     /// Managed by this API (created through `/v1/pipelines`) rather than written by other tools.
     pub managed: bool,
 }
@@ -521,6 +577,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
     });
     let (search_mode, full_search_every) = graph.as_ref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
     let tuning = graph.as_ref().and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
+    let dictionary = graph.as_ref().and_then(dictionary_of);
     let outputs = outputs_of(view, &workload_id);
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
@@ -542,6 +599,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         telemetry,
         pose: pose_summary(&outputs),
         outputs,
+        dictionary,
         search_mode,
         full_search_every,
         loss_full_search_after: tuning.map(|tuning| tuning.loss_full_search_after),
@@ -840,6 +898,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
                 loss_full_search_after: None,
                 margin_growth_misses: None,
                 field_layout: pipeline.field_layout,
+                dictionary: None,
             }
         }
     };
@@ -954,6 +1013,7 @@ mod tests {
             loss_full_search_after: None,
             margin_growth_misses: None,
             field_layout: None,
+            dictionary: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
         let contexts = BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None))]);
@@ -1011,6 +1071,7 @@ mod tests {
             loss_full_search_after: Some(2),
             margin_growth_misses: Some(9),
             field_layout: None,
+            dictionary: None,
         };
         let graph = effective_graph(&spec, &view).expect("tracked");
         assert_eq!(search_tuning_of(&graph), Some(SearchTuning { full_search_every: DEFAULT_FULL_SEARCH_EVERY, loss_full_search_after: 2, margin_growth_misses: 9 }));
@@ -1024,6 +1085,16 @@ mod tests {
         spec.loss_full_search_after = Some(1);
         spec.search_mode = Some(SearchMode::Full);
         assert!(effective_graph(&spec, &view).is_err(), "tracking settings with full search");
+    }
+
+    #[test]
+    fn dictionary_sets_the_detector_family() {
+        let mut graph: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("golden graph");
+        assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_36h11"));
+        assert_eq!(apply_dictionary(&mut graph, "apriltag_16h5"), 1);
+        assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_16h5"));
+        let consts = graph["graph"]["nodes"][1]["const_inputs"].as_array().expect("consts");
+        assert_eq!(consts.iter().filter(|entry| entry[0] == "dictionary").count(), 1);
     }
 
     #[test]
@@ -1042,6 +1113,7 @@ mod tests {
             loss_full_search_after: None,
             margin_growth_misses: None,
             field_layout: None,
+            dictionary: None,
         };
 
         let full = effective_graph(&spec, &view).expect("full");
@@ -1115,6 +1187,7 @@ mod tests {
             loss_full_search_after: None,
             margin_growth_misses: None,
             field_layout: None,
+            dictionary: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("bare graph JSON");
         assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
@@ -1138,6 +1211,7 @@ mod tests {
             loss_full_search_after: None,
             margin_growth_misses: None,
             field_layout: None,
+            dictionary: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("eidos is not loaded");
         assert!(error.message.contains("eidos"));
@@ -1156,6 +1230,7 @@ mod tests {
             loss_full_search_after: None,
             margin_growth_misses: None,
             field_layout: None,
+            dictionary: None,
         };
         assert!(validate_spec(&spec, &view, "node-local", None).is_err());
     }

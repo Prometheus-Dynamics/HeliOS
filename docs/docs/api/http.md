@@ -400,6 +400,10 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   (`eidos:aruco.multi_tag_pose`) solves against; unset, the pipeline uses the selected layout and
   follows the selection. The API writes the layout's tags into the node's `known_tags` constant
   when it deploys the pipeline; the pipeline reports the layout in use (`field_layout`).
+- `dictionary` sets the tag family the graph's Eidos detector groups decode (an Eidos dictionary
+  name: `apriltag_36h11`, the FRC family since 2024, `apriltag_16h5`, `aruco_4x4_50`, ...);
+  unset keeps the graph's. A family other than the tags' own finds nothing at all, not even
+  rejected candidates. The pipeline reports the family in use (`dictionary`).
 
 The pipeline the API returns:
 
