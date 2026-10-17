@@ -1345,6 +1345,9 @@ pub struct Template {
     pub id: String,
     /// The detector family (`apriltag` or `aruco`).
     pub family: String,
+    /// `default` (the node-group, profiled stage by stage; the first of its family) or
+    /// `low-latency` (one node that starts on a frame's first rows).
+    pub variant: String,
     /// The dictionary the graph decodes; a pipeline can change it (`PipelineSpec::dictionary`).
     pub dictionary: Option<String>,
     /// The graph input a camera binds to (its host bridge's frame input).
@@ -1359,7 +1362,8 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
     for (id, json) in crate::startup::GRAPHS {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = if id.starts_with("aruco") { "aruco" } else { "apriltag" };
-        out.push(Template { id: (*id).into(), family: family.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
+        let variant = if id.ends_with("-low-latency") { "low-latency" } else { "default" };
+        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
     }
     Ok(Json(out))
 }

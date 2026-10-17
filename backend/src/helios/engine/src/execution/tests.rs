@@ -46,6 +46,7 @@ use crate::{
 /// The stored graph documents engine workloads run: Eidos's detector templates.
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
+const APRILTAG_LOW_LATENCY_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-low-latency.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -136,7 +137,15 @@ impl FrameSource for ChannelFrameSource {
 /// field). The camera and the extrinsics are held host inputs (`camera`, `extrinsics`), which the
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
+    helios_template_with(registry, dictionary, layout, false)
+}
+
+/// `single_node`: the tracked detector as one node (`eidos:detectors.tracked_detect`), which
+/// starts on a sliced frame's first rows, instead of the node-group whose stages are profiled
+/// one by one.
+fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>, single_node: bool) -> String {
     let mut template = TrackedDetectorTemplate {
+        single_node,
         tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
         ..TrackedDetectorTemplate::new(dictionary, 8)
     };
@@ -146,7 +155,8 @@ fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Op
         layout.map(|layout| MultiTagPoseTemplate { config: MultiTagPoseConfig::default(), known_tags: KnownTagPoses::from_known_tags(&layout.known_tags()), extrinsics: StructuredInput::GraphInput });
     let has_field = template.multi_tag_pose.is_some();
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("tracked detector graph"));
-    let title = format!("HeliOS {} tracked detector with tag pose{}", dictionary.name(), if has_field { " and multi-tag field pose" } else { "" });
+    let title =
+        format!("HeliOS {} tracked detector{} with tag pose{}", dictionary.name(), if single_node { " (low latency, one node)" } else { "" }, if has_field { " and multi-tag field pose" } else { "" });
     document.metadata.insert("title".into(), title.into());
     // As helios-api stores graphs: without the metadata copied from the node declarations
     // (the planner reads node-group graphs from the registry).
@@ -159,7 +169,8 @@ fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Op
             });
         }
     }
-    serde_json::to_string_pretty(&value).expect("document json")
+    // Compact: helios-api embeds the templates, and indentation is most of a pretty one.
+    serde_json::to_string(&value).expect("document json")
 }
 
 /// `libhelios_eidos_plugin.so`: `HELIOS_EIDOS_PLUGIN`, else the one `cargo test` built next to
@@ -296,7 +307,7 @@ fn artifact_json(artifacts: &[ExecutionArtifactRecord], kind: &str) -> serde_jso
 }
 
 fn frame_spec(input: &str) -> FrameSourceSpec {
-    FrameSourceSpec { input: input.into(), resource_id: "camera.test".into(), socket_path: "/nonexistent.sock".into(), request: FrameRequestOptions::default() }
+    FrameSourceSpec { input: input.into(), resource_id: "camera.test".into(), socket_path: "/nonexistent.sock".into(), request: FrameRequestOptions::default(), sliced: false }
 }
 
 /// Start a driver for `workload` fed through the returned sender.
@@ -326,6 +337,11 @@ fn graph_documents_are_eidos_templates() {
     for (file, json, stored) in [
         ("graphs/apriltag-36h11.graph.json", helios_template(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark())), APRILTAG_GRAPH_DOCUMENT),
         ("graphs/aruco-4x4_50.graph.json", helios_template(plugins.registry(), Dictionary::Aruco4x4_50, None), ARUCO_GRAPH_DOCUMENT),
+        (
+            "graphs/apriltag-36h11-low-latency.graph.json",
+            helios_template_with(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark()), true),
+            APRILTAG_LOW_LATENCY_GRAPH_DOCUMENT,
+        ),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");

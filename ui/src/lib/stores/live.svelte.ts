@@ -404,7 +404,7 @@ export class LiveCluster {
    * ISP's half level attached, much cheaper than the detector building it) and its tag family set. */
   async createJob(name: string, cameraId: string, family: "apriltag" | "aruco", dictionary?: string): Promise<string> {
     const templates = await this.guard("templates", () => api.pipelineTemplates());
-    const template = templates?.find((t) => t.family === family);
+    const template = templates?.find((t) => t.family === family && (t.variant ?? "default") === "default");
     if (!template) {
       toasts.error(`This device has no ${family} template`);
       return "";

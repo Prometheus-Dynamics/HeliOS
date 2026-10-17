@@ -25,6 +25,9 @@ pub(crate) struct FrameSourceSpec {
     pub resource_id: String,
     pub socket_path: PathBuf,
     pub request: FrameRequestOptions,
+    /// Ask for frames at their first slice (still filling, with progress): only for graphs whose
+    /// frame readers handle that (see `graph_takes_sliced_frames`).
+    pub sliced: bool,
 }
 
 impl FrameSourceSpec {
@@ -40,6 +43,16 @@ impl FrameSourceSpec {
         }
         request
     }
+}
+
+/// Nodes that start on a frame's first rows and wait for the rest themselves. Every Eidos node
+/// waits for a sliced frame to complete before reading it, so a graph with one of these gains
+/// latency and the others stay correct; graphs without one get complete frames.
+const SLICED_FRAME_NODES: &[&str] = &["eidos:detectors.tracked_detect"];
+
+/// Whether a workload's graph should get frames at their first slice.
+pub(crate) fn graph_takes_sliced_frames(graph_json: &str) -> bool {
+    SLICED_FRAME_NODES.iter().any(|id| graph_json.contains(&format!("\"{id}\"")))
 }
 
 /// A graph input fed with a resource's state as JSON.
@@ -62,7 +75,7 @@ pub(crate) fn resolve_bindings(workload: &ExecutionWorkload, resources: &BTreeMa
     for binding in &workload.bindings {
         let resource = resources.get(binding.resource_id.as_str()).ok_or_else(|| ExecutionError::MissingResource(binding.resource_id.clone()))?;
         if let Some(socket_path) = frame_socket_path(&resource.endpoints) {
-            resolved.frames.push(FrameSourceSpec { input: binding.input.clone(), resource_id: binding.resource_id.clone(), socket_path, request: binding.frame_request.clone() });
+            resolved.frames.push(FrameSourceSpec { input: binding.input.clone(), resource_id: binding.resource_id.clone(), socket_path, request: binding.frame_request.clone(), sliced: false });
             continue;
         }
         let payload = serde_json::to_string(&resource_binding_payload(resource)).map_err(|error| ExecutionError::Execute(error.to_string()))?;

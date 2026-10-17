@@ -68,6 +68,9 @@ impl StyxFrameSource {
 
     fn client(spec: &FrameSourceSpec) -> Result<FrameClient, String> {
         let mut options = FrameClient::options(&spec.socket_path).timeout(CONNECT_TIMEOUT).reconnecting();
+        if spec.sliced {
+            options = options.sliced_frames();
+        }
         if let Some(camera) = &spec.request.camera {
             options = options.camera(camera);
         }

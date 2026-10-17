@@ -28,7 +28,7 @@ use tokio::sync::Notify;
 pub use bindings::STYX_FRAMES_ENDPOINT_SCHEME;
 pub use graph::GraphSettings;
 
-use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, LoadedPlugin};
+use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, LoadedPlugin};
 use bindings::resolve_bindings;
 use driver::WorkloadDriver;
 use frame_source::{FrameSource, StyxFrameSource};
@@ -142,7 +142,12 @@ impl ResidentExecutionSet {
         resources: &BTreeMap<ResourceId, ResourceRecord>,
     ) -> Result<(ExecutionSessionState, Vec<ExecutionArtifactRecord>), ExecutionError> {
         let id = workload.workload_id.as_str();
-        let resolved = resolve_bindings(workload, resources)?;
+        let mut resolved = resolve_bindings(workload, resources)?;
+        if let GraphRef::InlineSpec(graph) = &workload.graph_ref
+            && bindings::graph_takes_sliced_frames(graph)
+        {
+            resolved.frames.iter_mut().for_each(|spec| spec.sliced = true);
+        }
         // A camera that moved to another socket (or a changed request) restarts the driver.
         if self.drivers.get(id).is_some_and(|resident| resident.sources != resolved.frames) {
             self.drivers.remove(id);
