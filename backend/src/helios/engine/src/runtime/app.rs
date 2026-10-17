@@ -39,7 +39,10 @@ enum RuntimeEvent {
 
 const ORION_IPC_RETRY_DELAY: Duration = Duration::from_secs(2);
 const ORION_EMPTY_WATCH_RETRY_DELAY: Duration = Duration::from_millis(200);
-const ENGINE_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+/// A full state read as a safety net under the state watch (which pushes every change).
+const ENGINE_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
+/// How long after a due publication a tick is waited for before publishing anyway.
+const PUBLISH_FALLBACK_DELAY: Duration = Duration::from_millis(100);
 
 pub struct EngineApp {
     config: EngineConfig,
@@ -182,9 +185,19 @@ impl EngineApp {
                         }
                     }
                 }
-                _ = outputs_ready.notified(), if publish_due.is_none() => {
-                    publish_due = Some(Instant::max(Instant::now(), last_publish + publish_interval));
+                // Published right after a graph tick, once the interval has passed: the publish
+                // (and Orion's and helios-api's handling of it) then falls between frames instead
+                // of on the camera's ISP job, which it slows by contending for memory.
+                _ = outputs_ready.notified() => {
+                    if Instant::now() >= last_publish + publish_interval {
+                        publish_due = None;
+                        last_publish = Instant::now();
+                        self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                    } else if publish_due.is_none() {
+                        publish_due = Some(last_publish + publish_interval + PUBLISH_FALLBACK_DELAY);
+                    }
                 }
+                // No tick came after the interval (the graph stopped or runs slower than it).
                 _ = sleep_until(publish_due.unwrap_or_else(Instant::now)), if publish_due.is_some() => {
                     publish_due = None;
                     last_publish = Instant::now();
