@@ -40,7 +40,7 @@
   <div class="kpis">
     <div><b>{running}</b><span>pipelines running</span></div>
     <div><b>{cluster.cameras.length}</b><span>cameras</span></div>
-    <div><b>{memMiB.toFixed(0)}</b><span>MiB on Razes</span></div>
+    <div><b>{memMiB.toFixed(0)}</b><span>MiB used</span></div>
   </div>
 
   <div class="devs">

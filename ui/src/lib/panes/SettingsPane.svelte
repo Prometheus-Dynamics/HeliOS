@@ -278,11 +278,6 @@
     color: var(--fg-3);
     line-height: 1.5;
   }
-  code {
-    font-family: var(--font-code);
-    font-size: 11px;
-    color: var(--fg-2);
-  }
   .seg {
     padding: 0 10px 4px;
   }
