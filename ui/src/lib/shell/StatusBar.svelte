@@ -9,6 +9,7 @@
   import { shell } from "#lib/core/shell.svelte.js";
   import { pane, workspaces } from "#lib/core/workspace.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { liveState } from "#lib/stores/live.svelte.js";
 
   const s = $derived(selection.current);
   const readout = $derived.by(() => {
@@ -30,6 +31,16 @@
   const issues = $derived(problems().filter(actionable));
   const steps = $derived(guide.checklist);
   const next = $derived(steps.find((x) => !x.done));
+  /** Robot code's view: whether pipeline results reach NetworkTables. */
+  const nt = $derived.by(() => {
+    const state = liveState.nt4;
+    if (!cluster.live || !state) return null;
+    if (!state.settings.enabled) return { tone: "", text: "NT off", tip: "Publishing to NetworkTables is off (Settings › Robot)" };
+    if (!state.server) return { tone: "warn", text: "NT: no team", tip: "Set the team number in Settings › Robot so results reach robot code" };
+    return state.connected
+      ? { tone: "ok", text: `NT ${state.server}`, tip: `Publishing every frame to ${state.server} under ${state.settings.prefix}` }
+      : { tone: "warn", text: `NT waiting`, tip: `Not connected to ${state.server} yet: is the device on the robot network?` };
+  });
 </script>
 
 <footer class="sb" data-tour="status">
@@ -43,10 +54,19 @@
   <button type="button" class:bad={issues.length > 0} onclick={() => shell.go("overview")}>
     <Icon name={issues.length ? "alert-triangle" : "circle-check"} size={11} />{issues.length ? `${issues.length} problem${issues.length > 1 ? "s" : ""}` : "OK"}
   </button>
-  <span class="mono">{cluster.playing ? "live" : "paused"} · frame {cluster.frame}</span>
+  {#if nt}
+    <button type="button" class="nt {nt.tone}" onclick={() => shell.go("settings")} data-tip={nt.tip}><Icon name="plug" size={11} />{nt.text}</button>
+  {/if}
+  <span class="mono">{cluster.live ? "live" : `${cluster.playing ? "live" : "paused"} · frame ${cluster.frame}`}</span>
 </footer>
 
 <style>
+  .nt.ok {
+    color: var(--ok, #3ccf7e);
+  }
+  .nt.warn {
+    color: var(--warn, #f5a524);
+  }
   .sb {
     display: flex;
     align-items: center;
