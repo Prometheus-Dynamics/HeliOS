@@ -334,7 +334,7 @@ artifact `artifact.pipeline.<id>` that carries the name and revision as labels.
 | `GET` | `/v1/pipelines/{id}/outputs` | The latest value of each graph host output |
 | `GET` | `/v1/outputs` | Host outputs of every pipeline |
 | `GET` | `/v1/plugins` | `{engine_running, plugins}`: the plugins helios-engine reports as loaded |
-| `GET` | `/v1/catalog` | **501**. Needs helios-engine to publish its node registry |
+| `GET` | `/v1/catalog` | `{format: "helios.node-catalog", schema_version, plugins, nodes}`: every node the loaded plugins declare (Daedalus `NodeDecl`s with ports, `type_key`, schema, const defaults, and their `plugin`); **501** until helios-engine has written it |
 
 Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
 

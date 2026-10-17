@@ -231,8 +231,12 @@ impl EngineApp {
             warn!("no Daedalus plugins discovered in configured plugin dirs");
         }
 
-        let load_result = load_plugins(&plugin_paths)?;
+        let mut load_result = load_plugins(&plugin_paths)?;
         log_loaded_plugins(&load_result);
+        match crate::plugins::catalog::write_catalog(&load_result.registry, &self.config.catalog_path) {
+            Ok(path) => load_result.catalog_path = Some(path),
+            Err(error) => warn!(path = %self.config.catalog_path.display(), %error, "could not write the node catalog"),
+        }
         Ok(load_result)
     }
 
@@ -259,6 +263,7 @@ impl EngineApp {
         let snapshot = EngineSnapshot {
             node_id: self.config.node_id.clone(),
             engine_socket_path: self.config.engine_socket_path.clone(),
+            catalog_path: plugins.catalog_path.clone(),
             plugin_dirs: self.config.plugin_dirs.clone(),
             loaded_plugins,
             assigned_workloads: decoded.runnable,

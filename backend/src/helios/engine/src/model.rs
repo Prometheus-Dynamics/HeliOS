@@ -178,6 +178,7 @@ pub struct ExecutionArtifactRecord {
 pub struct EngineSnapshot {
     pub node_id: String,
     pub engine_socket_path: PathBuf,
+    pub catalog_path: Option<PathBuf>,
     pub plugin_dirs: Vec<PathBuf>,
     pub loaded_plugins: Vec<LoadedPlugin>,
     pub assigned_workloads: Vec<ExecutionWorkload>,

@@ -35,6 +35,8 @@ pub struct PluginLoadResult {
     pub builtins: Vec<LoadedPlugin>,
     pub libraries: Vec<LoadedPluginLibrary>,
     pub registry: PluginRegistry,
+    /// Where the node catalog was written, once it was.
+    pub catalog_path: Option<PathBuf>,
 }
 
 pub fn load_plugins(paths: &[PathBuf]) -> Result<PluginLoadResult, PluginLoadError> {
@@ -45,7 +47,7 @@ pub fn load_plugins(paths: &[PathBuf]) -> Result<PluginLoadResult, PluginLoadErr
     let builtins = install_builtin_plugins(&mut registry)?;
     let libraries = paths.iter().map(|path| load_plugin_library(path, &mut registry)).collect::<Result<Vec<_>, _>>()?;
 
-    Ok(PluginLoadResult { builtins, libraries, registry })
+    Ok(PluginLoadResult { builtins, libraries, registry, catalog_path: None })
 }
 
 fn load_plugin_library(path: &Path, registry: &mut PluginRegistry) -> Result<LoadedPluginLibrary, PluginLoadError> {

@@ -92,6 +92,9 @@ impl OrionEnginePublisher {
             .label(format!("helios.engine.plugin_count={}", snapshot.loaded_plugins.len()))
             .label(format!("helios.engine.assigned_workloads={}", snapshot.assigned_workloads.len()))
             .endpoint(format!("unix://{}", snapshot.engine_socket_path.display()));
+        if let Some(path) = &snapshot.catalog_path {
+            builder = builder.label(format!("helios.engine.catalog={}", path.display()));
+        }
 
         for plugin in &snapshot.loaded_plugins {
             if let Some(name) = &plugin.plugin_name {

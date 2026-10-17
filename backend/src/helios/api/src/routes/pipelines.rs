@@ -316,9 +316,11 @@ pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
             return Err(ApiError::unprocessable("dictionary is an Eidos dictionary name such as apriltag_36h11, apriltag_16h5 or aruco_4x4_50"));
         }
-        let groups = graph.get("graph").and_then(|g| g.get("nodes")).and_then(|n| n.as_array()).map_or(0, |nodes| {
-            nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id.starts_with(family) && is_detector_group(id))).count()
-        });
+        let groups = graph
+            .get("graph")
+            .and_then(|g| g.get("nodes"))
+            .and_then(|n| n.as_array())
+            .map_or(0, |nodes| nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id.starts_with(family) && is_detector_group(id))).count());
         if groups == 0 {
             return Err(ApiError::unprocessable(format!("dictionary {name} needs a {family} detector group (tracked or not) in the graph")));
         }
@@ -979,11 +981,20 @@ pub async fn plugins(State(state): State<SharedState>) -> ApiResult<Json<PluginL
     Ok(Json(PluginList { engine_running: loaded.is_some(), plugins: loaded.unwrap_or_default() }))
 }
 
-pub async fn catalog() -> ApiError {
-    ApiError::not_available(
-        "the node catalog is not published by the device yet",
-        "helios-engine publishing its plugin registry (node ids, ports with TypeExpr/TypeKey, parameters, plugin versions) as an Orion resource or artifact",
-    )
+/// The node catalog helios-engine wrote at startup (`helios.node-catalog`: its plugins, and every
+/// node they declare as a Daedalus `NodeDecl`), found through its `engine.runtime` resource.
+pub async fn catalog(State(state): State<SharedState>) -> ApiResult<Json<serde_json::Value>> {
+    let view = state.orion.view().await?;
+    let runtime = view.resources.get(&format!("engine.runtime.{}", state.config.node_id));
+    let Some(path) = runtime.and_then(|runtime| label_values(&runtime.labels, "helios.engine.catalog").first().map(|path| std::path::PathBuf::from(*path))) else {
+        return Err(ApiError::not_available("the node catalog is not published by the device yet", "helios-engine running and writing its node catalog"));
+    };
+    // Only ever a catalog file, whatever a resource label says.
+    if !path.is_absolute() || path.file_name().is_none_or(|name| name != "catalog.json") {
+        return Err(ApiError::internal(format!("unexpected catalog path {}", path.display())));
+    }
+    let bytes = tokio::fs::read(&path).await?;
+    serde_json::from_slice(&bytes).map(Json).map_err(|error| ApiError::internal(format!("the node catalog is not valid JSON: {error}")))
 }
 
 #[cfg(test)]
