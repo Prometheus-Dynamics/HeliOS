@@ -22,8 +22,8 @@ export const JOBS: { id: Job; title: string; detail: string; icon: IconName }[] 
 /** The tag families a job can use, most common first (FRC uses 36h11 since 2024, 16h5 before). */
 export const DICTIONARIES: Record<"apriltag" | "aruco", { value: string; label: string }[]> = {
   apriltag: [
-    { value: "apriltag_36h11", label: "36h11 (FRC 2024+)" },
-    { value: "apriltag_16h5", label: "16h5 (FRC 2023 and earlier)" },
+    { value: "apriltag_36h11", label: "36h11 · FRC 2024+" },
+    { value: "apriltag_16h5", label: "16h5 · FRC ≤2023" },
     { value: "apriltag_25h9", label: "25h9" },
     { value: "apriltag_36h10", label: "36h10" },
   ],

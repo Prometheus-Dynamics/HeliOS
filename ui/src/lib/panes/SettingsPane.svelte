@@ -88,7 +88,6 @@
         <input type="color" value={prefs.accent ?? "#ff6b6b"} aria-label="Custom accent" oninput={(e) => (prefs.accent = (e.currentTarget as HTMLInputElement).value)} />
       </span>
     </Prop>
-    <p class="hint">A theme is one block of colour tokens in <code>src/themes/themes.css</code>; copy one, rename it, and add it to the list in <code>prefs.svelte.ts</code>.</p>
   </Section>
 
   <Section title="Names, icons and colours" key="set-ident">
