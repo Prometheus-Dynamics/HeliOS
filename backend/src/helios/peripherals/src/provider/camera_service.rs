@@ -21,6 +21,7 @@ use crate::{
 /// Scheme of the endpoint a camera resource advertises for its Styx `CameraService` socket.
 pub const STYX_FRAMES_ENDPOINT_SCHEME: &str = "styx-frames+unix";
 const CAMERA_SERVICE_SOCKET_SUFFIX: &str = ".styx.sock";
+const CAMERA_SPARE_CLIENTS: usize = 2;
 const CAMERA_SERVICE_SOCKET_MODE: u32 = 0o660;
 
 /// `styx-frames+unix://<absolute socket path>`: where Styx `FrameClient`s reach a camera.
@@ -87,7 +88,15 @@ impl CameraServices {
                 continue;
             };
             let socket_path = camera_service_socket_path(&config.stream_dir, resource);
-            match CameraService::new(device.clone()).pause_when_idle(Duration::from_millis(config.camera_idle_pause_ms)).socket_mode(CAMERA_SERVICE_SOCKET_MODE).serve(&socket_path) {
+            match CameraService::new(device.clone())
+                .pause_when_idle(Duration::from_millis(config.camera_idle_pause_ms))
+                // Room for two low-priority clients beside the pipelines (the UI's preview and a
+                // calibration capture) without restarting the capture; about 5.8 MB more per
+                // running 1280x800 camera.
+                .spare_clients(CAMERA_SPARE_CLIENTS)
+                .socket_mode(CAMERA_SERVICE_SOCKET_MODE)
+                .serve(&socket_path)
+            {
                 Ok(handle) => {
                     info!(resource_id = resource.id.as_str(), socket = %socket_path.display(), "camera service started");
                     self.services.insert(resource.id.as_str().to_string(), handle);

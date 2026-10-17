@@ -203,9 +203,6 @@ fn detect(socket: &Path, board: CharucoBoard, size: Option<(u32, u32)>) -> ApiRe
         RecvOutcome::Empty => return Err(ApiError::backend("the camera sent no frame in time")),
         RecvOutcome::Closed => return Err(ApiError::backend(format!("camera service closed: {}", client.last_error().map(|error| error.to_string()).unwrap_or_default()))),
     };
-    // The board detector reads planes the CPU owns; a camera frame is a dmabuf, so it gets
-    // one copy here (a few captures a second at most).
-    let frame = frame.materialize_owned();
     let (width, height) = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
     let mut detector = CharucoDetector::new(board.clone());
     let detection = detector.detect(&frame).map_err(|error| ApiError::internal(format!("board detection: {error}")))?;
