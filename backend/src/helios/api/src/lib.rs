@@ -43,6 +43,8 @@ pub struct AppState {
     pub previews: camera_preview::CameraPreviews,
     /// Calibration views captured per camera, until solved.
     pub calibrations: calibration_capture::CalibrationSessions,
+    /// Live journal tails, one `journalctl -f` per filter shared by its viewers.
+    pub log_followers: routes::logs::LogFollowers,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
     /// Held while a peripheral action runs: helios-api runs one at a time, so its callers queue
@@ -64,6 +66,7 @@ impl AppState {
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
             calibrations: calibration_capture::CalibrationSessions::default(),
+            log_followers: routes::logs::LogFollowers::default(),
             store,
             events,
             auth: auth::Auth::new(config.auth_file.clone()),

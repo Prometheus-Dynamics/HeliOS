@@ -1,17 +1,26 @@
 //! The journal: recent lines and a live tail.
 
-use std::{convert::Infallible, process::Stdio};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    process::Stdio,
+    sync::{Arc, Mutex, Weak},
+};
 
 use axum::{
     Json,
-    extract::Query,
+    extract::{Query, State},
     response::sse::{Event, KeepAlive, Sse},
 };
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::broadcast,
+};
 
 use crate::{
+    SharedState,
     error::{ApiError, ApiResult},
     host::{self, LogLine, LogQuery},
 };
@@ -59,40 +68,111 @@ pub async fn query(Query(params): Query<LogParams>) -> ApiResult<Json<LogPage>> 
 }
 
 /// Live tail as Server-Sent Events (`event: log`), starting with the last `lines` lines.
-pub async fn stream(Query(params): Query<LogParams>) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+///
+/// Viewers with the same filters share one `journalctl -f` (about 8 MB each on the CM5): it
+/// runs while anyone follows and stops with the last one. Each viewer first gets its backlog
+/// from a one-shot read.
+pub async fn stream(State(state): State<SharedState>, Query(params): Query<LogParams>) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let mut query = params.to_query()?;
     if params.lines.is_none() {
         query.lines = 50;
     }
-    let mut child = tokio::process::Command::new("journalctl")
-        .args(host::journal_args(&query, true))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| ApiError::backend(format!("journalctl is not available: {error}")))?;
-    let stdout = child.stdout.take().ok_or_else(|| ApiError::internal("journalctl stdout unavailable"))?;
-    let lines = BufReader::new(stdout).lines();
-    let stream = futures_util::stream::unfold((lines, child), |(mut lines, child)| async move {
+    let follower = state.log_followers.follow(&query)?;
+    let receiver = follower.subscribe();
+    let backlog = host::journal(&query).await.unwrap_or_default();
+    let backlog = futures_util::stream::iter(backlog.into_iter().map(|log| Ok(Event::default().event("log").data(serde_json::to_string(&log).unwrap_or_default()))));
+    let live = futures_util::stream::unfold((receiver, follower), |(mut receiver, follower)| async move {
         loop {
-            match lines.next_line().await {
-                Ok(Some(line)) => {
-                    if let Some(log) = host::parse_journal_line(&line) {
-                        let event = Event::default().event("log").data(serde_json::to_string(&log).unwrap_or_default());
-                        return Some((Ok(event), (lines, child)));
-                    }
-                }
-                _ => return None,
+            match receiver.recv().await {
+                Ok(data) => return Some((Ok(Event::default().event("log").data(data.as_ref())), (receiver, follower))),
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
     });
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+    Ok(Sse::new(backlog.chain(live)).keep_alive(KeepAlive::default()))
+}
+
+/// One `journalctl -f` per distinct filter, shared by everyone following with it.
+#[derive(Default)]
+pub struct LogFollowers {
+    running: Mutex<HashMap<Vec<String>, Weak<Follower>>>,
+}
+
+pub struct Follower {
+    tx: broadcast::Sender<Arc<str>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Follower {
+    fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
+        self.tx.subscribe()
+    }
+}
+
+impl Drop for Follower {
+    fn drop(&mut self) {
+        // The child is killed with the task (`kill_on_drop`).
+        self.task.abort();
+    }
+}
+
+impl LogFollowers {
+    fn follow(&self, query: &LogQuery) -> ApiResult<Arc<Follower>> {
+        let live = LogQuery { lines: 0, since_ms: None, ..query.clone() };
+        let args = host::journal_args(&live, true);
+        let mut running = self.running.lock().unwrap_or_else(|poison| poison.into_inner());
+        running.retain(|_, follower| follower.strong_count() > 0);
+        if let Some(follower) = running.get(&args).and_then(Weak::upgrade) {
+            return Ok(follower);
+        }
+        let mut child = tokio::process::Command::new("journalctl")
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| ApiError::backend(format!("journalctl is not available: {error}")))?;
+        let stdout = child.stdout.take().ok_or_else(|| ApiError::internal("journalctl stdout unavailable"))?;
+        let (tx, _) = broadcast::channel(256);
+        let sender = tx.clone();
+        let task = tokio::spawn(async move {
+            let _child = child;
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(log) = host::parse_journal_line(&line) {
+                    let _ = sender.send(Arc::from(serde_json::to_string(&log).unwrap_or_default()));
+                }
+            }
+        });
+        let follower = Arc::new(Follower { tx, task });
+        running.insert(args, Arc::downgrade(&follower));
+        Ok(follower)
+    }
+
+    /// Followers running now (for tests and diagnostics).
+    pub fn running(&self) -> usize {
+        self.running.lock().unwrap_or_else(|poison| poison.into_inner()).values().filter(|follower| follower.strong_count() > 0).count()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn viewers_with_the_same_filters_share_one_follower() {
+        let followers = LogFollowers::default();
+        let query = LogParams::default().to_query().expect("query");
+        let Ok(first) = followers.follow(&query) else { return }; // no journalctl here
+        let second = followers.follow(&query).expect("follow");
+        assert!(Arc::ptr_eq(&first, &second));
+        let warnings = followers.follow(&LogParams { level: Some("warn".into()), ..LogParams::default() }.to_query().expect("query")).expect("follow");
+        assert_eq!(followers.running(), 2);
+        drop((first, second, warnings));
+        assert_eq!(followers.running(), 0);
+    }
 
     #[test]
     fn params_normalise_units_and_levels() {
