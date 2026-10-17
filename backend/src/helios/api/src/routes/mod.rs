@@ -83,6 +83,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/pipelines/{id}/revisions", get(pipelines::revisions))
         .route("/v1/pipelines/{id}/bindings/{input}", put(pipelines::bind_input))
         .route("/v1/pipelines/{id}/outputs", get(pipelines::pipeline_outputs))
+        .route("/v1/pipelines/{id}/plan", get(pipelines::pipeline_plan))
         .route("/v1/outputs", get(pipelines::outputs))
         // Resources and peripherals
         .route("/v1/resources", get(resources::list))

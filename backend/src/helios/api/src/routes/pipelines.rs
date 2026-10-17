@@ -992,6 +992,32 @@ pub async fn pipeline_outputs(State(state): State<SharedState>, Path(id): Path<S
     Ok(Json(outputs_of(&view, workload.workload_id.as_str())))
 }
 
+/// Where helios-engine writes each pipeline's full plan (its `execution.plan` artifact names it).
+const PLAN_DIR: &str = "/var/lib/helios/state/plans";
+
+/// `GET /v1/pipelines/{id}/plan`: the pipeline's Daedalus plan (`helios.engine.plan.v1`: host
+/// ports, `explain_plan()`, edges with adapter steps). helios-engine publishes a summary and
+/// keeps the full plan in a file, read here.
+pub async fn pipeline_plan(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    check_id(&id)?;
+    let view = state.orion.view().await?;
+    let workload = find_workload(&view, &id).ok_or_else(|| ApiError::not_found(format!("no pipeline {id}")))?;
+    let summary = workload_resources(&view, workload.workload_id.as_str(), ARTIFACT_TYPE)
+        .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some("execution.plan"))
+        .map(|record| parse_message(state_field(record, "message")))
+        .ok_or_else(|| ApiError::not_found(format!("pipeline {id} has no plan yet")))?;
+    let Some(file) = summary.get("plan_file").and_then(serde_json::Value::as_str) else {
+        return Ok(Json(summary));
+    };
+    let path = std::path::Path::new(file);
+    // Only ever a plan file, whatever the artifact says.
+    if !path.starts_with(PLAN_DIR) || path.extension().is_none_or(|ext| ext != "json") || file.contains("..") {
+        return Err(ApiError::internal(format!("unexpected plan file {file}")));
+    }
+    let bytes = tokio::fs::read(path).await?;
+    serde_json::from_slice(&bytes).map(Json).map_err(|error| ApiError::internal(format!("plan file is not JSON: {error}")))
+}
+
 /// The latest value of every pipeline host output.
 pub async fn outputs(State(state): State<SharedState>) -> ApiResult<Json<Vec<Output>>> {
     let view = state.orion.view().await?;

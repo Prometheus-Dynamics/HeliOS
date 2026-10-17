@@ -76,6 +76,8 @@ pub struct ResidentExecutionSet {
     outputs_ready: Arc<Notify>,
     /// Where graph threads hand each tick's outputs to NetworkTables.
     nt4: crate::nt4::Nt4Sink,
+    /// Where each workload's full plan is written (published as a summary and this path).
+    plan_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ResidentExecutionSet {
@@ -86,12 +88,18 @@ impl Default for ResidentExecutionSet {
 
 impl ResidentExecutionSet {
     pub fn new(settings: GraphSettings) -> Self {
-        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), nt4: crate::nt4::Nt4Sink::default() }
+        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), nt4: crate::nt4::Nt4Sink::default(), plan_dir: None }
     }
 
     /// Publish every workload's outputs to NetworkTables through `sink` (drivers started after).
     pub fn with_nt4(mut self, sink: crate::nt4::Nt4Sink) -> Self {
         self.nt4 = sink;
+        self
+    }
+
+    /// Write each workload's full plan under `dir` instead of publishing it inline.
+    pub fn with_plan_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.plan_dir = Some(dir);
         self
     }
 
@@ -148,7 +156,10 @@ impl ResidentExecutionSet {
                 .iter()
                 .map(|spec| StyxFrameSource::open(spec.clone()).map(|source| (spec.clone(), Box::new(source) as Box<dyn FrameSource>)).map_err(ExecutionError::Execute))
                 .collect::<Result<Vec<_>, _>>()?;
-            let driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.nt4.clone())?;
+            let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.nt4.clone())?;
+            if let Some(dir) = &self.plan_dir {
+                driver.externalize_plan(dir);
+            }
             self.drivers.insert(id.to_string(), driver);
         }
         let driver = self.drivers.get_mut(id).expect("driver was just ensured");

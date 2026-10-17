@@ -134,7 +134,9 @@ impl EngineApp {
         let mut current_state_snapshot = self.node_runtime.control_plane(format!("{}-control", self.publisher.executor_client_name()))?.fetch_state_snapshot().await.ok();
         let (nt4, nt4_status) = crate::nt4::spawn(self.config.nt4_settings_path.clone(), format!("helios-{}", self.config.node_id));
         *self.nt4_status.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(nt4_status);
-        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level }).with_nt4(nt4);
+        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level })
+            .with_nt4(nt4)
+            .with_plan_dir(self.config.catalog_path.parent().map_or_else(|| std::path::PathBuf::from("/var/lib/helios/state"), std::path::Path::to_path_buf).join("plans"));
         // Graphs run on their own threads when their input arrives; they signal here when they
         // produced something, and what they produced is published at most once per interval.
         let outputs_ready = execution_sessions.outputs_ready();

@@ -78,7 +78,7 @@ pub(crate) fn session_id_for(workload: &ExecutionWorkload) -> String {
     format!("session.{}", workload.workload_id)
 }
 
-fn sanitize_id_component(value: &str) -> String {
+pub(crate) fn sanitize_id_component(value: &str) -> String {
     value
         .chars()
         .map(|ch| match ch {

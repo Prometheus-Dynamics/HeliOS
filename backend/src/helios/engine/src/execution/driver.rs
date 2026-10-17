@@ -289,6 +289,29 @@ impl WorkloadDriver {
 
     /// The session and artifacts to publish now: the latest value of each host output (each
     /// rendered once), the driver's stats, the plan and, when enabled, the graph metrics.
+    /// Write the full plan to `dir/<workload>.json` and publish only its summary (counts, host
+    /// ports) and the file's path: the plan's text is tens of KB that never changes, and every
+    /// publication would carry it.
+    pub fn externalize_plan(&mut self, dir: &std::path::Path) {
+        let Ok(mut plan) = serde_json::from_str::<serde_json::Value>(&self.plan_message) else { return };
+        let path = dir.join(format!("{}.json", crate::execution::outputs::sanitize_id_component(&self.workload.workload_id)));
+        let written = std::fs::create_dir_all(dir).and_then(|()| {
+            let partial = path.with_extension("json.partial");
+            std::fs::write(&partial, &self.plan_message)?;
+            std::fs::rename(&partial, &path)
+        });
+        match written {
+            Ok(()) => {
+                if let Some(fields) = plan.as_object_mut() {
+                    fields.remove("plan");
+                    fields.insert("plan_file".into(), serde_json::Value::String(path.display().to_string()));
+                }
+                self.plan_message = plan.to_string();
+            }
+            Err(error) => tracing::warn!(path = %path.display(), %error, "could not write the plan file; publishing the plan inline"),
+        }
+    }
+
     pub fn snapshot(&mut self) -> (ExecutionSessionState, Vec<ExecutionArtifactRecord>) {
         let (stats, outputs, metrics) = {
             let mut state = lock(&self.shared.state);

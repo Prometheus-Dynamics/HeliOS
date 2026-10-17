@@ -335,6 +335,7 @@ artifact `artifact.pipeline.<id>` that carries the name and revision as labels.
 | `GET` | `/v1/pipelines/{id}/revisions` | `[{revision, saved_at_ms, name}]`, newest first |
 | `PUT` | `/v1/pipelines/{id}/bindings/{input}` | Rebind one input (a binding object; makes a new revision) |
 | `GET` | `/v1/pipelines/{id}/outputs` | The latest value of each graph host output |
+| `GET` | `/v1/pipelines/{id}/plan` | The pipeline's Daedalus plan (`helios.engine.plan.v1`: host ports, `explain_plan()`, edges with adapter steps). The engine publishes a summary and keeps the full plan in `/var/lib/helios/state/plans/` |
 | `GET` | `/v1/outputs` | Host outputs of every pipeline |
 | `GET` | `/v1/plugins` | `{engine_running, plugins}`: the plugins helios-engine reports as loaded |
 | `GET` | `/v1/catalog` | `{format: "helios.node-catalog", schema_version, plugins, nodes}`: every node the loaded plugins declare (Daedalus `NodeDecl`s with ports, `type_key`, schema, const defaults, and their `plugin`); **501** until helios-engine has written it |
