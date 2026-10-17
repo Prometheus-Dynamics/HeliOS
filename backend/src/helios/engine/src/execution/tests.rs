@@ -148,7 +148,18 @@ fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Op
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("tracked detector graph"));
     let title = format!("HeliOS {} tracked detector with tag pose{}", dictionary.name(), if has_field { " and multi-tag field pose" } else { "" });
     document.metadata.insert("title".into(), title.into());
-    document.to_json_pretty().expect("document json")
+    // As helios-api stores graphs: without the metadata copied from the node declarations
+    // (the planner reads node-group graphs from the registry).
+    let mut value: serde_json::Value = serde_json::from_str(&document.to_json().expect("document json")).expect("json");
+    for node in value["graph"]["nodes"].as_array_mut().into_iter().flatten() {
+        if let Some(metadata) = node.get_mut("metadata").and_then(serde_json::Value::as_object_mut) {
+            metadata.retain(|key, _| {
+                let port = (key.starts_with("inputs.") || key.starts_with("outputs.")) && [".description", ".min", ".max", ".step"].iter().any(|suffix| key.ends_with(suffix));
+                !port && !["daedalus.embedded_graph", "summary", "category", "stage_of", "eidos.operation", "eidos.operation_id"].contains(&key.as_str())
+            });
+        }
+    }
+    serde_json::to_string_pretty(&value).expect("document json")
 }
 
 /// `libhelios_eidos_plugin.so`: `HELIOS_EIDOS_PLUGIN`, else the one `cargo test` built next to

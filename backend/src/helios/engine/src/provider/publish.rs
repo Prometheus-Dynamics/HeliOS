@@ -139,7 +139,13 @@ fn session_resources<'a>(executor_id: &'a str, provider_id: &'a str, sessions: &
         match &session.graph_ref {
             GraphRef::ArtifactId(value) => state = state.field("graph.artifact_id", orion::control_plane::TypedConfigValue::String(value.clone())),
             GraphRef::ResourceId(value) => state = state.field("graph.resource_id", orion::control_plane::TypedConfigValue::String(value.clone())),
-            GraphRef::InlineSpec(value) => state = state.field("graph.inline", orion::control_plane::TypedConfigValue::String(value.clone())),
+            // The graph itself is the workload's (often 100 KB+); the session names which one it
+            // runs, so it is not copied into every publication.
+            GraphRef::InlineSpec(value) => {
+                state = state
+                    .field("graph.digest", orion::control_plane::TypedConfigValue::String(graph_digest(value)))
+                    .field("graph.bytes", orion::control_plane::TypedConfigValue::UInt(value.len() as u64))
+            }
         }
 
         for plugin in &session.plugin_requirements {
@@ -186,6 +192,12 @@ fn artifact_resources<'a>(executor_id: &'a str, provider_id: &'a str, artifacts:
         }
         builder.build()
     })
+}
+
+/// FNV-1a 64 of an inline graph: which graph a session runs, without the graph.
+fn graph_digest(graph: &str) -> String {
+    let hash = graph.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3));
+    format!("fnv1a64:{hash:016x}")
 }
 
 fn provider_id_for(node_id: &str) -> String {

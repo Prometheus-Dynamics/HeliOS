@@ -280,6 +280,7 @@ pub fn apply_dictionary(graph: &mut serde_json::Value, name: &str) -> usize {
 /// The graph a spec deploys: its search mode applied (see `PipelineSpec::search_mode`).
 pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde_json::Value> {
     let mut graph = spec.graph.clone();
+    strip_registry_metadata(&mut graph);
     let tuning = SearchTuning {
         full_search_every: spec.full_search_every.unwrap_or(DEFAULT_FULL_SEARCH_EVERY),
         loss_full_search_after: spec.loss_full_search_after.unwrap_or(DEFAULT_LOSS_FULL_SEARCH_AFTER),
@@ -656,6 +657,25 @@ pub fn loaded_plugins(view: &StateView, node_id: &str) -> Option<Vec<String>> {
     Some(label_values(&runtime.labels, "helios.plugin.loaded").into_iter().map(str::to_string).collect())
 }
 
+/// Drop the node metadata a graph builder copies from the plugins' node declarations: a
+/// node-group's embedded graph (Daedalus's planner reads it from the registry, not the document)
+/// and the descriptive keys (summary, category, port descriptions and ranges). They are most of a
+/// template's size (the AprilTag one: 124 KB, 75 KB of it one embedded graph) and would be stored,
+/// published to Orion and sent to every viewer with each pipeline.
+pub fn strip_registry_metadata(graph: &mut serde_json::Value) {
+    let nodes = graph.get_mut("graph").and_then(|graph| graph.get_mut("nodes")).and_then(serde_json::Value::as_array_mut);
+    for node in nodes.into_iter().flatten() {
+        let Some(metadata) = node.get_mut("metadata").and_then(serde_json::Value::as_object_mut) else { continue };
+        metadata.retain(|key, _| !is_registry_metadata(key));
+    }
+}
+
+fn is_registry_metadata(key: &str) -> bool {
+    const EXACT: &[&str] = &["daedalus.embedded_graph", "summary", "category", "stage_of", "eidos.operation", "eidos.operation_id"];
+    const PORT_SUFFIXES: &[&str] = &[".description", ".min", ".max", ".step"];
+    EXACT.contains(&key) || ((key.starts_with("inputs.") || key.starts_with("outputs.")) && PORT_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)))
+}
+
 /// Validate a spec against Daedalus's document format and the live state, and return the
 /// document it deploys (its search mode applied, and `layout`'s tags in its multi-tag pose).
 pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layout: Option<&StoredLayout>) -> ApiResult<GraphDocument> {
@@ -1010,6 +1030,23 @@ pub async fn catalog(State(state): State<SharedState>) -> ApiResult<Json<serde_j
 mod tests {
     use super::*;
     use crate::routes::cameras;
+
+    #[test]
+    fn registry_metadata_is_dropped_and_graphs_stay_valid() {
+        let mut graph: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("template");
+        let node = &mut graph["graph"]["nodes"][1]["metadata"];
+        for key in ["daedalus.embedded_graph", "summary", "category", "inputs.radius.description", "inputs.radius.max", "outputs.poses.description"] {
+            node[key] = serde_json::json!({"type": "String", "value": "x"});
+        }
+        node["helios.title"] = serde_json::json!({"type": "String", "value": "kept"});
+        strip_registry_metadata(&mut graph);
+        let metadata = graph["graph"]["nodes"][1]["metadata"].as_object().expect("metadata");
+        assert!(!metadata.keys().any(|key| is_registry_metadata(key)), "{metadata:?}");
+        assert_eq!(metadata["helios.title"]["value"], "kept");
+        let text = graph.to_string();
+        assert!(text.contains("daedalus.host_input_types"));
+        GraphDocument::from_json(&text).expect("still a GraphDocument");
+    }
 
     pub fn sample_document() -> serde_json::Value {
         serde_json::json!({
