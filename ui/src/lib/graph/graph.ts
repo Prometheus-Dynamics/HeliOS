@@ -48,12 +48,22 @@ export const CATEGORY_ICONS: Record<NodeType["category"], IconName> = {
 };
 
 export function portColor(type: PortType | undefined): string {
-  return type ? PORT_COLORS[type] : PORT_COLORS.any;
+  if (!type) return PORT_COLORS.any;
+  const known = (PORT_COLORS as Record<string, string>)[type];
+  if (known) return known;
+  // A type the UI has no colour for gets a stable one of its own.
+  let hash = 0;
+  for (const c of type) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  return `hsl(${Math.abs(hash) % 360} 70% 68%)`;
 }
 
-/** Short display name of a port type: "styx:framelease" -> "framelease". */
+/** Short display name of a port type: "styx:framelease" -> "framelease", a scalar -> "float". */
 export function portTypeLabel(type: PortType): string {
-  return type === "any" ? "any" : type.split(":")[1];
+  if (type === "any") return "any";
+  const scalar = /"Scalar":"(\w+)"/.exec(type)?.[1];
+  if (scalar) return scalar.toLowerCase();
+  if (type.startsWith("typeexpr:")) return type.includes('"Enum"') ? "enum" : "value";
+  return type.split(":").at(-1) ?? type;
 }
 
 // --- Conversion ------------------------------------------------------------

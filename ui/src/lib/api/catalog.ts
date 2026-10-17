@@ -1,9 +1,12 @@
-// The node catalog the device reports: every node type a graph can use, with
-// typed ports and parameters. Mirrors what the installed plugins register
-// (styx.frames, eidos, helios bridges); the UI renders whatever is listed, so
-// a new plugin node appears here with no UI change.
+// The node catalog: every node type a graph can use, with typed ports and
+// parameters. The list below is what the UI knows by itself (mock mode, and the
+// titles and help it shows for well-known nodes); on a device, `mergeDeviceCatalog`
+// replaces it with what helios-engine's loaded plugins actually declare
+// (`GET /v1/catalog`), so a new plugin node appears with no UI change.
 
-export type PortType =
+import type { DeviceCatalog, DeviceCatalogNode, DeviceCatalogPort } from "./types.js";
+
+export type KnownPortType =
   | "styx:framelease"
   | "eidos:mask"
   | "eidos:runs"
@@ -18,6 +21,9 @@ export type PortType =
   | "eidos:pose_solutions"
   | "eidos:camera_pose"
   | "any";
+
+/** A port's Daedalus type key; the known ones have their own colour. */
+export type PortType = KnownPortType | (string & {});
 
 export interface Port {
   name: string;
@@ -39,6 +45,10 @@ export interface NodeType {
   inputs: Port[];
   outputs: Port[];
   params: Param[];
+  /** False when the device's catalog does not list it: kept to draw old graphs, not offered. */
+  available?: boolean;
+  /** A node-group: its stages are nodes of their own. */
+  group?: boolean;
 }
 
 const dictionaries = [
@@ -352,7 +362,7 @@ export const CATALOG: NodeType[] = [
 
 export const CATALOG_BY_ID: Record<string, NodeType> = Object.fromEntries(CATALOG.map((n) => [n.id, n]));
 
-export const PORT_COLORS: Record<PortType, string> = {
+export const PORT_COLORS: Record<KnownPortType, string> = {
   "styx:framelease": "#60a5fa",
   "eidos:mask": "#a78bfa",
   "eidos:runs": "#c084fc",
@@ -371,4 +381,91 @@ export const PORT_COLORS: Record<PortType, string> = {
 
 export function defaults(type: NodeType): Record<string, number | string | boolean> {
   return Object.fromEntries(type.params.map((p) => [p.name, p.default]));
+}
+
+// --- The device's catalog ----------------------------------------------------
+
+const CATEGORY_BY_SECTION: Record<string, NodeType["category"]> = {
+  aruco: "Fiducials",
+  detectors: "Fiducials",
+  calibration: "Geometry",
+  filter: "Filter",
+  mask: "Mask",
+  contour: "Mask",
+  geometry: "Geometry",
+  sampling: "Geometry",
+  color: "Color",
+  motion: "Motion",
+  draw: "Output",
+  io: "Source",
+};
+
+/** UI-level nodes the engine has no declaration for (camera bindings, host outputs). */
+const UI_PLUGINS = new Set(["styx.frames", "helios"]);
+
+function humanize(id: string): string {
+  const last = id.split(/[:.]/).at(-1) ?? id;
+  const words = last.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function scalarOf(port: DeviceCatalogPort): string | undefined {
+  return /"Scalar":"(\w+)"/.exec(port.type_key)?.[1];
+}
+
+function toParam(port: DeviceCatalogPort, known: Param | undefined): Param {
+  const help = port.description ?? known?.help ?? "";
+  const scalar = scalarOf(port);
+  if (port.options?.length) return { name: port.name, kind: "enum", default: String(port.default ?? port.options[0]), options: port.options.map(String), help };
+  if (typeof port.default === "boolean" || scalar === "Bool") return { name: port.name, kind: "bool", default: Boolean(port.default), help };
+  const value = Number(port.default ?? 0);
+  if (scalar === "Float" || scalar === "F32" || scalar === "F64" || (scalar === undefined && !Number.isInteger(value))) {
+    const min = port.min ?? (known?.kind === "float" ? known.min : Math.min(0, value));
+    const max = port.max ?? (known?.kind === "float" ? known.max : Math.max(1, value * 4));
+    return { name: port.name, kind: "float", default: value, min, max, step: port.step ?? (known?.kind === "float" ? known.step : (max - min) / 100 || 0.01), help };
+  }
+  if (typeof port.default === "string") return { name: port.name, kind: "enum", default: port.default, options: [port.default], help };
+  const unsigned = scalar?.startsWith("U") ?? false;
+  const min = port.min ?? (known?.kind === "int" ? known.min : unsigned ? 0 : Math.min(0, value));
+  const max = port.max ?? (known?.kind === "int" ? known.max : Math.max(16, value * 4));
+  return { name: port.name, kind: "int", default: value, min, max, help };
+}
+
+function fromDevice(node: DeviceCatalogNode, known: NodeType | undefined): NodeType {
+  const section = node.id.split(":")[1]?.split(".")[0] ?? "";
+  const ports = (list: DeviceCatalogPort[]) => list.map((p) => ({ name: p.name, type: p.type_key }));
+  const summary = node.summary ?? node.label ?? known?.summary ?? "";
+  return {
+    id: node.id,
+    plugin: node.plugin ?? known?.plugin ?? node.id.split(":")[0],
+    category: known?.category ?? CATEGORY_BY_SECTION[section] ?? "Filter",
+    title: known?.title ?? humanize(node.id),
+    summary,
+    inputs: ports(node.inputs.filter((p) => p.default === undefined)),
+    outputs: ports(node.outputs),
+    params: node.inputs.filter((p) => p.default !== undefined).map((p) => toParam(p, known?.params.find((k) => k.name === p.name))),
+    available: true,
+    group: node.group,
+  };
+}
+
+/**
+ * Make `CATALOG` (and `CATALOG_BY_ID`) what the device declares: its nodes, typed as it
+ * types them, with the UI's titles and categories for the ones it knows. Nodes the UI
+ * lists that the device does not are kept (old graphs still draw) but no longer offered.
+ */
+export function mergeDeviceCatalog(device: DeviceCatalog) {
+  const merged = new Map<string, NodeType>();
+  for (const node of device.nodes) {
+    const known = CATALOG_BY_ID[node.id];
+    // A declaration with no ports (the host bridge) says less than the UI's entry does.
+    const bare = !node.inputs.length && !node.outputs.length;
+    merged.set(node.id, known && bare ? { ...known, available: true } : fromDevice(node, known));
+  }
+  for (const known of CATALOG) {
+    if (!merged.has(known.id)) merged.set(known.id, { ...known, available: UI_PLUGINS.has(known.plugin) });
+  }
+  CATALOG.splice(0, CATALOG.length, ...merged.values());
+  for (const id of Object.keys(CATALOG_BY_ID)) delete CATALOG_BY_ID[id];
+  Object.assign(CATALOG_BY_ID, Object.fromEntries(CATALOG.map((n) => [n.id, n])));
 }

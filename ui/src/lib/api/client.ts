@@ -24,6 +24,7 @@ import type {
   NewApiToken,
   Pipeline,
   PipelineTemplate,
+  DeviceCatalog,
   PipelineOutput,
   PipelineSpec,
   ProcessInfo,
@@ -203,6 +204,7 @@ export const api = {
   bindInput: (id: string, input: string, binding: Binding) => request<Pipeline>("PUT", `/v1/pipelines/${enc(id)}/bindings/${enc(input)}`, { body: binding }),
   outputs: () => request<PipelineOutput[]>("GET", "/v1/outputs"),
   plugins: () => request<{ engine_running: boolean; plugins: string[] }>("GET", "/v1/plugins"),
+  catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
 
   // Resources and peripherals
   resources: (type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),

@@ -7,12 +7,14 @@
   import { drafts } from "#lib/graph/drafts.svelte.js";
   import { CATEGORY_COLORS, CATEGORY_ICONS, CATEGORY_ORDER, DRAG_MIME, portColor } from "#lib/graph/graph.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { liveState } from "#lib/stores/live.svelte.js";
 
   let query = $state("");
   const groups = $derived.by(() => {
+    void liveState.catalogVersion;
     const q = query.trim().toLowerCase();
     const match = (t: NodeType) => !q || [t.title, t.id, t.plugin, t.category, t.summary, ...t.inputs.map((p) => p.type), ...t.outputs.map((p) => p.type)].some((s) => s.toLowerCase().includes(q));
-    return CATEGORY_ORDER.map((category) => ({ category, types: CATALOG.filter((t) => t.category === category && match(t)) })).filter((g) => g.types.length);
+    return CATEGORY_ORDER.map((category) => ({ category, types: CATALOG.filter((t) => t.available !== false && t.category === category && match(t)) })).filter((g) => g.types.length);
   });
   const workloadId = $derived(selection.last.workload?.id ?? cluster.workloads[0]?.id);
 

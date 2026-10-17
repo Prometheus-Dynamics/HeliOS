@@ -547,3 +547,36 @@ export interface PipelineMetricsWindow {
   nodes?: PipelineMetricsNode[];
   [key: string]: unknown;
 }
+
+/** `GET /v1/catalog`: every node helios-engine's loaded plugins declare. */
+export interface DeviceCatalog {
+  format: "helios.node-catalog";
+  schema_version: number;
+  plugins: { id: string; version?: string | null }[];
+  nodes: DeviceCatalogNode[];
+}
+
+export interface DeviceCatalogNode {
+  id: string;
+  plugin?: string;
+  label?: string;
+  summary?: string;
+  /** A node-group (its stages are nodes of their own). */
+  group?: boolean;
+  inputs: DeviceCatalogPort[];
+  outputs: DeviceCatalogPort[];
+}
+
+export interface DeviceCatalogPort {
+  name: string;
+  type_key: string;
+  schema?: unknown;
+  optional?: boolean;
+  /** Set on constant inputs (parameters): their default. */
+  default?: number | string | boolean | null;
+  options?: (string | number)[];
+  min?: number;
+  max?: number;
+  step?: number;
+  description?: string;
+}

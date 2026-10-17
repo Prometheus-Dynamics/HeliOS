@@ -9,6 +9,7 @@ import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
 import type * as W from "#lib/api/types.js";
+import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { pickFile } from "#lib/files.js";
 import { toasts } from "./toasts.svelte";
 
@@ -39,6 +40,8 @@ class LiveState {
   update = $state<W.UpdateStatus | null>(null);
   identity = $state<W.Identity | null>(null);
   plugins = $state<string[]>([]);
+  /** Bumped when the device's node catalog is merged into `CATALOG`, for what lists it. */
+  catalogVersion = $state(0);
   /** Camera mounts stored on the device (robot frame, metres, degrees). */
   mounts = $state<Record<string, W.CameraMount>>({});
 }
@@ -176,7 +179,21 @@ export class LiveCluster {
     this.data.workloads = pipelines.map((p) => toWorkload(p, this.nodeId, previous.get(p.id)));
     this.data.streams = toStreams(pipelines);
     const plugins = await this.guard("plugins", () => api.plugins());
-    if (plugins) liveState.plugins = plugins.plugins;
+    if (plugins) {
+      const changed = plugins.plugins.join() !== liveState.plugins.join();
+      liveState.plugins = plugins.plugins;
+      if (changed || !liveState.catalogVersion) await this.refreshCatalog();
+    }
+  }
+
+  /** The nodes helios-engine's plugins declare, as the palette's catalog. */
+  async refreshCatalog() {
+    try {
+      mergeDeviceCatalog(await api.catalog());
+      liveState.catalogVersion++;
+    } catch {
+      // Not written yet (engine starting) or an older device: the UI's own list stays.
+    }
   }
 
   /** Detections for each camera with a running pipeline (one small request for all of them). */
