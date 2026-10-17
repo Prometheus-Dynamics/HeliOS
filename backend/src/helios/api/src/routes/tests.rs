@@ -66,7 +66,6 @@ async fn missing_backends_answer_501_with_what_they_need() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
     let cases = [
-        ("POST", "/v1/cameras/cam0/calibration/capture"),
         ("POST", "/v1/system/safe-mode"),
         ("PUT", "/v1/system/processes/100/affinity"),
         ("GET", "/v1/peripherals/fan"),

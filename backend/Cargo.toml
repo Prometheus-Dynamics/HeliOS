@@ -151,6 +151,7 @@ styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.g
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false, features = ["std"] }
 eidos-core = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
+eidos-detectors = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-daedalus = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 
 [profile.release]

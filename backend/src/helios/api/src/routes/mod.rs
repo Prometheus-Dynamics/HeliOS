@@ -62,6 +62,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/cameras/{id}/preview/ws", get(cameras::preview_ws))
         .route("/v1/cameras/{id}/calibration", get(cameras::get_calibration).put(cameras::put_calibration).delete(cameras::delete_calibration))
         .route("/v1/cameras/{id}/calibration/capture", post(cameras::capture_calibration))
+        .route("/v1/cameras/{id}/calibration/solve", post(cameras::solve_calibration))
+        .route("/v1/cameras/{id}/calibration/views", delete(cameras::reset_calibration_views))
         // Field layouts for the multi-tag (field) pose
         .route("/v1/field-layouts", get(field_layouts::list).post(field_layouts::upload))
         .route("/v1/field-layouts/selected", get(field_layouts::get_selected).put(field_layouts::put_selected))

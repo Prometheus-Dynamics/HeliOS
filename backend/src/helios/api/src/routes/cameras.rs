@@ -20,6 +20,7 @@ use styx::preview::{MJPEG_CONTENT_TYPE, ws_message};
 
 use crate::{
     SharedState,
+    calibration_capture::{CaptureRequest, CaptureResult, SolveRequest, SolveResult},
     camera_context::{self, CameraCalibration},
     camera_controls::{AppliedCameraControl, CameraClient, CameraControl},
     error::{ApiError, ApiResult},
@@ -446,13 +447,26 @@ pub async fn delete_calibration(State(state): State<SharedState>, Path(id): Path
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /v1/cameras/{id}/calibration/capture`: not on the device yet.
-pub async fn capture_calibration(Path(id): Path<String>) -> ApiResult<ApiError> {
+/// `POST /v1/cameras/{id}/calibration/capture`: one frame, the board in it, and the view kept
+/// for the solve when the board is seen well enough (`calibration_capture`).
+pub async fn capture_calibration(State(state): State<SharedState>, Path(id): Path<String>, Json(request): Json<CaptureRequest>) -> ApiResult<Json<CaptureResult>> {
+    let (_, record) = find(&state, &id).await?;
+    let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
+    Ok(Json(state.calibrations.capture(&id, &socket, request).await?))
+}
+
+/// `POST /v1/cameras/{id}/calibration/solve`: intrinsics fitted to the views captured; returned,
+/// not stored (`PUT /v1/cameras/{id}/calibration` stores it).
+pub async fn solve_calibration(State(state): State<SharedState>, Path(id): Path<String>, body: Option<Json<SolveRequest>>) -> ApiResult<Json<SolveResult>> {
     check_id(&id)?;
-    Ok(ApiError::not_available(
-        "calibration capture is not available on the device yet; upload a calibration with PUT /v1/cameras/{id}/calibration",
-        "a capture and solve flow (board detection on the camera's frames, an Eidos calibration solve) behind this endpoint",
-    ))
+    Ok(Json(state.calibrations.solve(&id, body.map(|Json(request)| request).unwrap_or_default()).await?))
+}
+
+/// `DELETE /v1/cameras/{id}/calibration/views`: forget the views captured.
+pub async fn reset_calibration_views(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    check_id(&id)?;
+    state.calibrations.reset(&id).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

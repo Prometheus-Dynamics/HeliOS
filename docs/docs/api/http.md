@@ -110,7 +110,9 @@ as unavailable and not retry.
 | `GET` | `/v1/cameras/{id}/preview` | Styx preview | MJPEG (`multipart/x-mixed-replace; boundary=styxpreview`) for an `<img>`. See [Camera preview](#camera-preview) |
 | `GET` | `/v1/cameras/{id}/preview/ws` | Styx preview | The same frames over a WebSocket, one binary `SPV1` message each |
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/calibration` | API store | Camera calibrations, one per image size (intrinsics, `pinhole` or `fisheye`, distortion), kept on `/data`; which one each pipeline gets. See [Calibration](#calibration-and-camera-context) |
-| `POST` | `/v1/cameras/{id}/calibration/capture` | — | **501**. Capturing and solving a calibration on the device is a later item; upload one with `PUT` |
+| `POST` | `/v1/cameras/{id}/calibration/capture` | `{board: {squares_x, squares_y, square_mm, marker_mm, dictionary}, width?, height?, keep?}` | One gray frame from the camera (a low-priority client of its service, like the preview), the ChArUco board found in it (Eidos), and the view kept for the solve when at least 8 corners are seen (`keep: false` only looks). Returns `{corners, width, height, kept, views, message?}`. A different board or size starts over |
+| `POST` | `/v1/cameras/{id}/calibration/solve` | `{model?: "pinhole"\|"fisheye", drop?: [view index]}` | Fits the intrinsics to the views kept (at least 4): `{calibration, view_rms, views, converged}`. Not stored: `PUT` the `calibration` to keep it |
+| `DELETE` | `/v1/cameras/{id}/calibration/views` | — | Forgets the views kept |
 
 A camera:
 

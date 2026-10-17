@@ -580,3 +580,30 @@ export interface DeviceCatalogPort {
   step?: number;
   description?: string;
 }
+
+/** The printed ChArUco board (`POST /v1/cameras/{id}/calibration/capture`). */
+export interface CalibrationBoard {
+  squares_x: number;
+  squares_y: number;
+  square_mm: number;
+  marker_mm: number;
+  dictionary: string;
+}
+
+export interface CalibrationCapture {
+  /** Board corners found, pixels. */
+  corners: [number, number][];
+  width: number;
+  height: number;
+  kept: boolean;
+  views: number;
+  message?: string;
+}
+
+export interface CalibrationSolve {
+  /** Not stored yet: `PUT /v1/cameras/{id}/calibration` stores it. */
+  calibration: CameraCalibration;
+  view_rms: number[];
+  views: number;
+  converged: boolean;
+}

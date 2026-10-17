@@ -88,7 +88,7 @@
         <Prop label="Resolution"><span class="mono">{camera.settings.width}×{camera.settings.height}</span></Prop>
         <Prop label="Board"><span class="small">{boardLabel}</span></Prop>
         <div class="tip"><Icon name="printer" size={13} /> No board yet? <button type="button" onclick={() => workspaces.open(ws, makePane("board"))}>Make one in Board maker</button>, print it at 100% and tape it to something flat.</div>
-        <button type="button" class="primary" onclick={() => cal.restart()}>Start capturing <Icon name="arrow-right" size={13} /></button>
+        <button type="button" class="primary" onclick={() => cal.restart(camera)}>Start capturing <Icon name="arrow-right" size={13} /></button>
       {:else if cal.step === "capture"}
         <h3>Capture views</h3>
         <p class="lead">Move the board around the whole image, close and far, and tilt it. Fill the grid; green cells have enough corners.</p>
@@ -102,6 +102,7 @@
           <button type="button" class="secondary" disabled={!inView} onclick={() => cal.capture(camera)}><Icon name="player-record" size={13} /> Capture{inView ? "" : " (no board)"}</button>
           <button type="button" class="primary" disabled={!ready} onclick={() => cal.solve(camera)}>Solve <Icon name="arrow-right" size={13} /></button>
         </div>
+        {#if cal.note}<p class="small dim">{cal.note}</p>{/if}
         {#if !ready}<p class="small dim">Solve unlocks at 12 views and 60% coverage.</p>{/if}
       {:else if cal.step === "solve"}
         <h3>Solving…</h3>
@@ -125,7 +126,7 @@
           <button type="button" class="primary" onclick={() => { cal.apply(camera); cal.step = "setup"; }}><Icon name="device-floppy" size={13} /> Save</button>
         </div>
         <div class="row">
-          <button type="button" class="link" onclick={() => cal.restart()}>Start over</button>
+          <button type="button" class="link" onclick={() => cal.restart(camera)}>Start over</button>
           <button type="button" class="link" onclick={() => downloadJson(`${camera.resourceId}-${r.width}x${r.height}.calibration.json`, { format: "helios.calibration", schema_version: 1, ...r, camera_matrix: [[r.fx, 0, r.cx], [0, r.fy, r.cy], [0, 0, 1]], dist_coeffs: r.dist })}>Export JSON</button>
         </div>
       {/if}

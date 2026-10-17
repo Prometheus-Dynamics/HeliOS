@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod auth_state;
 pub mod board_update;
+pub mod calibration_capture;
 pub mod camera_context;
 pub mod camera_controls;
 pub mod camera_preview;
@@ -40,6 +41,8 @@ pub struct AppState {
     pub cameras: camera_controls::CameraControls,
     /// One Styx preview per camera, made on its first viewer.
     pub previews: camera_preview::CameraPreviews,
+    /// Calibration views captured per camera, until solved.
+    pub calibrations: calibration_capture::CalibrationSessions,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
     /// Held while a peripheral action runs: helios-api runs one at a time, so its callers queue
@@ -60,6 +63,7 @@ impl AppState {
             orion: orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone()),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
+            calibrations: calibration_capture::CalibrationSessions::default(),
             store,
             events,
             auth: auth::Auth::new(config.auth_file.clone()),

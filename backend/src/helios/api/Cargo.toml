@@ -57,6 +57,12 @@ orion-client = { workspace = true }
 styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde", "preview", "codec-turbojpeg"] }
 
 helios-diagnostics = { path = "../diagnostics" }
+# Calibration on the device (`calibration_capture.rs`): ChArUco board detection and the
+# intrinsics solve.
+eidos-detectors = { workspace = true }
+eidos-aruco = { workspace = true }
+eidos-calibration = { workspace = true }
+eidos-core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

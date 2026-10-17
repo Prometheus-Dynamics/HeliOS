@@ -518,9 +518,6 @@ export class LiveCluster {
     await this.refreshDevice();
   }
 
-  async calibrate(cameraId: string) {
-    await this.act("Calibration", () => api.calibrate(cameraId));
-  }
 
   /** Graph of a pipeline as the device has it (for screens that reload). */
   graphOf(id: string): GraphDocument {
