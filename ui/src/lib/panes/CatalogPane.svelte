@@ -69,6 +69,7 @@
 
 <style>
   .cat {
+    container-type: inline-size;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -145,16 +146,30 @@
     opacity: 0.6;
   }
   .title {
-    flex: 1;
+    flex: 1 0 auto;
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Port dots give way to the title: they shrink (clipped), and go when the pane is narrow. */
   .dots {
     display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
     align-items: center;
     gap: 2px;
     color: var(--fg-4);
+  }
+  .dots i {
+    flex: none;
+  }
+  @container (max-width: 220px) {
+    .dots {
+      display: none;
+    }
   }
   .dots i {
     width: 6px;
