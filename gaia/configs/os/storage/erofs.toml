@@ -1,4 +1,4 @@
-description = "Read-only EROFS root and the /data partition: the root slot image (LZMA, large pclusters), /var on tmpfs, /data (p7) mounted early with the persistent state bound into place, sshd host keys and the machine ID on /data, and the device hostname."
+description = "Read-only EROFS root and the /data partition: the root slot image (LZMA, large pclusters), /var on tmpfs, /data (p7) mounted early with the persistent state bound into place, the machine ID on /data (sshd host keys are the device package's, per board), and the device hostname."
 
 # The root filesystem is one A/B slot (p5/p6, 512 MiB, targets/raze.toml) that
 # the device package's writer replaces wholesale, so it is read-only: EROFS,

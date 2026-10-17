@@ -15,8 +15,6 @@
 #                                          the clock floor across reboots
 #   /data/root        -> /root             root's home (shell history, keys)
 #   /data/identity/machine-id              bound over /etc/machine-id
-#   /data/ssh/                             sshd host keys (HostKey lines in
-#                                          /etc/ssh/sshd_config)
 #   /data/board/                           user overrides for the device
 #                                          package (*.env, read by it directly)
 #
@@ -103,21 +101,6 @@ if [ "$running" != "$kept" ]; then
 	# persistent journal under that one. It has not flushed to /var yet.
 	systemctl restart --no-block systemd-journald.service || true
 fi
-
-# --- SSH host keys ----------------------------------------------------------------
-# sshd reads them from /data/ssh (HostKey in /etc/ssh/sshd_config), so a board
-# keeps its host key across updates.
-
-mkdir -p "$DATA/ssh"
-chmod 0700 "$DATA/ssh"
-for type in ed25519 ecdsa rsa; do
-	key="$DATA/ssh/ssh_host_${type}_key"
-	if [ ! -s "$key" ] || [ ! -s "$key.pub" ]; then
-		rm -f "$key" "$key.pub"
-		ssh-keygen -q -t "$type" -N '' -C "root@$(hostname)" -f "$key"
-		log "generated the $type SSH host key"
-	fi
-done
 
 # --- the device package -------------------------------------------------------------
 
