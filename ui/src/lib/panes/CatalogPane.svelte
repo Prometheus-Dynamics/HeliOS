@@ -14,7 +14,7 @@
     void liveState.catalogVersion;
     const q = query.trim().toLowerCase();
     const match = (t: NodeType) => !q || [t.title, t.id, t.plugin, t.category, t.summary, ...t.inputs.map((p) => p.type), ...t.outputs.map((p) => p.type)].some((s) => s.toLowerCase().includes(q));
-    return CATEGORY_ORDER.map((category) => ({ category, types: CATALOG.filter((t) => t.available !== false && t.category === category && match(t)) })).filter((g) => g.types.length);
+    return CATEGORY_ORDER.map((category) => ({ category, types: CATALOG.filter((t) => t.available !== false && (q || !t.stageOf) && t.category === category && match(t)) })).filter((g) => g.types.length);
   });
   const workloadId = $derived(selection.last.workload?.id ?? cluster.workloads[0]?.id);
 

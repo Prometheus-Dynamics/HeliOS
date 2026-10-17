@@ -77,8 +77,10 @@ fn node_entry(registry: &PluginRegistry, decl: &NodeDecl, plugin: Option<String>
     if let Some(label) = &decl.label {
         node.insert("label".into(), label.clone().into());
     }
-    if let Some(summary) = meta("summary") {
-        node.insert("summary".into(), summary);
+    for key in ["summary", "category", "stage_of"] {
+        if let Some(value) = meta(key) {
+            node.insert(key.into(), value);
+        }
     }
     if decl.metadata_json.contains_key("daedalus.embedded_graph") {
         node.insert("group".into(), true.into());

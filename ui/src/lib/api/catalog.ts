@@ -49,6 +49,8 @@ export interface NodeType {
   available?: boolean;
   /** A node-group: its stages are nodes of their own. */
   group?: boolean;
+  /** The node-groups it is a stage of (listed under them in the palette). */
+  stageOf?: string[];
 }
 
 const dictionaries = [
@@ -385,6 +387,21 @@ export function defaults(type: NodeType): Record<string, number | string | boole
 
 // --- The device's catalog ----------------------------------------------------
 
+/** The plugin's own category (Eidos `category` metadata) as the palette's. */
+const CATEGORY_BY_PLUGIN: Record<string, NodeType["category"]> = {
+  fiducials: "Fiducials",
+  calibration: "Geometry",
+  color: "Color",
+  contour: "Mask",
+  draw: "Output",
+  filter: "Filter",
+  geometry: "Geometry",
+  io: "Source",
+  mask: "Mask",
+  motion: "Motion",
+  sampling: "Geometry",
+};
+
 const CATEGORY_BY_SECTION: Record<string, NodeType["category"]> = {
   aruco: "Fiducials",
   detectors: "Fiducials",
@@ -434,18 +451,20 @@ function toParam(port: DeviceCatalogPort, known: Param | undefined): Param {
 function fromDevice(node: DeviceCatalogNode, known: NodeType | undefined): NodeType {
   const section = node.id.split(":")[1]?.split(".")[0] ?? "";
   const ports = (list: DeviceCatalogPort[]) => list.map((p) => ({ name: p.name, type: p.type_key }));
-  const summary = node.summary ?? node.label ?? known?.summary ?? "";
+  const summary = node.summary ?? known?.summary ?? node.label ?? "";
   return {
     id: node.id,
     plugin: node.plugin ?? known?.plugin ?? node.id.split(":")[0],
-    category: known?.category ?? CATEGORY_BY_SECTION[section] ?? "Filter",
-    title: known?.title ?? humanize(node.id),
+    category: known?.category ?? (node.category ? CATEGORY_BY_PLUGIN[node.category] : undefined) ?? CATEGORY_BY_SECTION[section] ?? "Filter",
+    // A short label is the plugin's title; a sentence (older plugins) is not.
+    title: known?.title ?? (node.label && node.label.length <= 40 && !node.label.endsWith(".") ? node.label : humanize(node.id)),
     summary,
     inputs: ports(node.inputs.filter((p) => p.default === undefined)),
     outputs: ports(node.outputs),
     params: node.inputs.filter((p) => p.default !== undefined).map((p) => toParam(p, known?.params.find((k) => k.name === p.name))),
     available: true,
     group: node.group,
+    stageOf: node.stage_of?.length ? node.stage_of : undefined,
   };
 }
 
