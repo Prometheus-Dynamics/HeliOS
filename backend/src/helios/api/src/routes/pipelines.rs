@@ -481,6 +481,15 @@ pub fn pose_digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
     engine_workloads(view).filter_map(|w| pose_summary(&outputs_of(view, w.workload_id.as_str())).map(|pose| (pipeline_id(w.workload_id.as_str()), pose))).collect()
 }
 
+/// Every pipeline's host outputs by `<pipeline>/<port>` (`output` events: a graph published a new
+/// value, at most once per helios-engine publish interval).
+pub fn outputs_digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
+    engine_workloads(view)
+        .flat_map(|w| outputs_of(view, w.workload_id.as_str()))
+        .filter_map(|output| Some((format!("{}/{}", output.pipeline, output.port), serde_json::to_value(output).ok()?)))
+        .collect()
+}
+
 /// How many pipelines this API manages (created through `/v1/pipelines`), not other tools' ones.
 pub fn managed_pipeline_count(view: &StateView) -> usize {
     engine_workloads(view).filter(|w| w.workload_id.as_str().starts_with(WORKLOAD_PREFIX)).count()

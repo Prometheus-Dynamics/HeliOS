@@ -2,7 +2,8 @@
 //!
 //! A watcher follows Orion on one event stream (desired-state changes and this node's `host.*`
 //! metrics; Orion pushes both), from the first subscriber on, and while anyone is subscribed
-//! publishes what changed: `pipeline` and `resource` events (observed changes within one
+//! publishes what changed: `output` events (a pipeline's host output has a new value, as in
+//! `GET /v1/outputs`), `pipeline` and `resource` events (observed changes within one
 //! host-metrics sample, see [`follow`]), `metrics` with every host-facts sample
 //! (`ORION_NODE_HOST_FACTS_REFRESH_MS`, 2 s on the image) and `orion` when Orion becomes reachable
 //! or unreachable. The device package updater's state is a local file, read once a second for
@@ -91,6 +92,8 @@ pub struct Digest {
     pub poses: BTreeMap<String, serde_json::Value>,
     /// Raw GPIO/PWM claims (`gpio` events: claimed, renewed, set, an edge, released).
     pub claims: BTreeMap<String, serde_json::Value>,
+    /// Pipeline host outputs by `<pipeline>/<port>` (`output` events).
+    pub outputs: BTreeMap<String, serde_json::Value>,
 }
 
 /// The events that turn `before` into `after`.
@@ -100,6 +103,7 @@ pub fn diff(before: &Digest, after: &Digest) -> Vec<(&'static str, serde_json::V
     diff_maps("resource", &before.resources, &after.resources, &mut out);
     diff_maps("pose", &before.poses, &after.poses, &mut out);
     diff_maps("gpio", &before.claims, &after.claims, &mut out);
+    diff_maps("output", &before.outputs, &after.outputs, &mut out);
     out
 }
 
@@ -227,6 +231,7 @@ impl Watch {
                     resources: routes::resources::digest(&view),
                     poses: routes::pipelines::pose_digest(&view),
                     claims: routes::resources::claims_digest(&view),
+                    outputs: routes::pipelines::outputs_digest(&view),
                 };
                 if let Some(before) = &self.seen.last {
                     for (kind, data) in diff(before, &digest) {

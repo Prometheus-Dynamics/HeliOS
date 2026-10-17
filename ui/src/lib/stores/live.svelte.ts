@@ -48,8 +48,18 @@ class LiveState {
 
 export const liveState = new LiveState();
 
-/** How often the camera overlays read pipeline outputs: helios-engine publishes them every 250 ms. */
-const OUTPUTS_POLL_MS = 250;
+/**
+ * Pipeline outputs arrive as `output` events (helios-engine publishes them at most every
+ * 250 ms); while none have come for this long (no event stream, an older device), they are
+ * read with `GET /v1/outputs` instead.
+ */
+const OUTPUTS_FALLBACK_MS = 1000;
+
+/** A `detections` output's value as overlay detections. */
+function toDetections(value: unknown): Detection[] {
+  const out = value as { detections?: { id: number; corners: { x: number; y: number }[] }[] } | undefined;
+  return (out?.detections ?? []).map((d) => ({ id: d.id, corners: d.corners.map((c) => [c.x, c.y] as [number, number]) }));
+}
 
 export class LiveCluster {
   private pipelines = new Map<string, W.Pipeline>();
@@ -61,6 +71,7 @@ export class LiveCluster {
   private pending = new Map<string, number>();
   private warned = new Set<string>();
   private controlChanges = new Map<string, W.CameraControlChanges>();
+  private lastOutputEvent = 0;
 
   constructor(private data: ClusterData) {}
 
@@ -86,7 +97,11 @@ export class LiveCluster {
     this.timers.push(window.setInterval(() => void this.refreshDevice(), 10_000));
     this.timers.push(window.setInterval(() => void this.refreshCameras(), 15_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
-    this.timers.push(window.setInterval(() => void this.refreshOutputs(), OUTPUTS_POLL_MS));
+    this.timers.push(
+      window.setInterval(() => {
+        if (performance.now() - this.lastOutputEvent > OUTPUTS_FALLBACK_MS) void this.refreshOutputs();
+      }, OUTPUTS_FALLBACK_MS / 4),
+    );
     return () => {
       for (const t of this.timers) clearInterval(t);
       for (const u of this.unsubscribers) u();
@@ -212,11 +227,34 @@ export class LiveCluster {
     }
     const next: Record<string, Detection[]> = {};
     for (const p of running) {
-      const camera = Object.values(p.bindings).find((b) => this.data.cameras.some((c) => c.resourceId === b.resource_id))?.resource_id;
-      const out = outputs.find((o) => o.pipeline === p.id && o.port === "detections")?.value as { detections?: { id: number; corners: { x: number; y: number }[] }[] } | undefined;
-      if (camera && out?.detections) next[camera] = out.detections.map((d) => ({ id: d.id, corners: d.corners.map((c) => [c.x, c.y] as [number, number]) }));
+      const camera = this.cameraOfPipeline(p);
+      const out = outputs.find((o) => o.pipeline === p.id && o.port === "detections");
+      if (camera && out) next[camera] = toDetections(out.value);
     }
     this.detections = next;
+  }
+
+  /** The camera resource feeding a pipeline. */
+  private cameraOfPipeline(p: W.Pipeline): string | undefined {
+    return Object.values(p.bindings).find((b) => this.data.cameras.some((c) => c.resourceId === b.resource_id))?.resource_id;
+  }
+
+  /** An `output` event: a pipeline published a new value of a host output. */
+  private applyOutput(data: { id: string; change: string; value?: W.PipelineOutput }) {
+    this.lastOutputEvent = performance.now();
+    const [pipelineId, port] = data.id.split("/");
+    if (port !== "detections") return;
+    const pipeline = this.pipelines.get(pipelineId);
+    const camera = pipeline && this.cameraOfPipeline(pipeline);
+    if (!camera) return;
+    if (data.change === "removed" || !data.value || pipeline.state !== "running") {
+      if (camera in this.detections) {
+        const { [camera]: _, ...rest } = this.detections;
+        this.detections = rest;
+      }
+      return;
+    }
+    this.detections = { ...this.detections, [camera]: toDetections(data.value.value) };
   }
 
   detectionsFor(cameraId: string): Detection[] {
@@ -252,6 +290,9 @@ export class LiveCluster {
 
   private onEvent(event: W.ApiEvent) {
     switch (event.type) {
+      case "output":
+        this.applyOutput(event.data as { id: string; change: string; value?: W.PipelineOutput });
+        break;
       case "metrics":
         this.snapshot.metrics = event.data as W.Metrics;
         this.applyNode();
