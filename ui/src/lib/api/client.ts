@@ -25,6 +25,8 @@ import type {
   Pipeline,
   PipelineTemplate,
   DeviceCatalog,
+  Nt4Settings,
+  Nt4State,
   CalibrationBoard,
   CalibrationCapture,
   CalibrationSolve,
@@ -149,7 +151,7 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
   return () => source.close();
 }
 
-export const EVENT_TYPES = ["hello", "output", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "lagged"];
+export const EVENT_TYPES = ["hello", "output", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "lagged"];
 
 export const api = {
   // Device security
@@ -214,6 +216,8 @@ export const api = {
   outputs: () => request<PipelineOutput[]>("GET", "/v1/outputs"),
   plugins: () => request<{ engine_running: boolean; plugins: string[] }>("GET", "/v1/plugins"),
   catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
+  nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
+  setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
 
   // Resources and peripherals
   resources: (type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),

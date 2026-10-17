@@ -4,6 +4,7 @@ pub mod auth;
 pub mod cameras;
 pub mod field_layouts;
 pub mod logs;
+pub mod nt4;
 pub mod pipelines;
 pub mod resources;
 pub mod system;
@@ -38,6 +39,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/auth/tokens/{id}", delete(auth::revoke_token))
         .route("/v1/device", get(system::device))
         .route("/v1/device/os", get(system::device_os))
+        .route("/v1/device/nt4", get(nt4::get_nt4).put(nt4::put_nt4))
         .route("/v1/nodes", get(system::nodes))
         .route("/v1/metrics", get(system::metrics))
         .route("/v1/system/health", get(system::health_report))

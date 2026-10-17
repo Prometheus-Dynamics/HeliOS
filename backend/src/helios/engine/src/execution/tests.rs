@@ -292,7 +292,8 @@ fn frame_spec(input: &str) -> FrameSourceSpec {
 fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, input: &str, settings: GraphSettings) -> (WorkloadDriver, TestCamera) {
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[input.to_string()], settings).expect("compile graph");
     let (sender, receiver) = test_camera();
-    let driver = WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("start driver");
+    let driver =
+        WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
     (driver, sender)
 }
 
@@ -512,7 +513,7 @@ fn secondary_camera_frames_pair_with_the_primary_frame() {
     let (front, front_frames) = test_camera();
     let (side, side_frames) = test_camera();
     let sources = vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), (frame_spec("side"), Box::new(side_frames) as Box<dyn FrameSource>)];
-    let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new())).expect("start driver");
+    let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
     let result = |driver: &mut WorkloadDriver| artifact_json(&driver.snapshot().1, "host_output:result");
 
     // A side frame alone does not tick the graph; the next front frame carries it.
@@ -732,8 +733,14 @@ fn missing_secondary_camera_does_not_block_the_graph() {
     let (front, front_frames) = test_camera();
 
     let started = Instant::now();
-    let mut driver = WorkloadDriver::start(workload, compiled, vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), missing_camera(&dir, "side")], Arc::new(Notify::new()))
-        .expect("start driver");
+    let mut driver = WorkloadDriver::start(
+        workload,
+        compiled,
+        vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), missing_camera(&dir, "side")],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+    )
+    .expect("start driver");
     for timestamp in 1..=3 {
         front.send(flat_frame(4, 4, timestamp)).expect("send front");
         wait_for("the primary frame", || driver.stats().ticks_processed == timestamp);
@@ -752,7 +759,7 @@ fn stop_ends_the_poll_loop_promptly() {
     let frames = workload("workload.stop-frames", passthrough_document(&plugins), Vec::new());
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &frames, &["camera".to_string()], GraphSettings::default()).expect("compile graph");
     let started = Instant::now();
-    let driver = WorkloadDriver::start(frames, compiled, vec![missing_camera(&dir, "camera")], Arc::new(Notify::new())).expect("start driver");
+    let driver = WorkloadDriver::start(frames, compiled, vec![missing_camera(&dir, "camera")], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
     assert!(started.elapsed() < Duration::from_millis(500), "starting waited for the camera: {:?}", started.elapsed());
     std::thread::sleep(Duration::from_millis(300));
     assert!(!driver.stats().source.connected);
@@ -773,7 +780,7 @@ fn stop_ends_the_poll_loop_promptly() {
     let document = plugins.registry().graph_document(graph).to_json().expect("document json");
     let resources = workload("workload.stop-resources", document, vec![binding("sensor", "gpio_line.node-local.0")]);
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &resources, &[], GraphSettings::default()).expect("compile graph");
-    let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new())).expect("start driver");
+    let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
     driver.update_context(vec![ResourceInput { input: "sensor".into(), revision: "1".into(), payload: "on".into() }]);
     wait_for("the resource tick", || driver.stats().ticks_processed == 1);
     std::thread::sleep(Duration::from_millis(50));
@@ -853,7 +860,8 @@ fn camera_context_feeds_pose_and_multi_tag_pose() {
         assert!(graph.input_ports.contains(&port.to_string()), "{port}: {:?}", graph.input_ports);
     }
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("driver");
+    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default())
+        .expect("driver");
     driver.update_camera_context(&apriltag);
 
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
@@ -897,7 +905,8 @@ fn multi_tag_pose_gives_the_camera_and_robot_in_the_reference_frame() {
     pose.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &pose, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("driver");
+    let mut driver =
+        WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("driver");
     driver.update_camera_context(&pose);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);
@@ -927,7 +936,8 @@ fn multi_tag_pose_runs_without_a_mount() {
     apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &apriltag, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("driver");
+    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default())
+        .expect("driver");
     driver.update_camera_context(&apriltag);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);

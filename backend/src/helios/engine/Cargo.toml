@@ -31,6 +31,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 notify = { workspace = true }
 orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
+# Pipeline outputs on NetworkTables for robot code (`nt4.rs`).
+orion-nt4 = { workspace = true }
 # `engine` (serial executor, no worker pool: graphs run on their driver thread),
 # `dylib-plugins` (plugin libraries) and `metrics` (per-node/per-edge telemetry,
 # off unless `HELIOS_ENGINE_METRICS_LEVEL` turns it on).

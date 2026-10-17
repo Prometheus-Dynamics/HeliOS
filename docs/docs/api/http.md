@@ -77,6 +77,7 @@ as unavailable and not retry.
 | `GET` `POST` `DELETE` | `/v1/auth/*` | API | Device security: status, enable/disable, login/logout, password, tokens. See [Device security](#device-security) |
 | `GET` | `/v1/device` | Orion, kernel | node id, hostname, model, serial, OS, uptime, Orion revisions and peers, clock sync |
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
+| `GET` `PUT` | `/v1/device/nt4` | API, helios-engine | NetworkTables settings and connection: see [NetworkTables](./networktables.md) |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
 | `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature (the hottest sensor), throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
 | `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |

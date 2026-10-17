@@ -7,6 +7,7 @@ import { identity } from "#lib/core/identity.svelte.js";
 import type { IconName } from "#lib/ui/icons.js";
 import { calibration } from "#lib/stores/calibration.svelte.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
+import { liveState } from "#lib/stores/live.svelte.js";
 import { field } from "#lib/stores/field.svelte.js";
 import { robot } from "#lib/stores/robot.svelte.js";
 import { toasts } from "#lib/stores/toasts.svelte.js";
@@ -94,6 +95,11 @@ class GuideStore {
   /** Where this camera's results go for robot code. */
   table(c: Camera): string | null {
     const w = this.active(c);
+    // On a device the engine publishes every pipeline's outputs under <prefix>/<pipeline>.
+    if (cluster.live) {
+      const nt = liveState.nt4;
+      return w && nt?.server ? `${nt.settings.prefix.replace(/\/$/, "")}/${w.id}` : null;
+    }
     const nt = w?.graph.nodes.find((n) => n.type === "helios:nt4");
     return nt ? String(nt.params.table) : null;
   }
@@ -118,7 +124,15 @@ class GuideStore {
       { id: "place", title: "Tell HeliOS where each camera is", detail: placed ? "All cameras are placed on the robot." : "Where it sits on the robot and which way it looks. Needed for positions.", done: placed, icon: "cube" },
       { id: "calibrate", title: "Calibrate each camera", detail: `${cal} of ${cams.length} done. About two minutes each with a printed board.`, done: cal === cams.length, icon: "grid-4x4" },
       { id: "field", title: "Pick this year's field", detail: field.layout.name === "Demo field" ? "Using the demo field. Load the official layout file." : `Using “${field.layout.name}”.`, done: field.layout.name !== "Demo field", icon: "map" },
-      { id: "robot-code", title: "Connect to robot code", detail: "Results are published on NetworkTables. Check the names match your code.", done: cams.every((c) => this.job(c) === "view" || this.table(c)), icon: "plug" },
+      cluster.live
+        ? {
+            id: "robot-code",
+            title: "Connect to robot code",
+            detail: liveState.nt4?.connected ? `Publishing to ${liveState.nt4.server} under ${liveState.nt4.settings.prefix}.` : liveState.nt4?.server ? `Waiting for ${liveState.nt4.server}. Is the device on the robot network?` : "Set your team number in Settings › Robot.",
+            done: Boolean(liveState.nt4?.connected),
+            icon: "plug",
+          }
+        : { id: "robot-code", title: "Connect to robot code", detail: "Results are published on NetworkTables. Check the names match your code.", done: cams.every((c) => this.job(c) === "view" || this.table(c)), icon: "plug" },
     ];
   }
 }

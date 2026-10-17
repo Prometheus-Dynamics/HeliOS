@@ -2,6 +2,7 @@
   // Device security, look and feel, names and colours for everything, layouts,
   // and backups.
   import Icon from "#lib/components/common/Icon.svelte";
+  import NtSection from "#lib/components/robot/NtSection.svelte";
   import SecuritySection from "#lib/components/security/SecuritySection.svelte";
   import { exportAll, importAll } from "#lib/core/backup.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
@@ -48,10 +49,14 @@
   <SecuritySection />
 
   <Section title="Robot" key="set-robot">
-    <Prop label="Team number" help="Sets where robot code is expected (NetworkTables server).">
-      <Num value={team.number ?? 0} min={0} max={99999} width={90} label="Team number" onchange={(v) => (team.number = v || null)} />
-    </Prop>
-    <Prop label="Robot code at"><span class="mono">{team.ntServer}</span></Prop>
+    {#if cluster.live}
+      <NtSection />
+    {:else}
+      <Prop label="Team number" help="Sets where robot code is expected (NetworkTables server).">
+        <Num value={team.number ?? 0} min={0} max={99999} width={90} label="Team number" onchange={(v) => (team.number = v || null)} />
+      </Prop>
+      <Prop label="Robot code at"><span class="mono">{team.ntServer}</span></Prop>
+    {/if}
     <Prop label="Screens in the rail">
       <button type="button" class="mini" onclick={() => gallery.show("screens")}>Choose…</button>
       <button type="button" class="mini" onclick={() => workspaces.setVisible(null)}>Show all</button>

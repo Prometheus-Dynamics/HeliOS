@@ -563,6 +563,10 @@ export interface DeviceCatalogNode {
   summary?: string;
   /** A node-group (its stages are nodes of their own). */
   group?: boolean;
+  /** The plugin's category (`fiducials`, `filter`, `mask`, ...). */
+  category?: string;
+  /** Node-groups this node is a stage of: listed under them, not on its own. */
+  stage_of?: string[];
   inputs: DeviceCatalogPort[];
   outputs: DeviceCatalogPort[];
 }
@@ -606,4 +610,21 @@ export interface CalibrationSolve {
   view_rms: number[];
   views: number;
   converged: boolean;
+}
+
+/** `GET`/`PUT /v1/device/nt4`: pipeline outputs on NetworkTables for robot code. */
+export interface Nt4Settings {
+  enabled: boolean;
+  team: number | null;
+  server: string | null;
+  port: number;
+  prefix: string;
+}
+
+export interface Nt4State {
+  settings: Nt4Settings;
+  /** Where publishing goes (`null`: off, or no team number or server). */
+  server: string | null;
+  connected: boolean;
+  engine_reporting: boolean;
 }

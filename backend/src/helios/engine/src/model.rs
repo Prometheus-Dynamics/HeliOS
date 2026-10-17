@@ -179,6 +179,8 @@ pub struct EngineSnapshot {
     pub node_id: String,
     pub engine_socket_path: PathBuf,
     pub catalog_path: Option<PathBuf>,
+    /// The NetworkTables connection, once the publisher runs.
+    pub nt4: Option<crate::nt4::Nt4Status>,
     pub plugin_dirs: Vec<PathBuf>,
     pub loaded_plugins: Vec<LoadedPlugin>,
     pub assigned_workloads: Vec<ExecutionWorkload>,

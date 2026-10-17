@@ -65,6 +65,7 @@ use super::{
 };
 use crate::{
     model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload},
+    nt4::{Nt4Sink, Nt4Tick},
     stream_io,
 };
 
@@ -140,7 +141,13 @@ pub(crate) struct WorkloadDriver {
 impl WorkloadDriver {
     /// Start driving `graph`: from `frames` (one source per frame binding, the first paces the
     /// graph) when there are any, otherwise from the bound resources.
-    pub fn start(workload: ExecutionWorkload, graph: CompiledWorkloadGraph, frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>, outputs_ready: Arc<Notify>) -> Result<Self, ExecutionError> {
+    pub fn start(
+        workload: ExecutionWorkload,
+        graph: CompiledWorkloadGraph,
+        frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>,
+        outputs_ready: Arc<Notify>,
+        nt4: Nt4Sink,
+    ) -> Result<Self, ExecutionError> {
         let (sources, frame_sources): (Vec<_>, Vec<_>) = frames.into_iter().unzip();
         let frame_inputs = sources.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
         let latest = |port: &String| graph.host_graph.set_latest_input(port.clone()).map_err(|error| ExecutionError::Plan(format!("host input '{port}': {error}")));
@@ -177,7 +184,8 @@ impl WorkloadDriver {
         let planning_ms = graph.planning_ms;
         // Made here, before the thread runs, so a stop at any point makes it readable.
         let inbound = graph.host_graph.inbound_fd().map_err(|error| ExecutionError::Execute(format!("graph inbound fd: {error}")))?;
-        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone()), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone() };
+        let nt4 = Nt4Output { sink: nt4, pipeline: pipeline_name(&workload.workload_id), serializers: serializers.clone() };
+        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone(), nt4), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone() };
         let thread = std::thread::Builder::new()
             .name(format!("helios-graph-{}", workload.workload_id))
             .spawn(move || graph_loop.run(trigger))
@@ -353,14 +361,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct TickRecorder {
     output_ports: Vec<String>,
     shared: Arc<DriverShared>,
+    nt4: Nt4Output,
     /// When to read Daedalus's frame-overhead report next (`None`: not recorded).
     next_overhead: Option<Instant>,
 }
 
 impl TickRecorder {
-    fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>) -> Self {
+    fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>, nt4: Nt4Output) -> Self {
         let next_overhead = graph.host_graph.frame_overhead_enabled().then(Instant::now);
-        Self { output_ports: graph.output_ports.clone(), shared, next_overhead }
+        Self { output_ports: graph.output_ports.clone(), shared, nt4, next_overhead }
     }
 
     fn record(&mut self, graph: &ResidentHostGraph, result: Result<&ExecutionTelemetry, String>) {
@@ -380,6 +389,16 @@ impl TickRecorder {
                 outputs.push((port.clone(), value));
             }
         }
+        // NetworkTables gets every tick's outputs (frames are not sent); only while connected.
+        let nt4_outputs: Option<Vec<(String, Payload)>> = self.nt4.sink.active().then(|| {
+            outputs
+                .iter()
+                .filter_map(|(port, value)| match value {
+                    OutputValue::Payload(payload) => Some((port.clone(), payload.clone())),
+                    OutputValue::Message(_) => None,
+                })
+                .collect()
+        });
         let frame_overhead = match self.next_overhead {
             Some(due) if now >= due => {
                 self.next_overhead = Some(now + FRAME_OVERHEAD_INTERVAL);
@@ -412,9 +431,30 @@ impl TickRecorder {
             if let Some(report) = frame_overhead {
                 state.metrics.set_frame_overhead(&report);
             }
+            if let Some(outputs) = nt4_outputs {
+                self.nt4.offer(outputs, state.stats.last_tick_ms, state.stats.fps);
+            }
         }
         self.shared.outputs_ready.notify_one();
     }
+}
+
+/// A workload's outputs on NetworkTables (`crate::nt4`).
+struct Nt4Output {
+    sink: Nt4Sink,
+    pipeline: String,
+    serializers: ValueSerializerMap,
+}
+
+impl Nt4Output {
+    fn offer(&self, outputs: Vec<(String, Payload)>, latency_ms: f64, fps: f64) {
+        self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps });
+    }
+}
+
+/// The pipeline a workload is, as helios-api names it (`pipeline.<id>` -> `<id>`).
+fn pipeline_name(workload_id: &str) -> String {
+    workload_id.strip_prefix("pipeline.").unwrap_or(workload_id).to_string()
 }
 
 /// The graph thread.

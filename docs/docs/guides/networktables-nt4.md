@@ -1,73 +1,42 @@
 ---
 title: NetworkTables NT4
-description: Configure NT4 and use the Explorer to inspect topics.
+description: Send pipeline results to robot code over NetworkTables.
 ---
 
-Use this guide if you are integrating HeliOS with an NT4 server (commonly the roboRIO).
+Use this guide to get HeliOS results into robot code. HeliOS publishes them to the robot's NT4
+server, which is normally the roboRIO.
 
 ## Goal
 
 You are done when:
 
-- the device publishes under the expected prefix
-- the Explorer can list topics
+- **Settings › Robot** shows NetworkTables as **Connected**;
+- robot code (or a dashboard such as AdvantageScope, or Atlas's NT viewer) sees
+  `/helios/<pipeline>/...` topics updating.
 
-## Before You Start
+## Configure
 
-- Your NT4 server must be reachable from the device.
-- Most teams use the roboRIO as the NT4 server.
-- If you use team addressing, the roboRIO is usually `10.TE.AM.2`.
+1. Open **Settings › Robot**.
+2. Set your **Team number**. HeliOS connects to the roboRIO at `10.TE.AM.2`. For team `6390`,
+   that's `10.63.90.2`.
+3. Leave **Server** empty for the roboRIO. Set it to a host to use a simulator or another NT
+   server instead.
+4. Keep **NetworkTables** switched on. The badge turns **Connected** once the server answers.
 
-Example for team `6390`:
+## What robot code reads
 
-- roboRIO host: `10.63.90.2`
-- NT4 port: `5810`
+Each pipeline publishes under `/helios/<pipeline>/` (the prefix can be changed under **Topics**):
 
-## Configure (UI)
+- one `string` topic per output, holding JSON (for example `detections`, `multi_tag_pose`);
+- `latency_ms`, `fps` and `capture_time_us`. `capture_time_us` is on the NT server's clock, so
+  robot code can subtract it from the current time to get the result's age.
 
-1. Open [Settings > Networking](/os/settings/networking).
-2. Scroll to **NetworkTables (NT4)**.
-3. Set:
-   - Enable NT4 publishing
-   - Enable NT4 subscriptions (required for Explorer)
-   - Team number (optional) or server host override
-   - Port (default 5810)
+The full list is in the [NetworkTables API reference](../api/networktables.md).
 
-Derived values:
+## Common problems
 
-- Host from team: `10.TE.AM.2`
-- Publish prefix from hostname: `/<hostname>` (fallback `/helios`)
-
-What each toggle actually changes:
-
-- Publishing: HeliOS can write topics.
-- Subscriptions: HeliOS can read topics, and the Explorer UI can query topics.
-
-## Explorer
-
-1. Click **Open Explorer**.
-2. Search topics.
-3. Click a topic to read its value.
-
-If Explorer is disabled:
-
-- enable subscriptions
-- set team number or server host override
-
-## Verify (Quick Checks)
-
-1. In Explorer, confirm you can see a topic tree (even if it is mostly empty).
-2. Confirm you see your publish prefix and topics under it.
-3. If you have a pipeline that publishes outputs, confirm those topics appear while the stream is running.
-
-## Common Problems (And Fixes)
-
-- Nothing shows in Explorer:
-  - Enable subscriptions.
-  - Confirm server host is correct.
-  - Confirm the device is on the same robot network as the server.
-- Explorer works but your topics are missing:
-  - Confirm the pipeline is running on a `Live` stream.
-  - Confirm you are looking under the correct prefix.
-- Flaky NT4:
-  - Avoid multiple NT servers on the same network unless you know which one you intend to use.
+- **"Set a team number"**: no team number or server is set yet.
+- **"Waiting for 10.TE.AM.2"**: the device can't reach the roboRIO. Check that the device is on
+  the robot network (USB or Ethernet) and that the team number is right.
+- **Topics present but not updating**: check that the pipeline is running and has a camera
+  bound. Outputs are published only while frames are being processed.

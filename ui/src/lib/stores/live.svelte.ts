@@ -40,6 +40,8 @@ class LiveState {
   update = $state<W.UpdateStatus | null>(null);
   identity = $state<W.Identity | null>(null);
   plugins = $state<string[]>([]);
+  /** Where pipelines publish for robot code, and whether that is connected. */
+  nt4 = $state<W.Nt4State | null>(null);
   /** Bumped when the device's node catalog is merged into `CATALOG`, for what lists it. */
   catalogVersion = $state(0);
   /** Camera mounts stored on the device (robot frame, metres, degrees). */
@@ -133,6 +135,7 @@ export class LiveCluster {
     const device = await this.guard("device", () => api.device());
     if (!device) return;
     this.snapshot.device = device;
+    void this.refreshNt4();
     if (!this.snapshot.identity) this.snapshot.identity = (await this.guard("identity", () => api.identity())) ?? undefined;
     liveState.identity = this.snapshot.identity ?? null;
     const [metrics, services, update] = await Promise.all([
@@ -198,6 +201,14 @@ export class LiveCluster {
       const changed = plugins.plugins.join() !== liveState.plugins.join();
       liveState.plugins = plugins.plugins;
       if (changed || !liveState.catalogVersion) await this.refreshCatalog();
+    }
+  }
+
+  async refreshNt4() {
+    try {
+      liveState.nt4 = await api.nt4();
+    } catch {
+      liveState.nt4 = null;
     }
   }
 
@@ -290,6 +301,9 @@ export class LiveCluster {
 
   private onEvent(event: W.ApiEvent) {
     switch (event.type) {
+      case "nt4":
+        this.soon("nt4", () => this.refreshNt4(), 2500);
+        break;
       case "output":
         this.applyOutput(event.data as { id: string; change: string; value?: W.PipelineOutput });
         break;

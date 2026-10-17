@@ -45,13 +45,15 @@ pub struct EngineApp {
     config: EngineConfig,
     publisher: OrionEnginePublisher,
     node_runtime: LocalNodeRuntime,
+    /// The NetworkTables publisher's connection, once it runs.
+    nt4_status: std::sync::Mutex<Option<std::sync::Arc<std::sync::Mutex<crate::nt4::Nt4Status>>>>,
 }
 
 impl EngineApp {
     pub fn from_config(config: EngineConfig) -> Result<Self, EngineRuntimeError> {
         let publisher = OrionEnginePublisher::from_config(&config);
         let node_runtime = LocalNodeRuntime::new(config.orion_ipc_socket_path.clone(), config.orion_ipc_stream_socket_path.clone());
-        Ok(Self { config, publisher, node_runtime })
+        Ok(Self { config, publisher, node_runtime, nt4_status: std::sync::Mutex::default() })
     }
 
     pub async fn run_until_stopped(&self) -> Result<(), EngineRuntimeError> {
@@ -127,7 +129,9 @@ impl EngineApp {
         });
 
         let mut current_state_snapshot = self.node_runtime.control_plane(format!("{}-control", self.publisher.executor_client_name()))?.fetch_state_snapshot().await.ok();
-        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level });
+        let (nt4, nt4_status) = crate::nt4::spawn(self.config.nt4_settings_path.clone(), format!("helios-{}", self.config.node_id));
+        *self.nt4_status.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(nt4_status);
+        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level }).with_nt4(nt4);
         // Graphs run on their own threads when their input arrives; they signal here when they
         // produced something, and what they produced is published at most once per interval.
         let outputs_ready = execution_sessions.outputs_ready();
@@ -264,6 +268,7 @@ impl EngineApp {
             node_id: self.config.node_id.clone(),
             engine_socket_path: self.config.engine_socket_path.clone(),
             catalog_path: plugins.catalog_path.clone(),
+            nt4: self.nt4_status.lock().unwrap_or_else(|poison| poison.into_inner()).as_ref().map(|status| status.lock().unwrap_or_else(|poison| poison.into_inner()).clone()),
             plugin_dirs: self.config.plugin_dirs.clone(),
             loaded_plugins,
             assigned_workloads: decoded.runnable,

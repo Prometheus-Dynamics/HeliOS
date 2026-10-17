@@ -95,6 +95,21 @@ impl Store {
         self.dir.join("pipelines").join(format!("{}.json", file_stem(id)))
     }
 
+    fn nt4_path(&self) -> PathBuf {
+        self.dir.join("nt4.json")
+    }
+
+    /// NetworkTables settings (helios-engine reads the same file).
+    pub async fn nt4_settings(&self) -> ApiResult<crate::routes::nt4::Nt4Settings> {
+        let _guard = self.lock.lock().await;
+        read_json(&self.nt4_path()).await.map(Option::unwrap_or_default)
+    }
+
+    pub async fn put_nt4_settings(&self, settings: &crate::routes::nt4::Nt4Settings) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.nt4_path(), settings).await
+    }
+
     fn mounts_path(&self) -> PathBuf {
         self.dir.join("camera-mounts.json")
     }
