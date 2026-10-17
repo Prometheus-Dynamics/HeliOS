@@ -59,8 +59,11 @@ config_overrides = [
   # LZMA with 256 KiB physical clusters ("big pclusters"), tail packing,
   # fragments and deduplication: the smallest image (the update download and
   # the slot), decompressed by the kernel on demand.
-  ["BR2_TARGET_ROOTFS_EROFS_LZMA", "y"],
-  ["BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL", "6"],
+  # LZMA level 6 as "custom compression": the same `mkfs.erofs -zlzma,6`, without
+  # Buildroot's generic image compression, which BR2_TARGET_ROOTFS_EROFS_LZMA also turns on
+  # (an unused `lzma -9` copy of the image, about 36 s per build).
+  ["BR2_TARGET_ROOTFS_EROFS_CUSTOM_COMPRESSION", "y"],
+  ["BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS", "\"lzma,6\""],
   ["BR2_TARGET_ROOTFS_EROFS_PCLUSTERSIZE", "262144"],
   ["BR2_TARGET_ROOTFS_EROFS_ZTAILPACKING", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_FRAGMENTS", "y"],
