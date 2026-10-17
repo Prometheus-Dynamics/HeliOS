@@ -22,6 +22,8 @@ use crate::{
 pub const STYX_FRAMES_ENDPOINT_SCHEME: &str = "styx-frames+unix";
 const CAMERA_SERVICE_SOCKET_SUFFIX: &str = ".styx.sock";
 const CAMERA_SPARE_CLIENTS: usize = 2;
+/// Sensor line at which the first slice of a frame is processed (of 800 on the OV9782).
+const CAMERA_SLICE_LINE: u16 = 600;
 const CAMERA_SERVICE_SOCKET_MODE: u32 = 0o660;
 
 /// `styx-frames+unix://<absolute socket path>`: where Styx `FrameClient`s reach a camera.
@@ -94,6 +96,10 @@ impl CameraServices {
                 // calibration capture) without restarting the capture; about 5.8 MB more per
                 // running 1280x800 camera.
                 .spare_clients(CAMERA_SPARE_CLIENTS)
+                // The back end's first job runs on the top rows while the rest are read out
+                // (Styx's rp1-cfe line event): every client gets complete frames ~1 ms sooner, and a
+                // client asking for sliced frames can start on the first slice.
+                .capture_config(styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true))
                 .socket_mode(CAMERA_SERVICE_SOCKET_MODE)
                 .serve(&socket_path)
             {
