@@ -14,3 +14,6 @@ PermitRootLogin yes
 PasswordAuthentication yes
 ChallengeResponseAuthentication no
 PermitEmptyPasswords no
+
+# scp (SFTP mode, the default since OpenSSH 9) and sftp clients.
+Subsystem sftp /usr/libexec/sftp-server
