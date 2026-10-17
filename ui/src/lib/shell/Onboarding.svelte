@@ -67,7 +67,7 @@
         </label>
         <div class="found">
           <Icon name="circle-check" size={14} />
-          Found {cluster.nodes.length} devices and {cluster.cameras.length} cameras on this robot.
+          Found {cluster.nodes.length} {cluster.nodes.length === 1 ? "device" : "devices"} and {cluster.cameras.length} {cluster.cameras.length === 1 ? "camera" : "cameras"} on this robot.
         </div>
       {:else if step === 1}
         <h2>Your cameras</h2>
