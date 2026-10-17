@@ -1,29 +1,25 @@
-description = "Shared vision/media hardware package layer: ffmpeg, libcamera pipelines, codec and TPU packages (libcamera and libpisp themselves, with the OV9782 patches, come from the device package). AI packages are retained for future replacement work but no AI runtime or plugin is currently shipped."
+description = "Shared vision/media hardware package layer. Only what HeliOS runs: Styx captures and encodes natively (its PiSP BE and RP1 CFE kernel modules, a vendored libjpeg-turbo for previews). No ffmpeg, H.264/H.265 encoders, libcamera or AI runtimes: nothing on the image loads them (checked on the CM5 against every binary, plugin and running process), and they cost about 24 MB of root. Bring a package back with the feature that needs it."
 
 [image]
 kind = "buildroot"
 config_overrides = [
-  ["BR2_PACKAGE_FFMPEG", "y"],
-  ["BR2_PACKAGE_FFMPEG_GPL", "y"],
-  ["BR2_PACKAGE_FFMPEG_SWSCALE", "y"],
-  ["BR2_PACKAGE_FFMPEG_ENCODERS", "\"mjpeg libx264 libopenh264 libx265\""],
-  ["BR2_PACKAGE_FFMPEG_DECODERS", "\"mjpeg h264 h264_v4l2m2m hevc hevc_v4l2m2m\""],
-  ["BR2_PACKAGE_FFMPEG_PROTOCOLS", "\"file\""],
-  ["BR2_PACKAGE_FFMPEG_FILTERS", "\"scale\""],
-  ["BR2_PACKAGE_LIBCAMERA", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_V4L2", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_UVCVIDEO", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_VIMC", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_SIMPLE", "y"],
-  ["BR2_PACKAGE_LIBDRM", "y"],
-  ["BR2_PACKAGE_LIBOPENH264", "y"],
-  ["BR2_PACKAGE_LIBPISP", "y"],
-  ["BR2_PACKAGE_LIBYUV", "y"],
-  ["BR2_PACKAGE_BZIP2", "y"],
+  # libjpeg-turbo: kept for the preview encoder's build (helios-api's turbojpeg crate).
   ["BR2_PACKAGE_JPEG", "y"],
-  ["BR2_PACKAGE_X264", "y"],
-  ["BR2_PACKAGE_X265", "y"],
-  ["BR2_PACKAGE_CORALTPU", "y"],
-  ["BR2_PACKAGE_TENSORFLOW_LITE", "y"],
+  ["BR2_PACKAGE_BZIP2", "y"],
+  ["BR2_PACKAGE_LIBDRM", "y"],
+  # Off, though the device package turns libcamera on for PhotonVision: HeliOS uses Styx.
+  ["BR2_PACKAGE_LIBCAMERA", "n"],
+  ["BR2_PACKAGE_LIBCAMERA_V4L2", "n"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP", "n"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_UVCVIDEO", "n"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_VIMC", "n"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_SIMPLE", "n"],
+  ["BR2_PACKAGE_LIBPISP", "n"],
+  ["BR2_PACKAGE_FFMPEG", "n"],
+  ["BR2_PACKAGE_LIBOPENH264", "n"],
+  ["BR2_PACKAGE_LIBYUV", "n"],
+  ["BR2_PACKAGE_X264", "n"],
+  ["BR2_PACKAGE_X265", "n"],
+  ["BR2_PACKAGE_CORALTPU", "n"],
+  ["BR2_PACKAGE_TENSORFLOW_LITE", "n"],
 ]

@@ -33,7 +33,7 @@ entries = [
   # names (helios-manage-url.service): http://<hostname>.local:5800/.
   ["HELIOS_API_BIND", "0.0.0.0:5800"],
   ["HELIOS_API_UI_DIR", "/usr/share/helios/ui"],
-  ["LD_LIBRARY_PATH", "/usr/lib/edgetpu:/usr/lib"],
+  ["LD_LIBRARY_PATH", "/usr/lib"],
 ]
 
 [[stage.env_sets]]
@@ -51,7 +51,7 @@ entries = [
   ["RAYON_NUM_THREADS", "4"],
   ["RUST_MIN_STACK", "2097152"],
   ["LOG_FOLDER", "/var/log/helios"],
-  ["LD_LIBRARY_PATH", "/usr/lib/edgetpu:/usr/lib"],
+  ["LD_LIBRARY_PATH", "/usr/lib"],
   ["HELIOS_CAPTURE_STALL_MS", "6000"],
   ["HELIOS_CAPTURE_ACTIVE_STALL_MS", "5000"],
 ]
