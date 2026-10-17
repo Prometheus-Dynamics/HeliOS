@@ -138,6 +138,14 @@ impl Default for SearchTuning {
 
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
+/// Eidos's tracked detector as one node (any family; it starts on a frame's first rows): the
+/// tracked groups' ports, in the low-latency template.
+const TRACKED_SINGLE_NODE: &str = "eidos:detectors.tracked_detect";
+
+/// A tracked detector: a tracked group or the single node.
+fn is_tracked_detector(id: &str) -> bool {
+    id == TRACKED_SINGLE_NODE || DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id)
+}
 /// Config ports the tracked groups have and the full ones do not (Eidos docs/daedalus.md,
 /// "Tracked detector groups").
 const TRACKED_ONLY_PORTS: [&str; 17] = [
@@ -168,7 +176,7 @@ pub fn search_mode_of(graph: &serde_json::Value) -> Option<(SearchMode, Option<u
         if DETECTOR_GROUPS.iter().any(|(full, _)| *full == id) {
             return Some((SearchMode::Full, None));
         }
-        if DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id) {
+        if is_tracked_detector(id) {
             let every = node
                 .get("const_inputs")
                 .and_then(|c| c.as_array())
@@ -183,7 +191,7 @@ pub fn search_mode_of(graph: &serde_json::Value) -> Option<(SearchMode, Option<u
 /// tracked group (the defaults where it sets none).
 pub fn search_tuning_of(graph: &serde_json::Value) -> Option<SearchTuning> {
     let nodes = graph.get("graph")?.get("nodes")?.as_array()?;
-    let node = nodes.iter().find(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id)))?;
+    let node = nodes.iter().find(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(is_tracked_detector))?;
     let value = |name: &str| {
         node.get("const_inputs")
             .and_then(|c| c.as_array())
@@ -207,11 +215,18 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning
     let mut changed = 0;
     for node in nodes {
         let Some(id) = node.get("id").and_then(|id| id.as_str()) else { continue };
-        let Some((full, tracked)) = DETECTOR_GROUPS.iter().find(|(full, tracked)| *full == id || *tracked == id) else { continue };
+        // The single node stays one node when tracked; full search is its family's full group.
+        let (full, tracked) = if id == TRACKED_SINGLE_NODE {
+            let apriltag = node_dictionary(node).is_some_and(|name| name.starts_with("apriltag_"));
+            (if apriltag { DETECTOR_GROUPS[1].0 } else { DETECTOR_GROUPS[0].0 }, TRACKED_SINGLE_NODE)
+        } else {
+            let Some((full, tracked)) = DETECTOR_GROUPS.iter().find(|(full, tracked)| *full == id || *tracked == id) else { continue };
+            (*full, *tracked)
+        };
         changed += 1;
         match mode {
             SearchMode::Full => {
-                node["id"] = (*full).into();
+                node["id"] = full.into();
                 if let Some(consts) = node.get_mut("const_inputs").and_then(|c| c.as_array_mut()) {
                     consts.retain(|entry| !entry.get(0).and_then(|n| n.as_str()).is_some_and(|name| TRACKED_ONLY_PORTS.contains(&name)));
                 }
@@ -220,7 +235,7 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning
                 }
             }
             SearchMode::Tracked => {
-                node["id"] = (*tracked).into();
+                node["id"] = tracked.into();
                 if node.get("const_inputs").and_then(|c| c.as_array()).is_none() {
                     node["const_inputs"] = serde_json::json!([]);
                 }
@@ -244,15 +259,18 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning
 /// The `dictionary` constant of `graph`'s first Eidos detector group.
 pub fn dictionary_of(graph: &serde_json::Value) -> Option<String> {
     let nodes = graph.get("graph")?.get("nodes")?.as_array()?;
-    nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(is_detector_group)).find_map(|node| {
-        let entry = node.get("const_inputs")?.as_array()?.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some("dictionary"))?;
-        let value = entry.get(1)?.get("value")?;
-        value.get("name").and_then(|n| n.as_str()).or_else(|| value.as_str()).map(str::to_string)
-    })
+    nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(is_detector_group)).find_map(node_dictionary)
+}
+
+/// A detector node's `dictionary` constant.
+fn node_dictionary(node: &serde_json::Value) -> Option<String> {
+    let entry = node.get("const_inputs")?.as_array()?.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some("dictionary"))?;
+    let value = entry.get(1)?.get("value")?;
+    value.get("name").and_then(|n| n.as_str()).or_else(|| value.as_str()).map(str::to_string)
 }
 
 fn is_detector_group(id: &str) -> bool {
-    DETECTOR_GROUPS.iter().any(|(full, tracked)| *full == id || *tracked == id)
+    id == TRACKED_SINGLE_NODE || DETECTOR_GROUPS.iter().any(|(full, tracked)| *full == id || *tracked == id)
 }
 
 /// Set the `dictionary` constant of every Eidos detector group in `graph` to `name`. Returns how
@@ -317,11 +335,9 @@ pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
             return Err(ApiError::unprocessable("dictionary is an Eidos dictionary name such as apriltag_36h11, apriltag_16h5 or aruco_4x4_50"));
         }
-        let groups = graph
-            .get("graph")
-            .and_then(|g| g.get("nodes"))
-            .and_then(|n| n.as_array())
-            .map_or(0, |nodes| nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id.starts_with(family) && is_detector_group(id))).count());
+        let groups = graph.get("graph").and_then(|g| g.get("nodes")).and_then(|n| n.as_array()).map_or(0, |nodes| {
+            nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id == TRACKED_SINGLE_NODE || (id.starts_with(family) && is_detector_group(id)))).count()
+        });
         if groups == 0 {
             return Err(ApiError::unprocessable(format!("dictionary {name} needs a {family} detector group (tracked or not) in the graph")));
         }
@@ -1072,6 +1088,24 @@ mod tests {
         let text = graph.to_string();
         assert!(text.contains("daedalus.host_input_types"));
         GraphDocument::from_json(&text).expect("still a GraphDocument");
+    }
+
+    #[test]
+    fn the_single_tracked_node_takes_tuning_dictionary_and_full_search() {
+        let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11-low-latency.graph.json")).expect("template");
+        assert_eq!(search_mode_of(&template).map(|(mode, _)| mode), Some(SearchMode::Tracked));
+        assert_eq!(dictionary_of(&template).as_deref(), Some("apriltag_36h11"));
+        let mut graph = template.clone();
+        let tuning = SearchTuning { full_search_every: 4, ..SearchTuning::default() };
+        assert_eq!(apply_search_mode(&mut graph, SearchMode::Tracked, &tuning), 1);
+        assert_eq!(search_tuning_of(&graph).map(|t| t.full_search_every), Some(4));
+        assert_eq!(apply_dictionary(&mut graph, "apriltag_16h5"), 1);
+        assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_16h5"));
+        assert!(graph.to_string().contains(TRACKED_SINGLE_NODE));
+        // Full search: the family's full group, without the tracking constants.
+        assert_eq!(apply_search_mode(&mut graph, SearchMode::Full, &tuning), 1);
+        assert_eq!(search_mode_of(&graph).map(|(mode, _)| mode), Some(SearchMode::Full));
+        assert!(graph.to_string().contains("\"eidos:detectors.apriltag\"") && !graph.to_string().contains("full_search_every"));
     }
 
     pub fn sample_document() -> serde_json::Value {
