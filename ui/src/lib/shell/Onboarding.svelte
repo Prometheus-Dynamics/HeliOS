@@ -28,15 +28,26 @@
   const blocked = $derived(step === SECURITY && choice === "secure" && auth.open);
   const overlays = { ...DEFAULT_OVERLAYS, histogram: false, hud: false };
 
+  /** The screens "Start simple" keeps in the rail: what a new team needs first. */
+  const SIMPLE_SCREENS = ["start", "cameras", "calibration", "settings"];
+
   function finish(tour: boolean) {
     const n = Number(teamText);
     team.number = Number.isInteger(n) && n > 0 && n < 100000 ? n : null;
     // The names shown here were confirmed, so they count as chosen.
     for (const c of cluster.cameras) if (!identity.get(c.resourceId).name) identity.set(c.resourceId, { name: c.name });
-    workspaces.setVisible(simple ? ["start", "settings"] : null);
+    workspaces.setVisible(simple ? SIMPLE_SCREENS : null);
     shell.go(simple ? "start" : "overview");
     help.finishOnboarding();
     if (tour) setTimeout(() => help.startTour(), 300);
+  }
+
+  /** Out of the wizard without choosing anything: every screen stays in the rail, and nothing
+   * (camera names, the team) counts as set up. */
+  function skip() {
+    workspaces.setVisible(null);
+    shell.go("overview");
+    help.finishOnboarding();
   }
 
   function cycleColor(id: string) {
@@ -53,7 +64,7 @@
         <span class:on={i === step} class:done={i < step}><i>{#if i < step}<Icon name="check" size={10} stroke={3} />{:else}{i + 1}{/if}</i>{s}</span>
       {/each}
       <span class="grow"></span>
-      <button type="button" class="skip" onclick={() => finish(false)}>Skip setup</button>
+      <button type="button" class="skip" onclick={skip}>Skip setup</button>
     </div>
 
     <div class="body">
@@ -98,7 +109,7 @@
           <button type="button" class="choice" class:on={simple} onclick={() => (simple = true)}>
             <Icon name="home" size={20} />
             <b>Start simple</b>
-            <span>One Start screen with every camera, the setup checklist and any problems. Add Cameras, Pipelines, Hardware and more when you need them.</span>
+            <span>Start (every camera, the setup checklist, any problems), Cameras and Calibration. Add Pipelines, Robot, Hardware and more from the + when you need them.</span>
             <em>Recommended for new teams</em>
           </button>
           <button type="button" class="choice" class:on={!simple} onclick={() => (simple = false)}>
