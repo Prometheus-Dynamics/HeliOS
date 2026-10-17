@@ -24,6 +24,8 @@
   const node = $derived(target.id ? cluster.node(target.id) : undefined);
   const hw = $derived(node ? system.of(node.id) : undefined);
   const empty = $derived(hw && !hw.fan && !hw.leds.length && !hw.gpio.length && !hw.imu && !hw.power.length && !hw.switches?.length);
+  // Live readings at 4 Hz while this pane is open.
+  $effect(() => system.watchPeripherals());
 </script>
 
 <PaneBar>

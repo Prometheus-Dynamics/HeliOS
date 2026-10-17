@@ -209,6 +209,38 @@ class SystemStore {
   private lastCpu = new Map<number, { ms: number; at: number }>();
   private warned = new Set<string>();
 
+  /** Panes watching peripherals (the IMU compass wants more than the 2 s device tick). */
+  private watchers = 0;
+  private fastTimer = 0;
+
+  /** Read peripherals four times a second while something shows them; returns the stop. */
+  watchPeripherals(): () => void {
+    if (MOCK || typeof window === "undefined") return () => {};
+    this.watchers += 1;
+    if (!this.fastTimer) this.fastTimer = window.setInterval(() => void this.peripheralsTick(), 250);
+    return () => {
+      this.watchers -= 1;
+      if (this.watchers <= 0 && this.fastTimer) {
+        clearInterval(this.fastTimer);
+        this.fastTimer = 0;
+      }
+    };
+  }
+
+  private async peripheralsTick() {
+    const node = cluster.nodes[0];
+    const hw = node ? this.hw[node.id] : undefined;
+    if (!node || !hw || (typeof document !== "undefined" && document.hidden)) return;
+    let peripherals: W.Resource[];
+    try {
+      peripherals = await api.peripherals();
+    } catch {
+      return;
+    }
+    const devices = livePeripherals(peripherals);
+    this.hw[node.id] = { ...hw, fan: devices.fan, leds: devices.leds, imu: devices.imu, power: devices.power, switches: devices.switches, fanResource: devices.fanResource };
+  }
+
   private async liveTick() {
     const node = cluster.nodes[0];
     if (!node) return;
