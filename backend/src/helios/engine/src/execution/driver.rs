@@ -74,6 +74,8 @@ use crate::{
 const SECONDARY_FRAME_MAX_AGE: Duration = Duration::from_millis(500);
 /// Daedalus's frame-overhead report is read from the graph at most this often.
 const FRAME_OVERHEAD_INTERVAL: Duration = Duration::from_secs(1);
+/// The metrics artifact is rendered at most this often.
+const METRICS_RENDER_INTERVAL: Duration = Duration::from_secs(1);
 
 /// State the graph thread shares with the engine's publishing loop.
 struct DriverShared {
@@ -129,6 +131,8 @@ pub(crate) struct WorkloadDriver {
     planning_ms: f64,
     started_at_ms: u64,
     rendered: BTreeMap<String, (u64, String)>,
+    /// The metrics artifact as last rendered (when, the JSON, its observed_at_ms).
+    metrics_rendered: Option<(Instant, String, u64)>,
     /// The revision of each resource input last pushed.
     revisions: BTreeMap<String, String>,
     /// Host inputs of the graph (for camera context).
@@ -201,6 +205,7 @@ impl WorkloadDriver {
             planning_ms,
             started_at_ms,
             rendered: BTreeMap::new(),
+            metrics_rendered: None,
             revisions: BTreeMap::new(),
             input_ports,
             camera_context: BTreeMap::new(),
@@ -293,7 +298,10 @@ impl WorkloadDriver {
                 state.stats.fps = fps;
                 state.stats.updated_at_ms = now_ms();
             }
-            let metrics = state.metrics.enabled().then(|| state.metrics.to_json());
+            // Tens of KB of JSON, rendered under the lock the graph thread takes each tick: at
+            // most once per METRICS_RENDER_INTERVAL, the last rendering in between.
+            let due = self.metrics_rendered.as_ref().is_none_or(|(at, _, _)| at.elapsed() >= METRICS_RENDER_INTERVAL);
+            let metrics = (state.metrics.enabled() && due).then(|| state.metrics.to_json());
             (state.stats.clone(), state.outputs.clone(), metrics)
         };
         let mut artifacts = Vec::with_capacity(outputs.len() + 3);
@@ -319,7 +327,10 @@ impl WorkloadDriver {
         artifacts.push(session_artifact(&self.workload, "telemetry", TELEMETRY_ARTIFACT_KIND, report.to_string(), observed_at_ms));
         artifacts.push(session_artifact(&self.workload, "plan", PLAN_ARTIFACT_KIND, self.plan_message.clone(), self.started_at_ms));
         if let Some(metrics) = metrics {
-            artifacts.push(session_artifact(&self.workload, "metrics", METRICS_ARTIFACT_KIND, metrics.to_string(), observed_at_ms));
+            self.metrics_rendered = Some((Instant::now(), metrics.to_string(), observed_at_ms));
+        }
+        if let Some((_, metrics, metrics_at_ms)) = &self.metrics_rendered {
+            artifacts.push(session_artifact(&self.workload, "metrics", METRICS_ARTIFACT_KIND, metrics.clone(), *metrics_at_ms));
         }
         let status = match (stats.ticks_processed, stats.ticks_failed) {
             (0, 0) => ExecutionSessionStatus::Starting,
