@@ -147,6 +147,8 @@ orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "bd61d
 # The client SDK, for `ActionCaller` (request/response actions over one stream; the `orion` facade
 # does not re-export it). The same Orion source and commit as `orion`.
 orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "bd61d48806640526ce69aa66ef68ed897d5b810c", default-features = false, features = ["ipc"] }
+# NetworkTables 4 (robot code): pipeline outputs from helios-engine. Same Orion commit.
+orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "bd61d48806640526ce69aa66ef68ed897d5b810c" }
 styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false, features = ["std"] }
@@ -174,7 +176,9 @@ opt-level = 3
 [profile.release.package.helios-vision-probe]
 opt-level = 3
 
-# Eidos (per-frame CV) is built for speed too.
+# Eidos (per-frame CV) is built for speed too, except the catalog-only crates no HeliOS
+# template runs per frame (filter, color, geometry, motion, draw): "s" (Eidos's measurement:
+# plugin 7.37 -> 6.71 MB; the detector path, node glue and pose solvers stay at 3).
 [profile.release.package.eidos-daedalus]
 opt-level = 3
 
@@ -185,7 +189,7 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.eidos-color]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.eidos-contour]
 opt-level = 3
@@ -197,22 +201,22 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.eidos-draw]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.eidos-filter]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.eidos-frame]
 opt-level = 3
 
 [profile.release.package.eidos-geometry]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.eidos-mask]
 opt-level = 3
 
 [profile.release.package.eidos-motion]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.eidos-sampling]
 opt-level = 3
