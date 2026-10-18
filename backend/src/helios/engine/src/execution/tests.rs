@@ -44,9 +44,13 @@ use crate::{
 };
 
 /// The stored graph documents engine workloads run: Eidos's detector templates.
+/// The templates HeliOS deploys: the tracked detector as one node, which starts on a sliced
+/// frame's first rows (the fastest path).
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
-const APRILTAG_LOW_LATENCY_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-low-latency.graph.json");
+/// The same detectors as node-groups, each stage a node of its own (per-stage profiling).
+const APRILTAG_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-staged.graph.json");
+const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50-staged.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -137,7 +141,7 @@ impl FrameSource for ChannelFrameSource {
 /// field). The camera and the extrinsics are held host inputs (`camera`, `extrinsics`), which the
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
-    helios_template_with(registry, dictionary, layout, false)
+    helios_template_with(registry, dictionary, layout, true)
 }
 
 /// `single_node`: the tracked detector as one node (`eidos:detectors.tracked_detect`), which
@@ -155,8 +159,12 @@ fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layou
         layout.map(|layout| MultiTagPoseTemplate { config: MultiTagPoseConfig::default(), known_tags: KnownTagPoses::from_known_tags(&layout.known_tags()), extrinsics: StructuredInput::GraphInput });
     let has_field = template.multi_tag_pose.is_some();
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("tracked detector graph"));
-    let title =
-        format!("HeliOS {} tracked detector{} with tag pose{}", dictionary.name(), if single_node { " (low latency, one node)" } else { "" }, if has_field { " and multi-tag field pose" } else { "" });
+    let title = format!(
+        "HeliOS {} tracked detector{} with tag pose{}",
+        dictionary.name(),
+        if single_node { "" } else { " (staged: one node per stage)" },
+        if has_field { " and multi-tag field pose" } else { "" }
+    );
     document.metadata.insert("title".into(), title.into());
     // As helios-api stores graphs: without the metadata copied from the node declarations
     // (the planner reads node-group graphs from the registry).
@@ -338,10 +346,11 @@ fn graph_documents_are_eidos_templates() {
         ("graphs/apriltag-36h11.graph.json", helios_template(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark())), APRILTAG_GRAPH_DOCUMENT),
         ("graphs/aruco-4x4_50.graph.json", helios_template(plugins.registry(), Dictionary::Aruco4x4_50, None), ARUCO_GRAPH_DOCUMENT),
         (
-            "graphs/apriltag-36h11-low-latency.graph.json",
-            helios_template_with(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark()), true),
-            APRILTAG_LOW_LATENCY_GRAPH_DOCUMENT,
+            "graphs/apriltag-36h11-staged.graph.json",
+            helios_template_with(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark()), false),
+            APRILTAG_STAGED_GRAPH_DOCUMENT,
         ),
+        ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");
@@ -587,13 +596,35 @@ fn frame_outputs_are_described_not_copied() {
     assert_eq!(processed["fourcc"], "GREY");
 }
 
-/// The stored AprilTag `GraphDocument`, run by the Eidos plugin library and driven by GREY frames
-/// through the frame driver: detections are published as structured JSON, with the plan (host
-/// ports, adapter edges) and the per-node metrics. `HELIOS_PRINT_PLAN=1` prints the plan.
+/// The default AprilTag template: Eidos's tracked detector as one node, which the planner keeps
+/// as `eidos:detectors.tracked_detect`.
 #[test]
 fn apriltag_graph_detects_markers_through_the_frame_driver() {
+    let plan = detect_markers_through_the_frame_driver(APRILTAG_GRAPH_DOCUMENT);
+    let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
+    assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "the detector is one node: {plan}");
+    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan"), "no stage nodes: {plan}");
+}
+
+/// The staged AprilTag template: the stored document holds Eidos's tracked group as one node; the
+/// planner expands it into its stage nodes (`eidos:detectors.track_plan`, ...), so each stage has
+/// its own telemetry, then the pose and multi-tag pose stages.
+#[test]
+fn staged_apriltag_graph_detects_markers_through_the_frame_driver() {
+    let plan = detect_markers_through_the_frame_driver(APRILTAG_STAGED_GRAPH_DOCUMENT);
+    let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
+    assert!(plan_nodes.len() > 4, "tracked group expanded into stages: {plan}");
+    assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan" || node["label"] == "eidos:detectors.track_plan"), "{plan}");
+    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "tracked group is stage nodes, not tracked_detect: {plan}");
+}
+
+/// A stored AprilTag `GraphDocument`, run by the Eidos plugin library and driven by GREY frames
+/// through the frame driver: detections are published as structured JSON, with the plan (host
+/// ports, adapter edges) and the per-node metrics. Returns the plan. `HELIOS_PRINT_PLAN=1` prints
+/// the plan.
+fn detect_markers_through_the_frame_driver(document: &str) -> serde_json::Value {
     let plugins = TestPlugins::load();
-    let mut apriltag = workload("workload.apriltag", APRILTAG_GRAPH_DOCUMENT.into(), Vec::new());
+    let mut apriltag = workload("workload.apriltag", document.into(), Vec::new());
     apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let (mut driver, frames) = spawn_channel_driver(&plugins, apriltag, "frame", GraphSettings { metrics_level: MetricsLevel::Detailed });
 
@@ -628,13 +659,6 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
     assert_eq!(camera["type_key"], "eidos:camera_calibration");
     let outputs = plan["host_outputs"].as_array().expect("host outputs").iter().map(|port| port["name"].as_str().unwrap_or_default().to_string()).collect::<Vec<_>>();
     assert!(outputs.contains(&"detections".to_string()) && outputs.contains(&"refined_corners".to_string()), "{outputs:?}");
-    // The stored document holds Eidos's tracked group as one node; the planner expands it into its
-    // stage nodes (`eidos:detectors.track_plan`, ...), so each stage has its own telemetry, then the
-    // pose and multi-tag pose stages.
-    let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
-    assert!(plan_nodes.len() > 4, "tracked group expanded into stages: {plan}");
-    assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan" || node["label"] == "eidos:detectors.track_plan"), "{plan}");
-    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "tracked group is stage nodes, not tracked_detect: {plan}");
     assert!(plan["adapter_edges"].is_array());
     assert_eq!(plan["requires"][0]["id"], "eidos");
 
@@ -650,6 +674,7 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
     assert!(overhead["stages"].as_array().is_some_and(|stages| stages.iter().any(|stage| stage["name"] == "tick")), "{overhead}");
     assert!(plan["copying_edges"].is_array() && plan["crossing_edges"].is_array(), "{plan}");
     assert!(plan["plan"]["edges"].as_array().is_some_and(|edges| edges.iter().all(|edge| edge["copies_frame"].is_boolean())), "{plan}");
+    plan
 }
 
 /// End to end over a real Styx camera service: a virtual camera served on a socket, bound

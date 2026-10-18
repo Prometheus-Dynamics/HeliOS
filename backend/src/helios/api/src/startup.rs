@@ -28,13 +28,14 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The golden graphs helios-engine ships (`backend/src/helios/engine/graphs`), by id: the
 /// default pipeline's choices and the templates `GET /v1/pipelines/templates` offers.
-/// The first template of a family is its default (the node-group, profiled stage by stage).
+/// The first template of a family is its default: the tracked detector as one node, which
+/// starts on a sliced frame's first rows (the fastest path). The `-staged` ones are the same
+/// detectors as node-groups, each stage a node (per-stage profiling).
 pub const GRAPHS: &[(&str, &str)] = &[
     ("apriltag-36h11", include_str!("../../engine/graphs/apriltag-36h11.graph.json")),
     ("aruco-4x4_50", include_str!("../../engine/graphs/aruco-4x4_50.graph.json")),
-    // The tracked detector as one node that starts on a frame's first rows: ~0.4 ms sooner
-    // results (p50), without per-stage metrics.
-    ("apriltag-36h11-low-latency", include_str!("../../engine/graphs/apriltag-36h11-low-latency.graph.json")),
+    ("apriltag-36h11-staged", include_str!("../../engine/graphs/apriltag-36h11-staged.graph.json")),
+    ("aruco-4x4_50-staged", include_str!("../../engine/graphs/aruco-4x4_50-staged.graph.json")),
 ];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

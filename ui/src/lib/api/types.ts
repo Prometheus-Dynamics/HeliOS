@@ -339,8 +339,8 @@ export interface PipelineSpec {
 export interface PipelineTemplate {
   id: string;
   family: "apriltag" | "aruco";
-  /** `default` (the node-group, profiled stage by stage) or `low-latency` (one node, starts on a frame's first rows). */
-  variant?: "default" | "low-latency";
+  /** `default` (one node, starts on a sliced frame's first rows) or `staged` (the node-group, one node per stage, for profiling). */
+  variant?: "default" | "staged";
   dictionary: string | null;
   camera_input: string;
   graph: DaedalusGraphDocument;

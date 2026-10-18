@@ -139,7 +139,7 @@ impl Default for SearchTuning {
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
 /// Eidos's tracked detector as one node (any family; it starts on a frame's first rows): the
-/// tracked groups' ports, in the low-latency template.
+/// tracked groups' ports, in the default templates.
 const TRACKED_SINGLE_NODE: &str = "eidos:detectors.tracked_detect";
 
 /// A tracked detector: a tracked group or the single node.
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[test]
     fn the_single_tracked_node_takes_tuning_dictionary_and_full_search() {
-        let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11-low-latency.graph.json")).expect("template");
+        let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("template");
         assert_eq!(search_mode_of(&template).map(|(mode, _)| mode), Some(SearchMode::Tracked));
         assert_eq!(dictionary_of(&template).as_deref(), Some("apriltag_36h11"));
         let mut graph = template.clone();
@@ -1379,8 +1379,8 @@ pub struct Template {
     pub id: String,
     /// The detector family (`apriltag` or `aruco`).
     pub family: String,
-    /// `default` (the node-group, profiled stage by stage; the first of its family) or
-    /// `low-latency` (one node that starts on a frame's first rows).
+    /// `default` (one node that starts on a sliced frame's first rows; the first of its family)
+    /// or `staged` (the node-group, profiled stage by stage).
     pub variant: String,
     /// The dictionary the graph decodes; a pipeline can change it (`PipelineSpec::dictionary`).
     pub dictionary: Option<String>,
@@ -1396,7 +1396,7 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
     for (id, json) in crate::startup::GRAPHS {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = if id.starts_with("aruco") { "aruco" } else { "apriltag" };
-        let variant = if id.ends_with("-low-latency") { "low-latency" } else { "default" };
+        let variant = if id.ends_with("-staged") { "staged" } else { "default" };
         out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
     }
     Ok(Json(out))
