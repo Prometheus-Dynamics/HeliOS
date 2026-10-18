@@ -75,7 +75,7 @@ imports = [
 # network discovery keeps _pd-device._tcp and /.well-known/pd-device): EROFS,
 # 4 KiB pages, updater safety nets, Bootlin bleeding-edge toolchain, kernel 7.2
 # with the Raze trims and a built-in EROFS (LZMA, ZSTD), firmware 1.20260915,
-# Atlas dev a36e866: proven kernel (trim opt-in via BR2_RAZE_KERNEL_TRIM), zstd slot initramfs; a9e23df: slot /init persists its logs; 25a02d7: initramfs guard, trial failure reasons; 15d5a11: slot /init refuses cut-short images, lean slot initramfs (73075a5); f3a5367: slot-init as the initramfs /init; 2203c3b: lean firmware overlays (only what the board loads), smaller slot-init; 2bf3dfb: kernel release from /proc in the slot /init; 79ac2f9: slot-init finds partitions itself; f393e9f: slot initramfs mounts /proc /sys /dev with a console, logs failures to p1; 2aadd1c: e2fsck with its libraries in the slot initramfs; 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
+# Atlas dev 307d746: USB gadget watchdog with stall evidence (8176035, 9313f82), slot display_name (c612f53), last boots and kept kernel logs over Orion (facecb9); a36e866: proven kernel (trim opt-in via BR2_RAZE_KERNEL_TRIM), zstd slot initramfs; a9e23df: slot /init persists its logs; 25a02d7: initramfs guard, trial failure reasons; 15d5a11: slot /init refuses cut-short images, lean slot initramfs (73075a5); f3a5367: slot-init as the initramfs /init; 2203c3b: lean firmware overlays (only what the board loads), smaller slot-init; 2bf3dfb: kernel release from /proc in the slot /init; 79ac2f9: slot-init finds partitions itself; f393e9f: slot initramfs mounts /proc /sys /dev with a console, logs failures to p1; 2aadd1c: e2fsck with its libraries in the slot initramfs; 01f6d10: slot /init and lib.sh fixes for slots boards; b4d664a: board-data-owners (re-owns service state on /data at boot), on top of the
 # slot-management and live-stream work.
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
@@ -84,7 +84,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "333629e3a8fc4bc1d3fb4a9001bd310bc0ab790c"
+rev = "307d7463e2250250156619393157c7194fe7c499"
 
 # Lemnos (dev 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -124,7 +124,7 @@ rev = "384b2b1379b0c81e7d47349c93beb74e69d51bd0"
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "a2a839eaba79e3f2903fff10bb9f77df2a2bdf53"
+rev = "5bb3a0c2648a9a9dcde6b2127d83197eb2d85a45"
 
 [[sources]]
 id = "orion"
@@ -144,6 +144,11 @@ default = "2026.2.0"
 [inputs.slot_variant]
 kind = "string"
 default = "styx"
+
+# The name Atlas shows for this slot (slot.json "display_name", Atlas c612f53).
+[inputs.slot_display_name]
+kind = "string"
+default = "HeliOS"
 
 # The HeliOS commit: tools/build-os.sh passes it (--set input.slot_commit / slot_source),
 # since project tokens don't resolve in input defaults.

@@ -98,8 +98,11 @@ impl CameraServices {
                 .spare_clients(CAMERA_SPARE_CLIENTS)
                 // The back end's first job runs on the top rows while the rest are read out
                 // (Styx's rp1-cfe line event): every client gets complete frames ~1 ms sooner, and a
-                // client asking for sliced frames can start on the first slice.
-                .capture_config(styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true))
+                // client asking for sliced frames can start on the first slice. The back end
+                // buffers beyond the first few are allocated as clients hold frames, not up front
+                // (Styx 5bb3a0c, CM5: 37.6 MiB against 70.6 MiB per camera; one late frame the
+                // first time several are added).
+                .capture_config(styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_lazy_output_buffers(true))
                 .socket_mode(CAMERA_SERVICE_SOCKET_MODE)
                 .serve(&socket_path)
             {
