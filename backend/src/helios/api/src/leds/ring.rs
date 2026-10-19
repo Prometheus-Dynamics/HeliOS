@@ -172,6 +172,9 @@ struct Applied {
     look: &'static str,
     progress: Option<u16>,
     sent_at: u64,
+    /// Shown with its spots as inputs (`LookSpots`): only then can `update_inputs` move them.
+    /// A look shown plainly (after a refusal) is re-sent with its spots instead.
+    with_spots: bool,
 }
 
 impl Sink {
@@ -236,7 +239,7 @@ impl Sink {
     fn apply_spots(&mut self, leds: &mut LedClient, step: &Step, now: u64) -> Result<(), ClientError> {
         let Some(look) = step.look else { return Ok(()) };
         let spots = native_spots(&step.spots);
-        if self.applied.as_ref().is_some_and(|applied| applied.look == look) {
+        if self.applied.as_ref().is_some_and(|applied| applied.look == look && applied.with_spots) {
             return match leds.update_inputs(RING_DEVICE, None, Some(&spots)) {
                 Err(ClientError::Rejected(_)) => self.refuse_spots(leds, step, now),
                 other => other,
@@ -246,7 +249,7 @@ impl Sink {
         request.fade_ms = Some(step.fade_ms);
         match leds.send_checked(request) {
             Ok(()) => {
-                self.applied = Some(Applied { look, progress: None, sent_at: now });
+                self.applied = Some(Applied { look, progress: None, sent_at: now, with_spots: true });
                 Ok(())
             }
             Err(ClientError::Rejected(_)) => self.refuse_spots(leds, step, now),
@@ -283,7 +286,7 @@ impl Sink {
                 let look_changed = self.applied.as_ref().is_none_or(|applied| applied.look != look);
                 let mut request = LedRequest::new(LedShow::Look { name: look.to_string(), progress });
                 request.fade_ms = Some(if look_changed { step.fade_ms } else { 0 });
-                self.applied = Some(Applied { look, progress, sent_at: now });
+                self.applied = Some(Applied { look, progress, sent_at: now, with_spots: false });
                 leds.send(request)
             }
             (None, None) => Ok(()),

@@ -65,7 +65,7 @@ layers = [
 envelope = { kind = "breathe", period_ms = 4000, depth = 0.2, easing = "ease-in-out" }
 brightness = 0.7
 layers = [
-  { block = "fill", color = "28c8ff" },
+  { block = "fill", color = "28c8ff", brightness = 0.22 },
   { block = "spots", color = "28c8ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
 ]
 
@@ -150,7 +150,7 @@ layers = [
 envelope = { kind = "breathe", period_ms = 4000, depth = 0.2, easing = "ease-in-out" }
 brightness = 0.7
 layers = [
-  { block = "fill", color = "28c8ff" },
+  { block = "fill", color = "28c8ff", brightness = 0.22 },
   { block = "spots", color = "28c8ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
   { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
 ]
