@@ -53,7 +53,9 @@ fn request(socket: &Path, settings: RecorderSettings) -> RecordingRequest {
 }
 
 fn settings(dir: &Path) -> RecorderSettings {
-    RecorderSettings { storage_dir: Some(dir.to_path_buf()), ..RecorderSettings::default() }
+    // A small reserve: the temp directory's free space depends on the host, and the tests that
+    // are about the reserve set their own.
+    RecorderSettings { storage_dir: Some(dir.to_path_buf()), reserve_bytes: 16 * MIB, ..RecorderSettings::default() }
 }
 
 /// Polls until the recording is no longer active (or `limit` passes).

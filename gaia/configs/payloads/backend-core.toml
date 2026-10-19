@@ -19,7 +19,7 @@ pin = "locked"
 id = "eidos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
-branch = "main"
+branch = "dev"
 
 [[artifacts]]
 id = "helios-api"
