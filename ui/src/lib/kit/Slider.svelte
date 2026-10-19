@@ -1,6 +1,8 @@
 <script lang="ts">
-  // A thin range with its exact value beside it (scrubbable number field).
+  // A thin range with its exact value beside it (scrubbable number field). `log` spreads
+  // min..max evenly in log space, for spans such as 9 µs .. 476 ms (both bounds above zero).
   import Num from "./Num.svelte";
+  import { fromLogFraction, toLogFraction } from "./scale.js";
 
   let {
     value = $bindable(0),
@@ -10,6 +12,7 @@
     unit,
     disabled = false,
     label,
+    log = false,
     onchange,
   }: {
     value?: number;
@@ -19,22 +22,33 @@
     unit?: string;
     disabled?: boolean;
     label?: string;
+    log?: boolean;
     onchange?: (value: number) => void;
   } = $props();
 
-  const fill = $derived(((value - min) / (max - min || 1)) * 100);
+  // The range input runs over 0..STEPS for a log scale, so its ticks stay even on screen.
+  const STEPS = 1000;
+  const position = $derived(log ? toLogFraction(value, min, max) * STEPS : value);
+  const fill = $derived(((position - (log ? 0 : min)) / ((log ? STEPS : max - min) || 1)) * 100);
+
+  function input(event: Event) {
+    const raw = Number((event.currentTarget as HTMLInputElement).value);
+    value = log ? fromLogFraction(raw / STEPS, min, max) : raw;
+    onchange?.(value);
+  }
 </script>
 
 <span class="slider" class:disabled>
   <input
     type="range"
-    {min}
-    {max}
-    {step}
+    min={log ? 0 : min}
+    max={log ? STEPS : max}
+    step={log ? 1 : step}
     {disabled}
     aria-label={label}
-    bind:value
-    oninput={() => onchange?.(value)}
+    aria-valuetext={unit ? `${value} ${unit}` : undefined}
+    value={position}
+    oninput={input}
     style:--fill="{fill}%"
   />
   <Num bind:value {min} {max} {step} {unit} {disabled} {label} {onchange} width={unit ? 72 : 58} />
