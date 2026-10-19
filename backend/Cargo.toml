@@ -14,6 +14,7 @@ members = [
     "src/helios/api",
     "src/helios/engine",
     "src/helios/peripherals",
+    "src/helios/recorder",
     "src/helios/diagnostics",
     "src/helios/eidos-plugin",
     "src/helios/field",

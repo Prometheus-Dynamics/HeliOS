@@ -1,0 +1,29 @@
+[package]
+name = "helios-recorder"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "helios_recorder"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+lemnos-ipc = { workspace = true }
+nix = { workspace = true, features = ["fs", "time"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Recordings as MCAP (`StreamRecorder::mcap`), with lz4 chunks (the default). lz4 builds a C library:
+# the aarch64 image's C toolchain provides it (gaia/docker/aarch64).
+styx = { workspace = true, default-features = false, features = ["facade", "replay-mcap", "replay-mcap-lz4"] }
+
+[dev-dependencies]
+mcap = { version = "0.25", default-features = false }
+tempfile = { workspace = true }
