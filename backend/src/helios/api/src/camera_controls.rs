@@ -13,7 +13,9 @@
 //! by name) are stored in the API's state directory (`Store::persist_camera_settings`, on the
 //! data partition) and re-applied every time the client (re)connects to the camera service: at
 //! boot, and after the camera service restarts. A camera that is not streaming takes them as
-//! deferred values, applied when its capture starts. Resetting to defaults forgets them.
+//! deferred values, applied when its capture starts. Resetting to defaults forgets them. The
+//! frame rate is the exception: it is not re-applied here (see `reapply`), but with the
+//! pipelines' frame requests, which carry it (`pipelines::refresh_camera_inputs`).
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -317,6 +319,13 @@ impl CameraClient {
 
     /// Apply the stored values (after the client connected). Keys the camera no longer has, or
     /// refuses, are skipped and reported.
+    ///
+    /// The stored frame rate is not applied here. It is a service-wide override that lasts until
+    /// the service restarts, while every pipeline on the camera asks for the stored rate as an
+    /// exact one with its frames (`pipelines::refresh_camera_inputs`). Restoring both could
+    /// disagree (the service refuses an exact request for another rate), and the frame requests
+    /// alone apply the rate from the first frame of every connection, so the control is left out.
+    /// A camera with no pipeline runs at its default rate after its service restarts.
     async fn reapply(&self) -> (Vec<AppliedCameraControl>, Vec<String>) {
         let stored = match self.store.camera_settings(&self.camera_id).await {
             Ok(stored) => stored,
@@ -325,7 +334,7 @@ impl CameraClient {
         let mut listed = None;
         let mut changes = Vec::with_capacity(stored.len());
         let mut errors = Vec::new();
-        for (key, value) in &stored {
+        for (key, value) in stored.iter().filter(|(key, _)| key.as_str() != standard_key(StandardControl::FrameRate)) {
             match self.resolve_one(key, value, &mut listed).await {
                 Ok(change) => changes.push(change),
                 Err(error) => errors.push(format!("{key}: {}", error.message)),

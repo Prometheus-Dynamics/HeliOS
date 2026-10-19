@@ -21,11 +21,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     SharedState,
     camera_context::{self, CalibrationMatch},
+    camera_controls::standard_key,
     error::{ApiError, ApiResult},
     field_layouts::{self, StoredLayout},
     host::now_ms,
     orion::{StateView, enum_name, label_map, label_values},
+    store::Store,
 };
+use styx::ipc::StandardControl;
 
 use super::check_id;
 
@@ -355,18 +358,36 @@ fn camera_inputs<'a>(spec: &'a PipelineSpec, view: &'a StateView) -> impl Iterat
 /// frame size and the camera's mount, as `binding.<input>.context.*` fields.
 pub type CameraContexts = BTreeMap<String, BTreeMap<String, TypedConfigValue>>;
 
-/// `CameraContexts` for `bindings` (input -> binding) from the stored calibrations and mounts.
-pub async fn camera_contexts<'a>(state: &SharedState, view: &StateView, bindings: impl Iterator<Item = (&'a String, &'a Binding)>) -> ApiResult<CameraContexts> {
-    let calibrations = state.store.calibrations().await?;
-    let mounts = state.store.mounts().await?;
-    Ok(bindings
-        .filter(|(_, binding)| view.resources.get(&binding.resource_id).is_some_and(|r| r.resource_type.as_str() == super::cameras::CAMERA_RESOURCE_TYPE))
-        .map(|(input, binding)| {
-            let size = binding.output_width.zip(binding.output_height);
-            let matched = camera_context::match_calibration(calibrations.get(&binding.resource_id).map(Vec::as_slice).unwrap_or_default(), size);
-            (input.clone(), camera_context::context_fields(matched.calibration(), mounts.get(&binding.resource_id)))
-        })
-        .collect())
+/// What each camera binding takes from its camera's stored settings, by input: the calibration
+/// and mount (`contexts`) and the exact frame rate the camera's stored `fps` asks for
+/// (`frame_rates`, `binding.<input>.fps`; absent when the camera has none).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct CameraInputs {
+    pub contexts: CameraContexts,
+    pub frame_rates: BTreeMap<String, u32>,
+}
+
+/// `CameraInputs` for `bindings` (input -> binding) from the stored calibrations, mounts and
+/// camera settings.
+pub async fn camera_inputs_for<'a>(store: &Store, view: &StateView, bindings: impl Iterator<Item = (&'a String, &'a Binding)>) -> ApiResult<CameraInputs> {
+    let calibrations = store.calibrations().await?;
+    let mounts = store.mounts().await?;
+    let mut inputs = CameraInputs::default();
+    for (input, binding) in bindings.filter(|(_, binding)| view.resources.get(&binding.resource_id).is_some_and(|r| r.resource_type.as_str() == super::cameras::CAMERA_RESOURCE_TYPE)) {
+        let size = binding.output_width.zip(binding.output_height);
+        let matched = camera_context::match_calibration(calibrations.get(&binding.resource_id).map(Vec::as_slice).unwrap_or_default(), size);
+        inputs.contexts.insert(input.clone(), camera_context::context_fields(matched.calibration(), mounts.get(&binding.resource_id)));
+        if let Some(fps) = stored_frame_rate(&store.camera_settings(&binding.resource_id).await?) {
+            inputs.frame_rates.insert(input.clone(), fps);
+        }
+    }
+    Ok(inputs)
+}
+
+/// The exact frame rate a camera's stored settings ask for: its `fps`, when it is a usable rate.
+pub fn stored_frame_rate(settings: &BTreeMap<String, serde_json::Value>) -> Option<u32> {
+    let fps = settings.get(standard_key(StandardControl::FrameRate))?.as_f64()?;
+    (fps.is_finite() && (1.0..=f64::from(u32::MAX)).contains(&fps)).then(|| fps.round() as u32)
 }
 
 /// Which calibration a camera binding uses, for the pipeline DTO.
@@ -725,15 +746,7 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
 }
 
 /// The Orion records for a pipeline spec.
-pub fn records_for(
-    id: &str,
-    spec: &PipelineSpec,
-    document: &GraphDocument,
-    revision: u64,
-    node_id: &str,
-    contexts: &CameraContexts,
-    layout: Option<&str>,
-) -> ApiResult<(ArtifactRecord, WorkloadRecord)> {
+pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revision: u64, node_id: &str, inputs: &CameraInputs, layout: Option<&str>) -> ApiResult<(ArtifactRecord, WorkloadRecord)> {
     let workload_id = format!("{WORKLOAD_PREFIX}{id}");
     let artifact_id = format!("{ARTIFACT_PREFIX}{id}");
     let inline = document.to_json().map_err(|error| ApiError::internal(error.to_string()))?;
@@ -768,8 +781,11 @@ pub fn records_for(
         if let Some(levels) = binding.pyramid {
             config = config.field(format!("binding.{input}.pyramid"), TypedConfigValue::Int(i64::from(levels)));
         }
-        for (field, value) in contexts.get(input).into_iter().flatten() {
+        for (field, value) in inputs.contexts.get(input).into_iter().flatten() {
             config = config.field(format!("binding.{input}.context.{field}"), value.clone());
+        }
+        if let Some(fps) = inputs.frame_rates.get(input) {
+            config = config.field(format!("binding.{input}.fps"), TypedConfigValue::Int(i64::from(*fps)));
         }
         builder = builder.bind_resource(ResourceId::new(binding.resource_id.clone()), NodeId::new(node_id));
     }
@@ -793,8 +809,8 @@ async fn spec_layout(state: &SharedState, spec: &PipelineSpec) -> ApiResult<Opti
 async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &PipelineSpec, revision: u64) -> ApiResult<()> {
     let layout = spec_layout(state, spec).await?;
     let document = validate_spec(spec, view, &state.config.node_id, layout.as_ref())?;
-    let contexts = camera_contexts(state, view, spec.bindings.iter()).await?;
-    let (artifact, workload) = records_for(id, spec, &document, revision, &state.config.node_id, &contexts, layout.as_ref().map(|l| l.id.as_str()))?;
+    let inputs = camera_inputs_for(&state.store, view, spec.bindings.iter()).await?;
+    let (artifact, workload) = records_for(id, spec, &document, revision, &state.config.node_id, &inputs, layout.as_ref().map(|l| l.id.as_str()))?;
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await
 }
 
@@ -967,10 +983,11 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
     deploy(&state, &id, spec).await.map(Json)
 }
 
-/// Write the current camera context (calibration, mount) of `camera` into every engine workload
-/// bound to it, without a new revision: helios-engine pushes the new values into the running
-/// graph (adding or removing a mount recompiles it). Returns the pipelines updated.
-pub async fn refresh_camera_context(state: &SharedState, camera: &str) -> ApiResult<Vec<String>> {
+/// Write the current camera inputs of `camera` (calibration, mount and stored frame rate) into
+/// every engine workload bound to it, without a new revision: helios-engine pushes the new
+/// context into the running graph (adding or removing a mount recompiles it), and a new frame
+/// rate restarts the camera's frame source at that rate. Returns the pipelines updated.
+pub async fn refresh_camera_inputs(state: &SharedState, camera: &str) -> ApiResult<Vec<String>> {
     let view = state.orion.view().await?;
     let mut mutations = Vec::new();
     let mut updated = Vec::new();
@@ -980,17 +997,10 @@ pub async fn refresh_camera_context(state: &SharedState, camera: &str) -> ApiRes
         if using.is_empty() {
             continue;
         }
-        let contexts = camera_contexts(state, &view, using.iter().map(|(input, binding)| (*input, *binding))).await?;
+        let inputs = camera_inputs_for(&state.store, &view, using.iter().map(|(input, binding)| (*input, *binding))).await?;
         let mut record = workload.clone();
-        let Some(config) = record.config.as_mut() else { continue };
-        for (input, _) in &using {
-            let prefix = format!("binding.{input}.context.");
-            config.payload.retain(|key, _| !key.starts_with(&prefix));
-            for (field, value) in contexts.get(*input).into_iter().flatten() {
-                config.payload.insert(format!("{prefix}{field}"), value.clone());
-            }
-        }
-        if record.config != workload.config {
+        let bound = using.iter().map(|(input, _)| input.as_str()).collect::<Vec<_>>();
+        if write_camera_inputs(&mut record, &inputs, &bound) {
             updated.push(pipeline_id(workload.workload_id.as_str()));
             mutations.push(DesiredStateMutation::PutWorkload(record));
         }
@@ -999,6 +1009,31 @@ pub async fn refresh_camera_context(state: &SharedState, camera: &str) -> ApiRes
         state.orion.apply(mutations).await?;
     }
     Ok(updated)
+}
+
+/// Set the camera inputs of each of the `bound` inputs in `record`'s config (`context.*` and
+/// `fps` fields, replaced as a whole; an input with no stored frame rate loses its `fps`).
+/// Returns whether the config changed.
+fn write_camera_inputs(record: &mut WorkloadRecord, inputs: &CameraInputs, bound: &[&str]) -> bool {
+    let Some(config) = record.config.as_mut() else { return false };
+    let before = config.payload.clone();
+    for input in bound {
+        let prefix = format!("binding.{input}.context.");
+        config.payload.retain(|key, _| !key.starts_with(&prefix));
+        for (field, value) in inputs.contexts.get(*input).into_iter().flatten() {
+            config.payload.insert(format!("{prefix}{field}"), value.clone());
+        }
+        let fps_key = format!("binding.{input}.fps");
+        match inputs.frame_rates.get(*input) {
+            Some(fps) => {
+                config.payload.insert(fps_key, TypedConfigValue::Int(i64::from(*fps)));
+            }
+            None => {
+                config.payload.remove(&fps_key);
+            }
+        }
+    }
+    config.payload != before
 }
 
 pub async fn pipeline_outputs(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Vec<Output>>> {
@@ -1147,8 +1182,8 @@ mod tests {
             dictionary: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
-        let contexts = BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None))]);
-        let (artifact, workload) = records_for("tags-front", &spec, &document, 3, "node-local", &contexts, None).expect("records");
+        let inputs = CameraInputs { contexts: BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None))]), frame_rates: BTreeMap::new() };
+        let (artifact, workload) = records_for("tags-front", &spec, &document, 3, "node-local", &inputs, None).expect("records");
         assert_eq!(workload.workload_id.as_str(), "pipeline.tags-front");
         assert_eq!(workload.runtime_type.as_str(), ENGINE_RUNTIME);
         assert_eq!(workload.resource_bindings.len(), 1);
@@ -1169,6 +1204,66 @@ mod tests {
         assert_eq!(config.payload.get("binding.camera.context.camera.fx_px"), Some(&TypedConfigValue::F64(0.0)), "uncalibrated context");
         assert_eq!(config.payload.get("binding.camera.context.camera.lens"), Some(&TypedConfigValue::String("pinhole".into())));
         assert!(!config.payload.keys().any(|key| key.starts_with("binding.camera.context.mount.")), "no mount");
+    }
+
+    fn camera_spec() -> PipelineSpec {
+        PipelineSpec {
+            name: "Tags front".into(),
+            graph: sample_document(),
+            bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]),
+            enabled: true,
+            search_mode: None,
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+            dictionary: None,
+        }
+    }
+
+    #[test]
+    fn stored_frame_rate_is_the_cameras_fps_setting() {
+        let settings = |value: serde_json::Value| BTreeMap::from([("fps".to_string(), value)]);
+        assert_eq!(stored_frame_rate(&settings(serde_json::json!(120.0))), Some(120));
+        assert_eq!(stored_frame_rate(&settings(serde_json::json!(29.97))), Some(30));
+        assert_eq!(stored_frame_rate(&settings(serde_json::json!(0))), None);
+        assert_eq!(stored_frame_rate(&settings(serde_json::json!("120"))), None);
+        assert_eq!(stored_frame_rate(&BTreeMap::from([("gain".to_string(), serde_json::json!(4))])), None);
+    }
+
+    #[tokio::test]
+    async fn stored_frame_rate_reaches_the_pipeline_binding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::store::Store::new(dir.path());
+        let view = view_with_camera();
+        let spec = camera_spec();
+        let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
+
+        // No stored rate: the binding asks for none (the camera's default).
+        let inputs = camera_inputs_for(&store, &view, spec.bindings.iter()).await.expect("inputs");
+        assert!(inputs.frame_rates.is_empty());
+
+        store.persist_camera_settings("camera.front", [("fps".to_string(), serde_json::json!(120.0))]).await.expect("persist");
+        let inputs = camera_inputs_for(&store, &view, spec.bindings.iter()).await.expect("inputs");
+        assert_eq!(inputs.frame_rates, BTreeMap::from([("camera".to_string(), 120)]));
+        let (_, workload) = records_for("tags-front", &spec, &document, 1, "node-local", &inputs, None).expect("records");
+        assert_eq!(workload.config.as_ref().expect("config").payload.get("binding.camera.fps"), Some(&TypedConfigValue::Int(120)));
+    }
+
+    #[test]
+    fn a_running_pipeline_takes_the_new_frame_rate_without_a_revision() {
+        let mut record = WorkloadRecord::builder(WorkloadId::new("pipeline.front"), ENGINE_RUNTIME, ArtifactId::new("artifact.pipeline.front"))
+            .config(WorkloadConfig::new(ENGINE_CONFIG_SCHEMA).field("binding.camera.fps", TypedConfigValue::Int(30)))
+            .build();
+        let rate = |fps: u32| CameraInputs { frame_rates: BTreeMap::from([("camera".to_string(), fps)]), ..CameraInputs::default() };
+        let fps_of = |record: &WorkloadRecord| record.config.as_ref().expect("config").payload.get("binding.camera.fps").cloned();
+
+        assert!(write_camera_inputs(&mut record, &rate(120), &["camera"]));
+        assert_eq!(fps_of(&record), Some(TypedConfigValue::Int(120)));
+        assert!(!write_camera_inputs(&mut record, &rate(120), &["camera"]), "the same rate changes nothing");
+        // Settings cleared: the binding asks for the camera's default again.
+        assert!(write_camera_inputs(&mut record, &CameraInputs::default(), &["camera"]));
+        assert_eq!(fps_of(&record), None);
     }
 
     fn group_document(id: &str) -> serde_json::Value {

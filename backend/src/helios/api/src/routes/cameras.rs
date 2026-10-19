@@ -262,6 +262,16 @@ pub fn spawn_camera_settings_keeper(state: SharedState) -> tokio::task::JoinHand
                     tracing::warn!(camera = %record.resource_id, error = %error.message, "camera control client");
                 }
             }
+            // Pipelines take their camera's stored frame rate with their frames, so pipelines
+            // written before it was kept in their bindings (or out of step with the settings) get
+            // it here.
+            for record in camera_records(&view) {
+                match pipelines::refresh_camera_inputs(&state, record.resource_id.as_str()).await {
+                    Ok(updated) if !updated.is_empty() => tracing::info!(camera = %record.resource_id, pipelines = ?updated, "camera inputs synced to pipelines"),
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(camera = %record.resource_id, error = %error.message, "camera inputs not synced to pipelines"),
+                }
+            }
         }
     })
 }
@@ -296,7 +306,10 @@ pub async fn set_settings(State(state): State<SharedState>, Path(id): Path<Strin
     };
     let (client, _) = control_client(&state, &id).await?;
     let changes = client.resolve(&request).await?;
-    let applied = client.apply(changes).await?;
+    // The pipelines follow the stored frame rate even when a later change was refused.
+    let applied = client.apply(changes).await;
+    refresh_pipelines(&state, &id).await;
+    let applied = applied?;
     Ok(Json(SettingsApplied { applied, persisted: client.persisted().await? }))
 }
 
@@ -304,7 +317,9 @@ pub async fn set_settings(State(state): State<SharedState>, Path(id): Path<Strin
 /// forgotten (the camera starts with its defaults after a reboot).
 pub async fn reset_settings(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<SettingsApplied>> {
     let (client, _) = control_client(&state, &id).await?;
-    let applied = client.reset().await?;
+    let applied = client.reset().await;
+    refresh_pipelines(&state, &id).await;
+    let applied = applied?;
     Ok(Json(SettingsApplied { applied, persisted: client.persisted().await? }))
 }
 
@@ -372,13 +387,13 @@ async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::previ
     }
 }
 
-/// Hand a camera's new calibration or mount to the pipelines using it (no new revision). A
-/// pipeline that could not be updated now gets it with its next deploy.
+/// Hand a camera's new calibration, mount or stored frame rate to the pipelines using it (no new
+/// revision). A pipeline that could not be updated now gets it with its next deploy.
 async fn refresh_pipelines(state: &SharedState, camera: &str) {
-    match super::pipelines::refresh_camera_context(state, camera).await {
-        Ok(updated) if !updated.is_empty() => tracing::info!(camera, pipelines = ?updated, "camera context updated"),
+    match super::pipelines::refresh_camera_inputs(state, camera).await {
+        Ok(updated) if !updated.is_empty() => tracing::info!(camera, pipelines = ?updated, "camera inputs updated"),
         Ok(_) => {}
-        Err(error) => tracing::warn!(camera, error = %error.message, "camera context not handed to its pipelines"),
+        Err(error) => tracing::warn!(camera, error = %error.message, "camera inputs not handed to its pipelines"),
     }
 }
 
