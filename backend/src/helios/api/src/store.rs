@@ -110,6 +110,17 @@ impl Store {
         write_json(&self.nt4_path(), settings).await
     }
 
+    /// The LED director's settings (`leds.json`); the defaults until saved.
+    pub async fn led_settings(&self) -> ApiResult<crate::leds::settings::LedSettings> {
+        let _guard = self.lock.lock().await;
+        read_json(&self.dir.join("leds.json")).await.map(Option::unwrap_or_default)
+    }
+
+    pub async fn put_led_settings(&self, settings: &crate::leds::settings::LedSettings) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.dir.join("leds.json"), settings).await
+    }
+
     fn recording_settings_path(&self) -> PathBuf {
         self.dir.join("recording.json")
     }

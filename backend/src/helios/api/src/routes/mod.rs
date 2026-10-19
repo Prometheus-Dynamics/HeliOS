@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod cameras;
 pub mod field_layouts;
+pub mod leds;
 pub mod logs;
 pub mod nt4;
 pub mod pipelines;
@@ -41,6 +42,9 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/device", get(system::device))
         .route("/v1/device/os", get(system::device_os))
         .route("/v1/device/nt4", get(nt4::get_nt4).put(nt4::put_nt4))
+        .route("/v1/device/leds", get(leds::get_leds).put(leds::put_leds))
+        .route("/v1/device/leds/locate", post(leds::locate))
+        .route("/v1/device/leds/preview", post(leds::preview))
         .route("/v1/nodes", get(system::nodes))
         .route("/v1/metrics", get(system::metrics))
         .route("/v1/system/health", get(system::health_report))
@@ -143,6 +147,8 @@ pub fn check_id(id: &str) -> Result<(), ApiError> {
     if valid_id(id) { Ok(()) } else { Err(ApiError::bad_request(format!("invalid id {id:?}"))) }
 }
 
+#[cfg(test)]
+mod leds_tests;
 #[cfg(test)]
 mod tests;
 

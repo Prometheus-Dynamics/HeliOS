@@ -182,6 +182,12 @@ impl CalibrationSessions {
     pub async fn reset(&self, id: &str) {
         self.sessions.lock().await.remove(id);
     }
+
+    /// The views kept by the capture session with the most (`None`: no session is open). The LED
+    /// director shows their coverage.
+    pub async fn most_views(&self) -> Option<u32> {
+        self.sessions.lock().await.values().map(|session| session.views.len() as u32).max()
+    }
 }
 
 fn eidos_lens(model: LensModel) -> eidos_calibration::LensModel {

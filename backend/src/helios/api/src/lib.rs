@@ -17,6 +17,7 @@ pub mod error;
 pub mod events;
 pub mod field_layouts;
 pub mod host;
+pub mod leds;
 pub mod orion;
 pub mod recordings;
 pub mod routes;
@@ -56,6 +57,8 @@ pub struct AppState {
     pub update_lock: Arc<Mutex<()>>,
     /// The last stage/apply helios-api started, for `/v1/update/status`.
     pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
+    /// The LED director: HeliOS's state on the status ring (`leds`, started by `leds::start`).
+    pub leds: leds::LedHandle,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -76,6 +79,7 @@ impl AppState {
             auth: auth::Auth::new(config.auth_file.clone()),
             update_lock: routes::update::new_update_lock(),
             update_task: std::sync::Mutex::new(None),
+            leds: leds::LedHandle::new(),
             config,
         })
     }

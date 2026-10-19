@@ -58,6 +58,9 @@ orion-client = { workspace = true }
 # libjpeg-turbo (Styx docs/preview.md).
 styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde", "preview", "codec-turbojpeg"] }
 
+# lemnosd's LED client: the LED director's look and frame writes, and the ring's brightness.
+lemnos-ipc = { workspace = true }
+
 helios-diagnostics = { path = "../diagnostics" }
 # Calibration on the device (`calibration_capture.rs`): ChArUco board detection and the
 # intrinsics solve.

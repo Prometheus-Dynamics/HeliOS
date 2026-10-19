@@ -80,6 +80,8 @@ async fn serve() -> anyhow::Result<()> {
     let bind = config.bind;
     let state = AppState::new(config);
     let _watcher = events::spawn_state_watcher(state.clone());
+    // The LED director: HeliOS's state on the status ring, through lemnosd.
+    helios_api::leds::start(&state, PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
     // Stored camera settings are applied whenever a camera service appears.
     let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
     // The startup file's default pipeline, created once a camera is there and no pipeline is.
