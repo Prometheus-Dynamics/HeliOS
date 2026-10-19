@@ -5,6 +5,7 @@
 
 import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
+import { applyControlValue } from "#lib/api/adapt.js";
 import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "#lib/api/mock.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
@@ -22,6 +23,15 @@ interface PoseData {
 
 const FEED_FRAMES = 480;
 const FEED_FPS = 16;
+
+/** Mock only: a control write as the device takes it (clamped to its range; read-only ones refuse). */
+function mockControl(c: Camera, key: string, value: number | string | boolean) {
+  const control = c.controls?.find((x) => x.standard === key || x.name === key);
+  if (!control || control.readOnly || !control.writable || typeof value === "string") return;
+  const clamped = control.min !== undefined && control.max !== undefined && typeof value === "number" ? Math.min(control.max, Math.max(control.min, value)) : value;
+  applyControlValue(c, { id: control.id }, clamped);
+  control.persisted = true;
+}
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
@@ -292,6 +302,9 @@ class ClusterStore {
     if (!c) return;
     Object.assign(c.settings, settings);
     if (extra) c.extra = { ...(c.extra ?? {}), ...extra };
+    // The mock's controls take the same keys the device does: standard keys, or names.
+    const keys: Record<string, number | string | boolean | undefined> = { exposure_us: settings.exposureUs, ae: settings.autoExposure, gain: settings.gain, fps: settings.fps, ...extra };
+    for (const [key, value] of Object.entries(keys)) if (value !== undefined) mockControl(c, key, value);
     c.stats.fps = c.settings.fps;
   }
 

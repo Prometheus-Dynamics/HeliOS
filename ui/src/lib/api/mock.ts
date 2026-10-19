@@ -4,7 +4,7 @@
 // any screen.
 
 import { CATALOG_BY_ID, defaults } from "./catalog";
-import type { Camera, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 
 const now = Date.now();
 
@@ -163,7 +163,43 @@ export const NODES: ClusterNode[] = [
   },
 ];
 
+/**
+ * The OV9782's controls as its camera service lists them (Styx's native backend, at the revision
+ * Backend/Cargo.lock pins): the same names, ranges, defaults and flags a device reports.
+ */
+function ov9782Controls(values: { exposureUs: number; gain: number; fps: number; autoExposure: boolean }): CameraControlInfo[] {
+  const control = (c: Pick<CameraControlInfo, "id" | "name" | "kind"> & Partial<CameraControlInfo>): CameraControlInfo => ({
+    default: null,
+    value: null,
+    standard: null,
+    writable: true,
+    readOnly: false,
+    persisted: false,
+    ...c,
+  });
+  const crop = (id: number, name: string): CameraControlInfo => control({ id, name, kind: "rectangle", rect: { x: 0, y: 0, width: 0, height: 0 } });
+  return [
+    control({ id: 0xf4000001, name: "exposure_time_us", kind: "uint", min: 9, max: 476066, default: 10000, step: 1, value: values.exposureUs, standard: "exposure_us" }),
+    control({ id: 0xf4000002, name: "gain", kind: "float", min: 1, max: 15.94, default: 1, step: 0.0625, value: values.gain, standard: "gain" }),
+    control({ id: 0xf4000003, name: "frame_duration_us", kind: "uint", min: 3209, max: 476190, default: 16667, step: 1, value: Math.round(1_000_000 / values.fps) }),
+    control({ id: 0xf4000004, name: "frame_rate", kind: "float", min: 2.1, max: 311.7, default: 30, step: 0.001, value: values.fps, standard: "fps" }),
+    control({ id: 0xf4000005, name: "ae_enable", kind: "bool", default: true, value: values.autoExposure, standard: "ae" }),
+    control({ id: 0xf4000006, name: "exposure_value", kind: "float", min: -8, max: 8, default: 0, step: 0.1, value: 0, standard: "ev" }),
+    control({ id: 0xf4000007, name: "awb_enable", kind: "bool", default: true, value: true, standard: "awb" }),
+    control({ id: 0xf4000008, name: "colour_temperature", kind: "uint", min: 1000, max: 20000, default: 0, step: 1, value: 5600, standard: "colour_temperature" }),
+    control({ id: 0xf4000009, name: "red_gain", kind: "float", min: 0, max: 8, default: 0, step: 0.01, value: 1.6, standard: "red_gain" }),
+    control({ id: 0xf400000a, name: "blue_gain", kind: "float", min: 0, max: 8, default: 0, step: 0.01, value: 1.9, standard: "blue_gain" }),
+    control({ id: 0xf4000011, name: "ae_flicker_mode", kind: "int", min: 0, max: 3, default: 3, step: 1, value: 3 }),
+    control({ id: 0xf4000013, name: "ae_deflicker_mode", kind: "int", min: 0, max: 2, default: 2, step: 1, value: 2 }),
+    control({ id: 0xf4000012, name: "ae_flicker_detected", kind: "int", min: 0, max: 1_000_000, default: 0, step: 1, value: 10_000, readOnly: true, writable: false }),
+    control({ id: 0xf4000010, name: "ae_state", kind: "int", min: 0, max: 2, default: 1, step: 1, value: 2, readOnly: true, writable: false }),
+    crop(0xf4000100, "output_crop"),
+    ...Array.from({ length: 15 }, (_, i) => crop(0xf4000101 + i, `region_crop_${i + 1}`)),
+  ];
+}
+
 function cam(id: string, name: string, nodeId: string, mount: string, offset: number, extra: Partial<Camera> = {}): Camera {
+  const settings = { width: 1280, height: 800, fps: 60, format: "GREY", exposureUs: 2200, autoExposure: false, gain: 4, pyramid: true, roi: null };
   return {
     resourceId: id,
     name,
@@ -171,7 +207,8 @@ function cam(id: string, name: string, nodeId: string, mount: string, offset: nu
     sensor: "OV9782 · global shutter",
     backend: "styx native · PiSP",
     mount,
-    settings: { width: 1280, height: 800, fps: 60, format: "GREY", exposureUs: 2200, autoExposure: false, gain: 4, pyramid: true, roi: null },
+    settings,
+    controls: ov9782Controls(settings),
     stats: { fps: 60, dropped: 0, latencyMs: 9.7, cpuMsPerFrame: 0.3 },
     feed: { base: "/mock/robot", offset },
     ...extra,
@@ -189,12 +226,15 @@ export const CAMERAS: Camera[] = [
     foreign: "PhotonVision",
     stats: { fps: 30, dropped: 3, latencyMs: 31, cpuMsPerFrame: 0 },
     settings: { width: 1280, height: 800, fps: 30, format: "MJPEG", exposureUs: 6000, autoExposure: true, gain: 1, pyramid: false, roi: null },
+    controls: [],
+    controlsError: "PhotonVision owns this camera's settings",
   }),
   cam("camera.driver-laptop.usb0", "Laptop webcam", "driver-laptop", "Driver station", 300, {
     sensor: "UVC 1080p",
     backend: "styx uvc",
     stats: { fps: 30, dropped: 0, latencyMs: 41, cpuMsPerFrame: 1.2 },
     settings: { width: 1280, height: 720, fps: 30, format: "MJPEG", exposureUs: 16000, autoExposure: true, gain: 1, pyramid: false, roi: null },
+    controls: [],
   }),
 ];
 
