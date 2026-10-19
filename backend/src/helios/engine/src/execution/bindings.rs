@@ -32,7 +32,9 @@ pub(crate) struct FrameSourceSpec {
 
 impl FrameSourceSpec {
     /// What the camera service is asked for: the latest luma frame at native size, unless the
-    /// binding asks for a size or pyramid levels.
+    /// binding asks for a size, pyramid levels or a frame rate. A stored rate is an exact one,
+    /// requested with every frame so it applies from the first frame of every (re)connection,
+    /// without waiting for the camera controls to be restored.
     pub fn request(&self) -> FrameRequest {
         let mut request = Frames::gray().latest();
         if let Some((width, height)) = self.request.output_resolution {
@@ -40,6 +42,9 @@ impl FrameSourceSpec {
         }
         if let Some(levels) = self.request.pyramid_levels {
             request = request.pyramid(levels);
+        }
+        if let Some(fps) = self.request.fps {
+            request = request.fps(fps);
         }
         request
     }

@@ -80,6 +80,9 @@ pub struct FrameRequestOptions {
     pub output_resolution: Option<(u32, u32)>,
     /// Half-size pyramid levels to attach to each frame (the first from the ISP where it can).
     pub pyramid_levels: Option<u8>,
+    /// The exact frame rate the camera runs at (the camera's stored fps, set through the camera
+    /// controls). Unset asks for the camera's default rate.
+    pub fps: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

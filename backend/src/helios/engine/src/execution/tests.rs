@@ -30,6 +30,7 @@ use orion::control_plane::{ClusterStateEnvelope, ObservedClusterState, ResourceA
 use styx::{
     core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
     imports::framelease::FrameLease,
+    prelude::FrameRate,
 };
 use tokio::sync::Notify;
 
@@ -316,6 +317,22 @@ fn artifact_json(artifacts: &[ExecutionArtifactRecord], kind: &str) -> serde_jso
 
 fn frame_spec(input: &str) -> FrameSourceSpec {
     FrameSourceSpec { input: input.into(), resource_id: "camera.test".into(), socket_path: "/nonexistent.sock".into(), request: FrameRequestOptions::default(), sliced: false }
+}
+
+#[test]
+fn frame_source_request_carries_the_stored_frame_rate() {
+    // Exact when the binding has a stored rate, the camera's default otherwise; the size and
+    // pyramid options keep their place.
+    let mut spec = frame_spec("camera");
+    assert_eq!(spec.request().fps, FrameRate::CameraDefault);
+
+    spec.request.fps = Some(120);
+    assert_eq!(spec.request().fps, FrameRate::Exactly(120));
+
+    spec.request.output_resolution = Some((640, 400));
+    spec.request.pyramid_levels = Some(1);
+    let request = spec.request();
+    assert_eq!((request.fps, request.size, request.pyramid.is_some()), (FrameRate::Exactly(120), Some((640, 400)), true));
 }
 
 /// Start a driver for `workload` fed through the returned sender.

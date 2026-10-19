@@ -53,6 +53,10 @@ struct BindingConfig {
     /// Camera frame sources only: half-size pyramid levels to attach to each frame.
     #[serde(default)]
     pyramid: Option<u8>,
+    /// Camera frame sources only: the exact frame rate to request (the camera's stored fps, written
+    /// by the API with the camera's other inputs; absent when the camera has none).
+    #[serde(default)]
+    fps: Option<u32>,
     /// Camera frame sources only: the camera's calibration (`camera.*`) and mount (`mount.*`),
     /// pushed into the graph's held `camera` and `extrinsics` inputs. Numbers are
     /// `TypedConfigValue::F64` (or ints), names strings; the unit is in the key
@@ -188,7 +192,12 @@ fn decode_frame_request(record: &WorkloadRecord, input: &str, binding: &BindingC
             });
         }
     };
-    Ok(FrameRequestOptions { camera: binding.camera.clone().filter(|camera| !camera.is_empty()), output_resolution, pyramid_levels: binding.pyramid.filter(|levels| *levels > 0) })
+    Ok(FrameRequestOptions {
+        camera: binding.camera.clone().filter(|camera| !camera.is_empty()),
+        output_resolution,
+        pyramid_levels: binding.pyramid.filter(|levels| *levels > 0),
+        fps: binding.fps.filter(|fps| *fps > 0),
+    })
 }
 
 fn decode_context(record: &WorkloadRecord, input: &str, binding: &BindingConfig) -> Result<BTreeMap<String, ContextValue>, WorkloadDecodeError> {
@@ -305,7 +314,22 @@ mod tests {
 
         let decoded = decode_assigned_workload(&record, NODE_ID).expect("decode");
         assert_eq!(decoded.graph_ref, GraphRef::InlineSpec("{}".into()));
-        assert_eq!(decoded.bindings[0].frame_request, FrameRequestOptions { camera: Some("front".into()), output_resolution: Some((640, 480)), pyramid_levels: None });
+        assert_eq!(decoded.bindings[0].frame_request, FrameRequestOptions { camera: Some("front".into()), output_resolution: Some((640, 480)), pyramid_levels: None, fps: None });
+
+        // The camera's stored frame rate rides in the binding, so the frames start at that rate.
+        let stored = WorkloadRecord::builder(WorkloadId::new("workload.stored"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.stored"))
+            .desired_state(DesiredState::Running)
+            .assigned_to(NODE_ID)
+            .config(
+                WorkloadConfig::new("schema.exec")
+                    .field("graph.kind", TypedConfigValue::String("inline".into()))
+                    .field("graph.inline", TypedConfigValue::String("{}".into()))
+                    .field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into()))
+                    .field("binding.frame.fps", TypedConfigValue::Int(120)),
+            )
+            .build();
+        let decoded = decode_assigned_workload(&stored, NODE_ID).expect("decode");
+        assert_eq!(decoded.bindings[0].frame_request, FrameRequestOptions { camera: None, output_resolution: None, pyramid_levels: None, fps: Some(120) });
 
         let half = WorkloadRecord::builder(WorkloadId::new("workload.half"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.half"))
             .desired_state(DesiredState::Running)
