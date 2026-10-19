@@ -24,6 +24,9 @@ Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/li
 # Per-node timings for the profiler (the engine reads HELIOS_ENGINE_METRICS_LEVEL; timing is the
 # cheapest level with per-node durations).
 Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
+# Daedalus GPU nodes use Vulkan on the CM5 (Daedalus 39ca4b2 dropped its aarch64 Vulkan-only
+# default; without this wgpu may pick a GL backend).
+Environment=WGPU_BACKEND=vulkan
 EnvironmentFile=-/etc/default/helios-engine.env
 ExecStart=/usr/bin/helios-engine
 Restart=always
