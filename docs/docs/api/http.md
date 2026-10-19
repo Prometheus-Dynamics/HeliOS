@@ -78,6 +78,9 @@ as unavailable and not retry.
 | `GET` | `/v1/device` | Orion, kernel | node id, hostname, model, serial, OS, uptime, Orion revisions and peers, clock sync |
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
 | `GET` `PUT` | `/v1/device/nt4` | API, helios-engine | NetworkTables settings and connection: see [NetworkTables](./networktables.md) |
+| `GET` `PUT` | `/v1/device/leds` | API, lemnosd | The status ring's settings (enabled, brightness, ambient, forward LED and direction, FOV, tally, boost) and its live state; see [Status ring](../leds.md). `PUT` takes the settings object |
+| `POST` | `/v1/device/leds/locate` | API, lemnosd | Shows the locate state for `{"seconds": 1..60}` (default 10) |
+| `POST` | `/v1/device/leds/preview` | API, lemnosd | Shows a state for `{"state": "<state>" \| null, "seconds": 1..30}` (default 4); `null` ends it |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
 | `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature (the hottest sensor), throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
 | `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |
