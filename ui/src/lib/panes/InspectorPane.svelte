@@ -19,7 +19,8 @@
   import Section from "#lib/kit/Section.svelte";
   import Slider from "#lib/kit/Slider.svelte";
   import Spark from "#lib/kit/Spark.svelte";
-  import Switch from "#lib/kit/Switch.svelte";
+  import ExposureFields from "#lib/camera/ExposureFields.svelte";
+  import FrameRateField from "#lib/camera/FrameRateField.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { system } from "#lib/stores/system.svelte.js";
   import { field } from "#lib/stores/field.svelte.js";
@@ -49,10 +50,8 @@
       {@const uses = cluster.workloads.filter((w) => Object.values(w.bindings).includes(c.resourceId))}
       <IdentityEditor id={c.resourceId} fallbackName={c.name} fallbackIcon="camera" sub="{c.sensor} · {cluster.node(c.nodeId)?.name}" />
       <Section title="Quick controls" key="insp-cam">
-        <Prop label="Auto exposure"><Switch checked={c.settings.autoExposure} onchange={(v) => cluster.setCamera(c.resourceId, { autoExposure: v })} /></Prop>
-        <Prop label="Exposure"><Slider value={c.settings.exposureUs} min={50} max={16000} step={50} unit="µs" disabled={c.settings.autoExposure} onchange={(v) => cluster.setCamera(c.resourceId, { exposureUs: v })} /></Prop>
-        <Prop label="Gain"><Slider value={c.settings.gain} min={1} max={16} step={0.1} unit="×" disabled={c.settings.autoExposure} onchange={(v) => cluster.setCamera(c.resourceId, { gain: v })} /></Prop>
-        <Prop label="Frame rate"><Slider value={c.settings.fps} min={1} max={120} unit="fps" onchange={(v) => cluster.setCamera(c.resourceId, { fps: v })} /></Prop>
+        <ExposureFields camera={c} compact />
+        <FrameRateField camera={c} help="The same control as the camera's settings." />
         <div class="link"><button type="button" onclick={() => shell.go("cameras")}>All camera controls <Icon name="arrow-right" size={12} /></button></div>
       </Section>
       <Section title="Used by" key="insp-cam-uses" count={uses.length}>
