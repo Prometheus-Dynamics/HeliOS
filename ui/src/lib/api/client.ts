@@ -42,6 +42,7 @@ import type {
   UpdateStatus,
   Upload,
 } from "./types";
+import type { LedSettings, LedState, LedsResponse } from "./leds";
 
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.needs ? `${error.message} (needs: ${error.needs})` : error.message;
@@ -218,6 +219,13 @@ export const api = {
   catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
   nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
   setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
+
+  // The LED ring (settings, locate, and previewing a state)
+  leds: () => request<LedsResponse>("GET", "/v1/device/leds"),
+  setLeds: (settings: LedSettings) => request<LedsResponse>("PUT", "/v1/device/leds", { body: settings }),
+  locateLeds: (seconds = 10) => request<LedsResponse>("POST", "/v1/device/leds/locate", { body: { seconds } }),
+  /** Shows `state` for `seconds`; `null` ends the preview. */
+  previewLeds: (state: LedState | null, seconds?: number) => request<LedsResponse>("POST", "/v1/device/leds/preview", { body: seconds === undefined ? { state } : { state, seconds } }),
 
   // Resources and peripherals
   resources: (type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),

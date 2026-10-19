@@ -2,6 +2,7 @@
   // Device security, look and feel, names and colours for everything, layouts,
   // and backups.
   import Icon from "#lib/components/common/Icon.svelte";
+  import LedSection from "#lib/components/leds/LedSection.svelte";
   import NtSection from "#lib/components/robot/NtSection.svelte";
   import SecuritySection from "#lib/components/security/SecuritySection.svelte";
   import { exportAll, importAll } from "#lib/core/backup.js";
@@ -65,6 +66,10 @@
       <button type="button" class="mini" onclick={() => help.startTour()}>Tour</button>
       <button type="button" class="mini" onclick={() => (help.onboarding = true)}>First-time setup</button>
     </Prop>
+  </Section>
+
+  <Section title="LEDs" key="set-leds">
+    <LedSection />
   </Section>
 
   <Section title="Theme" key="set-theme">
