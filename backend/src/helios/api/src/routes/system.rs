@@ -35,6 +35,11 @@ pub async fn health() -> Json<Health> {
 
 const DEVICE_PACKAGE_ENV: &str = "/usr/lib/board/board-package.env";
 
+/// The device package's facts (`BOARD_PACKAGE_VERSION`, `BOARD_PACKAGE_COMMIT`, ...); empty off the device.
+pub fn device_package_facts() -> std::collections::BTreeMap<String, String> {
+    std::fs::read_to_string(DEVICE_PACKAGE_ENV).map(|text| host::parse_env(&text)).unwrap_or_default()
+}
+
 /// The device identity: the Raze device package's identity document (the same JSON as
 /// `:5899/.well-known/pd-device`), with a `helios` section describing this API. When the device
 /// package has not written it, the same fields are read from the system.

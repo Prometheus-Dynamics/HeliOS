@@ -6,6 +6,7 @@ pub mod field_layouts;
 pub mod logs;
 pub mod nt4;
 pub mod pipelines;
+pub mod recordings;
 pub mod resources;
 pub mod system;
 pub mod update;
@@ -70,6 +71,11 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/field-layouts", get(field_layouts::list).post(field_layouts::upload))
         .route("/v1/field-layouts/selected", get(field_layouts::get_selected).put(field_layouts::put_selected))
         .route("/v1/field-layouts/{id}", get(field_layouts::get_one).delete(field_layouts::remove))
+        // Session recordings (helios-recorder): one at a time, from a camera's frames
+        .route("/v1/recordings", get(recordings::list).post(recordings::start))
+        .route("/v1/recordings/settings", get(recordings::get_settings).put(recordings::put_settings))
+        .route("/v1/recordings/{id}", get(recordings::download).delete(recordings::remove))
+        .route("/v1/recordings/{id}/stop", post(recordings::stop))
         // Pipelines (Daedalus graphs run by helios-engine) and their outputs
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))
@@ -142,3 +148,6 @@ mod tests;
 
 #[cfg(test)]
 mod auth_tests;
+
+#[cfg(test)]
+mod recording_tests;

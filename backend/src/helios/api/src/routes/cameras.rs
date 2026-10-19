@@ -192,7 +192,7 @@ pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Vec<Camera
     Ok(Json(futures_util::future::join_all(futures).await))
 }
 
-async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView, orion::control_plane::ResourceRecord)> {
+pub(crate) async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView, orion::control_plane::ResourceRecord)> {
     check_id(id)?;
     let view = state.orion.view().await?;
     let record = camera_records(&view).find(|r| r.resource_id.as_str() == id).cloned().ok_or_else(|| ApiError::not_found(format!("no camera {id}")))?;

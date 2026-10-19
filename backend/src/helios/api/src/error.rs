@@ -23,6 +23,8 @@ pub enum ErrorCode {
     PayloadTooLarge,
     /// Too many failed sign-in attempts from this address (429).
     TooManyRequests,
+    /// The storage a request needs is not there (507): e.g. a recording below the free-space reserve.
+    InsufficientStorage,
     /// The backend for this endpoint does not exist yet (501).
     NotAvailable,
     /// The backend exists but is not reachable right now, e.g. Orion is down (503).
@@ -41,6 +43,7 @@ impl ErrorCode {
             Self::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
+            Self::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
             Self::NotAvailable => StatusCode::NOT_IMPLEMENTED,
             Self::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -98,6 +101,10 @@ impl ApiError {
 
     pub fn backend(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::BackendUnavailable, message)
+    }
+
+    pub fn insufficient_storage(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InsufficientStorage, message)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {

@@ -1293,6 +1293,7 @@ dependencies = [
  "getrandom 0.4.3",
  "helios-diagnostics",
  "helios-field",
+ "helios-recorder",
  "hex",
  "libc",
  "orion",

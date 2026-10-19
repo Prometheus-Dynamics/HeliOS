@@ -48,6 +48,8 @@ daedalus-planner = { workspace = true, features = ["std"] }
 daedalus-data = { workspace = true }
 # FRC field layouts (WPILib JSON, Limelight .fmap) as Eidos known tag poses.
 helios-field = { path = "../field" }
+# Session recordings of a camera (MCAP, `routes/recordings.rs`).
+helios-recorder = { path = "../recorder" }
 # Orion is the device's state store: resources, workloads, the updater and host facts.
 orion = { workspace = true, default-features = false, features = ["client"] }
 orion-client = { workspace = true }

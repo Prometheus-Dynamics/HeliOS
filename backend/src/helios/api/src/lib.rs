@@ -18,6 +18,7 @@ pub mod events;
 pub mod field_layouts;
 pub mod host;
 pub mod orion;
+pub mod recordings;
 pub mod routes;
 pub mod startup;
 pub mod store;
@@ -43,6 +44,8 @@ pub struct AppState {
     pub previews: camera_preview::CameraPreviews,
     /// Calibration views captured per camera, until solved.
     pub calibrations: calibration_capture::CalibrationSessions,
+    /// The session recorder: one recording at a time, from a camera's frames.
+    pub recorder: helios_recorder::Recorder,
     /// Live journal tails, one `journalctl -f` per filter shared by its viewers.
     pub log_followers: routes::logs::LogFollowers,
     /// Device security: open (default) or secured.
@@ -66,6 +69,7 @@ impl AppState {
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
             calibrations: calibration_capture::CalibrationSessions::default(),
+            recorder: helios_recorder::Recorder::default(),
             log_followers: routes::logs::LogFollowers::default(),
             store,
             events,

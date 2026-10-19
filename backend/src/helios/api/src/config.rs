@@ -52,6 +52,8 @@ pub struct ApiConfig {
     pub preview: crate::camera_preview::PreviewSettings,
     /// The first-boot startup file (`[default_pipeline]`, see `startup.rs`).
     pub startup_file: PathBuf,
+    /// lemnosd's socket: the IMU, magnetometer and power samples a recording takes.
+    pub lemnos_socket: PathBuf,
 }
 
 impl Default for ApiConfig {
@@ -74,6 +76,7 @@ impl Default for ApiConfig {
             auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
             preview: crate::camera_preview::PreviewSettings::default(),
             startup_file: DEFAULT_STARTUP_FILE.into(),
+            lemnos_socket: helios_recorder::lemnos::DEFAULT_SOCKET.into(),
         }
     }
 }
@@ -126,6 +129,9 @@ impl ApiConfig {
         }
         if let Some(value) = env.get(crate::auth_state::AUTH_FILE_ENV) {
             config.auth_file = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_LEMNOSD_SOCKET") {
+            config.lemnos_socket = value.into();
         }
         if let Some(value) = env.get("HELIOS_API_STARTUP_FILE") {
             config.startup_file = value.into();

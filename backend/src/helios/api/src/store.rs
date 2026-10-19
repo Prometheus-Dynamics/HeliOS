@@ -110,6 +110,21 @@ impl Store {
         write_json(&self.nt4_path(), settings).await
     }
 
+    fn recording_settings_path(&self) -> PathBuf {
+        self.dir.join("recording.json")
+    }
+
+    /// Session recording settings (helios-recorder's, `recording.json`); the defaults until saved.
+    pub async fn recording_settings(&self) -> ApiResult<helios_recorder::RecorderSettings> {
+        let _guard = self.lock.lock().await;
+        read_json(&self.recording_settings_path()).await.map(Option::unwrap_or_default)
+    }
+
+    pub async fn put_recording_settings(&self, settings: &helios_recorder::RecorderSettings) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        write_json(&self.recording_settings_path(), settings).await
+    }
+
     fn mounts_path(&self) -> PathBuf {
         self.dir.join("camera-mounts.json")
     }
