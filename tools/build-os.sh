@@ -45,6 +45,14 @@ ensure_ui_build() {
   (cd ui && bun install --frozen-lockfile && bun run build)
 }
 
+# What the image ships of the UI: ui/build without mock/ (the offline demo's replay frames,
+# ~12 MB of JPEGs a device never serves). Staged from gaia/build/ui (gaia/configs/payloads/ui.toml).
+stage_ui_build() {
+  rm -rf gaia/build/ui
+  mkdir -p gaia/build/ui
+  (cd ui/build && tar --exclude=./mock -cf - .) | (cd gaia/build/ui && tar -xf -)
+}
+
 cd "$ROOT_DIR"
 
 case "${1:-}" in
@@ -53,6 +61,7 @@ case "${1:-}" in
     ;;
   "")
     ensure_ui_build
+    stage_ui_build
     exec gaia tui --builds-dir "$BUILDS_DIR"
     ;;
   *)
@@ -67,6 +76,7 @@ case "${1:-}" in
     fi
     if [[ "$profile" == "full" ]]; then
       ensure_ui_build
+      stage_ui_build
     fi
     # The slot id carries this checkout's commit (input defaults can't use project tokens).
     commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)

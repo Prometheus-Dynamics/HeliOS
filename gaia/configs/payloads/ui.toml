@@ -2,11 +2,11 @@ description = "UI payload layer: the HeliOS UI's static build (ui/, SvelteKit wi
 
 [stage]
 
-# Build it first: `cd ui && bun install --frozen-lockfile && bun run build`
-# (tools/build-os.sh does this when ui/ changed).
+# tools/build-os.sh builds ui/ when it changed and copies ui/build to gaia/build/ui without
+# mock/ (the offline demo's replay frames, ~12 MB a device never serves).
 [[stage.files]]
 id = "ui-static-build"
-src = "ui/build"
+src = "gaia/build/ui"
 dest = "/usr/share/helios/ui"
 origin = "static-asset"
 
