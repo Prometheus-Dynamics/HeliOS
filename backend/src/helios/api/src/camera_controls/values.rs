@@ -1,7 +1,10 @@
 //! The API's names for Styx's standard controls, and how JSON values become the control values
 //! Styx takes: a standard control's in its own type, a backend control's by what the JSON is.
 
-use styx::{ipc::StandardControl, prelude::ControlValue};
+use styx::{
+    ipc::StandardControl,
+    prelude::{ControlRect, ControlValue},
+};
 
 use crate::error::{ApiError, ApiResult};
 
@@ -65,6 +68,16 @@ pub fn standard_value(control: StandardControl, value: &serde_json::Value) -> Ap
 /// A backend control's value: booleans as booleans, whole numbers as integers, others as floats
 /// (the camera service takes numbers of any type for the control's type and clamps them).
 pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlValue> {
+    if let Some(rect) = rect_of(value) {
+        return Ok(ControlValue::Rect(rect));
+    }
+    // A list of rectangles (a control with several regions).
+    if let Some(items) = value.as_array()
+        && let Some(rects) = items.iter().map(rect_of).collect::<Option<Vec<_>>>()
+        && !rects.is_empty()
+    {
+        return Ok(ControlValue::Rects(rects));
+    }
     if let Some(flag) = value.as_bool() {
         return Ok(ControlValue::Bool(flag));
     }
@@ -75,6 +88,12 @@ pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlV
         });
     }
     Ok(ControlValue::Float(number(key, value)? as f32))
+}
+
+/// A rectangle `{x, y, width, height}` in pixels (`x`, `y` signed, `width`, `height` not negative).
+fn rect_of(value: &serde_json::Value) -> Option<ControlRect> {
+    let field = |name: &str| value.get(name)?.as_i64();
+    Some(ControlRect { x: i32::try_from(field("x")?).ok()?, y: i32::try_from(field("y")?).ok()?, width: u32::try_from(field("width")?).ok()?, height: u32::try_from(field("height")?).ok()? })
 }
 
 fn number(key: &str, value: &serde_json::Value) -> ApiResult<f64> {

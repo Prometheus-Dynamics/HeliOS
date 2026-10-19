@@ -1,7 +1,7 @@
 use super::*;
 use styx::{
     ipc::{AppliedControl, ControlDescriptor},
-    prelude::{Access, ControlId, ControlMeta, ControlMetadata},
+    prelude::{Access, ControlId, ControlMeta, ControlMetadata, ControlRect},
 };
 
 #[test]
@@ -17,6 +17,14 @@ fn standard_values_take_their_types() {
     assert_eq!(backend_value("sharpness", &serde_json::json!(4)).unwrap(), ControlValue::Int(4));
     assert_eq!(backend_value("sharpness", &serde_json::json!(4.5)).unwrap(), ControlValue::Float(4.5));
     assert_eq!(value_json(&ControlValue::Float(0.1)), serde_json::json!(0.1));
+    // A metering region is a rectangle in output pixels, by name (no standard control).
+    let region = serde_json::json!({ "x": 500, "y": 0, "width": 500, "height": 250 });
+    assert_eq!(backend_value("ae_metering_region", &region).unwrap(), ControlValue::Rect(ControlRect { x: 500, y: 0, width: 500, height: 250 }));
+    assert_eq!(backend_value("ae_metering_region", &serde_json::json!([region])).unwrap(), ControlValue::Rects(vec![ControlRect { x: 500, y: 0, width: 500, height: 250 }]));
+    assert!(backend_value("ae_metering_region", &serde_json::json!({ "x": 0, "y": 0, "width": -1, "height": 4 })).is_err());
+    // The AE limits are plain numbers: a microsecond ceiling, a total gain cap.
+    assert_eq!(backend_value("ae_exposure_max_us", &serde_json::json!(1500)).unwrap(), ControlValue::Int(1500));
+    assert_eq!(backend_value("ae_gain_max", &serde_json::json!(6.0)).unwrap(), ControlValue::Float(6.0));
 }
 
 /// A control of a camera's list, as the service describes it.
