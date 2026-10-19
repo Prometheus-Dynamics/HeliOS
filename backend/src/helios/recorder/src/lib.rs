@@ -20,6 +20,12 @@
 //! - TODO: raw sensor frames (`sensor_raw`): the request is already a parameter, see [`frames`].
 //! - TODO: outputs are stamped on receipt, not with the frame that produced them; the engine
 //!   would have to publish the frame sequence for an exact alignment.
+//! - TODO: NetworkTables `/helios/record` (true starts, false stops, on the default camera) and the
+//!   recording status topics are not wired. The NT4 publisher is helios-engine's
+//!   (`engine/src/nt4.rs`: one connection to the robot's server, settings from helios-api's
+//!   `nt4.json`); the subscription (`orion_nt4` `ClientHandle::subscribe`) belongs there too,
+//!   calling helios-api's recordings, which needs an engine-to-API call. A second NT client in
+//!   helios-api would duplicate that connection.
 //! - TODO: the Styx and Lemnos commits are not recorded in `helios.versions` (only HeliOS's own
 //!   version and the device package's), since they are not known at run time.
 
