@@ -23,11 +23,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use lemnos_ipc::{ClientError, ClientEvent, ClientOptions, DeviceClient, Event, LedClient, LedStatus, Reading, Refusal, Update};
+use lemnos_ipc::{ClientError, ClientEvent, ClientOptions, DeviceClient, Event, LedClient, LedRequest, LedShow, LedStatus, Reading, Refusal, Update};
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 use crate::lemnosd::fan::{FAN_DUTY_CONTROL, FanOverrideRequest, FanOverrides};
+use crate::lemnosd::led::{LED_PRIORITY, status_look};
 use crate::lemnosd::raw::{ClaimSpec, Claims, EdgeView, Held, MAX_CLAIMS, RawAction};
 use crate::lemnosd::resources::{DeviceReading, LemnosdProbe, LemnosdState, OverrideView};
 use crate::model::ObservedValue;
@@ -338,8 +339,9 @@ impl Worker {
         }
         self.reclaim();
         if self.leds.is_none() {
-            // LED clients get no events unless they ask: HeliOS only sends its status.
-            match ClientOptions::new(&self.options.socket, self.options.client.clone()).reconnecting().leds() {
+            // LED clients get no events unless they ask: HeliOS only sends its status, at the
+            // fallback priority (led.rs) below helios-api's LED director.
+            match ClientOptions::new(&self.options.socket, self.options.client.clone()).reconnecting().priority(LED_PRIORITY).leds() {
                 Ok(leds) => self.leds = Some(leds),
                 Err(error) => warn!(error = %error, "lemnosd LED client failed to connect"),
             }
@@ -601,9 +603,12 @@ impl Worker {
 
     fn send_status(&mut self) {
         let (Some(leds), Some(status)) = (self.leds.as_mut(), self.status) else { return };
+        // The status as lemnosd's built-in look: an application layer (the status layer would
+        // sit above the director's looks).
+        let request = LedRequest::new(LedShow::Look { name: status_look(status).to_string(), progress: None });
         // A stale connection fails the first send; the second reconnects.
-        if leds.status(status).is_err()
-            && let Err(error) = leds.status(status)
+        if leds.send(request.clone()).is_err()
+            && let Err(error) = leds.send(request)
         {
             debug!(error = %error, status = status.name(), "LED status not sent; it is re-sent on the next connection");
         }
