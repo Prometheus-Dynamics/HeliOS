@@ -84,6 +84,14 @@ export interface CameraSettings {
   roi: { x: number; y: number; w: number; h: number } | null;
 }
 
+/** A crop or region rectangle, in frame pixels. Zero width or height: off. */
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** A camera control the device lists (live mode), for generic editors. */
 export interface CameraControlInfo {
   id: number;
@@ -100,6 +108,10 @@ export interface CameraControlInfo {
   standard: string | null;
   /** The device lets the UI change it. */
   writable: boolean;
+  /** The device reports the value and never takes one (`ae_state`, `ae_flicker_detected`). */
+  readOnly: boolean;
+  /** Rectangle controls (crop regions): the value now. */
+  rect?: CropRect | CropRect[] | null;
   /** A value set through the UI is kept across reboots. */
   persisted: boolean;
 }
@@ -112,6 +124,8 @@ export interface Camera {
   backend: string;
   mount: string;
   settings: CameraSettings;
+  /** The sensor mode the camera service reports, when it lists one (read-only for now). */
+  mode?: string | null;
   stats: { fps: number; dropped: number; latencyMs: number; cpuMsPerFrame: number };
   /** `base`: recorded frames replayed (mocks); `live`: the camera's MJPEG preview URL. */
   feed: { base: string; offset: number; live?: string };

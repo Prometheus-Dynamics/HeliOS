@@ -3,7 +3,7 @@
 
 import { CATALOG_BY_ID } from "./catalog";
 import { previewUrl } from "./client";
-import type { Camera, CameraControlInfo, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, CropRect, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
 import type * as W from "./types";
 
 // --- Graphs ------------------------------------------------------------------
@@ -285,9 +285,14 @@ export function toControls(settings: W.CameraSettings): CameraControlInfo[] {
     value: scalar(c.current),
     standard: c.standard,
     writable: c.writable && !c.read_only,
+    readOnly: c.read_only,
+    rect: rectOf(c.current),
     persisted: c.persisted ?? false,
   }));
 }
+
+const isRect = (value: unknown): value is CropRect => typeof value === "object" && value !== null && "width" in value && "height" in value;
+const rectOf = (value: W.ControlValue | null | undefined): CropRect | CropRect[] | null => (Array.isArray(value) ? value.filter(isRect) : isRect(value) ? value : null);
 
 /** Set a control's value on the camera, and the settings fields its standard control feeds. */
 export function applyControlValue(camera: Camera, match: { id?: number; standard?: string | null; name?: string }, value: W.ControlValue | null) {
@@ -304,6 +309,7 @@ export function applyControlValue(camera: Camera, match: { id?: number; standard
 
 /** Take a `GET /v1/cameras/{id}/settings` answer into the camera. */
 export function applyCameraSettings(camera: Camera, settings: W.CameraSettings) {
+  camera.mode = settings.mode;
   camera.controls = toControls(settings);
   camera.controlsError = undefined;
   for (const control of camera.controls) if (control.standard) applyControlValue(camera, { standard: control.standard }, control.value);
