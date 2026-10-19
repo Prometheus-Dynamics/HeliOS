@@ -44,6 +44,7 @@ fn request(socket: &Path, settings: RecorderSettings) -> RecordingRequest {
         frames_socket: socket.to_path_buf(),
         frames: frames::luma_request(),
         board: "test-board".into(),
+        camera_label: "cam".into(),
         commit: "abc1234".into(),
         settings,
         info: info(),

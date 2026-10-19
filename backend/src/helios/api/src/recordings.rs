@@ -127,8 +127,9 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
         camera_id: camera.to_string(),
         frames_socket: socket,
         frames: frames::luma_request(),
-        board: state.config.node_id.clone(),
-        commit: device_package_facts().get("BOARD_PACKAGE_COMMIT").cloned().unwrap_or_default(),
+        board: board_name(&state.config.node_id),
+        camera_label: camera_label(crate::orion::label_map(&record.labels).get("helios.display_name").map_or("", String::as_str), camera),
+        commit: image_commit(),
         settings: settings.clone(),
         info,
         lemnos: Some(LemnosSource {
@@ -139,6 +140,27 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
             power_period_ms: settings.power_period_ms,
         }),
     })
+}
+
+/// The image's description (`HELIOS_COMMIT`, `IMAGE_VERSION`, ...), written at build time.
+const IMAGE_ENV: &str = "/etc/default/helios-image.env";
+
+/// The board in a recording's name: its hostname (`helios-b00a37bc`), else the node id.
+fn board_name(node_id: &str) -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname").ok().map(|name| name.trim().to_string()).filter(|name| !name.is_empty()).unwrap_or_else(|| node_id.to_string())
+}
+
+/// The camera in a recording's name: the first word of its name (`ov9782`), lower case, else the
+/// tail of its resource id.
+fn camera_label(name: &str, id: &str) -> String {
+    let word = name.split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+    if word.chars().any(|c| c.is_ascii_alphanumeric()) { word } else { id.rsplit(['-', '_', '/']).next().unwrap_or(id).to_string() }
+}
+
+/// The HeliOS commit the image was built from, shortened to 8 characters ("" when unknown).
+fn image_commit() -> String {
+    let facts = std::fs::read_to_string(IMAGE_ENV).map(|text| api_host::parse_env(&text)).unwrap_or_default();
+    facts.get("HELIOS_COMMIT").map(|commit| commit.chars().take(8).collect()).unwrap_or_default()
 }
 
 /// How often a running recording's status is published as a `recording` event.

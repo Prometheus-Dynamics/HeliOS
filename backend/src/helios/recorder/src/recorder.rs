@@ -35,9 +35,11 @@ pub struct RecordingRequest {
     pub frames_socket: PathBuf,
     /// What frames to record (`frames::luma_request()` today).
     pub frames: FrameRequest,
-    /// The board's name, for the file name (the node id).
+    /// The board's name, for the file name (its hostname).
     pub board: String,
-    /// The device package's commit, for the file name.
+    /// The camera's short label, for the file name (`ov9782`); the full id is in the metadata.
+    pub camera_label: String,
+    /// The HeliOS commit the image was built from, for the file name.
     pub commit: String,
     pub settings: RecorderSettings,
     pub info: RecordingInfo,
@@ -72,7 +74,7 @@ impl Recorder {
         let settings = request.settings;
         let dir = storage::resolve_dir(&settings)?;
         let free = storage::check_reserve(&dir, settings.reserve_bytes)?;
-        let session = naming::unused_session_stem(&dir, &naming::session_stem(&request.board, &request.camera_id, Utc::now(), &request.commit));
+        let session = naming::unused_session_stem(&dir, &naming::session_stem(&request.board, &request.camera_label, Utc::now(), &request.commit));
         let source = FrameSource::open(&request.frames_socket, &request.frames)?;
         let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
         let header = writer::header_for(&request.camera_id, delivered.format, delivered.size, delivered.fps)?;
