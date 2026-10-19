@@ -1,9 +1,13 @@
 <script lang="ts">
-  // The AprilTag preset: manual exposure of about 1.5 ms, gain raised to keep the brightness.
-  // It shows what it will set, applies it in one write, and can be undone to the values before.
+  // The AprilTag preset, for tags on a moving robot. A camera with an exposure ceiling gets auto
+  // exposure held to a short exposure, with gain up to its gain cap (the camera keeps the
+  // brightness itself). Otherwise: manual exposure of about 1.5 ms, gain raised to keep the
+  // brightness. It shows what it will set, applies it in one write, and undo restores the
+  // camera's settings from before: each key goes back to its value, or is forgotten when the camera
+  // kept no value for it before.
   import type { Camera } from "#lib/api/model.js";
   import Icon from "#lib/components/common/Icon.svelte";
-  import { aprilTagPlan, disabledReason, EXPOSURE_FALLBACK, formatMs, formatNumber } from "./controls.js";
+  import { APRILTAG_EXPOSURE_US, aprilTagCapWrites, aprilTagPlan, disabledReason, EXPOSURE_FALLBACK, formatMs, formatNumber, presetUndoChanges, rangeOr, type PresetBefore } from "./controls.js";
   import { controlNamed, keyOf, writeControls } from "./write.js";
 
   let { camera }: { camera: Camera } = $props();
@@ -13,34 +17,55 @@
   const exposure = $derived(controlNamed(controls, "exposure_time_us"));
   const gain = $derived(controlNamed(controls, "gain"));
   const frame = $derived(controlNamed(controls, "frame_rate"));
-  const usable = $derived(!!ae && !!exposure && !!gain && !disabledReason(ae) && !disabledReason(exposure) && !disabledReason(gain));
+  const ceiling = $derived(controlNamed(controls, "ae_exposure_max_us"));
+  const gainCap = $derived(controlNamed(controls, "ae_gain_max"));
+
+  const aeFree = $derived(!!ae && !disabledReason(ae));
+  /** AE held to an exposure ceiling: the camera has the control, and the UI may change it. */
+  const capped = $derived(aeFree && !!ceiling && !disabledReason(ceiling));
+  const manualUsable = $derived(aeFree && !!exposure && !!gain && !disabledReason(exposure) && !disabledReason(gain));
+  const usable = $derived(capped || manualUsable);
 
   let open = $state(false);
-  /** The values before the preset was applied, for undo. */
-  let before = $state<{ auto: boolean; exposureUs: number | null; gain: number | null } | null>(null);
+  /** The values the preset replaces, and whether the camera kept each, for undo. */
+  let before = $state<PresetBefore | null>(null);
 
-  const exposureRange = $derived({ min: exposure?.min ?? EXPOSURE_FALLBACK.min, max: exposure?.max ?? EXPOSURE_FALLBACK.max });
-  const gainRange = $derived({ min: gain?.min ?? 1, max: gain?.max ?? 16 });
+  const exposureRange = $derived(rangeOr(exposure, EXPOSURE_FALLBACK));
+  const gainRange = $derived(rangeOr(gain, { min: 1, max: 16 }));
   const exposureNow = $derived(typeof exposure?.value === "number" ? exposure.value : null);
   const gainNow = $derived(typeof gain?.value === "number" ? gain.value : null);
   const plan = $derived(
-    usable ? aprilTagPlan({ exposureUs: exposureNow, gain: gainNow }, { exposure: exposureRange, gain: gainRange, fps: typeof frame?.value === "number" ? frame.value : camera.settings.fps }) : null,
+    manualUsable && !capped ? aprilTagPlan({ exposureUs: exposureNow, gain: gainNow }, { exposure: exposureRange, gain: gainRange, fps: typeof frame?.value === "number" ? frame.value : camera.settings.fps }) : null,
   );
+  /** The gain the capped preset allows: the camera's gain cap, or 16 when it lists none. */
+  const cappedGainMax = $derived(gainCap?.max ?? 16);
+
+  /** What the preset writes, by key (null when there is nothing to write). */
+  const writes = $derived.by((): Record<string, number | boolean> | null => {
+    if (capped && ae && ceiling) {
+      const gainKey = gainCap && !disabledReason(gainCap) ? keyOf(gainCap) : undefined;
+      return aprilTagCapWrites({ ae: keyOf(ae), exposureMax: keyOf(ceiling), gainMax: gainKey }, cappedGainMax);
+    }
+    if (plan && ae && exposure && gain) return { [keyOf(ae)]: false, [keyOf(exposure)]: plan.exposureUs, [keyOf(gain)]: plan.gain };
+    return null;
+  });
 
   function apply() {
-    if (!ae || !exposure || !gain || !plan) return;
-    before = { auto: ae.value === true, exposureUs: exposureNow, gain: gainNow };
-    writeControls(camera, { [keyOf(ae)]: false, [keyOf(exposure)]: plan.exposureUs, [keyOf(gain)]: plan.gain });
+    const next = writes;
+    if (!next) return;
+    before = Object.fromEntries(
+      Object.keys(next).map((key) => {
+        const control = controls.find((c) => keyOf(c) === key);
+        return [key, { kept: control?.persisted ?? false, previous: control?.value ?? null }];
+      }),
+    );
+    writeControls(camera, next);
     open = false;
   }
 
   function undo() {
-    if (!ae || !exposure || !gain || !before) return;
-    const changes: Record<string, number | boolean> = {};
-    if (before.exposureUs !== null) changes[keyOf(exposure)] = before.exposureUs;
-    if (before.gain !== null) changes[keyOf(gain)] = before.gain;
-    changes[keyOf(ae)] = before.auto;
-    writeControls(camera, changes);
+    if (!before) return;
+    writeControls(camera, presetUndoChanges(before));
     before = null;
   }
 </script>
@@ -61,20 +86,26 @@
     </div>
     <p class="note">
       {#if !usable}
-        Needs auto exposure, exposure and gain controls the camera lets the UI change.
+        Needs auto exposure and either an exposure ceiling, or exposure and gain controls the camera lets the UI change.
       {:else if before}
-        Applied. Undo puts back {before.auto ? "auto exposure" : `${formatMs(before.exposureUs ?? 0)} ms at ${formatNumber(before.gain ?? 0)}×`}.
+        Applied. Undo puts the camera's settings from before back, with the values it kept and nothing it did not keep.
+      {:else if capped}
+        Auto exposure held to {formatMs(APRILTAG_EXPOSURE_US)} ms, with gain up to {formatNumber(cappedGainMax)}×. Shows what it sets before it changes anything.
       {:else}
         Short manual exposure for tags on a moving robot. Shows what it sets before it changes anything.
       {/if}
     </p>
-  {:else if plan}
+  {:else if writes}
     <div class="confirm">
       <p>
-        Sets <b>manual</b> exposure to <b>{formatMs(plan.exposureUs)} ms</b> and gain to <b>{formatNumber(plan.gain)}×</b>.
-        Now {exposureNow !== null ? `${formatMs(exposureNow)} ms` : "unknown"} at {gainNow !== null ? `${formatNumber(gainNow)}×` : "unknown"}
-        ({ae?.value ? "auto" : "manual"}), so the image keeps about the same brightness.
-        {#if plan.capped}<span class="warn">Gain is at the camera's limit, so the image will be darker.</span>{/if}
+        {#if capped}
+          Turns <b>auto exposure</b> on, held to a <b>{formatMs(APRILTAG_EXPOSURE_US)} ms</b> ceiling, with gain up to <b>{formatNumber(cappedGainMax)}×</b>. The camera keeps the brightness itself.
+        {:else if plan}
+          Sets <b>manual</b> exposure to <b>{formatMs(plan.exposureUs)} ms</b> and gain to <b>{formatNumber(plan.gain)}×</b>.
+          Now {exposureNow !== null ? `${formatMs(exposureNow)} ms` : "unknown"} at {gainNow !== null ? `${formatNumber(gainNow)}×` : "unknown"}
+          ({ae?.value ? "auto" : "manual"}), so the image keeps about the same brightness.
+          {#if plan.capped}<span class="warn">Gain is at the camera's limit, so the image will be darker.</span>{/if}
+        {/if}
       </p>
       <div class="row">
         <button type="button" class="go" onclick={apply}>Apply</button>

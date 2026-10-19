@@ -2,7 +2,8 @@
   // One camera control the device lists, drawn from what the device says about it: a switch for
   // a bool, labelled choices for an enum, a slider (log for wide spans) or number field for a
   // number, text for a read-only value. Shows its unit and value, a reset when it is away from
-  // its default, a "saved" mark when the value is kept across reboots, and why it is locked.
+  // its default (which forgets the value kept for it), a "saved" mark when the value is kept
+  // across reboots, and why it is locked.
   import type { Camera, CameraControlInfo } from "#lib/api/model.js";
   import Choice from "#lib/kit/Choice.svelte";
   import Num from "#lib/kit/Num.svelte";
@@ -10,7 +11,7 @@
   import Slider from "#lib/kit/Slider.svelte";
   import Switch from "#lib/kit/Switch.svelte";
   import { disabledReason, enumOptions, friendlyLabel, isChanged, resetTarget, unitOf, valueText } from "./controls.js";
-  import { keyOf, writeControls } from "./write.js";
+  import { forgetControl, keyOf, writeControls } from "./write.js";
 
   let {
     camera,
@@ -32,8 +33,11 @@
   const unit = $derived(unitOf(control.name));
   const options = $derived(enumOptions(control));
   const text = $derived(valueText(control));
-  const wide = $derived(control.min !== undefined && control.max !== undefined && control.min > 0 && control.max / control.min >= 100);
-  const ranged = $derived(control.min !== undefined && control.max !== undefined && control.max > control.min);
+  /** The range the slider spans: the camera's effective range now when it reports one. */
+  const low = $derived(control.effectiveMin ?? control.min);
+  const high = $derived(control.effectiveMax ?? control.max);
+  const wide = $derived(low !== undefined && high !== undefined && low > 0 && high / low >= 100);
+  const ranged = $derived(low !== undefined && high !== undefined && high > low);
 
   function write(value: number | boolean) {
     writeControls(camera, { [keyOf(control)]: value });
@@ -44,7 +48,7 @@
   label={title}
   help="{control.name}{control.standard ? ` · standard ${control.standard}` : ''}"
   changed={isChanged(control)}
-  onreset={target !== null ? () => write(target) : undefined}
+  onreset={target !== null ? () => forgetControl(camera, control) : undefined}
 >
   {#if control.rect !== undefined || control.readOnly || control.value === null}
     <span class="value">{text}</span>
@@ -54,7 +58,7 @@
   {:else if options}
     <Choice label={title} value={Number(control.value)} {options} disabled={!!reason} onchange={(v) => write(Number(v))} />
   {:else if ranged && typeof control.value === "number"}
-    <Slider value={control.value} min={control.min} max={control.max} step={control.step ?? 1} {unit} log={wide} label={title} disabled={!!reason} onchange={write} />
+    <Slider value={control.value} min={low} max={high} step={control.step ?? 1} {unit} log={wide} label={title} disabled={!!reason} onchange={write} />
   {:else}
     <Num value={Number(control.value)} step={control.step ?? 1} {unit} label={title} disabled={!!reason} onchange={write} />
   {/if}

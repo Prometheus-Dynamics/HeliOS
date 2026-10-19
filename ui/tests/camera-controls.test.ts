@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  aprilTagCapWrites,
   aprilTagPlan,
+  clampedNote,
   clampExposure,
   disabledReason,
   enumOptions,
+  EXPOSURE_FALLBACK,
   flickerLabel,
   formatMs,
   friendlyLabel,
@@ -11,7 +14,10 @@ import {
   frameRatePresetsIn,
   groupOf,
   isChanged,
+  limitOn,
   maxExposureUs,
+  presetUndoChanges,
+  rangeOr,
   resetTarget,
   rectText,
   unitOf,
@@ -249,5 +255,95 @@ describe("read-only values", () => {
     expect(valueText({ name: "exposure_time_us", value: 2200 })).toBe("2200 µs");
     expect(valueText({ name: "ae_enable", value: false })).toBe("Off");
     expect(valueText({ name: "gain", value: null })).toBe("not readable");
+  });
+});
+
+describe("device menus", () => {
+  test("a value shows the device's menu label, by index, before any fallback map", () => {
+    const menu = ["inactive", "searching", "converged"];
+    expect(valueText({ name: "ae_state", value: 2, menu })).toBe("converged");
+    expect(valueText({ name: "ae_state", value: 0, menu })).toBe("inactive");
+    // Without a menu the fallback words apply (searching and converged only).
+    expect(valueText({ name: "ae_state", value: 0 })).toBe("0");
+  });
+});
+
+describe("effective ranges", () => {
+  test("the range a control takes now is the effective one when the camera reports it", () => {
+    expect(rangeOr({ min: 9, max: 476_066, effectiveMin: 9, effectiveMax: 8_100 }, EXPOSURE_FALLBACK)).toEqual({ min: 9, max: 8_100 });
+    expect(rangeOr({ min: 1, max: 15.94 }, { min: 1, max: 16 })).toEqual({ min: 1, max: 15.94 });
+    expect(rangeOr(undefined, EXPOSURE_FALLBACK)).toEqual(EXPOSURE_FALLBACK);
+  });
+
+  test("the exposure max shows the effective max at the frame rate: 8.1 ms at 120 fps", () => {
+    const range = rangeOr({ min: 9, max: 476_066, effectiveMax: 8_100 }, EXPOSURE_FALLBACK);
+    expect(formatMs(maxExposureUs(range, 120))).toBe("8.1");
+  });
+
+  test("the frame-duration maths applies when no effective range is reported", () => {
+    const range = rangeOr({ min: 9, max: 476_066 }, EXPOSURE_FALLBACK);
+    expect(formatMs(maxExposureUs(range, 120))).toBe("8.333");
+  });
+
+  test("an exposure beyond the effective max is clamped to it", () => {
+    const range = rangeOr({ min: 9, max: 476_066, effectiveMax: 8_100 }, EXPOSURE_FALLBACK);
+    expect(clampExposure(50_000, range, 120)).toBe(8_100);
+  });
+
+  test("a clamped write says what was asked and what was set", () => {
+    expect(clampedNote({ name: "exposure_time_us" }, 50_000, 8_100)).toBe("Exposure: 50000 µs is outside what the camera takes now, so it is 8100 µs");
+  });
+});
+
+describe("AE limits", () => {
+  test("0 is no limit; any other value limits", () => {
+    expect(limitOn(0)).toBe(false);
+    expect(limitOn(null)).toBe(false);
+    expect(limitOn(false)).toBe(false);
+    expect(limitOn(1500)).toBe(true);
+    expect(limitOn(6)).toBe(true);
+  });
+
+  test("the limits, modes and metering region are exposure controls, with friendly names", () => {
+    for (const name of ["ae_exposure_max_us", "ae_gain_max", "ae_exposure_mode", "ae_metering_mode", "ae_metering_region"]) {
+      expect(groupOf({ name })).toBe("exposure");
+    }
+    expect(friendlyLabel("ae_exposure_max_us")).toBe("Max exposure (motion blur limit)");
+    expect(friendlyLabel("ae_gain_max")).toBe("Max gain");
+  });
+});
+
+describe("AprilTag preset with an exposure ceiling", () => {
+  test("AE on, held to 1.5 ms, gain up to the device's gain cap", () => {
+    const writes = aprilTagCapWrites({ ae: "ae", exposureMax: "ae_exposure_max_us", gainMax: "ae_gain_max" }, 15.94);
+    expect(writes).toEqual({ ae: true, ae_exposure_max_us: 1500, ae_gain_max: 15.94 });
+  });
+
+  test("with no gain cap to set, only AE and the ceiling are written; 16 when the cap has no maximum", () => {
+    expect(aprilTagCapWrites({ ae: "ae", exposureMax: "ae_exposure_max_us" }, 15.94)).toEqual({ ae: true, ae_exposure_max_us: 1500 });
+    expect(aprilTagCapWrites({ ae: "ae", exposureMax: "ae_exposure_max_us", gainMax: "ae_gain_max" }, undefined)).toEqual({ ae: true, ae_exposure_max_us: 1500, ae_gain_max: 16 });
+  });
+
+  test("undo puts back what was kept, and forgets what was not stored before the preset", () => {
+    // AE was manual and not stored; the ceiling was not stored; the gain cap was stored at 4.
+    const undo = presetUndoChanges({
+      ae: { kept: false, previous: false },
+      ae_exposure_max_us: { kept: false, previous: 0 },
+      ae_gain_max: { kept: true, previous: 4 },
+    });
+    expect(undo).toEqual({ ae: null, ae_exposure_max_us: null, ae_gain_max: 4 });
+  });
+
+  test("undo leaves a kept key alone when its previous value is unknown", () => {
+    expect(presetUndoChanges({ exposure_us: { kept: true, previous: null }, gain: { kept: false, previous: 2 } })).toEqual({ gain: null });
+  });
+
+  test("the manual plan's undo restores kept values and forgets the rest", () => {
+    const undo = presetUndoChanges({
+      ae: { kept: true, previous: true },
+      exposure_us: { kept: false, previous: 2200 },
+      gain: { kept: true, previous: 1.5 },
+    });
+    expect(undo).toEqual({ ae: true, exposure_us: null, gain: 1.5 });
   });
 });

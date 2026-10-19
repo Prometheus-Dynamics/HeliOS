@@ -54,11 +54,9 @@
       void cluster.live.resetCamera(c.resourceId);
       return;
     }
-    const changes: Record<string, number | boolean> = {};
-    for (const control of c.controls ?? []) {
-      const value = resetTarget(control);
-      if (value !== null) changes[keyOf(control)] = value;
-    }
+    // As the device does: each control that has a default goes back to it, forgetting its value.
+    const changes: Record<string, null> = {};
+    for (const control of c.controls ?? []) if (resetTarget(control) !== null) changes[keyOf(control)] = null;
     writeControls(c, changes);
     toasts.info("Camera reset to defaults");
   }

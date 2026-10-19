@@ -1,6 +1,8 @@
 <script lang="ts">
   // One camera, big: follows the selected camera or stays pinned. Overlays,
   // ROI drawing, snapshot and quick exposure in the tab row.
+  import type { Camera } from "#lib/api/model.js";
+  import { controlNamed, writeControls } from "#lib/camera/write.js";
   import { identity } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
@@ -22,6 +24,32 @@
   const camera = $derived(target.id ? cluster.camera(target.id) : undefined);
   const overlays = $derived({ ...DEFAULT_OVERLAYS, ...((pane.props?.overlays as Partial<Overlays>) ?? {}) });
   let roiTool = $state(false);
+  /** The region button, where the menu of a drawn region opens. */
+  let roiButton: Element | undefined;
+
+  function toggleRoi(event: MouseEvent) {
+    roiButton = event.currentTarget as Element;
+    roiTool = !roiTool;
+  }
+
+  /** A drawn region (in the camera's output pixels): the crop for the pipelines, or the exposure's metering region. */
+  function offerRegion(roi: { x: number; y: number; w: number; h: number }) {
+    if (!camera) return;
+    const cam = camera;
+    roiTool = false;
+    const region = { x: roi.x, y: roi.y, width: roi.w, height: roi.h };
+    const items = [
+      { label: "Use as crop (ROI)", run: () => { cluster.setCamera(cam.resourceId, { roi }); toasts.success(`ROI set to ${roi.w}×${roi.h}`); } },
+      { label: "Meter exposure here", run: () => meterExposureHere(cam, region) },
+    ];
+    if (roiButton) menu.below(roiButton, items);
+  }
+
+  function meterExposureHere(cam: Camera, region: { x: number; y: number; width: number; height: number }) {
+    if (!controlNamed(cam.controls ?? [], "ae_metering_region")) return toasts.info("This camera has no metering region control");
+    writeControls(cam, { ae_metering_region: region });
+    toasts.success(`Auto exposure meters ${region.width}×${region.height} here`);
+  }
 
   function setOverlays(patch: Partial<Overlays>) {
     workspaces.setProps(ws, pane.id, { overlays: { ...overlays, ...patch } });
@@ -72,7 +100,7 @@
     ontogglepin={() => target.toggle()}
   />
   <span class="sep"></span>
-  <IconButton icon="marquee-2" label="Draw region of interest" active={roiTool} onclick={() => (roiTool = !roiTool)} size={24} />
+  <IconButton icon="marquee-2" label="Draw region (crop, or where to meter exposure)" active={roiTool} onclick={toggleRoi} size={24} />
   {#if camera?.settings.roi}
     <IconButton icon="x" label="Clear ROI" size={24} onclick={() => camera && cluster.setCamera(camera.resourceId, { roi: null })} />
   {/if}
@@ -83,7 +111,7 @@
 
 {#if camera}
   <div class="wrap">
-    <Feed {camera} {overlays} {roiTool} onroi={(roi) => { cluster.setCamera(camera.resourceId, { roi }); roiTool = false; toasts.success(`ROI set to ${roi?.w}×${roi?.h}`); }} />
+    <Feed {camera} {overlays} {roiTool} onroi={(roi) => roi && offerRegion(roi)} />
   </div>
 {:else}
   <Empty icon="camera" text="No camera selected. Pick one in the tab bar." />

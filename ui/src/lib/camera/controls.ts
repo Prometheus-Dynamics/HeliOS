@@ -2,14 +2,15 @@
 // camera pane, the inspector's quick controls and their tests all read it, so a control means
 // the same thing everywhere.
 //
-// Names and enum meanings come from Styx's native backend (`native_backend.rs`, the revision
-// Backend/Cargo.lock pins): `controls::*` ids, `AE_FLICKER_MODE` (0 off, 1 50 Hz, 2 60 Hz,
-// 3 automatic), `AE_DEFLICKER_MODE` (0 off, 1 on, 2 with flicker avoidance), `AE_STATE`
-// (1 searching, 2 converged), `AE_FLICKER_DETECTED` (the light's flicker period in µs).
+// Names come from Styx's native backend (`native_backend.rs`, the revision Backend/Cargo.lock
+// pins): `controls::*` ids, `AE_FLICKER_DETECTED` (the light's flicker period in µs). A control's
+// labelled values come from the device's `menu` when it lists one (the value is the index); the
+// label maps below are only the fallback for a device that lists no menu.
 
 import type { CameraControlInfo, CropRect } from "#lib/api/model.js";
 
-export type Control = Pick<CameraControlInfo, "name" | "standard" | "min" | "max" | "default" | "value" | "writable" | "readOnly">;
+export type Control = Pick<CameraControlInfo, "name" | "standard" | "min" | "max" | "default" | "value" | "writable" | "readOnly"> &
+  Partial<Pick<CameraControlInfo, "effectiveMin" | "effectiveMax" | "menu" | "persisted">>;
 export type Range = { min: number; max: number };
 export type ControlGroup = "capture" | "exposure" | "white" | "flicker" | "crop" | "advanced";
 
@@ -36,6 +37,11 @@ const LABELS: Record<string, string> = {
   ae_deflicker_mode: "Deflicker",
   ae_flicker_detected: "Flicker detected",
   output_crop: "Output crop",
+  ae_exposure_max_us: "Max exposure (motion blur limit)",
+  ae_gain_max: "Max gain",
+  ae_exposure_mode: "Exposure mode",
+  ae_metering_mode: "Metering",
+  ae_metering_region: "Metering region",
 };
 
 const UNITS: Record<string, string> = {
@@ -65,13 +71,19 @@ const GROUP_BY_NAME: Record<string, ControlGroup> = {
   ae_deflicker_mode: "flicker",
   ae_flicker_detected: "flicker",
   output_crop: "crop",
+  ae_exposure_max_us: "exposure",
+  ae_gain_max: "exposure",
+  ae_exposure_mode: "exposure",
+  ae_metering_mode: "exposure",
+  ae_metering_region: "exposure",
 };
 
+/** Fallback labels for a device that lists no menu for these (Styx's native menus, by index). */
 const STATE_LABELS: Record<string, Record<number, string>> = {
   ae_state: { 1: "Searching", 2: "Converged" },
 };
 
-/** Labelled choices for the int controls the device lists without a menu. */
+/** Fallback choices for a device that lists no menu for these int controls. */
 const ENUM_OPTIONS: Record<string, { value: number; label: string }[]> = {
   ae_flicker_mode: [
     { value: 0, label: "Off" },
@@ -181,16 +193,67 @@ export function formatMs(us: number): string {
 }
 
 /** The value a control reads as text: a read-only row, or the value beside its control. */
-export function valueText(control: Pick<CameraControlInfo, "name" | "value" | "rect">): string {
+export function valueText(control: Pick<CameraControlInfo, "name" | "value" | "rect"> & Partial<Pick<CameraControlInfo, "menu">>): string {
   if (control.rect !== undefined) return rectText(control.rect);
   const value = control.value;
   if (value === null) return "not readable";
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (control.name === "ae_flicker_detected") return flickerLabel(value);
+  const labelled = control.menu?.[value];
+  if (labelled !== undefined) return labelled;
   const state = stateLabel(control.name, value);
   if (state) return state;
   const unit = unitOf(control.name);
   return `${formatNumber(value)}${unit ? ` ${unit}` : ""}`;
+}
+
+/**
+ * The range a control takes now: the camera's effective range when it reports one (AE's limits
+ * at the current frame duration), else the device's own limits, else the fallback.
+ */
+export function rangeOr(control: Partial<Pick<CameraControlInfo, "min" | "max" | "effectiveMin" | "effectiveMax">> | undefined, fallback: Range): Range {
+  return {
+    min: control?.effectiveMin ?? control?.min ?? fallback.min,
+    max: control?.effectiveMax ?? control?.max ?? fallback.max,
+  };
+}
+
+/** A short note for a write the camera clamped: what was asked for, and the value it set. */
+export function clampedNote(control: { name: string }, requested: number | boolean | null, value: number | boolean | null): string {
+  return `${friendlyLabel(control.name)}: ${valueText({ name: control.name, value: requested })} is outside what the camera takes now, so it is ${valueText({ name: control.name, value })}`;
+}
+
+/** A control an AprilTag preset writes, before it did: its value and whether the camera kept it. */
+export type PresetBefore = Record<string, { kept: boolean; previous: number | boolean | null }>;
+
+/**
+ * What undoing a preset writes: each key it wrote that the camera kept before goes back to its
+ * previous value, and each one it did not keep is forgotten (`null`), so the camera's stored values
+ * end up exactly as they were. A kept key whose previous value is unknown is left alone.
+ */
+export function presetUndoChanges(before: PresetBefore): Record<string, number | boolean | null> {
+  const changes: Record<string, number | boolean | null> = {};
+  for (const [key, { kept, previous }] of Object.entries(before)) {
+    if (!kept) changes[key] = null;
+    else if (previous !== null) changes[key] = previous;
+  }
+  return changes;
+}
+
+/**
+ * The AprilTag preset with an exposure ceiling (`ae_exposure_max_us`): auto exposure on, held to
+ * the tag exposure, gain up to the device's gain cap (or 16). Keys are the camera's write keys;
+ * `gainMax` is absent when the camera has no gain cap.
+ */
+export function aprilTagCapWrites(keys: { ae: string; exposureMax: string; gainMax?: string }, gainCapMax: number | undefined): Record<string, number | boolean> {
+  const writes: Record<string, number | boolean> = { [keys.ae]: true, [keys.exposureMax]: APRILTAG_EXPOSURE_US };
+  if (keys.gainMax) writes[keys.gainMax] = gainCapMax ?? 16;
+  return writes;
+}
+
+/** A limit control where 0 means off (`ae_exposure_max_us`, `ae_gain_max`): whether it limits now. */
+export function limitOn(value: number | boolean | null | undefined): boolean {
+  return typeof value === "number" && value > 0;
 }
 
 export function clamp(value: number, min: number, max: number): number {

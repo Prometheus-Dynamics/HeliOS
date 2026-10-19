@@ -4,13 +4,14 @@
 // backend for yet (501) are reported once, as "not available".
 
 import { dictionaryLabel } from "#lib/format.js";
-import { applyCameraSettings, applyControlValue, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
+import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { pickFile } from "#lib/files.js";
+import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
 
 /** The parts of the cluster store the live backend fills in. */
@@ -32,6 +33,17 @@ const STANDARD_KEYS = new Set(["exposure_us", "gain", "ae", "ev", "fps", "awb", 
 const PER_PIPELINE = new Set(["width", "height", "format", "pyramid", "roi"]);
 /** Control changes made while dragging are sent at most this often per camera. */
 const CONTROL_FLUSH_MS = 120;
+
+/** The device key a camera field writes to: its camera key, a standard key or a listed control's name; null when it is none. */
+function deviceKeyOf(key: string, camera: Camera | undefined): string | null {
+  if (CONTROL_KEYS[key]) return CONTROL_KEYS[key];
+  if (STANDARD_KEYS.has(key) || camera?.controls?.some((c) => c.name === key)) return key;
+  return null;
+}
+
+const scalarOf = (value: W.ControlValue): number | boolean | null => (typeof value === "number" || typeof value === "boolean" ? value : null);
+/** A rectangle written to a region control (`ae_metering_region`). */
+const isRectValue = (value: unknown): value is { x: number; y: number; width: number; height: number } => typeof value === "object" && value !== null && "width" in value && "height" in value;
 const LOG_CAP = 600;
 
 class LiveState {
@@ -450,7 +462,14 @@ export class LiveCluster {
     const changes: W.CameraControlChanges = {};
     let perPipeline = false;
     for (const [key, value] of Object.entries(settings)) {
-      if (value === undefined || value === null) continue;
+      if (value === undefined) continue;
+      // `null` forgets a camera control (it goes to its default); it means nothing for a field
+      // that is per pipeline.
+      if (value === null) {
+        const forgotten = deviceKeyOf(key, camera);
+        if (forgotten && !PER_PIPELINE.has(key)) changes[forgotten] = null;
+        continue;
+      }
       if (PER_PIPELINE.has(key)) {
         perPipeline = true;
         continue;
@@ -458,14 +477,19 @@ export class LiveCluster {
       if (key === "awb" && typeof value === "string") changes.awb = value === "auto";
       else if (CONTROL_KEYS[key] && (typeof value === "number" || typeof value === "boolean")) changes[CONTROL_KEYS[key]] = value;
       else if (STANDARD_KEYS.has(key) && (typeof value === "number" || typeof value === "boolean" || typeof value === "string")) changes[key] = value;
-      else if (camera?.controls?.some((c) => c.name === key) && (typeof value === "number" || typeof value === "boolean")) changes[key] = value;
+      else if (camera?.controls?.some((c) => c.name === key) && (typeof value === "number" || typeof value === "boolean" || isRectValue(value))) changes[key] = value;
     }
     if (perPipeline && !this.warned.has("per-pipeline")) {
       this.warned.add("per-pipeline");
       toasts.info("Resolution, format, pyramid and region are set per pipeline (its camera binding), not on the camera.");
     }
     if (Object.keys(changes).length === 0) return;
-    if (camera) for (const [key, value] of Object.entries(changes)) applyControlValue(camera, { standard: key, name: key }, typeof value === "string" ? null : value);
+    // A forgotten control shows the value it takes by default until the camera answers.
+    if (camera)
+      for (const [key, value] of Object.entries(changes)) {
+        const shown = value === null ? (camera.controls?.find((c) => c.standard === key || c.name === key)?.default ?? null) : typeof value === "string" ? null : value;
+        applyControlValue(camera, { standard: key, name: key }, shown);
+      }
     this.controlChanges.set(id, { ...(this.controlChanges.get(id) ?? {}), ...changes });
     this.soon(`controls:${id}`, () => this.flushControls(id), CONTROL_FLUSH_MS);
   }
@@ -480,8 +504,12 @@ export class LiveCluster {
       if (camera) await this.refreshCameraControls(id);
       return;
     }
+    if (camera) applyPersisted(camera, result.persisted);
     for (const applied of result.applied) {
       if (camera) applyControlValue(camera, { id: applied.id }, applied.value);
+      // The camera took the value it could: say so, with the value it set.
+      const control = camera?.controls?.find((c) => c.id === applied.id);
+      if (applied.clamped && control) toasts.info(`${camera?.name ?? id}: ${clampedNote(control, scalarOf(applied.requested), scalarOf(applied.value))}`);
       if (applied.restarted) toasts.info(`${camera?.name ?? id}: the capture restarted to apply ${applied.control}`);
       else if (applied.deferred) toasts.info(`${camera?.name ?? id}: ${applied.control} applies when the camera starts`);
     }

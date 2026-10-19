@@ -6,10 +6,11 @@
 import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
+import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
 import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "#lib/api/mock.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
-import type { Camera, CameraSettings, ClusterNode, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
+import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
 import { toasts } from "./toasts.svelte";
 
 interface FeedData {
@@ -24,13 +25,33 @@ interface PoseData {
 const FEED_FRAMES = 480;
 const FEED_FPS = 16;
 
-/** Mock only: a control write as the device takes it (clamped to its range; read-only ones refuse). */
-function mockControl(c: Camera, key: string, value: number | string | boolean) {
+/**
+ * Mock only: a control write as the device takes it (clamped to the range it takes now; read-only
+ * ones refuse; `null` goes back to the default and is not kept). Returns the note for a clamped write.
+ */
+function mockControl(c: Camera, key: string, value: ControlWrite): string | null {
   const control = c.controls?.find((x) => x.standard === key || x.name === key);
-  if (!control || control.readOnly || !control.writable || typeof value === "string") return;
-  const clamped = control.min !== undefined && control.max !== undefined && typeof value === "number" ? Math.min(control.max, Math.max(control.min, value)) : value;
+  if (!control || control.readOnly || !control.writable || typeof value === "string") return null;
+  if (value === null) {
+    applyControlValue(c, { id: control.id }, control.default);
+    control.persisted = false;
+    return null;
+  }
+  if (typeof value !== "number") {
+    applyControlValue(c, { id: control.id }, value);
+    control.persisted = true;
+    return null;
+  }
+  const range = rangeOr(control, { min: -Infinity, max: Infinity });
+  const clamped = clamp(value, range.min, range.max);
   applyControlValue(c, { id: control.id }, clamped);
   control.persisted = true;
+  // As the device does: setting a metering mode clears the metering region.
+  if (control.name === "ae_metering_mode") {
+    const region = c.controls?.find((x) => x.name === "ae_metering_region");
+    if (region) region.rect = { x: 0, y: 0, width: 0, height: 0 };
+  }
+  return clamped !== value ? clampedNote(control, value, clamped) : null;
 }
 
 function clone<T>(value: T): T {
@@ -293,7 +314,7 @@ class ClusterStore {
   }
 
   /** Applies camera settings live (controls call this as you drag). */
-  setCamera(id: string, settings: Partial<CameraSettings>, extra?: Record<string, number | string | boolean>) {
+  setCamera(id: string, settings: Partial<CameraSettings>, extra?: Record<string, ControlWrite>) {
     if (this.live) {
       void this.live.setCamera(id, { ...settings, ...(extra ?? {}) });
       return;
@@ -301,10 +322,22 @@ class ClusterStore {
     const c = this.camera(id);
     if (!c) return;
     Object.assign(c.settings, settings);
-    if (extra) c.extra = { ...(c.extra ?? {}), ...extra };
+    if (extra) {
+      // Values kept by name; a null forgets one.
+      const kept = { ...(c.extra ?? {}) };
+      for (const [key, value] of Object.entries(extra)) {
+        if (value === null) delete kept[key];
+        else if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") kept[key] = value;
+      }
+      c.extra = kept;
+    }
     // The mock's controls take the same keys the device does: standard keys, or names.
-    const keys: Record<string, number | string | boolean | undefined> = { exposure_us: settings.exposureUs, ae: settings.autoExposure, gain: settings.gain, fps: settings.fps, ...extra };
-    for (const [key, value] of Object.entries(keys)) if (value !== undefined) mockControl(c, key, value);
+    const keys: Record<string, ControlWrite | undefined> = { exposure_us: settings.exposureUs, ae: settings.autoExposure, gain: settings.gain, fps: settings.fps, ...extra };
+    for (const [key, value] of Object.entries(keys)) {
+      if (value === undefined) continue;
+      const note = mockControl(c, key, value);
+      if (note) toasts.info(`${c.name}: ${note}`);
+    }
     c.stats.fps = c.settings.fps;
   }
 

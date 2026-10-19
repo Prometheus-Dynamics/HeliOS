@@ -224,7 +224,11 @@ export interface CameraControl {
   max: ControlValue;
   default: ControlValue;
   step: ControlValue | null;
+  /** The labels of an enumerated control's values, by index (the value is the index). */
   menu: string[] | null;
+  /** The range it takes now, when narrower than min..max (exposure at the frame duration, the gain AE may use). */
+  effective_min?: ControlValue | null;
+  effective_max?: ControlValue | null;
   /** The value now; null when it cannot be read. */
   current: ControlValue | null;
   standard: CameraStandardControl | null;
@@ -254,8 +258,11 @@ export interface CameraSettingsApplied {
   persisted: Record<string, ControlValue>;
 }
 
-/** `PATCH /v1/cameras/{id}/settings` body: standard keys, or a control's `name` or `id`. */
-export type CameraControlChanges = Record<string, boolean | number | string>;
+/**
+ * `PATCH /v1/cameras/{id}/settings` body: standard keys, or a control's `name` or `id`. A `null`
+ * value sets that control back to its default and forgets the value kept for it.
+ */
+export type CameraControlChanges = Record<string, boolean | number | string | null | { x: number; y: number; width: number; height: number }>;
 
 export interface AppliedCameraControl {
   control: string;

@@ -92,6 +92,9 @@ export interface CropRect {
   height: number;
 }
 
+/** A value written to a camera control: a number, a boolean, a rectangle (a region), or `null` to forget it. */
+export type ControlWrite = number | string | boolean | null | CropRect;
+
 /** A camera control the device lists (live mode), for generic editors. */
 export interface CameraControlInfo {
   id: number;
@@ -99,7 +102,11 @@ export interface CameraControlInfo {
   kind: "bool" | "int" | "uint" | "float" | "menu" | "int_menu" | "rectangle" | "none" | "unknown";
   min?: number;
   max?: number;
+  /** The range the camera takes now, when narrower than min..max (exposure at the frame duration, the gain AE may use). */
+  effectiveMin?: number;
+  effectiveMax?: number;
   step?: number;
+  /** The labels of the values, by index (the value is the index). */
   menu?: string[];
   default: number | boolean | null;
   /** The value now (null when it cannot be read or is not a scalar). */

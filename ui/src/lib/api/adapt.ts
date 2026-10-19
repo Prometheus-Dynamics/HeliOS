@@ -279,6 +279,8 @@ export function toControls(settings: W.CameraSettings): CameraControlInfo[] {
     kind: c.kind,
     min: num(c.min),
     max: num(c.max),
+    effectiveMin: num(c.effective_min),
+    effectiveMax: num(c.effective_max),
     step: num(c.step),
     menu: c.menu ?? undefined,
     default: scalar(c.default),
@@ -303,12 +305,18 @@ export function applyControlValue(camera: Camera, match: { id?: number; standard
   const control = camera.controls?.find((c) => (match.standard && c.standard === match.standard) || (match.id !== undefined && c.id === match.id) || (match.name !== undefined && c.name === match.name));
   const v = scalar(value);
   if (control) control.value = v;
+  if (control && control.rect !== undefined && isRect(value)) control.rect = value;
   const standard = match.standard ?? control?.standard;
   if (v === null || !standard) return;
   if (standard === "exposure_us" && typeof v === "number") camera.settings.exposureUs = v;
   else if (standard === "gain" && typeof v === "number") camera.settings.gain = v;
   else if (standard === "ae" && typeof v === "boolean") camera.settings.autoExposure = v;
   else if (standard === "fps" && typeof v === "number") camera.settings.fps = v;
+}
+
+/** Mark the controls whose values the camera keeps across reboots (a `persisted` map of keys: standard keys or names). */
+export function applyPersisted(camera: Camera, persisted: Record<string, W.ControlValue>) {
+  for (const control of camera.controls ?? []) control.persisted = control.name in persisted || (control.standard !== null && control.standard in persisted);
 }
 
 /** Take a `GET /v1/cameras/{id}/settings` answer into the camera. */

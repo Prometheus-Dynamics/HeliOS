@@ -6,7 +6,7 @@
   import Seg from "#lib/kit/Seg.svelte";
   import Slider from "#lib/kit/Slider.svelte";
   import { disabledReason, isChanged, resetTarget } from "./controls.js";
-  import { controlNamed, keyOf, writeControls } from "./write.js";
+  import { controlNamed, forgetControl, keyOf, writeControls } from "./write.js";
 
   let { camera }: { camera: Camera } = $props();
 
@@ -35,9 +35,10 @@
   function set(control: CameraControlInfo | undefined, value: number) {
     if (control) writeControls(camera, { [keyOf(control)]: value });
   }
+  /** A reset forgets the value kept for the control, so the camera takes its default. */
   function resetOf(control: CameraControlInfo | undefined, lock: string | null): (() => void) | undefined {
     const target = control && !lock ? resetTarget(control) : null;
-    return target === null || !control ? undefined : () => set(control, target as number);
+    return target === null || !control ? undefined : () => forgetControl(camera, control);
   }
 </script>
 
