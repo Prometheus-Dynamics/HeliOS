@@ -32,7 +32,7 @@ build_group = "helios-backend"
 # Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
-profile = "release"
+profile = "${input.cargo_profile}"
 install_name = "helios-api"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-api"
@@ -57,7 +57,7 @@ build_group = "helios-backend"
 # Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
-profile = "release"
+profile = "${input.cargo_profile}"
 install_name = "helios-engine"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-engine"
@@ -82,7 +82,7 @@ build_group = "helios-backend"
 # Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
-profile = "release"
+profile = "${input.cargo_profile}"
 install_name = "helios-diagnostics"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-diagnostics"
@@ -117,7 +117,7 @@ build_group = "helios-backend"
 # Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
-profile = "release"
+profile = "${input.cargo_profile}"
 target_name = "libhelios_eidos_plugin.so"
 install_name = "libhelios_eidos_plugin.so"
 install_class = "library"

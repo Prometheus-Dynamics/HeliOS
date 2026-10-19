@@ -20,7 +20,7 @@ source = "backend-workspace"
 # Same workspace lock, so cargo also resolves the private Eidos git dep (see backend-core.toml).
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 target = "aarch64-unknown-linux-gnu"
-profile = "release"
+profile = "${input.cargo_profile}"
 install_name = "helios-peripherals"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-peripherals"

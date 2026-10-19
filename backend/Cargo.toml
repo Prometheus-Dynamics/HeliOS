@@ -164,6 +164,15 @@ codegen-units = 1
 strip = "symbols"
 panic = "unwind"
 
+# Quick device iterations (`tools/build-os.sh raze full --set input.cargo_profile=dev-image`):
+# the release settings and per-package opt-levels, but thin LTO over 16 codegen units, so a
+# one-crate change relinks in a fraction of the fat-LTO time. Larger and slightly slower
+# binaries: never measure performance or ship a release on it.
+[profile.dev-image]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 # Services are built for size; per-frame vision code is built for speed. Both
 # levels matter under fat LTO: each crate's own (Eidos at "z" made the ArUco
 # graph 4x slower) and the final artifact's (the engine and probe run the

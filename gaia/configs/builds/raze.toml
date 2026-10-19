@@ -168,6 +168,13 @@ default = "helios"
 kind = "string"
 default = "console=serial0,115200 console=tty1 rootwait log_buf_len=8M printk.devkmsg=on"
 
+# The cargo profile of the backend binaries: "release" (fat LTO, what ships and what timings
+# are measured on) or "dev-image" (thin LTO, faster relinks for quick device iterations).
+[inputs.cargo_profile]
+kind = "enum"
+default = "release"
+choices = ["release", "dev-image"]
+
 [inputs.profile]
 description = "Build profile"
 kind = "enum"
