@@ -8,6 +8,13 @@ src = "@assets/runtime-config/etc/helios/user.env"
 dest = "/etc/helios/user.env"
 origin = "static-asset"
 
+# HeliOS's LED looks (lemnosd reads every look file in /etc/lemnos/looks.d; docs/docs/leds.md).
+[[stage.files]]
+id = "runtime-lemnos-helios-looks"
+src = "@assets/runtime-config/etc/lemnos/looks.d/helios.toml"
+dest = "/etc/lemnos/looks.d/helios.toml"
+origin = "static-asset"
+
 [[stage.env_sets]]
 id = "runtime-helios-api"
 name = "helios-api"

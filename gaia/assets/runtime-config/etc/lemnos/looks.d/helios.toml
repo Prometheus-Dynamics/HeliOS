@@ -1,0 +1,165 @@
+# HeliOS's LED looks, read by lemnosd from /etc/lemnos/looks.d (docs/looks.md).
+# helios-api picks them by name (backend/src/helios/api/src/leds/states.rs); docs/docs/leds.md
+# describes each state.
+#
+# Cool colours mean healthy, warm colours mean trouble. Every comet keeps a dim glow of its own
+# colour (base 0.18), and nothing blinks or flashes except the one-shot ripples.
+#
+# The tags' spots are a spots block, fed by helios-api (LedClient::look_spots and update_inputs).
+# The rainbow locate is drawn by helios-api as frames. A `helios.rec.*` look is the same state
+# with the recording tally: a soft red LED at the ring's top (logical LED 0).
+
+[looks."helios.error"]
+envelope = { kind = "breathe", period_ms = 3000, depth = 0.7, easing = "ease-in-out" }
+brightness = 0.7
+layers = [
+  { block = "fill", color = "ff2828" },
+]
+
+[looks."helios.calibrating"]
+envelope = "solid"
+layers = [
+  { block = "arc", fraction = "input", color = "2bd47d", track = "101012", head = 0.35, sheen = true },
+]
+
+[looks."helios.calibrating-view"]
+envelope = "solid"
+layers = [
+  { block = "arc", fraction = "input", color = "2bd47d", track = "101012", head = 0.35, sheen = true },
+  { block = "ripple", color = "2bd47d", origin = 0, speed = 12, width = 2.2, settle_ms = 1400, glow = 0.15 },
+]
+
+[looks."helios.robot-wait"]
+envelope = "solid"
+layers = [
+  { block = "comet", color = "ff9614", period_ms = 2400, tail = 6, base = 0.18, heads = 2 },
+]
+
+[looks."helios.robot-wait-tags"]
+envelope = "solid"
+layers = [
+  { block = "fill", color = "28c8ff", brightness = 0.25 },
+  { block = "comet", color = "ff9614", period_ms = 2400, tail = 6, base = 0, heads = 2, mode = "over" },
+]
+
+[looks."helios.searching"]
+envelope = "solid"
+layers = [
+  { block = "comet", color = "965aff", period_ms = 1600, tail = 7, base = 0.18 },
+]
+
+[looks."helios.starting"]
+envelope = "solid"
+layers = [
+  { block = "wash", color = "ffffff", brightness = 0.09, envelope = { kind = "breathe", period_ms = 3000, depth = 0.55, easing = "ease-in-out" } },
+  { block = "sparkle", color = "ffffff", density = 1.2, base = 0.03, min_ms = 350, max_ms = 950 },
+]
+
+[looks."helios.robot-enabled"]
+envelope = "solid"
+layers = [
+  { block = "ripple", color = "28c8ff", origin = 0, speed = 12, width = 2.2, settle_ms = 1400, glow = 0.15 },
+]
+
+[looks."helios.tags"]
+envelope = { kind = "breathe", period_ms = 4000, depth = 0.2, easing = "ease-in-out" }
+brightness = 0.7
+layers = [
+  { block = "fill", color = "28c8ff" },
+  { block = "spots", color = "28c8ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
+]
+
+# A valid field pose: the spots warm toward white, and a slow white sheen orbits the ring.
+[looks."helios.tags-locked"]
+envelope = "solid"
+layers = [
+  { block = "fill", color = "28c8ff", brightness = 0.25 },
+  { block = "comet", color = "ffffff", period_ms = 6000, tail = 3, base = 0, brightness = 0.35 },
+  { block = "spots", color = "d8f4ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
+]
+
+[looks."helios.recording"]
+envelope = "solid"
+layers = [
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6 },
+]
+
+# The tally variants: the state's layers, then the tally (at most four layers in all).
+
+[looks."helios.rec.error"]
+envelope = { kind = "breathe", period_ms = 3000, depth = 0.7, easing = "ease-in-out" }
+brightness = 0.7
+layers = [
+  { block = "fill", color = "ff2828" },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.calibrating"]
+envelope = "solid"
+layers = [
+  { block = "arc", fraction = "input", color = "2bd47d", track = "101012", head = 0.35, sheen = true },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.calibrating-view"]
+envelope = "solid"
+layers = [
+  { block = "arc", fraction = "input", color = "2bd47d", track = "101012", head = 0.35, sheen = true },
+  { block = "ripple", color = "2bd47d", origin = 0, speed = 12, width = 2.2, settle_ms = 1400, glow = 0.15 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.robot-wait"]
+envelope = "solid"
+layers = [
+  { block = "comet", color = "ff9614", period_ms = 2400, tail = 6, base = 0.18, heads = 2 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.robot-wait-tags"]
+envelope = "solid"
+layers = [
+  { block = "fill", color = "28c8ff", brightness = 0.25 },
+  { block = "comet", color = "ff9614", period_ms = 2400, tail = 6, base = 0, heads = 2, mode = "over" },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.searching"]
+envelope = "solid"
+layers = [
+  { block = "comet", color = "965aff", period_ms = 1600, tail = 7, base = 0.18 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.starting"]
+envelope = "solid"
+layers = [
+  { block = "wash", color = "ffffff", brightness = 0.09, envelope = { kind = "breathe", period_ms = 3000, depth = 0.55, easing = "ease-in-out" } },
+  { block = "sparkle", color = "ffffff", density = 1.2, base = 0.03, min_ms = 350, max_ms = 950 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.robot-enabled"]
+envelope = "solid"
+layers = [
+  { block = "ripple", color = "28c8ff", origin = 0, speed = 12, width = 2.2, settle_ms = 1400, glow = 0.15 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.tags"]
+envelope = { kind = "breathe", period_ms = 4000, depth = 0.2, easing = "ease-in-out" }
+brightness = 0.7
+layers = [
+  { block = "fill", color = "28c8ff" },
+  { block = "spots", color = "28c8ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
+
+[looks."helios.rec.tags-locked"]
+envelope = "solid"
+layers = [
+  { block = "fill", color = "28c8ff", brightness = 0.25 },
+  { block = "comet", color = "ffffff", period_ms = 6000, tail = 3, base = 0, brightness = 0.35 },
+  { block = "spots", color = "d8f4ff", width = 1.5, follow_ms = 120, spots = "input", max_spots = 8 },
+  { block = "frame", pixels = ["ff2828"], brightness = 0.6, mode = "max" },
+]
