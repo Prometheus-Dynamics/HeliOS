@@ -200,7 +200,10 @@ export interface LogLine {
 
 export interface Detection {
   id: number;
+  /** Corner pixels in the frame the detector saw (`frame`), or in the feed's pixels when `frame` is absent. */
   corners: [number, number][];
+  /** The size of the frame the corners are in (the pipeline's frame, e.g. 1280x800), when the output says so. */
+  frame?: { w: number; h: number };
 }
 
 export interface TagPose {

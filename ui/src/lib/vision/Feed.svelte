@@ -35,11 +35,17 @@
     natural = null;
     previewFailed = false;
   });
-  const markers = $derived(cluster.detectionsFor(camera));
   // Feed frames are a scaled replay; overlays use the feed's pixel space and
   // the ROI is stored in sensor pixels.
   const fw = $derived(live ? (natural?.w ?? 640) : (cluster.feed?.width ?? 640));
   const fh = $derived(live ? (natural?.h ?? 400) : (cluster.feed?.height ?? 400));
+  // Detection corners scaled into the feed's pixel space (the SVG's viewBox): live corners are in
+  // the pipeline's frame (e.g. 1280x800) while the preview is smaller (640x400 by default).
+  const markers = $derived(
+    cluster.detectionsFor(camera).map((d) =>
+      d.frame ? { ...d, corners: d.corners.map(([x, y]) => [(x * fw) / d.frame!.w, (y * fh) / d.frame!.h] as [number, number]) } : d,
+    ),
+  );
   const sx = $derived(camera.settings.width / fw);
   const sy = $derived(camera.settings.height / fh);
   const tint = $derived(colorVar(identity.get(camera.resourceId).color));

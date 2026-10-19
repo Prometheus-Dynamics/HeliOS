@@ -59,8 +59,16 @@ const OUTPUTS_FALLBACK_MS = 1000;
 
 /** A `detections` output's value as overlay detections. */
 function toDetections(value: unknown): Detection[] {
-  const out = value as { detections?: { id: number; corners: { x: number; y: number }[] }[] } | undefined;
-  return (out?.detections ?? []).map((d) => ({ id: d.id, corners: d.corners.map((c) => [c.x, c.y] as [number, number]) }));
+  type Point = { x: number; y: number };
+  const out = value as { detections?: { id: number; corners: Point[] }[]; subpixel?: Point[][]; frame_width?: number; frame_height?: number } | undefined;
+  // Corners are in the pipeline's frame (frame_width x frame_height, usually the sensor mode),
+  // not the preview's: the feed scales them. Sub-pixel corners, when present, are the refined ones.
+  const frame = out?.frame_width && out?.frame_height ? { w: out.frame_width, h: out.frame_height } : undefined;
+  return (out?.detections ?? []).map((d, i) => {
+    const refined = out?.subpixel?.[i];
+    const points = refined?.length === d.corners.length ? refined : d.corners;
+    return { id: d.id, corners: points.map((c) => [c.x, c.y] as [number, number]), frame };
+  });
 }
 
 export class LiveCluster {
