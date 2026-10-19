@@ -228,6 +228,30 @@ impl Store {
         Ok(stored)
     }
 
+    /// Forget the values stored for `camera` under `keys` (the others are kept), and return what
+    /// is still stored for it.
+    pub async fn forget_camera_settings(&self, camera: &str, keys: impl IntoIterator<Item = String>) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+        let _guard = self.lock.lock().await;
+        let path = self.camera_settings_path();
+        let mut all: BTreeMap<String, BTreeMap<String, serde_json::Value>> = read_json(&path).await?.unwrap_or_default();
+        let Some(stored) = all.get_mut(camera) else {
+            return Ok(BTreeMap::new());
+        };
+        let before = stored.len();
+        for key in keys {
+            stored.remove(&key);
+        }
+        let remaining = stored.clone();
+        let changed = remaining.len() != before;
+        if remaining.is_empty() {
+            all.remove(camera);
+        }
+        if changed {
+            write_json(&path, &all).await?;
+        }
+        Ok(remaining)
+    }
+
     /// Forget every value stored for `camera` (back to the camera's defaults on its next start).
     pub async fn clear_camera_settings(&self, camera: &str) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
@@ -462,6 +486,32 @@ mod tests {
         assert_eq!(store.camera_settings("camera.a").await.expect("settings"), merged);
         store.clear_camera_settings("camera.a").await.expect("clear");
         assert!(store.camera_settings("camera.a").await.expect("cleared").is_empty());
+        assert_eq!(store.camera_settings("camera.b").await.expect("other camera kept").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn forgetting_removes_only_the_listed_keys_and_survives_a_new_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path());
+        store
+            .persist_camera_settings("camera.a", [("exposure_us".to_string(), serde_json::json!(8000)), ("ae".to_string(), serde_json::json!(false)), ("sharpness".to_string(), serde_json::json!(4))])
+            .await
+            .expect("persist");
+        store.persist_camera_settings("camera.b", [("exposure_us".to_string(), serde_json::json!(2000))]).await.expect("persist");
+
+        // Forgetting a key that is not stored changes nothing; the others stay.
+        let remaining = store.forget_camera_settings("camera.a", ["exposure_us".to_string(), "gain".to_string()]).await.expect("forget");
+        assert_eq!(remaining, BTreeMap::from([("ae".to_string(), serde_json::json!(false)), ("sharpness".to_string(), serde_json::json!(4))]));
+
+        // As after a reboot: a new store on the same directory.
+        let store = Store::new(dir.path());
+        assert_eq!(store.camera_settings("camera.a").await.expect("settings"), remaining);
+        assert_eq!(store.camera_settings("camera.b").await.expect("other camera kept"), BTreeMap::from([("exposure_us".to_string(), serde_json::json!(2000))]));
+
+        // Forgetting the last keys drops the camera's entry, and an unknown camera is empty.
+        store.forget_camera_settings("camera.a", ["ae".to_string(), "sharpness".to_string()]).await.expect("forget");
+        assert!(store.camera_settings("camera.a").await.expect("empty").is_empty());
+        assert!(store.forget_camera_settings("camera.zzz", ["ae".to_string()]).await.expect("unknown").is_empty());
         assert_eq!(store.camera_settings("camera.b").await.expect("other camera kept").len(), 1);
     }
 }

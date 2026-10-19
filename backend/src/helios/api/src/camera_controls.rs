@@ -13,9 +13,16 @@
 //! by name) are stored in the API's state directory (`Store::persist_camera_settings`, on the
 //! data partition) and re-applied every time the client (re)connects to the camera service: at
 //! boot, and after the camera service restarts. A camera that is not streaming takes them as
-//! deferred values, applied when its capture starts. Resetting to defaults forgets them. The
-//! frame rate is the exception: it is not re-applied here (see `reapply`), but with the
-//! pipelines' frame requests, which carry it (`pipelines::refresh_camera_inputs`).
+//! deferred values, applied when its capture starts. A `null` value sets one control back to its
+//! descriptor default and forgets its stored value (`Store::forget_camera_settings`); resetting
+//! all of them to defaults forgets every stored value. The frame rate is the exception: it is not
+//! re-applied here (see `reapply`), but with the pipelines' frame requests, which carry it
+//! (`pipelines::refresh_camera_inputs`).
+
+mod json;
+#[cfg(test)]
+mod tests;
+mod values;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -27,10 +34,9 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
 use styx::{
-    ipc::{AppliedControl, ClientEvent, ControlClient, ControlDescriptor, ControlEvent, ControlRefusal, ControlTarget, IpcError, SERVICE_FRAME_RATE, StandardControl},
-    prelude::{Access, ControlId, ControlKind, ControlValue, RecvOutcome},
+    ipc::{ClientEvent, ControlClient, ControlDescriptor, ControlRefusal, ControlTarget, IpcError, StandardControl},
+    prelude::{ControlKind, ControlValue, RecvOutcome},
 };
 use tokio::{sync::Mutex, task::JoinHandle};
 
@@ -40,125 +46,31 @@ use crate::{
     store::Store,
 };
 
+pub use json::{AppliedCameraControl, CameraControl, control_event_json, value_json};
+pub use values::standard_key;
+use values::{MODES_FIRST, STANDARD, backend_value, standard_value};
+
 /// How long one connection attempt to the camera service, or one control request, may take.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The API's names for Styx's standard controls (in Styx's units), and how values are sent.
-const STANDARD: [(&str, StandardControl); 12] = [
-    ("exposure_us", StandardControl::ExposureUs),
-    ("gain", StandardControl::Gain),
-    ("ae", StandardControl::AeEnable),
-    ("ev", StandardControl::ExposureValue),
-    ("fps", StandardControl::FrameRate),
-    ("awb", StandardControl::AwbEnable),
-    ("colour_temperature", StandardControl::ColourTemperature),
-    ("red_gain", StandardControl::RedGain),
-    ("blue_gain", StandardControl::BlueGain),
-    ("af_mode", StandardControl::AfMode),
-    ("af_trigger", StandardControl::AfTrigger),
-    ("lens_position", StandardControl::LensPosition),
-];
-
-/// Modes are applied before the values they gate (`{"ae": false, "exposure_us": 8000}`).
-const MODES_FIRST: [StandardControl; 3] = [StandardControl::AeEnable, StandardControl::AwbEnable, StandardControl::AfMode];
-
 /// Control kinds a value can be stored and reset for.
 const SCALAR_KINDS: [ControlKind; 6] = [ControlKind::Bool, ControlKind::Int, ControlKind::Uint, ControlKind::Float, ControlKind::Menu, ControlKind::IntMenu];
-
-pub fn standard_key(control: StandardControl) -> &'static str {
-    STANDARD.iter().find(|(_, standard)| *standard == control).map_or("", |(key, _)| key)
-}
-
-/// A camera control as the API lists it.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct CameraControl {
-    /// The backend's control id (Styx's `SERVICE_FRAME_RATE` for a frame rate the service sets
-    /// by restarting the capture).
-    pub id: u32,
-    pub name: String,
-    /// `bool`, `int`, `uint`, `float`, `menu`, `int_menu`, `rectangle`, `none` or `unknown`.
-    pub kind: &'static str,
-    pub read_only: bool,
-    pub min: serde_json::Value,
-    pub max: serde_json::Value,
-    pub default: serde_json::Value,
-    pub step: Option<serde_json::Value>,
-    pub menu: Option<Vec<String>>,
-    /// The value now; `null` when it cannot be read.
-    pub current: Option<serde_json::Value>,
-    /// The standard control it answers (`exposure_us`, `gain`, `ae`, ...), in Styx's units.
-    pub standard: Option<&'static str>,
-    /// The camera service lets the API change it.
-    pub writable: bool,
-    /// A value set through the API is stored for it and re-applied after a reboot.
-    pub persisted: bool,
-}
-
-impl CameraControl {
-    fn new(descriptor: &ControlDescriptor, persisted: &BTreeMap<String, serde_json::Value>) -> Self {
-        let meta = &descriptor.meta;
-        let standard = descriptor.standard.map(standard_key);
-        Self {
-            id: meta.id.0,
-            name: meta.name.clone(),
-            kind: kind_name(meta.kind),
-            read_only: meta.access == Access::ReadOnly,
-            min: value_json(&meta.min),
-            max: value_json(&meta.max),
-            default: value_json(&meta.default),
-            step: meta.step.as_ref().map(value_json),
-            menu: meta.menu.clone(),
-            current: descriptor.current.as_ref().map(value_json),
-            persisted: persisted.contains_key(meta.name.as_str()) || standard.is_some_and(|key| persisted.contains_key(key)),
-            standard,
-            writable: descriptor.writable,
-        }
-    }
-}
-
-/// What a control change did.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct AppliedCameraControl {
-    /// The key it was asked for under.
-    pub control: String,
-    pub id: u32,
-    pub requested: serde_json::Value,
-    /// The value in effect now.
-    pub value: serde_json::Value,
-    /// The value asked for was out of range (or between steps) and `value` is the clamped one.
-    pub clamped: bool,
-    /// The camera is not streaming: the value applies when it starts.
-    pub deferred: bool,
-    /// The capture was restarted for every client to apply it (a frame rate).
-    pub restarted: bool,
-    /// Frame-exact cameras: the sensor sequence of the first frame using it.
-    pub frame: Option<u64>,
-}
-
-impl AppliedCameraControl {
-    fn new(control: String, applied: &AppliedControl) -> Self {
-        Self {
-            control,
-            id: applied.id.0,
-            requested: value_json(&applied.requested),
-            value: value_json(&applied.value),
-            clamped: applied.clamped,
-            deferred: applied.deferred,
-            restarted: applied.restarted,
-            frame: applied.frame,
-        }
-    }
-}
 
 /// One control change to make: what it was asked for as, the target and the value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlChange {
     pub key: String,
     pub target: ControlTarget,
+    /// The value to set; for a `forget` change, the control's default.
     pub value: ControlValue,
+    /// The standard control it answers (modes are applied first).
+    pub standard: Option<StandardControl>,
     /// Where its value is stored: the standard key, or the control's listed name; `None` for an
     /// action (an AF trigger), which is not kept.
     pub persist_as: Option<String>,
+    /// A `null` in the request: the control goes to its default, and the value stored under
+    /// `persist_as` is forgotten instead of stored.
+    pub forget: bool,
 }
 
 /// The camera clients the API keeps, one per camera.
@@ -178,6 +90,15 @@ pub struct CameraClient {
     online: Arc<AtomicBool>,
     /// Follows the camera's control changes and re-applies the stored values on (re)connect.
     follower: Option<JoinHandle<()>>,
+}
+
+/// What a batch of changes did: each applied in order, the values to store and the keys to
+/// forget for them, and the refusal that stopped the batch.
+struct Batch {
+    applied: Vec<AppliedCameraControl>,
+    stored: Vec<(String, serde_json::Value)>,
+    forgotten: Vec<String>,
+    refused: Option<ApiError>,
 }
 
 impl Drop for CameraClient {
@@ -247,13 +168,14 @@ impl CameraClient {
     }
 
     /// Resolve `{"key": value, ...}` into control changes, modes first: standard keys
-    /// (`exposure_us`, `ae`, ...), else a control's listed `name` or numeric `id`. Nothing is
-    /// applied when any key or value is unusable.
+    /// (`exposure_us`, `ae`, ...), else a control's listed `name` or numeric `id`. A `null` value
+    /// forgets the control (it goes to its default). Nothing is applied when any key or value is
+    /// unusable.
     pub async fn resolve(&self, request: &serde_json::Map<String, serde_json::Value>) -> ApiResult<Vec<ControlChange>> {
         if request.is_empty() {
             return Err(ApiError::bad_request("name at least one control: {\"exposure_us\": 8000, ...}"));
         }
-        let mut listed: Option<Vec<CameraControl>> = None;
+        let mut listed: Option<Vec<ControlDescriptor>> = None;
         let mut changes = Vec::with_capacity(request.len());
         for (key, value) in request {
             changes.push(self.resolve_one(key, value, &mut listed).await?);
@@ -262,36 +184,60 @@ impl CameraClient {
         Ok(changes)
     }
 
-    /// One `key: value`; `listed` caches the camera's controls for keys that are not standard.
-    async fn resolve_one(&self, key: &str, value: &serde_json::Value, listed: &mut Option<Vec<CameraControl>>) -> ApiResult<ControlChange> {
-        if let Some((_, standard)) = STANDARD.iter().find(|(name, _)| *name == key) {
-            let persist_as = (*standard != StandardControl::AfTrigger).then(|| key.to_string());
-            return Ok(ControlChange { key: key.to_string(), target: ControlTarget::Standard(*standard), value: standard_value(*standard, value)?, persist_as });
+    /// One `key: value`; `listed` caches the camera's controls, listed once for the keys that
+    /// need them (every backend key, and a standard key being forgotten, for its default).
+    async fn resolve_one(&self, key: &str, value: &serde_json::Value, listed: &mut Option<Vec<ControlDescriptor>>) -> ApiResult<ControlChange> {
+        let standard = STANDARD.iter().find(|(name, _)| *name == key).map(|(_, standard)| *standard);
+        if let Some(standard) = standard
+            && !value.is_null()
+        {
+            let persist_as = (standard != StandardControl::AfTrigger).then(|| key.to_string());
+            return Ok(ControlChange { key: key.to_string(), target: ControlTarget::Standard(standard), value: standard_value(standard, value)?, standard: Some(standard), persist_as, forget: false });
         }
-        if listed.is_none() {
-            *listed = Some(self.controls_with(&BTreeMap::new()).await?);
+        let controls = self.listed_controls(listed).await?;
+        let control = find_control(key, standard, controls)?;
+        if value.is_null() {
+            if control.standard == Some(StandardControl::AfTrigger) {
+                return Err(ApiError::bad_request("af_trigger is an action: it has no value to forget"));
+            }
+            // Forgotten under the key it is stored by: the standard key, or the control's name.
+            let persist_as = if standard.is_some() { key.to_string() } else { control.meta.name.clone() };
+            return Ok(ControlChange {
+                key: key.to_string(),
+                target: ControlTarget::Id(control.meta.id),
+                value: control.meta.default.clone(),
+                standard: control.standard,
+                persist_as: Some(persist_as),
+                forget: true,
+            });
         }
-        let controls = listed.as_deref().unwrap_or_default();
-        let control = controls
-            .iter()
-            .find(|control| control.name == key || control.id.to_string() == key || format!("{:#x}", control.id) == key.to_ascii_lowercase())
-            .ok_or_else(|| ApiError::bad_request(format!("the camera has no control {key:?} (GET the settings for its controls)")))?;
         // Kept under its own name: the value is in the backend's units, not the standard ones.
-        let persist_as = (control.standard != Some("af_trigger")).then(|| control.name.clone());
-        Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(ControlId(control.id)), value: backend_value(key, value)?, persist_as })
+        let persist_as = (control.standard != Some(StandardControl::AfTrigger)).then(|| control.meta.name.clone());
+        Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(control.meta.id), value: backend_value(key, value)?, standard: control.standard, persist_as, forget: false })
+    }
+
+    /// The camera's controls as the service lists them, listed once per `listed` cache.
+    async fn listed_controls<'a>(&self, listed: &'a mut Option<Vec<ControlDescriptor>>) -> ApiResult<&'a [ControlDescriptor]> {
+        if listed.is_none() {
+            *listed = Some(self.client.controls_async().await.map_err(|error| control_error("", &[], error))?);
+        }
+        Ok(listed.as_deref().unwrap_or_default())
     }
 
     /// Apply `changes` in order and store the values now in effect, so they are applied again
-    /// after a reboot. A refusal stops there (the changes before it stay applied and stored,
-    /// and were announced as events).
+    /// after a reboot; a forgotten control's stored value is removed. A refusal stops there (the
+    /// changes before it stay applied, stored or forgotten, and were announced as events).
     pub async fn apply(&self, changes: Vec<ControlChange>) -> ApiResult<Vec<AppliedCameraControl>> {
-        let (applied, stored, refused) = self.set_all(changes).await;
-        if !stored.is_empty() {
-            self.store.persist_camera_settings(&self.camera_id, stored).await?;
+        let batch = self.set_all(changes).await;
+        if !batch.stored.is_empty() {
+            self.store.persist_camera_settings(&self.camera_id, batch.stored).await?;
         }
-        match refused {
+        if !batch.forgotten.is_empty() {
+            self.store.forget_camera_settings(&self.camera_id, batch.forgotten).await?;
+        }
+        match batch.refused {
             Some(error) => Err(error),
-            None => Ok(applied),
+            None => Ok(batch.applied),
         }
     }
 
@@ -299,21 +245,23 @@ impl CameraClient {
     pub async fn reset(&self) -> ApiResult<Vec<AppliedCameraControl>> {
         self.store.clear_camera_settings(&self.camera_id).await?;
         let descriptors = self.client.controls_async().await.map_err(|error| control_error("", &[], error))?;
-        let mut defaults =
-            descriptors.iter().filter(|descriptor| descriptor.writable && descriptor.standard != Some(StandardControl::AfTrigger) && SCALAR_KINDS.contains(&descriptor.meta.kind)).collect::<Vec<_>>();
-        // Modes first; by id, as defaults are in the backend's units.
-        defaults.sort_by_key(|descriptor| !descriptor.standard.is_some_and(|standard| MODES_FIRST.contains(&standard)));
-        let changes = defaults
-            .into_iter()
-            .map(|descriptor| {
-                let key = descriptor.standard.map_or_else(|| descriptor.meta.name.clone(), |standard| standard_key(standard).to_string());
-                ControlChange { key, target: ControlTarget::Id(descriptor.meta.id), value: descriptor.meta.default.clone(), persist_as: None }
+        let mut changes = descriptors
+            .iter()
+            .filter(|descriptor| descriptor.writable && descriptor.standard != Some(StandardControl::AfTrigger) && SCALAR_KINDS.contains(&descriptor.meta.kind))
+            .map(|descriptor| ControlChange {
+                key: descriptor.standard.map_or_else(|| descriptor.meta.name.clone(), |standard| standard_key(standard).to_string()),
+                target: ControlTarget::Id(descriptor.meta.id),
+                value: descriptor.meta.default.clone(),
+                standard: descriptor.standard,
+                persist_as: None,
+                forget: false,
             })
             .collect::<Vec<_>>();
-        let (applied, _, refused) = self.set_all(changes).await;
-        match refused {
+        sort_modes_first(&mut changes);
+        let batch = self.set_all(changes).await;
+        match batch.refused {
             Some(error) => Err(error),
-            None => Ok(applied),
+            None => Ok(batch.applied),
         }
     }
 
@@ -351,34 +299,45 @@ impl CameraClient {
         (applied, errors)
     }
 
-    /// Apply `changes` in order until one is refused: what was applied, the values to store for
-    /// it, and the refusal.
-    async fn set_all(&self, changes: Vec<ControlChange>) -> (Vec<AppliedCameraControl>, Vec<(String, serde_json::Value)>, Option<ApiError>) {
-        let mut applied = Vec::with_capacity(changes.len());
-        let mut stored = Vec::with_capacity(changes.len());
+    /// Apply `changes` in order until one is refused.
+    async fn set_all(&self, changes: Vec<ControlChange>) -> Batch {
+        let mut batch = Batch { applied: Vec::with_capacity(changes.len()), stored: Vec::with_capacity(changes.len()), forgotten: Vec::new(), refused: None };
         for change in changes {
-            // The value as asked for, in the units it was asked in: applied again, it is
-            // clamped again the same way.
-            let asked = value_json(&change.value);
-            match self.client.set_control_async(change.target, change.value).await {
+            let ControlChange { key, target, value, persist_as, forget, .. } = change;
+            // The value as asked for, in the units it was asked in: applied again, it is clamped
+            // again the same way.
+            let asked = value_json(&value);
+            match self.client.set_control_async(target, value).await {
                 Ok(result) => {
-                    if let Some(key) = change.persist_as {
-                        stored.push((key, asked));
+                    match (forget, persist_as) {
+                        (true, Some(stored_as)) => batch.forgotten.push(stored_as),
+                        (false, Some(stored_as)) => batch.stored.push((stored_as, asked)),
+                        _ => {}
                     }
-                    applied.push(AppliedCameraControl::new(change.key, &result));
+                    batch.applied.push(AppliedCameraControl::new(key, &result));
                 }
                 Err(error) => {
-                    let refused = control_error(&change.key, &applied, error);
-                    return (applied, stored, Some(refused));
+                    batch.refused = Some(control_error(&key, &batch.applied, error));
+                    break;
                 }
             }
         }
-        (applied, stored, None)
+        batch
     }
 }
 
+/// The listed control a request key names: the standard control it answers for a standard key,
+/// else the one with that listed name, numeric id or hex id.
+fn find_control<'a>(key: &str, standard: Option<StandardControl>, controls: &'a [ControlDescriptor]) -> ApiResult<&'a ControlDescriptor> {
+    let found = match standard {
+        Some(standard) => controls.iter().find(|control| control.standard == Some(standard)),
+        None => controls.iter().find(|control| control.meta.name == key || control.meta.id.0.to_string() == key || format!("{:#x}", control.meta.id.0) == key.to_ascii_lowercase()),
+    };
+    found.ok_or_else(|| ApiError::bad_request(format!("the camera has no control {key:?} (GET the settings for its controls)")))
+}
+
 fn sort_modes_first(changes: &mut [ControlChange]) {
-    changes.sort_by_key(|change| !matches!(change.target, ControlTarget::Standard(standard) if MODES_FIRST.contains(&standard)));
+    changes.sort_by_key(|change| !change.standard.is_some_and(|standard| MODES_FIRST.contains(&standard)));
 }
 
 fn control_error(key: &str, applied: &[AppliedCameraControl], error: IpcError) -> ApiError {
@@ -424,310 +383,5 @@ async fn follow(camera: CameraClient, hub: Arc<EventHub>) {
                 return;
             }
         }
-    }
-}
-
-pub fn control_event_json(camera_id: &str, event: &ControlEvent) -> serde_json::Value {
-    serde_json::json!({
-        "id": camera_id,
-        "change": "control",
-        "control": {
-            "id": event.id.0,
-            "standard": event.standard.map(standard_key),
-            "frame_rate_restart": event.id == SERVICE_FRAME_RATE,
-            "value": value_json(&event.value),
-            "frame": event.frame,
-            "by": event.by,
-        },
-    })
-}
-
-fn kind_name(kind: ControlKind) -> &'static str {
-    match kind {
-        ControlKind::None => "none",
-        ControlKind::Bool => "bool",
-        ControlKind::Rectangle => "rectangle",
-        ControlKind::Int => "int",
-        ControlKind::Uint => "uint",
-        ControlKind::Float => "float",
-        ControlKind::Menu => "menu",
-        ControlKind::IntMenu => "int_menu",
-        ControlKind::Unknown => "unknown",
-    }
-}
-
-pub fn value_json(value: &ControlValue) -> serde_json::Value {
-    let rect = |r: &styx::prelude::ControlRect| serde_json::json!({ "x": r.x, "y": r.y, "width": r.width, "height": r.height });
-    match value {
-        ControlValue::None => serde_json::Value::Null,
-        ControlValue::Bool(value) => serde_json::json!(value),
-        ControlValue::Int(value) => serde_json::json!(value),
-        ControlValue::Uint(value) => serde_json::json!(value),
-        // Through the shortest decimal of the f32, so 0.1 stays 0.1 rather than 0.10000000149.
-        ControlValue::Float(value) => value.to_string().parse::<f64>().map_or(serde_json::Value::Null, |value| serde_json::json!(value)),
-        ControlValue::Rect(r) => rect(r),
-        ControlValue::Rects(rects) => rects.iter().map(rect).collect(),
-    }
-}
-
-fn number(key: &str, value: &serde_json::Value) -> ApiResult<f64> {
-    value.as_f64().filter(|value| value.is_finite()).ok_or_else(|| ApiError::bad_request(format!("{key} takes a number")))
-}
-
-/// A standard control's value in its type: exposure and colour temperature as whole numbers,
-/// gains, EV, fps and lens position as numbers, AE and AWB as booleans, AF mode
-/// (`manual`/`auto`/`continuous` or 0-2) and AF trigger (`start`/`cancel` or 0/1).
-pub fn standard_value(control: StandardControl, value: &serde_json::Value) -> ApiResult<ControlValue> {
-    let key = standard_key(control);
-    let choice = |names: &[&str]| -> ApiResult<ControlValue> {
-        if let Some(name) = value.as_str() {
-            return names.iter().position(|n| *n == name).map(|index| ControlValue::Int(index as i32)).ok_or_else(|| ApiError::bad_request(format!("{key} is one of {}", names.join(", "))));
-        }
-        let index = number(key, value)?;
-        if index.fract() == 0.0 && (0.0..names.len() as f64).contains(&index) {
-            Ok(ControlValue::Int(index as i32))
-        } else {
-            Err(ApiError::bad_request(format!("{key} is one of {}", names.join(", "))))
-        }
-    };
-    Ok(match control {
-        StandardControl::AeEnable | StandardControl::AwbEnable => ControlValue::Bool(value.as_bool().ok_or_else(|| ApiError::bad_request(format!("{key} takes true or false")))?),
-        StandardControl::ExposureUs | StandardControl::ColourTemperature => {
-            let n = number(key, value)?;
-            if n < 0.0 || n > f64::from(u32::MAX) {
-                return Err(ApiError::bad_request(format!("{key} takes a whole number from 0")));
-            }
-            ControlValue::Uint(n.round() as u32)
-        }
-        StandardControl::AfMode => choice(&["manual", "auto", "continuous"])?,
-        StandardControl::AfTrigger => choice(&["start", "cancel"])?,
-        StandardControl::Gain | StandardControl::ExposureValue | StandardControl::FrameRate | StandardControl::RedGain | StandardControl::BlueGain | StandardControl::LensPosition => {
-            ControlValue::Float(number(key, value)? as f32)
-        }
-    })
-}
-
-/// A backend control's value: booleans as booleans, whole numbers as integers, others as floats
-/// (the camera service takes numbers of any type for the control's type and clamps them).
-pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlValue> {
-    if let Some(flag) = value.as_bool() {
-        return Ok(ControlValue::Bool(flag));
-    }
-    if let Some(int) = value.as_i64() {
-        return Ok(match i32::try_from(int) {
-            Ok(int) => ControlValue::Int(int),
-            Err(_) => ControlValue::Uint(u32::try_from(int).map_err(|_| ApiError::bad_request(format!("{key} is out of range")))?),
-        });
-    }
-    Ok(ControlValue::Float(number(key, value)? as f32))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn standard_values_take_their_types() {
-        assert_eq!(standard_value(StandardControl::ExposureUs, &serde_json::json!(8000)).unwrap(), ControlValue::Uint(8000));
-        assert_eq!(standard_value(StandardControl::Gain, &serde_json::json!(2.5)).unwrap(), ControlValue::Float(2.5));
-        assert_eq!(standard_value(StandardControl::AeEnable, &serde_json::json!(false)).unwrap(), ControlValue::Bool(false));
-        assert_eq!(standard_value(StandardControl::AfMode, &serde_json::json!("continuous")).unwrap(), ControlValue::Int(2));
-        assert_eq!(standard_value(StandardControl::AfTrigger, &serde_json::json!(1)).unwrap(), ControlValue::Int(1));
-        assert!(standard_value(StandardControl::ExposureUs, &serde_json::json!(-1)).is_err());
-        assert!(standard_value(StandardControl::AeEnable, &serde_json::json!(1)).is_err());
-        assert!(standard_value(StandardControl::AfMode, &serde_json::json!("sideways")).is_err());
-        assert_eq!(backend_value("sharpness", &serde_json::json!(4)).unwrap(), ControlValue::Int(4));
-        assert_eq!(backend_value("sharpness", &serde_json::json!(4.5)).unwrap(), ControlValue::Float(4.5));
-        assert_eq!(value_json(&ControlValue::Float(0.1)), serde_json::json!(0.1));
-    }
-
-    /// A virtual camera with exposure, gain, AE, sharpness and a read-only temperature, served by
-    /// a Styx camera service like helios-peripherals serves the OV9782.
-    fn camera_service(socket: &Path) -> styx::ipc::CameraServiceHandle {
-        use styx::prelude::{ColorSpace, ControlMeta, ControlMetadata, FourCc, Interval, MediaFormat, Mode, Resolution};
-        let control = |id: u32, name: &str, kind: ControlKind, min: ControlValue, max: ControlValue| ControlMeta {
-            id: ControlId(id),
-            name: name.into(),
-            kind,
-            access: Access::ReadWrite,
-            default: min.clone(),
-            min,
-            max,
-            step: None,
-            menu: None,
-            metadata: ControlMetadata::default(),
-        };
-        let mut temperature = control(0x200, "sensor_temperature", ControlKind::Int, ControlValue::Int(40), ControlValue::Int(40));
-        temperature.access = Access::ReadOnly;
-        let mode = Mode::with_interval(MediaFormat::new(FourCc::GREY, Resolution::new(320, 200).expect("resolution"), ColorSpace::Srgb), Interval::from_fps(30).expect("interval"));
-        let device = styx::capture_api::make_virtual_device_with_controls(
-            "cam",
-            [mode],
-            vec![
-                control(0xF400_0001, "exposure_time_us", ControlKind::Uint, ControlValue::Uint(10), ControlValue::Uint(33_000)),
-                control(0xF400_0002, "gain", ControlKind::Float, ControlValue::Float(1.0), ControlValue::Float(16.0)),
-                control(0xF400_0005, "ae_enable", ControlKind::Bool, ControlValue::Bool(false), ControlValue::Bool(true)),
-                control(0x100, "sharpness", ControlKind::Int, ControlValue::Int(0), ControlValue::Int(10)),
-                temperature,
-            ],
-        );
-        styx::ipc::CameraService::new(device).keep_streaming().serve(socket).expect("serve camera")
-    }
-
-    fn controls_for(dir: &Path, hub: &Arc<EventHub>) -> CameraControls {
-        CameraControls::new(Arc::new(Store::new(dir.join("state"))), hub.clone())
-    }
-
-    fn current(controls: &[CameraControl], name: &str) -> Option<serde_json::Value> {
-        controls.iter().find(|control| control.name == name).and_then(|control| control.current.clone())
-    }
-
-    /// Wait until the camera's controls read `exposure_time_us` = `exposure` and `sharpness` =
-    /// `sharpness` (re-applied by the follower once it reconnected).
-    async fn wait_for_values(client: &CameraClient, exposure: u32, sharpness: i32) {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if let Ok(controls) = client.controls().await
-                    && current(&controls, "exposure_time_us") == Some(serde_json::json!(exposure))
-                    && current(&controls, "sharpness") == Some(serde_json::json!(sharpness))
-                {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("exposure {exposure} and sharpness {sharpness} were not applied"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn controls_are_listed_applied_and_announced() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let socket = dir.path().join("cam.sock");
-        let service = camera_service(&socket);
-        let hub = Arc::new(EventHub::new(16));
-        let mut events = hub.subscribe();
-        let cameras = controls_for(dir.path(), &hub);
-        let client = cameras.client("cam0", &socket).await.expect("camera client");
-        assert!(Arc::ptr_eq(&client, &cameras.client("cam0", &socket).await.expect("again")), "one client per camera");
-
-        let controls = client.controls().await.expect("controls");
-        let exposure = controls.iter().find(|control| control.standard == Some("exposure_us")).expect("exposure listed");
-        assert!(exposure.writable && exposure.kind == "uint" && exposure.max == serde_json::json!(33_000) && !exposure.persisted, "{exposure:?}");
-        assert!(controls.iter().any(|control| control.name == "sensor_temperature" && control.read_only));
-
-        // Modes first; out-of-range values are clamped; backend controls by name.
-        let request = serde_json::json!({ "exposure_us": 100_000, "sharpness": 4, "ae": false });
-        let changes = client.resolve(request.as_object().expect("object")).await.expect("resolve");
-        assert_eq!(changes[0].key, "ae");
-        let applied = client.apply(changes).await.expect("apply");
-        let exposure = applied.iter().find(|change| change.control == "exposure_us").expect("exposure applied");
-        assert!(exposure.clamped && exposure.value == serde_json::json!(33_000), "{exposure:?}");
-        assert!(applied.iter().any(|change| change.control == "sharpness" && change.value == serde_json::json!(4)));
-
-        // Every change reaches the SSE `camera` events.
-        let event = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let event = events.recv().await.expect("event");
-                if event.data["control"]["standard"] == "exposure_us" {
-                    return event;
-                }
-            }
-        })
-        .await
-        .expect("exposure event");
-        assert_eq!(event.kind, "camera");
-        assert_eq!(event.data["id"], "cam0");
-        assert_eq!(event.data["change"], "control");
-        assert_eq!(event.data["control"]["value"], 33_000);
-
-        // Unknown keys apply nothing; read-only controls are refused.
-        let unknown = client.resolve(serde_json::json!({ "gain": 2, "nope": 1 }).as_object().expect("object")).await.expect_err("unknown control");
-        assert_eq!(unknown.code, crate::error::ErrorCode::BadRequest);
-        let changes = client.resolve(serde_json::json!({ "sensor_temperature": 41 }).as_object().expect("object")).await.expect("resolve");
-        let refused = client.apply(changes).await.expect_err("read only");
-        assert_eq!(refused.code, crate::error::ErrorCode::Unprocessable, "{refused:?}");
-
-        // A control client: never one of the camera's frame clients, so it never joined (or
-        // changed) the capture plan and holds no buffers.
-        assert_eq!(service.stats().clients, 0);
-    }
-
-    /// Values set through the API are stored and applied again when the camera service comes
-    /// back (a restart, a reboot); a reset puts the defaults back and forgets them.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn settings_persist_and_are_reapplied_when_the_camera_service_returns() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let socket = dir.path().join("cam.sock");
-        let hub = Arc::new(EventHub::new(64));
-        let service = camera_service(&socket);
-        let cameras = controls_for(dir.path(), &hub);
-        let client = cameras.client("cam0", &socket).await.expect("camera client");
-
-        let request = serde_json::json!({ "exposure_us": 5000, "sharpness": 4 });
-        let changes = client.resolve(request.as_object().expect("object")).await.expect("resolve");
-        client.apply(changes).await.expect("apply");
-        let stored = client.persisted().await.expect("stored");
-        assert_eq!(stored, BTreeMap::from([("exposure_us".to_string(), serde_json::json!(5000)), ("sharpness".to_string(), serde_json::json!(4))]));
-        // Actions are not stored.
-        let trigger = client.resolve(serde_json::json!({ "af_trigger": "start" }).as_object().expect("object")).await.expect("resolve");
-        assert_eq!(trigger[0].persist_as, None);
-        let controls = client.controls().await.expect("controls");
-        assert!(controls.iter().any(|control| control.name == "exposure_time_us" && control.persisted));
-        assert!(controls.iter().any(|control| control.name == "sharpness" && control.persisted));
-        assert!(controls.iter().any(|control| control.name == "gain" && !control.persisted));
-
-        // The follower handled the first Connected event.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !client.online() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("camera online");
-
-        // The camera service restarts with its defaults; the API's client sees the connection go
-        // (offline), reconnects (online) and applies the stored values, in that order.
-        let mut events = hub.subscribe();
-        drop(service);
-        let _ = std::fs::remove_file(&socket);
-        let service = camera_service(&socket);
-        wait_for_values(&client, 5000, 4).await;
-        let (changes, restored) = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut changes = Vec::new();
-            loop {
-                let event = events.recv().await.expect("event");
-                let change = event.data["change"].as_str().unwrap_or_default().to_string();
-                if ["offline", "online", "restored"].contains(&change.as_str()) {
-                    changes.push(change);
-                }
-                if event.data["change"] == "restored" {
-                    return (changes, event);
-                }
-            }
-        })
-        .await
-        .expect("restored event");
-        assert_eq!(changes, ["offline", "online", "restored"]);
-        assert_eq!(restored.data["id"], "cam0");
-        assert!(client.online());
-
-        // After a reboot: a new API (a new client, the same state directory) and a new service.
-        drop(cameras);
-        drop(client);
-        drop(service);
-        let _ = std::fs::remove_file(&socket);
-        let _service = camera_service(&socket);
-        let cameras = controls_for(dir.path(), &hub);
-        let client = cameras.client("cam0", &socket).await.expect("camera client");
-        wait_for_values(&client, 5000, 4).await;
-
-        // Reset: defaults back, nothing stored.
-        client.reset().await.expect("reset");
-        assert!(client.persisted().await.expect("stored").is_empty());
-        let controls = client.controls().await.expect("controls");
-        assert_eq!(current(&controls, "exposure_time_us"), Some(serde_json::json!(10)));
-        assert_eq!(current(&controls, "sharpness"), Some(serde_json::json!(0)));
-        assert!(controls.iter().all(|control| !control.persisted));
     }
 }

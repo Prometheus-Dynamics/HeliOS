@@ -299,7 +299,8 @@ pub async fn get_settings(State(state): State<SharedState>, Path(id): Path<Strin
 }
 
 /// Change camera controls: `{"ae": false, "exposure_us": 8000, "gain": 4}` (standard keys, or
-/// a control's listed `name` or `id`). Modes go first; a refusal stops there.
+/// a control's listed `name` or `id`). Modes go first; a refusal stops there. A `null` value
+/// sets that control back to its default and forgets its stored value (the others are kept).
 pub async fn set_settings(State(state): State<SharedState>, Path(id): Path<String>, Json(request): Json<serde_json::Value>) -> ApiResult<Json<SettingsApplied>> {
     let serde_json::Value::Object(request) = request else {
         return Err(ApiError::bad_request("the body is an object of controls: {\"exposure_us\": 8000, ...}"));
