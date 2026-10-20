@@ -58,7 +58,7 @@ orion-nt4 = { workspace = true }
 # Camera list, live camera metrics, controls and previews from the Styx camera services (no
 # capture backends). `preview` + `codec-turbojpeg`: JPEG previews from YUV planes with
 # libjpeg-turbo (Styx docs/preview.md).
-styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde", "preview", "codec-turbojpeg", "replay-mcap", "replay-mcap-lz4", "file-backend"] }
+styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde", "preview", "codec-turbojpeg", "replay-mcap", "replay-mcap-lz4", "file-backend", "native"] }
 # Playback (`playback/`): a recording's metadata is read from its MCAP header, and a player's
 # calibration and mount come from it.
 mcap = { version = "0.25", default-features = false, features = ["lz4"] }

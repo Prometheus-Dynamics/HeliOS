@@ -17,6 +17,10 @@ use super::{
 };
 use crate::error::{ApiError, ApiResult};
 
+/// The built-in sensor description and tuning that process a raw recording's frames (the OV9782
+/// of the Raze camera).
+pub const ISP_SENSOR: &str = "ov9782";
+
 /// The socket file of player `token`, in the stream directory the engine reaches.
 pub fn socket_path(stream_dir: &Path, token: &str) -> PathBuf {
     stream_dir.join(format!("playback-{token}.styx.sock"))
@@ -41,7 +45,12 @@ pub fn device_for(resolved: &Resolved, options: StartOptions) -> ApiResult<Probe
             // Speed 0 replays unpaced (every frame as fast as the consumers take them); any other
             // speed starts realtime and is set through `replay_speed` once the player is open.
             let pacing = if options.speed == 0.0 { ReplayPacing::Unpaced } else { ReplayPacing::Realtime };
-            let config = ReplaySourceConfig::new(path).hold_at_end(true).timestamps(ReplayTimestamps::Rebased).loop_forever(options.looping).pacing(pacing);
+            let mut config = ReplaySourceConfig::new(path).hold_at_end(true).timestamps(ReplayTimestamps::Rebased).loop_forever(options.looping).pacing(pacing);
+            // Raw Bayer frames go through the software ISP as the camera would process them (the
+            // recorded exposure, gains and white balance; no AE or AWB), so the player offers NV12.
+            if resolved.raw {
+                config = config.soft_isp(ISP_SENSOR);
+            }
             let source = CaptureRequest::replay_source(config).map_err(|error| ApiError::unprocessable(format!("replay: {error}")))?;
             Ok(source.into_device())
         }

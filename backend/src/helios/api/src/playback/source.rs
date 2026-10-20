@@ -14,8 +14,6 @@ use crate::{
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png"];
 const RECORDING_EXTENSION: &str = "mcap";
-/// What a raw recording's player says it cannot do yet.
-pub const NOTE_RAW: &str = "raw recording: processed playback coming";
 /// What an image sequence's player says it cannot do yet.
 pub const NOTE_IMAGES: &str = "image sequence: plays at its frame rate; pause, seek and speed come with Styx's file backend controls";
 
@@ -38,7 +36,7 @@ pub struct Resolved {
     pub recording: Option<PathBuf>,
     /// The frames of an image sequence, in order.
     pub images: Vec<PathBuf>,
-    pub raw_only: bool,
+    pub raw: bool,
     pub note: Option<String>,
     /// The recording's start-time facts (default for an image sequence).
     pub facts: RecordingFacts,
@@ -82,7 +80,7 @@ fn resolve_path(roots: &Roots, path: &str) -> ApiResult<Resolved> {
 /// A recording file: its format (a raw recording is raw only) and its start-time facts.
 fn recording_file(file: &Path, label: String) -> ApiResult<Resolved> {
     let header = styx::replay::read_header(file).map_err(|error| ApiError::unprocessable(format!("{}: not a playable recording ({error})", file.display())))?;
-    let raw_only = header.format.code.is_bayer_raw();
+    let raw = header.format.code.is_bayer_raw();
     let facts = read_camera_facts(file)?;
     Ok(Resolved {
         kind: SourceKind::Recording,
@@ -90,8 +88,8 @@ fn recording_file(file: &Path, label: String) -> ApiResult<Resolved> {
         label,
         recording: Some(file.to_path_buf()),
         images: Vec::new(),
-        raw_only,
-        note: raw_only.then(|| NOTE_RAW.to_string()),
+        raw,
+        note: None,
         facts,
     })
 }
@@ -114,7 +112,7 @@ fn image_sequence(dir: &Path, label: String) -> ApiResult<Resolved> {
         label,
         recording: None,
         images,
-        raw_only: false,
+        raw: false,
         note: Some(NOTE_IMAGES.to_string()),
         facts: RecordingFacts::default(),
     })

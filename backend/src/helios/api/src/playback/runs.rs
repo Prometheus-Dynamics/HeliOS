@@ -76,7 +76,7 @@ mod tests {
             name: "Playback: rec-1".into(),
             source: PlaybackSource::Recording { recording: "rec-1".into() },
             kind: SourceKind::Recording,
-            raw_only: false,
+            raw: false,
             note: None,
             frames_endpoint: String::new(),
             speed: 1.0,

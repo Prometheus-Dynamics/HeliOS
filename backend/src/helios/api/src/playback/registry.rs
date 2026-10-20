@@ -133,7 +133,7 @@ fn view_of(resolved: &Resolved, token: &str, options: StartOptions, created_at_m
         name: format!("Playback: {}", resolved.label),
         source: resolved.source.clone(),
         kind: resolved.kind,
-        raw_only: resolved.raw_only,
+        raw: resolved.raw,
         note: resolved.note.clone(),
         frames_endpoint,
         speed: options.speed,

@@ -84,9 +84,9 @@ pub struct PlayerView {
     pub name: String,
     pub source: PlaybackSource,
     pub kind: SourceKind,
-    /// A raw recording replays as raw only: the pipelines get the raw frames (processed playback
-    /// waits for Styx's replay processing, `ReplaySourceConfig::process`).
-    pub raw_only: bool,
+    /// A raw Bayer recording: its frames are processed by the software ISP (`ov9782`) as the camera
+    /// would process them, so the player offers NV12 and pipelines bind to it like a live camera.
+    pub raw: bool,
     /// What the player cannot do yet, for the UI to show (`null` when nothing).
     pub note: Option<String>,
     /// The camera service's socket (`styx-frames+unix://...`).

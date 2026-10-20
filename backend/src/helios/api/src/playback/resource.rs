@@ -132,7 +132,7 @@ mod tests {
             name: "Playback: rec-1".into(),
             source,
             kind,
-            raw_only: false,
+            raw: false,
             note: None,
             frames_endpoint: "styx-frames+unix:///run/helios/streams/playback-1a2b3c4d.styx.sock".into(),
             speed: 1.0,
