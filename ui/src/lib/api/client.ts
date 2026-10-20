@@ -44,7 +44,6 @@ import type {
   PlayerView,
   PlaybackCreate,
   PlaybackRun,
-  RecordingListing,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
@@ -230,8 +229,8 @@ export const api = {
   nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
   setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
 
-  // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings.
-  recordings: () => request<RecordingListing>("GET", "/v1/recordings"),
+  // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings
+  // (the recordings it lists come from `recordings()` below).
   playbackPlayers: () => request<PlayerView[]>("GET", "/v1/playback"),
   openPlayback: (body: PlaybackCreate) => request<PlayerView>("POST", "/v1/playback", { body }),
   closePlayback: (id: string) => request<void>("DELETE", `/v1/playback/${enc(id)}`),

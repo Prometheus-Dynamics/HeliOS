@@ -690,35 +690,5 @@ export interface PlaybackRun {
   context: { calibration: RunContextFrom; mount: RunContextFrom };
 }
 
-export interface RecordingSummary {
-  session: string;
-  camera: string;
-  file: string;
-  index: number;
-  started_at_ms: number;
-  duration_ms: number;
-  bytes: number;
-  frames_written: number;
-  frames_dropped: number;
-  messages_written: number;
-  messages_dropped: number;
-  stop_reason: string | null;
-}
-
-/** One stored recording part (`GET /v1/recordings`, `stored`). */
-export interface StoredRecording {
-  id: string;
-  file: string;
-  bytes: number;
-  modified_at_ms: number;
-  /** Absent for a part that did not finish (power lost). */
-  summary: RecordingSummary | null;
-}
-
-/** `GET /v1/recordings`: the active recording (if any) and the stored parts, newest first. */
-export interface RecordingListing {
-  active: unknown | null;
-  stored: StoredRecording[];
-  storage: { dir: string; free_bytes: number | null; reserve_bytes: number } | null;
-  storage_error: string | null;
-}
+// Recordings (`GET /v1/recordings`) are typed in recording-types.ts; playback lists them too.
+export type { RecordingListing, StoredRecording } from "./recording-types";
