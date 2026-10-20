@@ -350,10 +350,10 @@ async fn work(state: SharedState, mut jobs: mpsc::UnboundedReceiver<Job>) {
                 }
             }
             Job::Command(Command::Record(false)) => {
-                if let Some(status) = state.recorder.status().filter(|status| status.state.is_active()) {
-                    if let Err(error) = recordings::stop_recording(&state, &status.id).await {
-                        warn!(error = %error.message, "recording over NetworkTables not stopped");
-                    }
+                if let Some(status) = state.recorder.status().filter(|status| status.state.is_active())
+                    && let Err(error) = recordings::stop_recording(&state, &status.id).await
+                {
+                    warn!(error = %error.message, "recording over NetworkTables not stopped");
                 }
             }
             Job::Command(Command::CaptureLast) => match recordings::capture_clip(&state, None, None).await {

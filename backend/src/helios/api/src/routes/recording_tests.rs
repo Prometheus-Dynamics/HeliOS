@@ -218,4 +218,3 @@ async fn an_eidos_export_needs_a_stored_readable_recording() {
     let (status, _) = call(&state, "POST", "/v1/recordings/..%2Fsecret/export/eidos", None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
-

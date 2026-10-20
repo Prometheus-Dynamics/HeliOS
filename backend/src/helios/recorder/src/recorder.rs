@@ -184,17 +184,20 @@ impl Recorder {
     /// whose settings changed restart, and failed ones are tried again. Opening a camera waits for
     /// its camera service (a missing one fails at once). Returns the status of each wanted ring.
     pub fn sync_rings(&self, wanted: &[RingRequest]) -> Vec<RingStatus> {
-        let mut rings = self.rings_lock();
-        rings.retain(|camera, _| wanted.iter().any(|request| &request.camera_id == camera));
-        for request in wanted {
-            if rings.get(&request.camera_id).is_some_and(|ring| ring.is_running() && ring.matches(&request.settings)) {
-                continue;
-            }
-            rings.remove(&request.camera_id);
+        // The lock is held for the map only: opening a camera can take seconds, and the listing
+        // and the clips must not wait for it.
+        let missing: Vec<&RingRequest> = {
+            let mut rings = self.rings_lock();
+            rings.retain(|camera, _| wanted.iter().any(|request| &request.camera_id == camera));
+            wanted.iter().filter(|request| !rings.get(&request.camera_id).is_some_and(|ring| ring.is_running() && ring.matches(&request.settings))).collect()
+        };
+        for request in missing {
             let settings = &request.settings;
             let handle = start_ring(request).unwrap_or_else(|error| RingHandle::failed(settings.capture_last_seconds, settings.frames, settings.max_fps, error.to_string()));
-            rings.insert(request.camera_id.clone(), handle);
+            let replaced = self.rings_lock().insert(request.camera_id.clone(), handle);
+            drop(replaced);
         }
+        let rings = self.rings_lock();
         wanted.iter().filter_map(|request| rings.get(&request.camera_id).map(|ring| ring.status(&request.camera_id))).collect()
     }
 
