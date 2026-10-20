@@ -458,8 +458,15 @@ impl TickRecorder {
                     state.metrics.record(telemetry, now);
                 }
                 Err(error) => {
+                    // Logged once per run of failures (the first after a good tick): every tick
+                    // of a failing graph would flood the journal.
+                    if state.stats.last_error.is_none() {
+                        tracing::warn!(pipeline = %self.nt4.pipeline, failed = state.stats.ticks_failed + 1, %error, "graph tick failed");
+                    }
                     state.stats.ticks_failed += 1;
-                    state.stats.last_error = Some(format!("graph tick failed: {error}"));
+                    let message = format!("graph tick failed: {error}");
+                    state.stats.last_failure = Some(message.clone());
+                    state.stats.last_error = Some(message);
                 }
             }
             if let Some(report) = frame_overhead {

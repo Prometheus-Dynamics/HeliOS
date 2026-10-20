@@ -33,6 +33,8 @@ pub(crate) struct DriverStats {
     pub last_frame_size: Option<(u32, u32)>,
     pub source: FrameSourceStatus,
     pub last_error: Option<String>,
+    /// The latest failed tick's error, kept after the ticks recover (`last_error` clears).
+    pub last_failure: Option<String>,
     /// Wall-clock time of the last change, used as the published records' observed time so
     /// unchanged stats do not churn Orion state.
     pub updated_at_ms: u64,
@@ -53,6 +55,7 @@ impl DriverStats {
             "source_reconnects": self.source.reconnects,
             "source_plan": self.source.plan,
             "last_error": self.last_error,
+            "last_failure": self.last_failure,
         })
     }
 }
