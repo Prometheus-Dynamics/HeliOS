@@ -91,7 +91,8 @@ export function trackFill(track: Pick<FeatureTrack, "status" | "age">): string {
   return `rgba(34, 211, 238, ${(0.9 - 0.4 * settled).toFixed(2)})`;
 }
 
-/** The summary chip's text: "12 tracks · 9 tracked · 3 new · 1 lost". */
-export function featureSummaryText(summary: FeatureTracks["summary"]): string {
+/** The summary chip's text: "12 tracks · 9 tracked · 3 new · 1 lost" (`short`, for a small feed: "12 · 3 new · 1 lost"). */
+export function featureSummaryText(summary: FeatureTracks["summary"], short = false): string {
+  if (short) return `${summary.count} · ${summary.new} new · ${summary.lost} lost`;
   return `${summary.count} tracks · ${summary.tracked} tracked · ${summary.new} new · ${summary.lost} lost`;
 }

@@ -223,7 +223,7 @@
       </div>
     {/if}
     {#if features && featureView}
-      <span class="hud fe mono">{featureSummaryText(features.tracks.summary)}</span>
+      <span class="hud fe mono">{featureSummaryText(features.tracks.summary, compact)}</span>
     {/if}
     {#if overlays.histogram && histPath && !compact}
       <svg class="hist" viewBox="0 0 128 40" preserveAspectRatio="none" aria-label="Brightness histogram">
@@ -369,6 +369,10 @@
   .fe {
     top: 30px;
     left: 6px;
+    max-width: calc(100% - 12px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: #a5f3fc;
   }
   .mono {
