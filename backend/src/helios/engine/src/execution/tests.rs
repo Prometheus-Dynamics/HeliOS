@@ -1052,6 +1052,9 @@ fn multi_tag_pose_gives_the_camera_and_robot_in_the_reference_frame() {
     assert_eq!(topics.tag_count, 1);
     let pose = topics.pose.expect("robot pose");
     assert!((pose.translation[0] - rx).abs() < 1e-9 && (pose.translation[2] - rz).abs() < 1e-9, "{pose:?}");
+    // Eidos's covariance gives the WPILib std devs: positive and finite, centimetres not metres.
+    let [sx, sy, st] = topics.std_devs.expect("std devs from the multi-tag covariance");
+    assert!([sx, sy, st].iter().all(|v| v.is_finite() && *v > 0.0) && sx < 1.0 && sy < 1.0 && st < 0.5, "{sx} {sy} {st}");
 }
 
 #[test]

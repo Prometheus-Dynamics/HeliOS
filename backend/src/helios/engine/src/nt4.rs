@@ -9,8 +9,8 @@
 //!
 //! A pipeline whose outputs include `multi_tag_pose` also gets typed robot pose topics on every
 //! tick (see [`robot_pose`]): `robot_pose` (`double[]` `[x, y, z, roll, pitch, yaw]`),
-//! `robot_pose_valid`, `robot_pose_struct` (`struct:Pose3d`), `tag_count` and, once the hook
-//! returns one, `robot_pose_std_devs`.
+//! `robot_pose_valid`, `robot_pose_struct` (`struct:Pose3d`), `tag_count` and, from the pose's
+//! covariance, `robot_pose_std_devs` (`[σx, σy, σθ]`).
 //!
 //! The graph thread only hands the tick's payloads over (one channel send, dropped when the
 //! publisher is behind); serializing and sending happen here.
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
         assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
         assert!(matches!(host.value("/.schema/struct:Pose3d"), Some(Value::Raw(bytes)) if bytes == b"Translation3d translation;Rotation3d rotation"));
-        assert_eq!(host.value("/helios/front/robot_pose_std_devs"), None, "no std devs until the hook returns some");
+        assert_eq!(host.value("/helios/front/robot_pose_std_devs"), None, "no std devs without a covariance");
         assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
 
         // Invalid, then valid without a rig: no robot pose. Waiting on `tag_count` (sent after

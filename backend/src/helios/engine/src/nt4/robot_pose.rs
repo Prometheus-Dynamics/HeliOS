@@ -14,8 +14,9 @@
 //!   `/.schema/struct:Pose3d` and the structs it nests, type `structschema`), so dashboards
 //!   (AdvantageScope, Glass) decode it too.
 //! - `tag_count` (`int`): `inlier_tags`, 0 when missing.
-//! - `robot_pose_std_devs` (`double[]`: `[σx, σy, σθ]`), only when [`robot_pose_std_devs`]
-//!   returns `Some`.
+//! - `robot_pose_std_devs` (`double[]`: `[σx, σy, σθ]`, metres and radians, for WPILib's
+//!   `addVisionMeasurement`), with `robot_pose`, from Eidos's `multi_tag_pose.covariance` (see
+//!   [`robot_pose_std_devs`]).
 //!
 //! The field frame: `reference_from_rig` is in the reference frame of the field layout's known
 //! tag poses (`helios-field`), which is WPILib's blue-origin field frame: origin at the blue
@@ -85,14 +86,56 @@ pub fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
     let has_rig = multi_tag_pose.get("has_rig").and_then(Json::as_bool).unwrap_or(false);
     let valid = multi_tag_pose.get("valid").and_then(Json::as_bool).unwrap_or(false);
     let pose = if valid && has_rig { robot_pose_from_rig(multi_tag_pose) } else { None };
-    RobotPoseTopics { tag_count: multi_tag_pose.get("inlier_tags").and_then(Json::as_i64).unwrap_or(0), pose, std_devs: robot_pose_std_devs(multi_tag_pose) }
+    let std_devs = pose.as_ref().and_then(|pose| robot_pose_std_devs(multi_tag_pose, pose.translation));
+    RobotPoseTopics { tag_count: multi_tag_pose.get("inlier_tags").and_then(Json::as_i64).unwrap_or(0), pose, std_devs }
 }
 
-/// The robot pose's standard deviations `[σx, σy, σθ]`, for `robot_pose_std_devs`. Eidos is
-/// adding a covariance to `multi_tag_pose`; this returns `None` until its convention is
-/// documented and read here.
-pub fn robot_pose_std_devs(_multi_tag_pose: &Json) -> Option<[f64; 3]> {
-    None
+/// The robot pose's standard deviations `[σx, σy, σθ]` (metres, metres, radians: what WPILib's
+/// pose estimators take), from `multi_tag_pose.covariance`, for a robot at `translation` (field
+/// frame). `None` without a usable covariance.
+///
+/// Eidos's convention: 6 x 6 row-major `[rx, ry, rz, tx, ty, tz]`, the left perturbation
+/// `reference_from_camera' = exp([w, v]^) reference_from_camera`, `w` and `v` in the reference
+/// (field) frame. `reference_from_rig` is `reference_from_camera` times the fixed mount, so the
+/// same perturbation holds for it. A left perturbation moves a point `p` by `v + w × p`, so the
+/// robot's position error is `v - [t]× w` (rotation error turns about the field origin):
+/// `Σt = V - Cᵀ[t]×ᵀ - [t]× C + [t]× W [t]×ᵀ` with `W`, `C`, `V` the rotation, rotation-translation
+/// and translation blocks. `σθ` is the error about the field's `z` (`w_z`).
+pub fn robot_pose_std_devs(multi_tag_pose: &Json, translation: [f64; 3]) -> Option<[f64; 3]> {
+    let values = multi_tag_pose.get("covariance")?.as_array()?;
+    if values.len() != 36 {
+        return None;
+    }
+    let mut sigma = [[0.0_f64; 6]; 6];
+    for (index, value) in values.iter().enumerate() {
+        let value = value.as_f64().filter(|v| v.is_finite())?;
+        sigma[index / 6][index % 6] = value;
+    }
+    let [x, y, z] = translation;
+    // [t]×, so that [t]× a = t × a.
+    let cross = [[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]];
+    // J = [-[t]×, I] maps [w, v] to the position error; Σt = J Σ Jᵀ.
+    let mut jacobian = [[0.0_f64; 6]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            jacobian[row][col] = -cross[row][col];
+        }
+        jacobian[row][3 + row] = 1.0;
+    }
+    let variance = |row: usize| -> f64 {
+        let mut total = 0.0;
+        for a in 0..6 {
+            for b in 0..6 {
+                total += jacobian[row][a] * sigma[a][b] * jacobian[row][b];
+            }
+        }
+        total
+    };
+    let (vx, vy, vtheta) = (variance(0), variance(1), sigma[2][2]);
+    if !(vx >= 0.0 && vy >= 0.0 && vtheta >= 0.0) {
+        return None;
+    }
+    Some([vx.sqrt(), vy.sqrt(), vtheta.sqrt()])
 }
 
 /// `reference_from_rig` as a robot pose; `None` unless every field is there and finite and the
@@ -140,6 +183,37 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::f64::consts::{FRAC_PI_2, PI};
+
+    /// A diagonal 6 x 6 covariance (`[rx, ry, rz, tx, ty, tz]` variances), row-major.
+    fn diagonal(variances: [f64; 6]) -> Json {
+        let mut values = vec![0.0; 36];
+        for (i, v) in variances.iter().enumerate() {
+            values[i * 7] = *v;
+        }
+        json!(values)
+    }
+
+    #[test]
+    fn std_devs_at_the_origin_are_the_translation_and_yaw_sigmas() {
+        let pose = json!({ "covariance": diagonal([1e-4, 4e-4, 9e-4, 0.01, 0.04, 0.09]) });
+        let [sx, sy, st] = robot_pose_std_devs(&pose, [0.0, 0.0, 0.0]).expect("std devs");
+        assert!((sx - 0.1).abs() < 1e-12 && (sy - 0.2).abs() < 1e-12 && (st - 0.03).abs() < 1e-12, "{sx} {sy} {st}");
+    }
+
+    #[test]
+    fn yaw_error_moves_a_robot_away_from_the_field_origin() {
+        // Only yaw uncertainty (0.01 rad): at (10, 0, 0) it is 10 cm across the field (y), none along x.
+        let pose = json!({ "covariance": diagonal([0.0, 0.0, 1e-4, 0.0, 0.0, 0.0]) });
+        let [sx, sy, st] = robot_pose_std_devs(&pose, [10.0, 0.0, 0.0]).expect("std devs");
+        assert!(sx.abs() < 1e-12 && (sy - 0.1).abs() < 1e-12 && (st - 0.01).abs() < 1e-12, "{sx} {sy} {st}");
+    }
+
+    #[test]
+    fn no_or_broken_covariance_means_no_std_devs() {
+        assert_eq!(robot_pose_std_devs(&json!({}), [1.0, 2.0, 0.0]), None);
+        assert_eq!(robot_pose_std_devs(&json!({ "covariance": [1.0, 2.0] }), [1.0, 2.0, 0.0]), None);
+        assert_eq!(robot_pose_std_devs(&json!({ "covariance": diagonal([0.0, 0.0, -1.0, 0.0, 0.0, 0.0]) }), [0.0; 3]), None);
+    }
 
     /// `[w, x, y, z]` of a rotation of `angle` about a unit axis.
     fn axis_angle(axis: [f64; 3], angle: f64) -> [f64; 4] {

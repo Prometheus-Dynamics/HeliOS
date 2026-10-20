@@ -51,7 +51,7 @@ up) and is the robot's pose through the camera's mount, so it needs a mount on t
 | `<prefix>/<pipeline>/robot_pose_valid` | `boolean` | There is a robot pose this tick: the solve is valid and the camera has a mount |
 | `<prefix>/<pipeline>/robot_pose_struct` | `raw` (`struct:Pose3d`) | The same pose as WPILib's `Pose3d` struct: translation `x, y, z` then rotation `w, x, y, z`, little-endian `f64`s (56 bytes). Published with `robot_pose`, after its schemas (`/.schema/struct:Pose3d`, `Translation3d`, `Rotation3d`, `Quaternion`; type `structschema`), so robot code and dashboards such as AdvantageScope decode it |
 | `<prefix>/<pipeline>/tag_count` | `int` | Tags the solve used (`inlier_tags`); 0 when there is no solve |
-| `<prefix>/<pipeline>/robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]`. Reserved: not published yet |
+| `<prefix>/<pipeline>/robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]` (metres, metres, radians), with `robot_pose`: the multi-tag pose's honest covariance (Eidos) carried to the robot's field position, including how a heading error moves a robot far from the field origin. Pass it to WPILib's `addVisionMeasurement` |
 
 Their `kind` properties are `robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `tag_count`
 and `robot_pose_std_devs`.
