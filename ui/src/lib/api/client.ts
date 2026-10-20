@@ -43,6 +43,7 @@ import type {
   Upload,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
+import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
 
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.needs ? `${error.message} (needs: ${error.needs})` : error.message;
@@ -86,6 +87,11 @@ const enc = encodeURIComponent;
 /** The camera's live MJPEG preview (`GET /v1/cameras/{id}/preview`), for an `<img>`. */
 export function previewUrl(cameraId: string): string {
   return url(`/v1/cameras/${enc(cameraId)}/preview`);
+}
+
+/** A stored recording's MCAP download (`GET /v1/recordings/{id}`), for a link. */
+export function recordingDownloadUrl(id: string): string {
+  return url(`/v1/recordings/${enc(id)}`);
 }
 
 // Device security. On a secured device the browser signs in with the device
@@ -152,7 +158,7 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
   return () => source.close();
 }
 
-export const EVENT_TYPES = ["hello", "output", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "lagged"];
+export const EVENT_TYPES = ["hello", "output", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
 
 export const api = {
   // Device security
@@ -227,8 +233,19 @@ export const api = {
   /** Shows `state` for `seconds`; `null` ends the preview. */
   previewLeds: (state: LedState | null, seconds?: number) => request<LedsResponse>("POST", "/v1/device/leds/preview", { body: seconds === undefined ? { state } : { state, seconds } }),
 
+  // Session recordings (helios-recorder): record a camera's frames, keep and export them
+  recordings: () => request<RecordingListing>("GET", "/v1/recordings"),
+  startRecording: (camera: string) => request<RecordingStatus>("POST", "/v1/recordings", { body: { camera } }),
+  stopRecording: (id: string) => request<RecordingStatus>("POST", `/v1/recordings/${enc(id)}/stop`),
+  deleteRecording: (id: string) => request<void>("DELETE", `/v1/recordings/${enc(id)}`),
+  /** The last seconds of a camera's ring, written as a new stored recording. */
+  captureLast: (body: { seconds?: number; camera?: string }) => request<PartSummary>("POST", "/v1/recordings/capture-last", { body }),
+  exportEidos: (id: string) => request<EidosExport>("POST", `/v1/recordings/${enc(id)}/export/eidos`),
+  recordingSettings: () => request<RecorderSettings>("GET", "/v1/recordings/settings"),
+  setRecordingSettings: (settings: RecorderSettings) => request<RecorderSettings>("PUT", "/v1/recordings/settings", { body: settings }),
+
   // Resources and peripherals
-  resources: (type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),
+  resources:(type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),
   peripherals: () => request<Resource[]>("GET", "/v1/peripherals"),
   peripheralAction: (id: string, kind: string, arg: Record<string, unknown> = {}) =>
     request<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", `/v1/peripherals/${enc(id)}/actions`, { body: { kind, arg } }),
