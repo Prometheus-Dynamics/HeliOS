@@ -1,7 +1,10 @@
 // The live map in 3D: the point cloud (grey per point), the camera's trajectory, the keyframes
 // as small frustums, the tags as squares with their ids, the current camera as a highlighted
 // frustum, and the field's axes once the map is aligned. Orbit controls; the scene draws the
-// map frame as the mapper gives it (the first clear tag, or the field). It owns its GPU
+// map frame as the mapper gives it (the first clear tag, or the field). Aligned, the map is in
+// WPILib's field frame (z up): it is turned into the scene's y-up frame and stands on the floor
+// grid; unaligned, up is unknown, so there is no floor. The view frames the map once per run
+// (and again when it aligns). It owns its GPU
 // resources and frees them in `dispose`.
 
 import * as THREE from "three";
@@ -74,6 +77,10 @@ export class MapScene {
   private current: THREE.LineSegments;
   private currentDot: THREE.Mesh;
   private tags = new THREE.Group();
+  /** The map's frame within the scene (turned z-up to y-up once aligned). */
+  private world = new THREE.Group();
+  /** The run (and alignment) the view was last framed for. */
+  private framedFor = "";
   private tagLabels: CSS2DObject[] = [];
   private axes = new THREE.AxesHelper(0.5);
   private floor: THREE.GridHelper;
@@ -104,12 +111,12 @@ export class MapScene {
     container.appendChild(this.labels.domElement);
 
     this.scene.background = bg;
-    this.scene.fog = new THREE.Fog(bg, 9, 22);
+    this.scene.fog = new THREE.Fog(bg, 14, 40);
 
-    this.floor = new THREE.GridHelper(10, 20, 0x2a2f3a, 0x1d2129);
+    this.floor = new THREE.GridHelper(20, 40, 0x465062, 0x2a303b);
     const floorMaterial = this.floor.material as THREE.Material;
     floorMaterial.transparent = true;
-    floorMaterial.opacity = 0.8;
+    floorMaterial.opacity = 0.9;
     floorMaterial.depthWrite = false;
     this.disposables.push(this.floor.geometry, floorMaterial);
     this.scene.add(this.floor);
@@ -120,10 +127,11 @@ export class MapScene {
     const dotMaterial = new THREE.MeshBasicMaterial({ color: this.colours.accent });
     this.currentDot = new THREE.Mesh(dotGeometry, dotMaterial);
     this.disposables.push(dotGeometry, dotMaterial);
-    this.scene.add(this.keyframes, this.current, this.currentDot, this.tags);
+    this.world.add(this.keyframes, this.current, this.currentDot, this.tags);
+    this.scene.add(this.world);
 
     this.axes.visible = false;
-    this.scene.add(this.axes);
+    this.world.add(this.axes);
 
     this.camera.position.set(3.4, 2.4, 3.6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -155,8 +163,30 @@ export class MapScene {
     this.updateKeyframes(data.snapshot);
     this.updateTags(data.snapshot, data.fieldIds);
     this.updateCurrent(data.pose);
-    this.axes.visible = data.snapshot?.aligned === true;
+    const aligned = data.snapshot?.aligned === true;
+    this.axes.visible = aligned;
+    this.floor.visible = aligned;
+    this.world.rotation.x = aligned ? -Math.PI / 2 : 0;
+    this.frame(data.snapshot, aligned);
     this.dirty = true;
+  }
+
+  /** Points the view at the map (three-quarter view from above, the whole cloud in sight), once
+   * per run and alignment, so the user's own orbiting is never undone by a new snapshot. */
+  private frame(snapshot: MapSnapshot | null, aligned: boolean) {
+    if (!snapshot || !this.cloud?.visible || snapshot.points.count === 0) return;
+    const key = `${snapshot.run_id}:${aligned}`;
+    if (key === this.framedFor) return;
+    this.framedFor = key;
+    this.world.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.cloud);
+    if (box.isEmpty()) return;
+    const centre = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+    const direction = new THREE.Vector3(1, 0.75, 1).normalize();
+    this.controls.target.copy(centre);
+    this.camera.position.copy(centre).addScaledVector(direction, radius * 2.2);
+    this.controls.update();
   }
 
   private updateCloud(snapshot: MapSnapshot | null) {
@@ -167,16 +197,22 @@ export class MapScene {
     }
     if (!this.cloud) {
       const geometry = new THREE.BufferGeometry();
-      const material = new THREE.PointsMaterial({ size: 0.018, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.8 });
+      const material = new THREE.PointsMaterial({ size: 0.03, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95 });
       this.disposables.push(geometry, material);
       this.cloud = new THREE.Points(geometry, material);
-      this.scene.add(this.cloud);
+      this.world.add(this.cloud);
     }
     this.cloud.visible = true;
     if (this.cloudSource !== points) {
-      // Each snapshot is a new buffer: upload it once, with the grey of each point as its colour.
+      // Each snapshot is a new buffer: upload it once, with the grey of each point as its colour,
+      // lifted off black (dark texture still reads against the dark background) and slightly cool.
       const colours = new Float32Array(points.count * 3);
-      for (let i = 0; i < points.count; i++) colours.fill(points.grey[i] / 255, i * 3, i * 3 + 3);
+      for (let i = 0; i < points.count; i++) {
+        const v = 0.32 + 0.68 * (points.grey[i] / 255);
+        colours[i * 3] = v * 0.94;
+        colours[i * 3 + 1] = v * 0.97;
+        colours[i * 3 + 2] = v;
+      }
       const geometry = this.cloud.geometry;
       geometry.setAttribute("position", new THREE.BufferAttribute(points.xyz.subarray(0, points.count * 3), 3));
       geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
@@ -199,7 +235,7 @@ export class MapScene {
       const material = new THREE.LineBasicMaterial({ color: this.colours.trail, transparent: true, opacity: 0.9 });
       this.disposables.push(geometry, material);
       this.trajectory = new THREE.Line(geometry, material);
-      this.scene.add(this.trajectory);
+      this.world.add(this.trajectory);
     }
     this.trajectory.visible = true;
     this.trajectory.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
