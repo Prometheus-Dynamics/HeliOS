@@ -513,6 +513,16 @@ export class LiveCluster {
     await this.refreshPipelines();
   }
 
+  /** Pin a pipeline's graph thread to a core (`null`: the scheduler's choice). The spec is the
+   * pipeline's own graph, bindings and settings, so only the core changes. */
+  async setCpu(id: string, cpu: number | null) {
+    const p = this.pipelines.get(id);
+    if (!p?.graph) return;
+    const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: cpu ?? undefined };
+    await this.act("CPU core", () => api.putPipeline(id, spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
+    await this.refreshPipelines();
+  }
+
   async createWorkload(name: string, _nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {
     const created = await this.act("Create pipeline", () => api.createPipeline({ name, graph: toDaedalus(graph), bindings: { camera: { resource_id: cameraId } } }), (p) => `${p.name} deployed`);
     await this.refreshPipelines();

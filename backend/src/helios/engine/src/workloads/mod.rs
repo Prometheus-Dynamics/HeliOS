@@ -14,6 +14,9 @@ struct EngineWorkloadConfig {
     binding: BTreeMap<String, BindingConfig>,
     #[serde(default)]
     plugin: Vec<PluginConfig>,
+    /// The CPU core the graph thread is pinned to (the API's pipeline `cpu`).
+    #[serde(default)]
+    cpu: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -135,7 +138,15 @@ pub fn decode_assigned_workload(record: &WorkloadRecord, node_id: &str) -> Resul
     let bindings = decode_bindings(record, &decoded)?;
     let plugin_requirements = decode_plugin_requirements(&decoded);
 
-    Ok(ExecutionWorkload { workload_id: record.workload_id.as_str().to_string(), artifact_id: record.artifact_id.as_str().to_string(), assigned_node_id, graph_ref, bindings, plugin_requirements })
+    Ok(ExecutionWorkload {
+        workload_id: record.workload_id.as_str().to_string(),
+        artifact_id: record.artifact_id.as_str().to_string(),
+        assigned_node_id,
+        graph_ref,
+        bindings,
+        plugin_requirements,
+        cpu: decoded.cpu,
+    })
 }
 
 fn decode_graph_ref(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> Result<GraphRef, WorkloadDecodeError> {
@@ -275,6 +286,15 @@ mod tests {
         assert_eq!(decoded.bindings[0].input, "camera");
         assert_eq!(decoded.plugin_requirements[0].plugin_name, "cv");
         assert_eq!(decoded.plugin_requirements[0].version.as_deref(), Some("1.2.3"));
+    }
+
+    #[test]
+    fn decode_assigned_workload_reads_the_pinned_cpu() {
+        let with_cpu = |config: WorkloadConfig| WorkloadRecord::builder(WorkloadId::new("workload.cpu"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.cpu")).desired_state(DesiredState::Running).assigned_to(NODE_ID).config(config).build();
+        let pinned = decode_assigned_workload(&with_cpu(WorkloadConfig::new("schema.exec").field("cpu", TypedConfigValue::Int(2))), NODE_ID).expect("decode");
+        assert_eq!(pinned.cpu, Some(2));
+        let unpinned = decode_assigned_workload(&with_cpu(WorkloadConfig::new("schema.exec")), NODE_ID).expect("decode");
+        assert_eq!(unpinned.cpu, None, "without cpu the scheduler decides");
     }
 
     #[test]

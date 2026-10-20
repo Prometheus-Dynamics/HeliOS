@@ -245,6 +245,7 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
         graph_ref: GraphRef::InlineSpec(graph_json),
         bindings,
         plugin_requirements: Vec::new(),
+        cpu: None,
     }
 }
 
@@ -411,6 +412,37 @@ fn inline_graph_document_without_inputs_runs_once() {
     std::thread::sleep(Duration::from_millis(50));
     let again = resident.sync_workloads(&plugins.execution(), &workloads, None, 43);
     assert_eq!(artifact_json(&again.artifacts, "execution.telemetry")["ticks_processed"], 1, "a graph without inputs runs once");
+}
+
+#[test]
+fn graph_thread_is_pinned_to_its_core_and_reports_it() {
+    let plugins = TestPlugins::load();
+    let src = EngineTestPlugin::new().source.clone().alias("src");
+    let graph = plugins.registry().graph_builder().expect("graph builder").host_bridge("host").node(&src).connect(&src.outputs.out, &host_port("host", "result")).build();
+    let document = plugins.registry().graph_document(graph).to_json().expect("document json");
+    let core = *super::affinity::allowed_cpus().expect("allowed cores").last().expect("an allowed core");
+
+    // An engine core: the thread runs there, and the telemetry says so.
+    let mut pinned = workload("workload.pinned", document.clone(), Vec::new());
+    pinned.cpu = Some(core);
+    let mut resident = ResidentExecutionSet::default();
+    let snapshot = sync_until(&mut resident, &plugins.execution(), &[pinned.clone()], None, "the pinned graph to start", |snapshot| {
+        artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1
+    });
+    let telemetry = artifact_json(&snapshot.artifacts, "execution.telemetry");
+    assert_eq!(telemetry["cpu"], core, "{telemetry}");
+    assert!(telemetry["cpu_error"].is_null(), "{telemetry}");
+
+    // Not a core: the graph still runs, unpinned, and the error is in the telemetry.
+    let mut missing = workload("workload.missing-core", document, Vec::new());
+    missing.cpu = Some(5000);
+    let mut resident = ResidentExecutionSet::default();
+    let snapshot = sync_until(&mut resident, &plugins.execution(), &[missing], None, "the unpinned graph to run", |snapshot| {
+        artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1
+    });
+    let telemetry = artifact_json(&snapshot.artifacts, "execution.telemetry");
+    assert!(telemetry["cpu"].is_null(), "{telemetry}");
+    assert!(telemetry["cpu_error"].as_str().is_some_and(|error| error.contains("does not exist")), "{telemetry}");
 }
 
 #[test]

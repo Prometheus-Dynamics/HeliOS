@@ -97,6 +97,7 @@ impl DefaultPipeline {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: self.dictionary.clone(),
+            cpu: None,
         })
     }
 }

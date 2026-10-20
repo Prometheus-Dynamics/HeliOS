@@ -340,6 +340,8 @@ export interface PipelineSpec {
   field_layout?: string;
   /** The tag family the graph's Eidos detector groups decode (`apriltag_16h5`, ...); unset keeps the graph's. */
   dictionary?: string;
+  /** The CPU core the graph thread is pinned to (0 to 63); unset leaves it to the scheduler. */
+  cpu?: number;
 }
 
 /** `GET /v1/pipelines/templates`: a graph helios-engine ships, deployable with a camera on `camera_input`. */
@@ -423,7 +425,7 @@ export interface Pipeline {
   bindings: Record<string, Binding>;
   plugins: string[];
   session: { status: string; message: string | null; observed_at_ms: number } | null;
-  telemetry: { fps?: number; last_tick_ms?: number; frames_processed?: number; frames_failed?: number; source_connected?: boolean; last_error?: string | null; [key: string]: unknown } | null;
+  telemetry: { fps?: number; last_tick_ms?: number; frames_processed?: number; frames_failed?: number; source_connected?: boolean; last_error?: string | null; cpu?: number | null; cpu_error?: string | null; [key: string]: unknown } | null;
   /** Daedalus per-node timings over the last window and since start (null while metrics are off). */
   metrics?: { window?: PipelineMetricsWindow; total?: PipelineMetricsWindow; [key: string]: unknown } | null;
   outputs: PipelineOutput[];
@@ -431,6 +433,10 @@ export interface Pipeline {
   full_search_every: number | null;
   loss_full_search_after: number | null;
   margin_growth_misses: number | null;
+  /** The field layout the multi-tag pose solves against; null without one. */
+  field_layout: string | null;
+  /** The CPU core the graph thread is pinned to (the spec's `cpu`); null for the scheduler's. */
+  cpu: number | null;
   pose: PoseSummary | null;
   managed: boolean;
 }

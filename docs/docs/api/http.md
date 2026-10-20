@@ -411,6 +411,12 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   name: `apriltag_36h11`, the FRC family since 2024, `apriltag_16h5`, `aruco_4x4_50`, ...);
   unset keeps the graph's. A family other than the tags' own finds nothing at all, not even
   rejected candidates. The pipeline reports the family in use (`dictionary`).
+- `cpu` pins the graph thread to one CPU core (0 to 63; unset leaves it to the scheduler), so a
+  heavy pipeline never shares a core with the tag pipeline. The engine pins only within its own
+  cores (`helios-engine.service` runs on cores 1 to 3 on the CM5). The graph runs serially on that
+  thread, so the whole graph stays on the core. The engine reports the core it applied in the
+  pipeline's telemetry (`cpu`), or why it could not (`cpu_error`); the pipeline reports the
+  requested core as `cpu`. A change restarts the graph on its new core.
 
 The pipeline the API returns:
 

@@ -2,6 +2,7 @@
   // Whatever is selected, anywhere: its identity, live facts, settings and
   // actions. Everyday things first; deeper sections are closed below.
   import { CATALOG_BY_ID } from "#lib/api/catalog.js";
+  import { ENGINE_CPU_CORES } from "#lib/api/model.js";
   import Icon from "#lib/components/common/Icon.svelte";
   import { duration } from "#lib/format.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
@@ -85,6 +86,16 @@
         </Prop>
         <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
           <Choice value={w.nodeId} options={cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId).map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
+        </Prop>
+        <Prop label="CPU core" help="Pin a heavy pipeline to its own core so it never slows the tag pipeline.">
+          <Choice value={w.cpu === null ? "auto" : String(w.cpu)} options={[{ value: "auto", label: "Auto" }, ...ENGINE_CPU_CORES.map((core) => ({ value: String(core), label: `Core ${core}` }))]} onchange={(v) => cluster.setCpu(w.id, v === "auto" ? null : Number(v))} />
+          {#if w.cpuError}
+            <Badge tone="warn" text={w.cpuError} />
+          {:else if w.cpuApplied !== null}
+            <span class="mono">on core {w.cpuApplied}</span>
+          {:else if w.cpu !== null}
+            <span class="mono">waiting for core {w.cpu}</span>
+          {/if}
         </Prop>
       </Section>
       <Section title="Performance" key="insp-wl-perf">

@@ -35,6 +35,10 @@ pub(crate) struct DriverStats {
     pub last_error: Option<String>,
     /// The latest failed tick's error, kept after the ticks recover (`last_error` clears).
     pub last_failure: Option<String>,
+    /// The CPU core the graph thread runs on, when it was pinned (`cpu` in the workload config).
+    pub cpu: Option<u32>,
+    /// Why the graph thread could not be pinned to its core (`cpu` is then unset).
+    pub cpu_error: Option<String>,
     /// Wall-clock time of the last change, used as the published records' observed time so
     /// unchanged stats do not churn Orion state.
     pub updated_at_ms: u64,
@@ -56,6 +60,8 @@ impl DriverStats {
             "source_plan": self.source.plan,
             "last_error": self.last_error,
             "last_failure": self.last_failure,
+            "cpu": self.cpu,
+            "cpu_error": self.cpu_error,
         })
     }
 }
