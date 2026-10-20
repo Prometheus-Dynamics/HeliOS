@@ -120,6 +120,9 @@ import IStopwatch from "@tabler/icons-svelte-runes/icons/stopwatch";
 import IArrowsMove from "@tabler/icons-svelte-runes/icons/arrows-move";
 import IPlayerSkipBack from "@tabler/icons-svelte-runes/icons/player-skip-back";
 import ICircuitCell from "@tabler/icons-svelte-runes/icons/circuit-cell";
+import IRepeat from "@tabler/icons-svelte-runes/icons/repeat";
+import IRewindBackward5 from "@tabler/icons-svelte-runes/icons/rewind-backward-5";
+import IRewindForward5 from "@tabler/icons-svelte-runes/icons/rewind-forward-5";
 
 import IPin from "@tabler/icons-svelte-runes/icons/pin";
 import IPinned from "@tabler/icons-svelte-runes/icons/pinned";
@@ -217,6 +220,9 @@ export const ICONS = {
   "scan": IScan,
   "focus-auto": IFocusAuto,
   "player-track-next": IPlayerTrackNext,
+  "repeat": IRepeat,
+  "rewind-backward-5": IRewindBackward5,
+  "rewind-forward-5": IRewindForward5,
   "transform": ITransform,
   "cube-plus": ICubePlus,
   "box-model-2": IBoxModel2,

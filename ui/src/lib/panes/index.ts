@@ -19,6 +19,7 @@ import LogsPane from "./LogsPane.svelte";
 import MountsPane from "./MountsPane.svelte";
 import PeripheralsPane from "./PeripheralsPane.svelte";
 import PipelinesPane from "./PipelinesPane.svelte";
+import PlaybackPane from "./PlaybackPane.svelte";
 import ProcessesPane from "./ProcessesPane.svelte";
 import RecordingsPane from "./RecordingsPane.svelte";
 import ProfilerPane from "./ProfilerPane.svelte";
@@ -42,6 +43,7 @@ definePane({ type: "recordings", title: "Recordings", icon: "player-record", gro
 definePane({ type: "mosaic",title: "All cameras", icon: "layout-grid", group: "Vision", summary: "Every camera at once, tiled to fit", component: CameraMosaicPane });
 definePane({ type: "cameras", title: "Cameras", icon: "aperture", group: "Vision", summary: "List of cameras by device", component: CameraListPane });
 definePane({ type: "camera-controls", title: "Camera controls", icon: "adjustments-horizontal", group: "Vision", summary: "Exposure, gain, ISP, ROI and transport", component: CameraControlsPane, label: (p) => (pinnedCamera(p) ? `${pinnedCamera(p)} controls` : null), identityOf: id("camera") });
+definePane({ type: "playback", title: "Playback", icon: "player-play", group: "Vision", summary: "Replay a recording or image folder as a camera, with transport and pipeline runs", component: PlaybackPane });
 definePane({ type: "calibration", title: "Calibration", icon: "grid-4x4", group: "Vision", summary: "Guided camera calibration", component: CalibrationPane });
 definePane({ type: "board", title: "Board maker", icon: "printer", group: "Vision", summary: "Printable chessboard, ChArUco or AprilGrid", component: BoardPane });
 definePane({ type: "pipelines", title: "Pipelines", icon: "list-details", group: "Pipelines", summary: "Every pipeline with its state and speed", component: PipelinesPane });

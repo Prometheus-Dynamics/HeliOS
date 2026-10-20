@@ -41,6 +41,10 @@ import type {
   UnitStatus,
   UpdateStatus,
   Upload,
+  PlayerView,
+  PlaybackCreate,
+  PlaybackRun,
+  RecordingListing,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
@@ -225,6 +229,13 @@ export const api = {
   catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
   nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
   setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
+
+  // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings.
+  recordings: () => request<RecordingListing>("GET", "/v1/recordings"),
+  playbackPlayers: () => request<PlayerView[]>("GET", "/v1/playback"),
+  openPlayback: (body: PlaybackCreate) => request<PlayerView>("POST", "/v1/playback", { body }),
+  closePlayback: (id: string) => request<void>("DELETE", `/v1/playback/${enc(id)}`),
+  runOnPlayback: (id: string, pipeline: string) => request<PlaybackRun>("POST", `/v1/playback/${enc(id)}/runs`, { body: { pipeline } }),
 
   // The LED ring (settings, locate, and previewing a state)
   leds: () => request<LedsResponse>("GET", "/v1/device/leds"),

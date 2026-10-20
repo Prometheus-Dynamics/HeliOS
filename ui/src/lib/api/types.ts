@@ -669,7 +669,8 @@ export interface PlayerView {
   name: string;
   source: PlaybackSource;
   kind: "recording" | "images";
-  raw_only: boolean;
+  /** A raw Bayer recording, processed by the software ISP and offered as NV12. */
+  raw: boolean;
   note: string | null;
   frames_endpoint: string;
   speed: number;
