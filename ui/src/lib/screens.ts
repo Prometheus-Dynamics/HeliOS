@@ -89,6 +89,12 @@ export function registerScreens() {
       ),
     ),
   );
+  workspaces.registerPreset(
+    "playback",
+    ws("playback", "Playback", "player-play", 11, "Replay a recording or image folder as a camera, and run a pipeline on it.",
+      row([0.7, 0.3], stack(pane("playback")), stack(pane("pipelines"))),
+    ),
+  );
   workspaces.registerPreset("settings", ws("settings", "Settings", "settings", 9, "Security, theme, names and colours, layouts, backup.", stack(pane("settings"))));
 }
 
