@@ -301,6 +301,17 @@ class ClusterStore {
     toasts.success(`${w.name} now finds ${dictionaryLabel(dictionary)}`);
   }
 
+  /** Pin a pipeline's graph thread to a core (`null`: the scheduler's choice). */
+  async setCpu(id: string, cpu: number | null) {
+    if (this.live) return this.live.setCpu(id, cpu);
+    const w = this.workload(id);
+    if (!w) return;
+    w.cpu = cpu;
+    w.cpuApplied = cpu;
+    w.cpuError = null;
+    toasts.success(cpu === null ? `${w.name} is placed by the scheduler` : `${w.name} pinned to core ${cpu}`);
+  }
+
   async createWorkload(name: string, nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {
     if (this.live) return this.live.createWorkload(name, nodeId, cameraId, graph);
     await this.later(500);
@@ -315,6 +326,9 @@ class ClusterStore {
       bindings: { camera: cameraId },
       graph: clone(graph),
       outputs: [`stream.${id}.poses`],
+      cpu: null,
+      cpuApplied: null,
+      cpuError: null,
       perf: { tickP50Ms: 0.7, tickP99Ms: 0.8, fps: 60, memMiB: 8.9, nodeMs: Object.fromEntries(graph.nodes.map((n) => [n.id, 0.05])), tickHistory: [] },
     });
     toasts.success(`${name} deployed to ${this.node(nodeId)?.name}`);

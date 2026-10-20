@@ -181,6 +181,12 @@ export interface GraphDocument {
 
 export type WorkloadState = "running" | "starting" | "quarantined" | "stopped";
 
+/**
+ * The CPU cores a pipeline can be pinned to: the engine's cores (helios-engine.service's
+ * `CPUAffinity=1 2 3` on the CM5; core 0 is left to the system and the camera).
+ */
+export const ENGINE_CPU_CORES = [1, 2, 3] as const;
+
 export interface Workload {
   id: string;
   name: string;
@@ -191,6 +197,12 @@ export interface Workload {
   bindings: Record<string, string>;
   graph: GraphDocument;
   outputs: string[];
+  /** The core the graph thread is pinned to (`null`: the scheduler's choice). */
+  cpu: number | null;
+  /** The core the graph thread runs on, as the engine applied it (telemetry); `null` if not pinned. */
+  cpuApplied: number | null;
+  /** Why the engine could not pin the graph thread to `cpu`. */
+  cpuError: string | null;
   perf: {
     tickP50Ms: number;
     tickP99Ms: number;
