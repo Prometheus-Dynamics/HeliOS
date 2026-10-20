@@ -38,6 +38,9 @@ pub const GRAPHS: &[(&str, &str)] = &[
     ("aruco-4x4_50-staged", include_str!("../../engine/graphs/aruco-4x4_50-staged.graph.json")),
     // Eidos's feature tracks (`eidos:features.track`): not a detector, so no dictionary.
     ("features-track", include_str!("../../engine/graphs/features-track.graph.json")),
+    // Eidos's live mapper (`eidos:mapping.live_map`) behind the tracked AprilTag detector: the
+    // camera pose, the map snapshot and the timing, for the UI's Map pane.
+    ("live-map", include_str!("../../engine/graphs/live-map.graph.json")),
 ];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

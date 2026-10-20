@@ -1464,6 +1464,29 @@ mod tests {
     }
 
     #[test]
+    fn live_map_template_is_a_deployable_mapping_pipeline() {
+        assert_eq!(template_family("live-map").expect("family"), "mapping");
+        let json = crate::startup::GRAPHS.iter().find(|(id, _)| *id == "live-map").map(|(_, json)| *json).expect("live map template");
+        let graph: serde_json::Value = serde_json::from_str(json).expect("template");
+        assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_36h11"));
+        let spec = PipelineSpec {
+            name: "Live map".into(),
+            graph,
+            bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), pyramid: Some(3), ..Binding::default() })]),
+            enabled: true,
+            search_mode: None,
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+            dictionary: None,
+            cpu: None,
+        };
+        let document = validate_spec(&spec, &view_with_camera(), "node-local", None).expect("deploys");
+        assert!(document.requires.iter().any(|requirement| requirement.id == "eidos"), "{:?}", document.requires);
+    }
+
+    #[test]
     fn pose_summary_reports_status_tags_and_field() {
         let output = |port: &str, value: serde_json::Value| Output { pipeline: "p".into(), port: port.into(), value, observed_at_ms: 5 };
         assert_eq!(pose_summary(&[output("detections", serde_json::json!({}))]), None);
@@ -1592,6 +1615,8 @@ fn template_family(id: &str) -> ApiResult<&'static str> {
         Ok("apriltag")
     } else if id.starts_with("features-") {
         Ok("features")
+    } else if id.starts_with("live-map") {
+        Ok("mapping")
     } else {
         Err(ApiError::internal(format!("template {id} has no known family")))
     }
@@ -1605,7 +1630,8 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = template_family(id)?;
         let variant = if id.ends_with("-staged") { "staged" } else { "default" };
-        let pyramid = if family == "features" { 3 } else { 1 };
+        // The feature tracks and the live mapper (`lk_levels` 4) read three half-size levels.
+        let pyramid = if matches!(family, "features" | "mapping") { 3 } else { 1 };
         out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, graph });
     }
     Ok(Json(out))
