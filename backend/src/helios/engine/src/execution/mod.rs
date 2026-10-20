@@ -6,6 +6,7 @@
 //! `styx-frames+unix://` endpoint), a change of the bound resources otherwise. The engine
 //! publishes the latest outputs, stats, plan and metrics of every workload as Orion artifacts.
 
+mod affinity;
 mod bindings;
 mod camera_context;
 mod driver;

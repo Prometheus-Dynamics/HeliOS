@@ -103,7 +103,17 @@ pub struct PipelineSpec {
     /// other than the tags' own finds nothing: no detections and no rejections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dictionary: Option<String>,
+    /// The CPU core the graph thread is pinned to (`0` to `MAX_PIPELINE_CPU`), so a heavy pipeline
+    /// never shares a core with another one; unset leaves the placement to the scheduler. The
+    /// engine pins only within its own cores (its systemd `CPUAffinity`) and reports what it
+    /// applied in the pipeline's telemetry (`cpu`, `cpu_error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<u32>,
 }
+
+/// The highest CPU core number a pipeline may name (a 64-core machine's last core). Which cores
+/// the engine may use is the engine's to check: a core outside them is reported in telemetry.
+pub const MAX_PIPELINE_CPU: u32 = 63;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -466,6 +476,8 @@ pub struct Pipeline {
     pub field_layout: Option<String>,
     /// The tag family the graph's detector group decodes; `null` without an Eidos detector group.
     pub dictionary: Option<String>,
+    /// The CPU core the graph thread is pinned to (the spec's `cpu`); `null` for the scheduler's.
+    pub cpu: Option<u32>,
     /// Managed by this API (created through `/v1/pipelines`) rather than written by other tools.
     pub managed: bool,
 }
@@ -664,6 +676,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         pose: pose_summary(&outputs),
         outputs,
         dictionary,
+        cpu: config_u64(workload, "cpu").and_then(|cpu| u32::try_from(cpu).ok()),
         search_mode,
         full_search_every,
         loss_full_search_after: tuning.map(|tuning| tuning.loss_full_search_after),
@@ -733,6 +746,9 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
             return Err(ApiError::unprocessable(format!("graph requires plugins helios-engine has not loaded: {} (loaded: {})", missing.join(", "), loaded.join(", "))));
         }
     }
+    if spec.cpu.is_some_and(|cpu| cpu > MAX_PIPELINE_CPU) {
+        return Err(ApiError::unprocessable(format!("cpu is a core number 0 to {MAX_PIPELINE_CPU}")));
+    }
     for (input, binding) in &spec.bindings {
         if !super::valid_id(input) || input.contains('.') {
             return Err(ApiError::unprocessable(format!("invalid binding input name {input:?}")));
@@ -766,6 +782,9 @@ pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revi
     // stay by name here and the engine plans against the document's own `requires`.
     for (index, requirement) in document.requires.iter().enumerate() {
         config = config.field(format!("plugin.{index}.name"), TypedConfigValue::String(requirement.id.clone()));
+    }
+    if let Some(cpu) = spec.cpu {
+        config = config.field("cpu", TypedConfigValue::Int(i64::from(cpu)));
     }
     let mut builder = WorkloadRecord::builder(WorkloadId::new(workload_id), ENGINE_RUNTIME, ArtifactId::new(artifact_id))
         .desired_state(if spec.enabled { DesiredState::Running } else { DesiredState::Stopped })
@@ -978,6 +997,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
                 margin_growth_misses: None,
                 field_layout: pipeline.field_layout,
                 dictionary: None,
+                cpu: pipeline.cpu,
             }
         }
     };
@@ -1182,6 +1202,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
         let inputs = CameraInputs { contexts: BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None, Default::default()))]), frame_rates: BTreeMap::new() };
@@ -1208,6 +1229,45 @@ mod tests {
         assert!(!config.payload.keys().any(|key| key.starts_with("binding.camera.context.mount.")), "no mount");
     }
 
+    #[test]
+    fn cpu_round_trips_and_is_optional() {
+        let view = view_with_camera();
+        let mut spec = camera_spec();
+        // Stored specs written before `cpu` existed still read, and the scheduler's choice is
+        // not written back out.
+        let stored: PipelineSpec = serde_json::from_value(serde_json::to_value(&spec).expect("json")).expect("spec without cpu");
+        assert_eq!(stored.cpu, None);
+        assert!(!serde_json::to_value(&spec).expect("json").as_object().expect("object").contains_key("cpu"));
+
+        spec.cpu = Some(2);
+        let json = serde_json::to_value(&spec).expect("json");
+        assert_eq!(json["cpu"], 2);
+        let read: PipelineSpec = serde_json::from_value(json).expect("spec with cpu");
+        assert_eq!(read.cpu, Some(2));
+
+        let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
+        let inputs = CameraInputs::default();
+        let (_, workload) = records_for("tags-front", &spec, &document, 1, "node-local", &inputs, None).expect("records");
+        assert_eq!(workload.config.as_ref().and_then(|c| c.payload.get("cpu")), Some(&TypedConfigValue::Int(2)));
+        assert_eq!(pipeline_dto(&view, &workload).cpu, Some(2));
+
+        spec.cpu = None;
+        let (_, unpinned) = records_for("tags-front", &spec, &document, 1, "node-local", &inputs, None).expect("records");
+        assert!(!unpinned.config.as_ref().expect("config").payload.contains_key("cpu"));
+        assert_eq!(pipeline_dto(&view, &unpinned).cpu, None);
+    }
+
+    #[test]
+    fn cpu_must_be_a_core_number() {
+        let view = view_with_camera();
+        let mut spec = camera_spec();
+        spec.cpu = Some(MAX_PIPELINE_CPU);
+        validate_spec(&spec, &view, "node-local", None).expect("the last core number is valid");
+        spec.cpu = Some(MAX_PIPELINE_CPU + 1);
+        let error = validate_spec(&spec, &view, "node-local", None).expect_err("out of range");
+        assert!(format!("{error:?}").contains("cpu is a core number 0 to 63"), "{error:?}");
+    }
+
     fn camera_spec() -> PipelineSpec {
         PipelineSpec {
             name: "Tags front".into(),
@@ -1220,6 +1280,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         }
     }
 
@@ -1300,6 +1361,7 @@ mod tests {
             margin_growth_misses: Some(9),
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         let graph = effective_graph(&spec, &view).expect("tracked");
         assert_eq!(search_tuning_of(&graph), Some(SearchTuning { full_search_every: DEFAULT_FULL_SEARCH_EVERY, loss_full_search_after: 2, margin_growth_misses: 9 }));
@@ -1342,6 +1404,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
 
         let full = effective_graph(&spec, &view).expect("full");
@@ -1394,6 +1457,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         let document = validate_spec(&spec, &view_with_camera(), "node-local", None).expect("deploys");
         assert!(document.requires.iter().any(|requirement| requirement.id == "eidos"), "{:?}", document.requires);
@@ -1443,6 +1507,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("bare graph JSON");
         assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
@@ -1467,6 +1532,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("eidos is not loaded");
         assert!(error.message.contains("eidos"));
@@ -1486,6 +1552,7 @@ mod tests {
             margin_growth_misses: None,
             field_layout: None,
             dictionary: None,
+            cpu: None,
         };
         assert!(validate_spec(&spec, &view, "node-local", None).is_err());
     }

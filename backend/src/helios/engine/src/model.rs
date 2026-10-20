@@ -99,6 +99,9 @@ pub struct ExecutionWorkload {
     pub graph_ref: GraphRef,
     pub bindings: Vec<ExecutionBinding>,
     pub plugin_requirements: Vec<PluginRequirement>,
+    /// The CPU core the graph thread is pinned to (`cpu` in the config); unset leaves it to the
+    /// scheduler. A change restarts the graph (it is part of the compiled shape).
+    pub cpu: Option<u32>,
 }
 
 impl ExecutionWorkload {

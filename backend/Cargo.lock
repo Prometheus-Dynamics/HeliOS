@@ -1380,6 +1380,7 @@ dependencies = [
  "eidos-daedalus",
  "helios-eidos-plugin",
  "helios-field",
+ "libc",
  "nix",
  "notify",
  "orion",

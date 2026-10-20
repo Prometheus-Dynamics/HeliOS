@@ -41,6 +41,8 @@ daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"]
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
 # `poll(2)`: a graph thread waits on its cameras and its graph's inbound fd in one call.
 nix = { workspace = true, features = ["poll"] }
+# `sched_setaffinity(2)`: a graph thread is pinned to its workload's CPU core (`execution::affinity`).
+libc = { workspace = true }
 # The robot-frame camera mount as Eidos extrinsics (camera context).
 helios-field = { path = "../field" }
 # Eidos's camera calibration and extrinsics types, which the engine pushes into the graphs'

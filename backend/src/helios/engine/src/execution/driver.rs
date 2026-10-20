@@ -189,7 +189,7 @@ impl WorkloadDriver {
         // Made here, before the thread runs, so a stop at any point makes it readable.
         let inbound = graph.host_graph.inbound_fd().map_err(|error| ExecutionError::Execute(format!("graph inbound fd: {error}")))?;
         let nt4 = Nt4Output { sink: nt4, pipeline: pipeline_name(&workload.workload_id), serializers: serializers.clone() };
-        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone(), nt4), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone() };
+        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone(), nt4), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone(), cpu: workload.cpu };
         let thread = std::thread::Builder::new()
             .name(format!("helios-graph-{}", workload.workload_id))
             .spawn(move || graph_loop.run(trigger))
@@ -508,15 +508,38 @@ struct GraphLoop {
     frame_inputs: Vec<String>,
     shared: Arc<DriverShared>,
     stop: HostGraphStopHandle,
+    /// The core to pin this thread to (the workload's `cpu`), before anything runs on it.
+    cpu: Option<u32>,
 }
 
 impl GraphLoop {
     fn run(self, trigger: Trigger) {
+        self.pin_to_cpu();
         match trigger {
             Trigger::Once => self.run_once(),
             Trigger::Resources => self.run_polled(Vec::new()),
             Trigger::Frames(sources) => self.run_polled(sources),
         }
+    }
+
+    /// Pin this thread to `cpu` and report what was applied (`cpu` or `cpu_error` in the stats).
+    /// A thread that could not be pinned runs anyway, where the scheduler puts it.
+    fn pin_to_cpu(&self) {
+        let Some(cpu) = self.cpu else { return };
+        let outcome = super::affinity::pin_current_thread(cpu);
+        if let Err(error) = &outcome {
+            tracing::warn!(pipeline = %self.recorder.nt4.pipeline, cpu, %error, "graph thread not pinned");
+        }
+        {
+            let mut state = lock(&self.shared.state);
+            let stats = &mut state.stats;
+            (stats.cpu, stats.cpu_error) = match outcome {
+                Ok(()) => (Some(cpu), None),
+                Err(error) => (None, Some(error)),
+            };
+            stats.updated_at_ms = now_ms();
+        }
+        self.shared.outputs_ready.notify_one();
     }
 
     fn run_once(mut self) {
