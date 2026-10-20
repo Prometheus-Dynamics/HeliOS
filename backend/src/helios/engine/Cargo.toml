@@ -50,6 +50,8 @@ eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Playback e2e: the test writes a recording (StreamRecorder) and replays it as a camera.
+styx = { workspace = true, default-features = false, features = ["facade", "daedalus", "replay-mcap", "replay-mcap-lz4"] }
 # Marker bit patterns for synthetic test scenes.
 eidos-aruco = { workspace = true }
 # Built by `cargo test` before the engine's tests, in the same build, so the tests can load

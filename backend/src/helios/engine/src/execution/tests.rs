@@ -47,6 +47,10 @@ use crate::{
 /// The stored graph documents engine workloads run: Eidos's detector templates.
 /// The templates HeliOS deploys: the tracked detector as one node, which starts on a sliced
 /// frame's first rows (the fastest path).
+/// Playback players (a recording served as a camera, bound like a live one).
+#[cfg(test)]
+mod playback;
+
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
 /// The same detectors as node-groups, each stage a node of its own (per-stage profiling).
