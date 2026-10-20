@@ -345,7 +345,8 @@ export interface PipelineSpec {
 /** `GET /v1/pipelines/templates`: a graph helios-engine ships, deployable with a camera on `camera_input`. */
 export interface PipelineTemplate {
   id: string;
-  family: "apriltag" | "aruco";
+  /** A detector family, or `features` (a non-detector template, such as the feature tracks). */
+  family: "apriltag" | "aruco" | "features";
   /** `default` (one node, starts on a sliced frame's first rows) or `staged` (the node-group, one node per stage, for profiling). */
   variant?: "default" | "staged";
   dictionary: string | null;

@@ -227,6 +227,24 @@ export interface Detection {
   frame?: { w: number; h: number };
 }
 
+/** One feature track of a `tracks` output (`eidos:feature_tracks`): stable id, position, age in ticks. */
+export interface FeatureTrack {
+  id: number;
+  x: number;
+  y: number;
+  age: number;
+  /** `new` when detected this tick (age 0), `tracked` when followed from the previous frame. */
+  status: "new" | "tracked";
+}
+
+/** A `tracks` output's value: the live tracks of one tick and their counts. */
+export interface FeatureTracks {
+  tracks: FeatureTrack[];
+  summary: { count: number; tracked: number; new: number; lost: number };
+  /** The size of the frame the positions are in (the pipeline's frame), when known. */
+  frame?: { w: number; h: number };
+}
+
 export interface TagPose {
   id: number;
   t: [number, number, number];

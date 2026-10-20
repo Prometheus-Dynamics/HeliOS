@@ -4,7 +4,8 @@
 // any screen.
 
 import { CATALOG_BY_ID, defaults } from "./catalog";
-import type { Camera, CameraControlInfo, ClusterNode, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
+import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
 
 const now = Date.now();
 
@@ -308,8 +309,68 @@ function tagWorkload(id: string, name: string, nodeId: string, cameraId: string,
   };
 }
 
+/** Mock feature tracks: 24 slots, each a track that lives 25 ticks; then its id ends and a new one starts. */
+const MOCK_SLOTS = 24;
+const MOCK_LIFE = 25;
+/** The mock tracks' frame: a 1280x800 sensor mode, so the overlay scales them as it does detections. */
+const MOCK_FRAME = { w: 1280, h: 800 };
+
+/** The mock `tracks` value at replay index `index`: ids are never reused, and positions drift on loops. */
+export function mockFeatureTracks(index: number): FeatureTracks {
+  const tracks: FeatureTrack[] = [];
+  for (let slot = 0; slot < MOCK_SLOTS; slot++) {
+    const phase = index + slot * 3;
+    const cycle = Math.floor(phase / MOCK_LIFE);
+    const age = phase % MOCK_LIFE;
+    const radius = 120 + (slot % 6) * 70;
+    const angle = 0.04 * index + slot;
+    tracks.push({
+      id: cycle * MOCK_SLOTS + slot + 1,
+      x: MOCK_FRAME.w / 2 + radius * Math.cos(angle),
+      y: MOCK_FRAME.h / 2 + 0.6 * radius * Math.sin(angle),
+      age,
+      status: age === 0 ? "new" : "tracked",
+    });
+  }
+  // A slot restarts (its old id ends) on the ticks where its age is 0, after the first tick.
+  const fresh = tracks.filter((t) => t.status === "new").length;
+  const lost = index > 0 ? fresh : 0;
+  return { tracks, summary: { count: tracks.length, tracked: tracks.length - fresh, new: fresh, lost }, frame: MOCK_FRAME };
+}
+
+/** A camera's mock feature tracks at replay index `index`, with the trails of the last ticks (as the live store keeps them). */
+export function mockCameraFeatures(index: number): CameraFeatures {
+  const book = new TrailBook();
+  let trails = new Map<number, TrailPoint[]>();
+  for (let back = TRAIL_LENGTH - 1; back >= 0; back--) trails = book.advance(mockFeatureTracks(Math.max(0, index - back)).tracks);
+  const tracks = mockFeatureTracks(index);
+  return { tracks, trails, signature: JSON.stringify(tracks) };
+}
+
+function featuresGraph(): GraphDocument {
+  return {
+    format: "daedalus.graph",
+    schema_version: 1,
+    requires: [{ id: "styx.frames" }, { id: "eidos" }, { id: "helios" }],
+    nodes: [node("camera", "styx:camera", 0, 60), node("tracks", "eidos:features.track", 270, 40), node("stream", "helios:stream", 540, 40, { name: "tracks" })],
+    edges: [edge("camera", "frame", "tracks", "frame"), edge("tracks", "tracks", "stream", "value")],
+  };
+}
+
 export const WORKLOADS: Workload[] = [
   tagWorkload("tags-front", "AprilTags · front", "raze-front", "camera.raze-front.cam0", "/helios/front"),
+  {
+    id: "features-front",
+    name: "Feature tracks · front",
+    nodeId: "raze-front",
+    revision: 1,
+    state: "running",
+    restarts: 0,
+    bindings: { camera: "camera.raze-front.cam0" },
+    graph: featuresGraph(),
+    outputs: ["stream.features-front.tracks"],
+    perf: { tickP50Ms: 0.3, tickP99Ms: 0.4, fps: 60, memMiB: 2.1, nodeMs: { camera: 0.02, tracks: 0.2, stream: 0.006 }, tickHistory: history(0.3, 0.03) },
+  },
   tagWorkload("tags-back", "AprilTags · back", "raze-back", "camera.raze-back.cam0", "/helios/back"),
   tagWorkload("tags-right", "AprilTags · right", "raze-right", "camera.raze-right.cam0", "/helios/right"),
   {
@@ -327,7 +388,7 @@ export const WORKLOADS: Workload[] = [
 ];
 
 export const STREAMS: Stream[] = [
-  ...WORKLOADS.filter((w) => w.state === "running").map((w) => ({
+  ...WORKLOADS.filter((w) => w.state === "running" && w.outputs.includes(`stream.${w.id}.poses`)).map((w) => ({
     id: `stream.${w.id}.poses`,
     name: `${w.name} · poses`,
     schema: "poses" as const,
@@ -336,6 +397,7 @@ export const STREAMS: Stream[] = [
     latencyMs: 1.9,
     bridges: ["nt4", "api"],
   })),
+  { id: "stream.features-front.tracks", name: "Feature tracks · front · tracks", schema: "telemetry", producer: "features-front", rateHz: 60, latencyMs: 1.1, bridges: ["api"] },
   { id: "stream.pv-coproc.targets", name: "PhotonVision · turret targets", schema: "detections", producer: "photonvision-adapter", rateHz: 30, latencyMs: 34, bridges: ["nt4", "api"] },
   { id: "stream.mcu-imu.orientation", name: "IMU · orientation", schema: "telemetry", producer: "imu-driver", rateHz: 200, latencyMs: 0.6, bridges: ["api", "cluster"] },
 ];

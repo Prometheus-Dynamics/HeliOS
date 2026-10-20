@@ -7,7 +7,8 @@ import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "#lib/api/mock.js";
+import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, mockCameraFeatures } from "#lib/api/mock.js";
+import type { CameraFeatures } from "#lib/vision/features.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
 import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
@@ -160,6 +161,13 @@ class ClusterStore {
   detectionsFor(camera: Camera): Detection[] {
     if (this.live) return this.live.detectionsFor(camera.resourceId);
     return this.feed?.frames[this.feedIndex(camera)]?.markers ?? [];
+  }
+
+  /** Feature tracks of a camera with a running `tracks` pipeline (null without one). */
+  featureTracksFor(camera: Camera): CameraFeatures | null {
+    if (this.live) return this.live.featureTracksFor(camera.resourceId);
+    const tracking = this.workloads.some((w) => w.state === "running" && w.outputs.some((o) => o.endsWith(".tracks")) && Object.values(w.bindings).includes(camera.resourceId));
+    return tracking ? mockCameraFeatures(this.feedIndex(camera)) : null;
   }
 
   posesFor(camera: Camera): TagPose[] {

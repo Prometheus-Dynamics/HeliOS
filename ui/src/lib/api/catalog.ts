@@ -20,6 +20,7 @@ export type KnownPortType =
   | "eidos:camera_extrinsics"
   | "eidos:pose_solutions"
   | "eidos:camera_pose"
+  | "eidos:feature_tracks"
   | "any";
 
 /** A port's Daedalus type key; the known ones have their own colour. */
@@ -338,6 +339,27 @@ export const CATALOG: NodeType[] = [
     params: [],
   },
   {
+    id: "eidos:features.track",
+    plugin: "eidos",
+    category: "Motion",
+    title: "Feature tracks",
+    summary: "Corners followed across frames with stable ids; empty grid cells are refilled.",
+    inputs: [
+      { name: "frame", type: "styx:framelease" },
+      { name: "mask", type: "eidos:mask" },
+    ],
+    outputs: [{ name: "tracks", type: "eidos:feature_tracks" }],
+    params: [
+      { name: "detector", kind: "enum", default: "shi_tomasi", options: ["shi_tomasi", "harris", "fast"], help: "Corner detector for new tracks." },
+      { name: "max_points", kind: "int", default: 200, min: 1, max: 2000, help: "Most live tracks." },
+      { name: "min_distance", kind: "float", default: 8, min: 0, max: 64, step: 0.5, help: "Smallest spacing between corners, in pixels." },
+      { name: "cell_size", kind: "int", default: 32, min: 4, max: 256, help: "Grid cell size, in pixels." },
+      { name: "max_per_cell", kind: "int", default: 2, min: 1, max: 16, help: "Most tracks per grid cell." },
+      { name: "window_radius", kind: "int", default: 7, min: 1, max: 31, help: "Tracker window half-size, in pixels." },
+      { name: "pyramid_levels", kind: "int", default: 3, min: 0, max: 6, help: "Tracker pyramid levels." },
+    ],
+  },
+  {
     id: "helios:stream",
     plugin: "helios",
     category: "Output",
@@ -346,7 +368,7 @@ export const CATALOG: NodeType[] = [
     inputs: [{ name: "value", type: "any" }],
     outputs: [],
     params: [
-      { name: "name", kind: "enum", default: "detections", options: ["detections", "poses", "rejected", "telemetry"], help: "Stream name." },
+      { name: "name", kind: "enum", default: "detections", options: ["detections", "poses", "rejected", "tracks", "telemetry"], help: "Stream name." },
       { name: "max_rate_hz", kind: "int", default: 60, min: 1, max: 240, help: "Publish at most this often." },
     ],
   },
@@ -378,6 +400,7 @@ export const PORT_COLORS: Record<KnownPortType, string> = {
   "eidos:camera_extrinsics": "#cbd5e1",
   "eidos:pose_solutions": "#f59e0b",
   "eidos:camera_pose": "#fb923c",
+  "eidos:feature_tracks": "#22d3ee",
   any: "#9aa0ae",
 };
 
