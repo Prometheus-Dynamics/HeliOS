@@ -53,6 +53,9 @@ mod playback;
 /// The feature-tracking template (`eidos:features.track`) and its golden document.
 #[cfg(test)]
 mod features;
+/// The live-map template (`eidos:mapping.live_map`) and its golden document.
+#[cfg(test)]
+mod live_map;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
@@ -61,6 +64,8 @@ const APRILTAG_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag
 const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50-staged.graph.json");
 /// Eidos's feature tracks (`eidos:features.track`) as one camera frame in, `tracks` out.
 const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-track.graph.json");
+/// The live map: the tracked detector and Eidos's live mapper (`eidos:mapping.live_map`).
+const LIVE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/live-map.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -383,6 +388,7 @@ fn graph_documents_are_eidos_templates() {
         ),
         ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
+        ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");
