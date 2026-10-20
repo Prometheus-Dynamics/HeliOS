@@ -18,6 +18,15 @@ use crate::{
 
 /// Eidos's multi-tag pose node, whose `known_tags` constant a layout fills.
 pub const MULTI_TAG_POSE_NODE: &str = "eidos:aruco.multi_tag_pose";
+/// The live mapper: with the layout, its map is in the field's frame (aligned once two tags match).
+pub const LIVE_MAP_NODE: &str = "eidos:mapping.live_map";
+/// The nodes that take the field layout, and the input each takes it on (both `eidos:known_tag_poses`).
+const LAYOUT_INPUTS: &[(&str, &str)] = &[(MULTI_TAG_POSE_NODE, "known_tags"), (LIVE_MAP_NODE, "layout")];
+
+fn layout_input(node: &serde_json::Value) -> Option<&'static str> {
+    let id = node.get("id").and_then(|id| id.as_str())?;
+    LAYOUT_INPUTS.iter().find(|(node_id, _)| *node_id == id).map(|(_, input)| *input)
+}
 
 /// A layout the API knows: built in, or uploaded and stored.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,13 +114,14 @@ pub async fn layout_for(state: &SharedState, named: Option<&str>) -> ApiResult<S
     }
 }
 
-/// Whether `graph` (a `GraphDocument` as JSON) has a multi-tag pose node.
+/// Whether `graph` (a `GraphDocument` as JSON) has a node that takes the field layout (a multi-tag
+/// pose or a live map).
 pub fn has_multi_tag_pose(graph: &serde_json::Value) -> bool {
-    graph.pointer("/graph/nodes").and_then(|n| n.as_array()).is_some_and(|nodes| nodes.iter().any(|node| node.get("id").and_then(|id| id.as_str()) == Some(MULTI_TAG_POSE_NODE)))
+    graph.pointer("/graph/nodes").and_then(|n| n.as_array()).is_some_and(|nodes| nodes.iter().any(|node| layout_input(node).is_some()))
 }
 
-/// Write `layout`'s tags into the `known_tags` constant of every multi-tag pose node of `graph`.
-/// Returns how many nodes it set.
+/// Write `layout`'s tags into every node of `graph` that takes them: the `known_tags` constant
+/// of a multi-tag pose node, the `layout` constant of a live map. Returns how many nodes it set.
 pub fn apply_layout(graph: &mut serde_json::Value, layout: &FieldLayout) -> ApiResult<usize> {
     let constant = daedalus_data::json::from_plain_json(&layout.known_tags_value()).map_err(|error| ApiError::internal(format!("field layout as a graph value: {error}")))?;
     let constant = serde_json::to_value(constant).map_err(|error| ApiError::internal(error.to_string()))?;
@@ -119,13 +129,14 @@ pub fn apply_layout(graph: &mut serde_json::Value, layout: &FieldLayout) -> ApiR
         return Ok(0);
     };
     let mut set = 0;
-    for node in nodes.iter_mut().filter(|node| node.get("id").and_then(|id| id.as_str()) == Some(MULTI_TAG_POSE_NODE)) {
+    for node in nodes.iter_mut() {
+        let Some(input) = layout_input(node) else { continue };
         if node.get("const_inputs").and_then(|c| c.as_array()).is_none() {
             node["const_inputs"] = serde_json::json!([]);
         }
         let consts = node["const_inputs"].as_array_mut().expect("just ensured");
-        consts.retain(|entry| entry.get(0).and_then(|name| name.as_str()) != Some("known_tags"));
-        consts.push(serde_json::json!(["known_tags", constant.clone()]));
+        consts.retain(|entry| entry.get(0).and_then(|name| name.as_str()) != Some(input));
+        consts.push(serde_json::json!([input, constant.clone()]));
         set += 1;
     }
     Ok(set)
@@ -143,6 +154,16 @@ mod tests {
         let summary = builtin[0].summary(FRC_2026_ANDYMARK_ID);
         assert_eq!(summary["selected"], true);
         assert_eq!(summary["tags"], 32);
+    }
+
+    #[test]
+    fn a_layout_fills_the_live_map_layout_constant() {
+        let mut graph = serde_json::json!({ "graph": { "nodes": [{ "id": "eidos:detectors.tracked_detect" }, { "id": LIVE_MAP_NODE }] } });
+        assert!(has_multi_tag_pose(&graph), "a live map takes the layout too");
+        assert_eq!(apply_layout(&mut graph, &FieldLayout::frc_2026_andymark()).expect("apply"), 1);
+        let consts = graph.pointer("/graph/nodes/1/const_inputs").and_then(|c| c.as_array()).expect("consts");
+        assert_eq!(consts.len(), 1);
+        assert_eq!(consts[0][0], "layout");
     }
 
     #[test]
