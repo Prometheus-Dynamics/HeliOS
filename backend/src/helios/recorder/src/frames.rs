@@ -2,7 +2,7 @@
 //! frames socket, so it never restarts or re-plans the capture the pipelines use. What it asks
 //! for is the recording's `frames` setting: the sensor's raw frames (the default) or luma.
 
-use std::{path::Path, time::Duration};
+use std::{cell::RefCell, path::Path, time::Duration};
 
 use styx::{
     core::prelude::{FrameLease, RecvOutcome},
@@ -32,15 +32,29 @@ pub fn request(frames: RecordFrames) -> FrameRequest {
 pub struct FrameSource {
     client: FrameClient,
     delivered: Option<Delivered>,
+    /// The frame read while opening, returned by the first [`FrameSource::next`].
+    first: RefCell<Option<FrameLease>>,
 }
 
 impl FrameSource {
     /// Connects to the camera service at `socket` and asks for `request`. Blocks up to
-    /// [`OPEN_TIMEOUT`].
+    /// [`OPEN_TIMEOUT`] for the connection, and as long again for a first frame: its format and
+    /// size are what the recording's header says (the service's `delivered` names the processed
+    /// capture's format for a `sensor_raw` request, not the raw frames').
     pub fn open(socket: &Path, request: &FrameRequest) -> Result<Self, RecorderError> {
         let client = FrameClient::options(socket).low_priority().reconnecting().timeout(OPEN_TIMEOUT).request(request).map_err(|error| RecorderError::Camera(error.to_string()))?;
-        let delivered = client.delivered();
-        Ok(Self { client, delivered })
+        let mut delivered = client.delivered();
+        let first = match client.recv(OPEN_TIMEOUT) {
+            RecvOutcome::Data(frame) => Some(frame),
+            RecvOutcome::Empty => None,
+            RecvOutcome::Closed => return Err(RecorderError::Camera(client.last_error().map(|e| e.to_string()).unwrap_or_else(|| "camera service closed".into()))),
+        };
+        if let (Some(delivered), Some(frame)) = (delivered.as_mut(), first.as_ref()) {
+            let format = frame.meta().format;
+            delivered.format = format.code;
+            delivered.size = (format.resolution.width.get(), format.resolution.height.get());
+        }
+        Ok(Self { client, delivered, first: RefCell::new(first) })
     }
 
     pub fn delivered(&self) -> Option<&Delivered> {
@@ -49,6 +63,9 @@ impl FrameSource {
 
     /// The next frame, waiting up to `wait`. `Err` only when the service is gone for good.
     pub fn next(&self, wait: Duration) -> Result<Option<FrameLease>, RecorderError> {
+        if let Some(frame) = self.first.borrow_mut().take() {
+            return Ok(Some(frame));
+        }
         match self.client.recv(wait) {
             RecvOutcome::Data(frame) => Ok(Some(frame)),
             RecvOutcome::Empty => Ok(None),
