@@ -374,9 +374,18 @@ impl FieldLayout {
         self.tags.iter().find(|tag| tag.id == id)
     }
 
-    /// The tags as Eidos known tag poses, reference frame = the field.
+    /// The tags as Eidos known tag poses, reference frame = the field, each with the field's
+    /// placement error ([`FIELD_PLACEMENT_SIGMA_M`], [`FIELD_PLACEMENT_SIGMA_RAD`]).
     pub fn known_tags(&self) -> KnownTagPoses {
-        KnownTagPoses::new(self.tags.iter().map(|tag| KnownTag { id: tag.id, side: tag.side_m, reference_from_tag: tag.field_from_eidos_tag() }).collect())
+        KnownTagPoses::new(
+            self.tags
+                .iter()
+                .map(|tag| {
+                    let reference_from_tag = tag.field_from_eidos_tag();
+                    KnownTag { id: tag.id, side: tag.side_m, reference_from_tag, placement: Some(placement_covariance(&reference_from_tag, FIELD_PLACEMENT_SIGMA_M, FIELD_PLACEMENT_SIGMA_RAD)) }
+                })
+                .collect(),
+        )
     }
 
     /// [`Self::known_tags`] as the value of an `eidos:known_tag_poses` graph constant: a list of
@@ -386,12 +395,48 @@ impl FieldLayout {
             .tags
             .iter()
             .map(|tag| {
-                let pose = Pose::from_se3(&tag.field_from_eidos_tag());
-                serde_json::json!({ "id": tag.id, "side": tag.side_m, "reference_from_tag": pose })
+                let field_from_tag = tag.field_from_eidos_tag();
+                let pose = Pose::from_se3(&field_from_tag);
+                let placement: Vec<f64> = placement_covariance(&field_from_tag, FIELD_PLACEMENT_SIGMA_M, FIELD_PLACEMENT_SIGMA_RAD).iter().flatten().copied().collect();
+                serde_json::json!({ "id": tag.id, "side": tag.side_m, "reference_from_tag": pose, "placement_covariance": placement })
             })
             .collect();
         serde_json::Value::Array(tags)
     }
+}
+
+/// How far a real field's tags are from the layout, 1 sigma: a centimetre and half a degree (FRC
+/// fields are built and checked to about that; a practice field is often worse).
+pub const FIELD_PLACEMENT_SIGMA_M: f64 = 0.01;
+pub const FIELD_PLACEMENT_SIGMA_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
+
+/// A tag's placement covariance in Eidos's convention (6 x 6 row-major `[rx, ry, rz, tx, ty, tz]`,
+/// the left perturbation `exp([w, v]^) reference_from_tag` in the reference frame) for an error of
+/// `sigma_rad` per axis turned about the tag's own centre and `sigma_m` per axis of position.
+///
+/// A diagonal covariance in the reference frame would turn the tag about the field's origin (a
+/// half degree is 14 cm at 16 m). The local error maps to the reference frame by the adjoint
+/// `A = [[R, 0], [[t]x R, R]]`: `Σ = A Σ_local Aᵀ`.
+pub fn placement_covariance(reference_from_tag: &Se3Transform, sigma_m: f64, sigma_rad: f64) -> [[f64; 6]; 6] {
+    let r = &reference_from_tag.rotation.m;
+    let t = &reference_from_tag.translation;
+    let cross = [[0.0, -t.z, t.y], [t.z, 0.0, -t.x], [-t.y, t.x, 0.0]];
+    let mut adjoint = [[0.0_f64; 6]; 6];
+    for i in 0..3 {
+        for j in 0..3 {
+            adjoint[i][j] = r[i][j];
+            adjoint[3 + i][3 + j] = r[i][j];
+            adjoint[3 + i][j] = (0..3).map(|k| cross[i][k] * r[k][j]).sum();
+        }
+    }
+    let local = |axis: usize| if axis < 3 { sigma_rad * sigma_rad } else { sigma_m * sigma_m };
+    let mut covariance = [[0.0_f64; 6]; 6];
+    for (i, row) in covariance.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            *cell = (0..6).map(|k| adjoint[i][k] * local(k) * adjoint[j][k]).sum();
+        }
+    }
+    covariance
 }
 
 fn is_rotation(r: &RotationMatrix3) -> bool {

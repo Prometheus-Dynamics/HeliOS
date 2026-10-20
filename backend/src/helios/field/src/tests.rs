@@ -157,7 +157,7 @@ fn the_wrong_tag_rotation_does_not_fit() {
     let field_from_camera = field_from_camera_looking_at(v(13.5, 4.1, 0.6), v(16.5, 4.1, 0.55));
     let observations = layout.tags.iter().filter_map(|tag| observe(tag, &field_from_camera, &calibration)).collect::<Vec<_>>();
     assert!(observations.len() >= 2);
-    let unconverted = KnownTagPoses::new(layout.tags.iter().map(|tag| KnownTag { id: tag.id, side: tag.side_m, reference_from_tag: tag.field_from_tag.to_se3() }).collect());
+    let unconverted = KnownTagPoses::new(layout.tags.iter().map(|tag| KnownTag::new(tag.id, tag.side_m, tag.field_from_tag.to_se3())).collect());
     let mut solver = MultiTagPoseSolver::new(unconverted, MultiTagPoseConfig::default());
     let mut out = MultiTagPose::default();
     solver.solve_into(&observations, &calibration, None, &mut out);
@@ -266,4 +266,26 @@ fn mount_angles_follow_wpilib() {
     let ahead = CameraMount { x_m: 0.3, ..CameraMount::default() }.extrinsics();
     assert!(distance(column(&ahead.rig_from_camera.rotation, 2), v(1.0, 0.0, 0.0)) < 1e-12);
     assert!(distance(translation(&ahead.rig_from_camera), v(0.3, 0.0, 0.0)) < 1e-12);
+}
+
+#[test]
+fn placement_turns_a_tag_about_its_own_centre() {
+    // A tag 16 m down the field: its placement error stays a centimetre where it is, with no
+    // translation from turning about the field origin.
+    let far = Se3Transform { rotation: RotationMatrix3 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }, translation: Translation3 { x: 16.0, y: 0.0, z: 0.0 } };
+    let covariance = placement_covariance(&far, 0.01, 0.0);
+    for axis in 3..6 {
+        assert!((covariance[axis][axis] - 1e-4).abs() < 1e-12, "{covariance:?}");
+    }
+    // Rotation only: in the reference frame, turning about the tag's centre is a turn about the
+    // origin plus the translation v = t x w that undoes the lever arm, so v is fully correlated
+    // with w (for t along x, v_y = -16 w_z).
+    let turned = placement_covariance(&far, 0.0, 0.01);
+    assert!((turned[2][2] - 1e-4).abs() < 1e-12);
+    assert!((turned[4][4] - 16.0 * 16.0 * 1e-4).abs() < 1e-9, "{turned:?}");
+    assert!((turned[4][2] + 16.0 * 1e-4).abs() < 1e-12, "{turned:?}");
+    // Every tag of the layout carries it.
+    let layout = FieldLayout::frc_2026_andymark();
+    assert!(layout.known_tags().tags.iter().all(|tag| tag.placement.is_some()));
+    assert_eq!(layout.known_tags_value()[0]["placement_covariance"].as_array().map(Vec::len), Some(36));
 }
