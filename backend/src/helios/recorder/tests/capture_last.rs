@@ -99,6 +99,7 @@ fn a_clip_is_written_from_the_ring_while_a_recording_keeps_running() {
         board: "test-board".into(),
         camera_label: "cam".into(),
         commit: "abc1234".into(),
+        label: None,
         settings: stored.clone(),
         info: info(),
         lemnos: None,

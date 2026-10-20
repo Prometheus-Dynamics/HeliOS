@@ -6,9 +6,10 @@
 use std::{path::Path, time::Duration};
 
 use helios_recorder::{
-    Attachment, LemnosSource, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus,
+    Attachment, ClipRequest, LemnosSource, PartSummary, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus,
     host::{self, HostSender, TOPIC_EVENTS},
     info::{ATTACHMENT_FIELD, ATTACHMENT_PIPELINE_PREFIX},
+    storage,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -119,7 +120,7 @@ fn to_strings(facts: serde_json::Map<String, Value>) -> std::collections::BTreeM
 }
 
 /// Everything `recorder.start` needs for `camera`: its frames socket, the board and the commit.
-pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSettings) -> ApiResult<RecordingRequest> {
+pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSettings, label: Option<String>) -> ApiResult<RecordingRequest> {
     let (view, record) = cameras::find(state, camera).await?;
     let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{camera} has no Styx frames endpoint")))?;
     let info = recording_info(state, camera, &socket, &view).await;
@@ -129,6 +130,7 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
         board: board_name(&state.config.node_id),
         camera_label: camera_label(crate::orion::label_map(&record.labels).get("helios.display_name").map_or("", String::as_str), camera),
         commit: image_commit(),
+        label,
         settings: settings.clone(),
         info,
         lemnos: Some(LemnosSource {
@@ -242,4 +244,85 @@ pub fn api_error(error: RecorderError) -> ApiError {
 /// A recording id from the path must be a stored or active one: letters, digits, `.`, `_`, `-`.
 pub fn check_recording_id(id: &str) -> ApiResult<()> {
     if helios_recorder::naming::is_valid_id(id) { Ok(()) } else { Err(ApiError::bad_request(format!("invalid recording id {id:?}"))) }
+}
+
+/// Starts a recording from `request.camera` (`label` goes into its file name). Publishes its
+/// status and starts the session's host channels.
+pub async fn start_recording(state: &SharedState, request: StartRecording, label: Option<String>) -> ApiResult<RecordingStatus> {
+    crate::routes::check_id(&request.camera)?;
+    let stored = state.store.recording_settings().await?;
+    let settings = effective_settings(&stored, &request);
+    settings.validate().map_err(ApiError::unprocessable)?;
+    let recording = request_for(state, &request.camera, settings, label).await?;
+    let started = {
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || state.recorder.start(recording)).await.map_err(|error| ApiError::internal(error.to_string()))?.map_err(api_error)?
+    };
+    if let Some(host) = state.recorder.host() {
+        drop(spawn_session_tasks(state.clone(), host, started.id.clone()));
+    }
+    publish(state, &started);
+    Ok(started)
+}
+
+/// Asks recording `id` to end (the last part is completed in the background).
+pub async fn stop_recording(state: &SharedState, id: &str) -> ApiResult<RecordingStatus> {
+    check_recording_id(id)?;
+    let status = state.recorder.stop(id).map_err(api_error)?;
+    publish(state, &status);
+    Ok(status)
+}
+
+/// The camera a recording made from the robot (NetworkTables, auto-record) uses: the lowest camera
+/// id present.
+pub async fn default_camera(state: &SharedState) -> ApiResult<String> {
+    let view = state.orion.view().await?;
+    cameras::camera_records(&view).map(|record| record.resource_id.to_string()).min().ok_or_else(|| ApiError::not_found("no camera is present"))
+}
+
+/// Writes the last `seconds` of `camera`'s capture-last ring (the first camera with a ring when
+/// `None`) to a stored recording. Refused (`409`) when the camera has no ring enabled, `503` when
+/// its ring cannot run, `422` for a window longer than the ring.
+pub async fn capture_clip(state: &SharedState, camera: Option<String>, seconds: Option<u32>) -> ApiResult<PartSummary> {
+    let settings = state.store.recording_settings().await?;
+    let camera = match camera {
+        Some(camera) => camera,
+        None => settings.capture_last_cameras.first().cloned().ok_or_else(|| ApiError::conflict("no camera has a capture-last ring; enable one in the recording settings"))?,
+    };
+    crate::routes::check_id(&camera)?;
+    if !settings.capture_last_cameras.contains(&camera) {
+        return Err(ApiError::conflict(format!("capture-last is not enabled for {camera}")));
+    }
+    if let Some(seconds) = seconds.filter(|seconds| *seconds == 0 || *seconds > settings.capture_last_seconds) {
+        return Err(ApiError::unprocessable(format!("seconds must be 1 to {} (the ring's length, got {seconds})", settings.capture_last_seconds)));
+    }
+    let statuses = crate::recording_rings::sync(state).await?;
+    match statuses.iter().find(|status| status.camera == camera) {
+        Some(status) if status.state == "running" => {}
+        Some(status) => return Err(ApiError::backend(status.error.clone().unwrap_or_else(|| "the capture-last ring is not running".into()))),
+        None => return Err(ApiError::backend(format!("{camera} has no camera service to ring"))),
+    }
+    let (view, record) = cameras::find(state, &camera).await?;
+    let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{camera} has no Styx frames endpoint")))?;
+    let info = recording_info(state, &camera, &socket, &view).await;
+    let (board, camera_label, commit) = file_names(state, &camera, &record);
+    let dir = storage::resolve_dir(&settings).map_err(|error| api_error(RecorderError::Storage(error)))?;
+    let last = seconds.map(|seconds| Duration::from_secs(u64::from(seconds)));
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let clip = ClipRequest {
+            camera_id: &camera,
+            board: &board,
+            camera_label: &camera_label,
+            commit: &commit,
+            info: &info,
+            compression: settings.compression,
+            queue_bytes: settings.queue_bytes,
+            max_fps: settings.max_fps,
+        };
+        state.recorder.capture_last(last, &clip, &dir)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+    .map_err(api_error)
 }

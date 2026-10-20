@@ -35,6 +35,8 @@ pub struct RecordingRequest {
     pub camera_id: String,
     /// The camera service's frames socket (`styx-frames+unix://...`, its path).
     pub frames_socket: PathBuf,
+    /// Appended to the file name (sanitized), such as the match a robot-enabled period is for.
+    pub label: Option<String>,
     /// The board's name, for the file name (its hostname).
     pub board: String,
     /// The camera's short label, for the file name (`ov9782`); the full id is in the metadata.
@@ -83,7 +85,12 @@ impl Recorder {
         let settings = request.settings;
         let dir = storage::resolve_dir(&settings)?;
         let free = storage::check_reserve(&dir, settings.reserve_bytes)?;
-        let session = naming::unused_session_stem(&dir, &naming::session_stem(&request.board, &request.camera_label, Utc::now(), &request.commit));
+        let stem = naming::session_stem(&request.board, &request.camera_label, Utc::now(), &request.commit);
+        let stem = match request.label.as_deref().map(str::trim).filter(|label| !label.is_empty()) {
+            Some(label) => format!("{stem}-{}", naming::sanitize(label)),
+            None => stem,
+        };
+        let session = naming::unused_session_stem(&dir, &stem);
         let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
         let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
         let format = format!("{} {}x{}", delivered.format, delivered.size.0, delivered.size.1);

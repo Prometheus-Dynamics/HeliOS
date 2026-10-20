@@ -53,6 +53,12 @@ pub struct RecorderSettings {
     pub capture_last_seconds: u32,
     /// The cameras with a capture-last ring running (none by default: the rings cost RAM and CPU).
     pub capture_last_cameras: Vec<String>,
+    /// Robot-side control over NetworkTables (`<prefix>/record`, `<prefix>/capture_last`, the status
+    /// topics), when the NT4 server is set. On by default.
+    pub nt_control: bool,
+    /// Record while the robot is enabled (FMS control data over NetworkTables): one file per
+    /// enabled period, named after the match. Off by default.
+    pub auto_record: bool,
 }
 
 impl Default for RecorderSettings {
@@ -73,6 +79,8 @@ impl Default for RecorderSettings {
             power_period_ms: 100,
             capture_last_seconds: 10,
             capture_last_cameras: Vec::new(),
+            nt_control: true,
+            auto_record: false,
         }
     }
 }
@@ -123,6 +131,7 @@ mod tests {
         assert_eq!(settings.max_fps, Some(30.0));
         assert_eq!(settings.frames, RecordFrames::Raw);
         assert_eq!((settings.capture_last_seconds, settings.capture_last_cameras.len()), (10, 0));
+        assert_eq!((settings.nt_control, settings.auto_record), (true, false));
         assert!(settings.compression);
         assert!(settings.queue_bytes >= 64 * MIB as usize);
         assert_eq!(settings.reserve_bytes, 2 * GIB);

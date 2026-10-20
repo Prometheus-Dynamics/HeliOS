@@ -2,7 +2,7 @@
 //! stored recordings, download or delete a stored part, and the settings they are made with.
 //! The recording itself is helios-recorder's (`recordings.rs` builds its request).
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use axum::{
     Json,
@@ -11,19 +11,15 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use helios_recorder::{ClipRequest, PartSummary, RecorderSettings, RecordingStatus, RingStatus, catalog, storage};
+use helios_recorder::{PartSummary, RecorderSettings, RecordingStatus, RingStatus, catalog, storage};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 
 use crate::{
     SharedState,
     error::{ApiError, ApiResult},
-    recording_rings,
     recordings::{self, StartRecording},
-    routes::cameras,
 };
-
-use super::check_id;
 
 /// Read chunk for downloads.
 const DOWNLOAD_CHUNK: usize = 1 << 20;
@@ -71,28 +67,14 @@ pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Listing>> 
 /// `POST /v1/recordings`: starts one (`201` with its status). `409` while another runs, `507`
 /// below the free-space reserve, `503` when the camera's service is not there.
 pub async fn start(State(state): State<SharedState>, Json(request): Json<StartRecording>) -> ApiResult<(StatusCode, Json<RecordingStatus>)> {
-    check_id(&request.camera)?;
-    let stored = state.store.recording_settings().await?;
-    let settings = recordings::effective_settings(&stored, &request);
-    settings.validate().map_err(ApiError::unprocessable)?;
-    let recording = recordings::request_for(&state, &request.camera, settings).await?;
-    let started = {
-        let state = state.clone();
-        tokio::task::spawn_blocking(move || state.recorder.start(recording)).await.map_err(|error| ApiError::internal(error.to_string()))?.map_err(recordings::api_error)?
-    };
-    if let Some(host) = state.recorder.host() {
-        drop(recordings::spawn_session_tasks(state.clone(), host, started.id.clone()));
-    }
-    recordings::publish(&state, &started);
+    let started = recordings::start_recording(&state, request, None).await?;
     Ok((StatusCode::CREATED, Json(started)))
 }
 
 /// `POST /v1/recordings/{id}/stop`: asks the recording to end. Returns at once (`202`) with the
 /// state `finishing`; the last part is completed in the background (poll `GET /v1/recordings`).
 pub async fn stop(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<(StatusCode, Json<RecordingStatus>)> {
-    recordings::check_recording_id(&id)?;
-    let status = state.recorder.stop(&id).map_err(recordings::api_error)?;
-    recordings::publish(&state, &status);
+    let status = recordings::stop_recording(&state, &id).await?;
     Ok((StatusCode::ACCEPTED, Json(status)))
 }
 
@@ -150,12 +132,13 @@ pub async fn put_settings(State(state): State<SharedState>, Json(settings): Json
     settings.validate().map_err(ApiError::unprocessable)?;
     state.store.put_recording_settings(&settings).await?;
     state.events.publish("recording_settings", serde_json::to_value(&settings).unwrap_or_default());
-    recording_rings::sync_in_background(state.clone());
+    crate::recording_rings::sync_in_background(state.clone());
     Ok(Json(settings))
 }
 
 /// `POST /v1/recordings/capture-last`: the body (all optional) names the last `seconds` of the
-/// ring and its `camera` (the first camera with a ring by default).
+/// ring and its `camera` (the first camera with a ring by default). Writes the clip (`201` with its
+/// summary); the ring and any running recording keep going.
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureLast {
@@ -165,51 +148,8 @@ pub struct CaptureLast {
     pub camera: Option<String>,
 }
 
-/// Writes the ring's last frames to a stored recording (`201` with its summary). The recording
-/// (if one runs) and the ring keep going. `409` when the camera has no ring enabled, `503` when
-/// its ring cannot run (the camera is missing or refused), `422` for a window longer than the ring.
 pub async fn capture_last(State(state): State<SharedState>, body: Option<Json<CaptureLast>>) -> ApiResult<(StatusCode, Json<PartSummary>)> {
     let request = body.map(|Json(request)| request).unwrap_or_default();
-    let settings = state.store.recording_settings().await?;
-    let camera = match request.camera {
-        Some(camera) => camera,
-        None => settings.capture_last_cameras.first().cloned().ok_or_else(|| ApiError::conflict("no camera has a capture-last ring; enable one in the recording settings"))?,
-    };
-    check_id(&camera)?;
-    if !settings.capture_last_cameras.contains(&camera) {
-        return Err(ApiError::conflict(format!("capture-last is not enabled for {camera}")));
-    }
-    if let Some(seconds) = request.seconds.filter(|seconds| *seconds == 0 || *seconds > settings.capture_last_seconds) {
-        return Err(ApiError::unprocessable(format!("seconds must be 1 to {} (the ring's length)", settings.capture_last_seconds)));
-    }
-    let statuses = recording_rings::sync(&state).await?;
-    match statuses.iter().find(|status| status.camera == camera) {
-        Some(status) if status.state == "running" => {}
-        Some(status) => return Err(ApiError::backend(status.error.clone().unwrap_or_else(|| "the capture-last ring is not running".into()))),
-        None => return Err(ApiError::backend(format!("{camera} has no camera service to ring"))),
-    }
-    let (view, record) = cameras::find(&state, &camera).await?;
-    let socket = cameras::frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{camera} has no Styx frames endpoint")))?;
-    let info = recordings::recording_info(&state, &camera, &socket, &view).await;
-    let (board, camera_label, commit) = recordings::file_names(&state, &camera, &record);
-    let dir = storage::resolve_dir(&settings).map_err(|error| recordings::api_error(helios_recorder::RecorderError::Storage(error)))?;
-    let last = request.seconds.map(|seconds| Duration::from_secs(u64::from(seconds)));
-    let recorder_state = state.clone();
-    let summary = tokio::task::spawn_blocking(move || {
-        let clip = ClipRequest {
-            camera_id: &camera,
-            board: &board,
-            camera_label: &camera_label,
-            commit: &commit,
-            info: &info,
-            compression: settings.compression,
-            queue_bytes: settings.queue_bytes,
-            max_fps: settings.max_fps,
-        };
-        recorder_state.recorder.capture_last(last, &clip, &dir)
-    })
-    .await
-    .map_err(|error| ApiError::internal(error.to_string()))?
-    .map_err(recordings::api_error)?;
+    let summary = recordings::capture_clip(&state, request.camera, request.seconds).await?;
     Ok((StatusCode::CREATED, Json(summary)))
 }

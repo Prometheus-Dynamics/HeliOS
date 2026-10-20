@@ -54,6 +54,7 @@ fn request(socket: &Path, settings: RecorderSettings) -> RecordingRequest {
         board: "test-board".into(),
         camera_label: "cam".into(),
         commit: "abc1234".into(),
+        label: None,
         settings,
         info: info(),
         lemnos: None,
@@ -271,4 +272,18 @@ fn raw_sensor_frames_are_recorded_at_the_frame_rate_limit() {
     assert_eq!(done.frames_dropped, 0, "{done:?}");
     let contents = read(&mcaps(&recordings)[0]);
     assert_eq!(contents.frames(), done.frames_written);
+}
+
+#[test]
+fn a_label_is_appended_to_the_file_name_sanitized() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("cam.styx.sock");
+    let _camera = luma_camera(&socket);
+    let recordings = dir.path().join("recordings");
+    let recorder = Recorder::default();
+    let labelled = RecordingRequest { label: Some(" ORNC q12 ".into()), ..request(&socket, settings(&recordings)) };
+    let started = recorder.start(labelled).expect("start");
+    assert!(started.id.ends_with("-abc1234-ORNC_q12"), "{}", started.id);
+    recorder.stop(&started.id).expect("stop");
+    wait_idle(&recorder, Duration::from_secs(30));
 }
