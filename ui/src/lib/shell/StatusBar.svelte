@@ -2,6 +2,7 @@
   // One line at the bottom: what is selected (with its key numbers), what
   // needs attention, the next setup step, and the live clock of the feeds.
   import Icon from "#lib/components/common/Icon.svelte";
+  import RecordingIndicator from "#lib/components/recording/RecordingIndicator.svelte";
   import { actionable, problems } from "#lib/core/fixes.js";
   import { guide } from "#lib/core/guide.svelte.js";
   import { identity } from "#lib/core/identity.svelte.js";
@@ -57,6 +58,7 @@
   {#if nt}
     <button type="button" class="nt {nt.tone}" onclick={() => shell.go("settings")} data-tip={nt.tip}><Icon name="plug" size={11} />{nt.text}</button>
   {/if}
+  <RecordingIndicator />
   <span class="mono">{cluster.live ? "live" : `${cluster.playing ? "live" : "paused"} · frame ${cluster.frame}`}</span>
 </footer>
 

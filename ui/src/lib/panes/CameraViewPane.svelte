@@ -11,6 +11,7 @@
   import Picker from "#lib/kit/Picker.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
+  import RecordControl from "#lib/components/recording/RecordControl.svelte";
   import Feed from "#lib/vision/Feed.svelte";
   import { DEFAULT_OVERLAYS, overlayMenu, type Overlays } from "#lib/vision/overlays.js";
   import PaneBar from "#lib/workspace/PaneBar.svelte";
@@ -100,7 +101,8 @@
     ontogglepin={() => target.toggle()}
   />
   <span class="sep"></span>
-  <IconButton icon="marquee-2" label="Draw region (crop, or where to meter exposure)" active={roiTool} onclick={toggleRoi} size={24} />
+  {#if camera}<RecordControl {camera} /><span class="sep"></span>{/if}
+  <IconButton icon="marquee-2"label="Draw region (crop, or where to meter exposure)" active={roiTool} onclick={toggleRoi} size={24} />
   {#if camera?.settings.roi}
     <IconButton icon="x" label="Clear ROI" size={24} onclick={() => camera && cluster.setCamera(camera.resourceId, { roi: null })} />
   {/if}
