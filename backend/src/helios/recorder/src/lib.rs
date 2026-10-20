@@ -15,18 +15,16 @@
 //! the sensor's raw frames (`RecordFrames::Raw`, 16-bit Bayer, at most `max_fps`, 30 by default);
 //! the camera service keeps raw on for every capture, so a recording never restarts it.
 //!
-//! Status (for the design doc's status section; the design doc itself is not in this tree):
-//! - TODO: capture-last ring buffer (recent frames kept for an on-demand clip).
-//! - TODO: auto-record when the robot is enabled.
-//! - TODO: Eidos exporter (recordings to Eidos's dataset format).
+//! The capture-last ring ([`ring`], [`capture`]) keeps the last seconds of a camera's frames,
+//! compressed, for a clip on demand. The export for Eidos is in [`export`] (`helios-recorder
+//! export --eidos`). Auto-record and the NetworkTables control are helios-api's (`recording_nt.rs`),
+//! on this crate's [`Recorder`].
+//!
+//! Status (the design doc's status section is `docs/docs/recording-design.md`):
 //! - TODO: outputs are stamped on receipt, not with the frame that produced them; the engine
-//!   would have to publish the frame sequence for an exact alignment.
-//! - TODO: NetworkTables `/helios/record` (true starts, false stops, on the default camera) and the
-//!   recording status topics are not wired. The NT4 publisher is helios-engine's
-//!   (`engine/src/nt4.rs`: one connection to the robot's server, settings from helios-api's
-//!   `nt4.json`); the subscription (`orion_nt4` `ClientHandle::subscribe`) belongs there too,
-//!   calling helios-api's recordings, which needs an engine-to-API call. A second NT client in
-//!   helios-api would duplicate that connection.
+//!   would have to publish the frame sequence for an exact alignment (the export matches them by
+//!   time, within 100 ms).
+//! - TODO: IMU relative-motion constraints are not in the Eidos export (v1).
 //! - TODO: the Styx and Lemnos commits are not recorded in `helios.versions` (only HeliOS's own
 //!   version and the device package's), since they are not known at run time.
 

@@ -3,8 +3,30 @@ title: Recording (design)
 description: Draft design of HeliOS session recordings — raw sensor frames, per-frame sensor data, IMU and detections in one MCAP file.
 ---
 
-**Status: draft.** Implementation waits on Styx's recorder work (writer queue,
-compression, host channels, per-frame 3A record, zero-copy `sensor_raw`).
+**Status: implemented, not yet verified on a robot.** Styx's recorder work it waited on is
+in Styx 2af5836 (writer queue, lz4, host channels, per-frame 3A, zero-copy `sensor_raw`). What is
+built, and where:
+
+- Raw by default: `RecordFrames::Raw` (`frames: "raw"`, or `"luma"`), at `max_fps` (30). The camera
+  services keep sensor raw on for every capture (`HELIOS_CAMERA_SENSOR_RAW`, default on: about
+  8 MB more per camera), so a recording joins without a capture restart. Spare low-priority clients
+  are 4 (`HELIOS_CAMERA_SPARE_CLIENTS`): preview, calibration, a recording and its ring.
+- Capture last: a ring per camera in `capture_last_cameras` (`capture_last_seconds`, 10 by default),
+  compressed in RAM and sized from `MemAvailable` (a quarter at most). `POST /v1/recordings/capture-last`.
+- NetworkTables (helios-api, `recording_nt.rs`): `<prefix>/record`, `<prefix>/capture_last` and
+  the status topics `<prefix>/recording/{active,bytes,dropped,file}`. Chosen over an engine relay
+  because the recorder and its state are helios-api's; the engine's publisher stays the one-way
+  path for outputs. The client is a second, low-rate connection to the same server (`nt4.json`).
+- Auto-record (`auto_record`): one recording per robot-enabled period, from `/FMSInfo`
+  (`FMSControlData` bit 0; the file name carries `EventName` and `MatchType`/`MatchNumber`).
+- Eidos export: `helios-recorder export --eidos <file.mcap> <outdir>`, or
+  `POST /v1/recordings/{id}/export/eidos`. The Eidos replay spec this section cites (`docs/replay-input.md`)
+  is not in the Eidos revision HeliOS pins (a0915861); the export follows this section.
+  IMU relative-motion constraints are a stated TODO for v1.
+
+Not verified on the CM5 yet: the 30 fps raw + ring + recording CPU and drops together, the ring's
+memory at 10 s, the NT control against a real roboRIO and FMS (practice-mode enable is FMSInfo's
+bit too, to be checked), and the spare-client count under the preview and calibration.
 
 ## Goal
 
