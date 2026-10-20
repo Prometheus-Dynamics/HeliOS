@@ -64,9 +64,12 @@ function isTrack(value: unknown): value is FeatureTrack {
   );
 }
 
-/** A `tracks` output's value as overlay tracks, in the pipeline's frame (`frame`, when known). Null when it is not one. */
+/**
+ * A `tracks` output's value as overlay tracks, in the frame they were tracked on: the output's own
+ * `image` size, else `frame` (the binding's size) when known. Null when it is not one.
+ */
 export function toFeatureTracks(value: unknown, frame?: { w: number; h: number }): FeatureTracks | null {
-  const out = value as { tracks?: unknown; summary?: FeatureTracks["summary"] } | null | undefined;
+  const out = value as { tracks?: unknown; summary?: FeatureTracks["summary"]; image?: { width?: unknown; height?: unknown } } | null | undefined;
   if (!out || !Array.isArray(out.tracks)) return null;
   const tracks = out.tracks.filter(isTrack).map((t) => ({ id: t.id, x: t.x, y: t.y, age: t.age, status: t.status }));
   const summary = out.summary ?? {
@@ -75,7 +78,9 @@ export function toFeatureTracks(value: unknown, frame?: { w: number; h: number }
     new: tracks.filter((t) => t.status === "new").length,
     lost: 0,
   };
-  return { tracks, summary, frame };
+  const image = out.image;
+  const own = image && typeof image.width === "number" && typeof image.height === "number" && image.width > 0 && image.height > 0 ? { w: image.width, h: image.height } : undefined;
+  return { tracks, summary, frame: own ?? frame };
 }
 
 /**

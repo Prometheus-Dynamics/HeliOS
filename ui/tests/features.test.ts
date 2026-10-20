@@ -44,6 +44,14 @@ describe("positions in the feed", () => {
   });
 });
 
+describe("frame size", () => {
+  test("the output's own image size wins over the binding's", () => {
+    const parsed = toFeatureTracks({ tracks: [], summary: { count: 0, tracked: 0, new: 0, lost: 0 }, image: { width: 640, height: 400 } }, { w: 1280, h: 800 });
+    expect(parsed?.frame).toEqual({ w: 640, h: 400 });
+    expect(toFeatureTracks({ tracks: [] }, { w: 1280, h: 800 })?.frame).toEqual({ w: 1280, h: 800 });
+  });
+});
+
 describe("trails", () => {
   test("keep the last positions of each id, newest last", () => {
     const book = new TrailBook();
