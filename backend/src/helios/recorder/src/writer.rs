@@ -12,7 +12,7 @@ use styx::{
     DeviceIdentity,
     core::prelude::FrameLease,
     prelude::{ColorSpace, FourCc, Interval, MediaFormat, Resolution},
-    replay::{ChannelId, RecordCompression, RecorderOptions, RecordingHeader, StreamRecorder},
+    replay::{ChannelId, RawStorage, RecordCompression, RecorderOptions, RecordingHeader, StreamRecorder},
 };
 
 use crate::{
@@ -40,7 +40,14 @@ pub fn header_for(camera: &str, format: FourCc, size: (u32, u32), fps: Option<f3
 
 /// The recorder's options for these settings (lz4 chunks when compressed).
 pub fn options_for(compression: bool, queue_bytes: usize) -> RecorderOptions {
-    RecorderOptions { compression: if compression { RecordCompression::Lz4 } else { RecordCompression::None }, compression_threads: 0, chunk_size: None, queue_bytes, clock_period: Some(CLOCK_PERIOD) }
+    RecorderOptions {
+        compression: if compression { RecordCompression::Lz4 } else { RecordCompression::None },
+        compression_threads: 0,
+        chunk_size: None,
+        queue_bytes,
+        clock_period: Some(CLOCK_PERIOD),
+        raw_storage: RawStorage::AsIs,
+    }
 }
 
 pub fn unix_ms() -> u64 {

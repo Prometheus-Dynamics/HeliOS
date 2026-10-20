@@ -68,7 +68,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -79,7 +79,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "eidos-aruco"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-calibration",
  "eidos-contour",
@@ -788,7 +788,7 @@ dependencies = [
 [[package]]
 name = "eidos-calibration"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
 ]
@@ -796,7 +796,7 @@ dependencies = [
 [[package]]
 name = "eidos-color"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -806,7 +806,7 @@ dependencies = [
 [[package]]
 name = "eidos-contour"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -817,7 +817,7 @@ dependencies = [
 [[package]]
 name = "eidos-core"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-macros",
  "serde",
@@ -829,7 +829,7 @@ dependencies = [
 [[package]]
 name = "eidos-daedalus"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "daedalus-rs",
  "eidos-aruco",
@@ -839,6 +839,7 @@ dependencies = [
  "eidos-core",
  "eidos-detectors",
  "eidos-draw",
+ "eidos-estimation",
  "eidos-features",
  "eidos-filter",
  "eidos-frame",
@@ -856,7 +857,7 @@ dependencies = [
 [[package]]
 name = "eidos-detectors"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-aruco",
  "eidos-calibration",
@@ -870,7 +871,7 @@ dependencies = [
 [[package]]
 name = "eidos-draw"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-aruco",
  "eidos-calibration",
@@ -883,9 +884,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eidos-estimation"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
+dependencies = [
+ "eidos-calibration",
+ "eidos-core",
+]
+
+[[package]]
 name = "eidos-features"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -895,7 +905,7 @@ dependencies = [
 [[package]]
 name = "eidos-filter"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -906,7 +916,7 @@ dependencies = [
 [[package]]
 name = "eidos-frame"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "smallvec",
@@ -917,7 +927,7 @@ dependencies = [
 [[package]]
 name = "eidos-geometry"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-calibration",
  "eidos-core",
@@ -928,7 +938,7 @@ dependencies = [
 [[package]]
 name = "eidos-io"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -940,12 +950,12 @@ dependencies = [
 [[package]]
 name = "eidos-macros"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 
 [[package]]
 name = "eidos-mask"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -956,7 +966,7 @@ dependencies = [
 [[package]]
 name = "eidos-motion"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-filter",
@@ -967,7 +977,7 @@ dependencies = [
 [[package]]
 name = "eidos-sampling"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -976,12 +986,12 @@ dependencies = [
 [[package]]
 name = "eidos-scratch"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 
 [[package]]
 name = "eidos-temporal"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#3e4e4b3a2a8dfe7e2d85e53b3e525fcd994e3e16"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#a0915861920650fd21ae7fec176d1676328cbca1"
 dependencies = [
  "eidos-aruco",
  "eidos-core",
@@ -1057,7 +1067,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2180,7 +2190,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2697,7 +2707,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2892,7 +2902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2932,7 +2942,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "bytes",
  "futures-core",
@@ -2965,7 +2975,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "libm",
  "serde",
@@ -2977,7 +2987,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "serde",
  "smallvec",
@@ -2987,7 +2997,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "parking_lot",
  "serde",
@@ -3022,7 +3032,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "libm",
  "thiserror 2.0.21",
@@ -3031,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "futures-core",
  "libc",
@@ -3041,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3051,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "libc",
 ]
@@ -3059,7 +3069,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -3075,7 +3085,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "bytemuck",
  "serde",
@@ -3095,7 +3105,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "bytemuck",
  "libm",
@@ -3105,7 +3115,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -3117,7 +3127,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3134,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "serde",
  "styx-core-rs",
@@ -3144,7 +3154,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#abcc4da844006922ff13f7338d3e1db8e8c95761"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2af583650a1d55293c268a5f53c3d0d0982f82b4"
 dependencies = [
  "libc",
  "smallvec",
@@ -3222,7 +3232,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3759,7 +3769,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
