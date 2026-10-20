@@ -475,7 +475,8 @@ pub async fn capture_calibration(State(state): State<SharedState>, Path(id): Pat
 /// not stored (`PUT /v1/cameras/{id}/calibration` stores it).
 pub async fn solve_calibration(State(state): State<SharedState>, Path(id): Path<String>, body: Option<Json<SolveRequest>>) -> ApiResult<Json<SolveResult>> {
     check_id(&id)?;
-    Ok(Json(state.calibrations.solve(&id, body.map(|Json(request)| request).unwrap_or_default()).await?))
+    let orientation = camera_context::Orientation::from_settings(&state.store.camera_settings(&id).await?);
+    Ok(Json(state.calibrations.solve(&id, body.map(|Json(request)| request).unwrap_or_default(), orientation).await?))
 }
 
 /// `DELETE /v1/cameras/{id}/calibration/views`: forget the views captured.

@@ -469,6 +469,7 @@ mod tests {
             distortion: Default::default(),
             rms_px: None,
             source: None,
+            orientation: Default::default(),
             saved_at_ms: 1,
         };
         store.put_calibration("camera.a", full.clone()).await.expect("put");

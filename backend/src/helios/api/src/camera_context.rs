@@ -60,6 +60,31 @@ impl Distortion {
     }
 }
 
+/// How the sensor reads out its image: mirrored left-right (`hflip`), top-bottom (`vflip`), or
+/// both (turned 180°). The camera's `hflip`, `vflip` and `rotation` controls (Styx's service
+/// controls) set it; a calibration keeps the one it was taken in.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct Orientation {
+    pub hflip: bool,
+    pub vflip: bool,
+}
+
+impl Orientation {
+    /// The orientation a camera's stored settings ask for: `rotation: 180` turns it, and `hflip`
+    /// and `vflip` mirror it on top of that.
+    pub fn from_settings(settings: &BTreeMap<String, serde_json::Value>) -> Self {
+        let on = |key: &str| settings.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let turned = settings.get("rotation").and_then(serde_json::Value::as_i64) == Some(180);
+        Self { hflip: on("hflip") != turned, vflip: on("vflip") != turned }
+    }
+
+    /// Turned 180° (both mirrors): a rotation about the optical axis, unlike one mirror.
+    pub fn turned(self) -> bool {
+        self.hflip && self.vflip
+    }
+}
+
 /// One camera calibration: intrinsics in pixels of a `width` x `height` image.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -80,9 +105,16 @@ pub struct CameraCalibration {
     /// Where it came from (a tool, a board, a date); informational.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The sensor orientation the calibration was taken in (unflipped when not said).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub orientation: Orientation,
     /// Set by the API when stored.
     #[serde(default)]
     pub saved_at_ms: u64,
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 impl CameraCalibration {
@@ -116,6 +148,24 @@ impl CameraCalibration {
         let sx = f64::from(width) / f64::from(self.width);
         let sy = f64::from(height) / f64::from(self.height);
         Self { width, height, fx: self.fx * sx, fy: self.fy * sy, cx: (self.cx + 0.5) * sx - 0.5, cy: (self.cy + 0.5) * sy - 0.5, ..self.clone() }
+    }
+
+    /// The same camera read out in `orientation`: a mirror moves the principal point to the
+    /// mirrored pixel (`cx' = width - 1 - cx`, `cy' = height - 1 - cy`) and turns the sign of
+    /// the tangential term along it (`p2` left-right, `p1` top-bottom); radial terms and focal
+    /// lengths are unchanged.
+    pub fn oriented(&self, orientation: Orientation) -> Self {
+        let (h, v) = (self.orientation.hflip != orientation.hflip, self.orientation.vflip != orientation.vflip);
+        let mut out = Self { orientation, ..self.clone() };
+        if h {
+            out.cx = f64::from(self.width) - 1.0 - self.cx;
+            out.distortion.p2 = -self.distortion.p2;
+        }
+        if v {
+            out.cy = f64::from(self.height) - 1.0 - self.cy;
+            out.distortion.p1 = -self.distortion.p1;
+        }
+        out
     }
 
     fn aspect(&self) -> f64 {
@@ -171,8 +221,13 @@ pub fn match_calibration(calibrations: &[CameraCalibration], size: Option<(u32, 
 /// the API's mount (metres and degrees, WPILib's robot frame: x forward, y left, z up;
 /// `Rotation3d(roll, pitch, yaw)`) is the pose of the camera's forward-left-up frame on the
 /// robot (`helios_field::CameraMount`).
-pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&CameraMount>) -> BTreeMap<String, TypedConfigValue> {
+///
+/// `orientation` is the camera's now: the calibration is turned into it, and a camera turned
+/// 180° adds 180° of roll to the mount (its image's frame is the body's, turned about the optical
+/// axis). One mirror has no rotation that matches it; tags do not decode mirrored either.
+pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&CameraMount>, orientation: Orientation) -> BTreeMap<String, TypedConfigValue> {
     let mut fields = BTreeMap::new();
+    let calibration = calibration.map(|c| c.oriented(orientation));
     let (lens, intrinsics, distortion, size) = match calibration {
         Some(c) => (c.model, [c.fx, c.fy, c.cx, c.cy], c.distortion, (c.width, c.height)),
         None => (LensModel::Pinhole, [0.0; 4], Distortion::default(), (0, 0)),
@@ -187,7 +242,8 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
     fields.insert("camera.width_px".to_string(), TypedConfigValue::Int(i64::from(size.0)));
     fields.insert("camera.height_px".to_string(), TypedConfigValue::Int(i64::from(size.1)));
     if let Some(m) = mount {
-        let pose = [("x_m", m.x), ("y_m", m.y), ("z_m", m.z), ("roll_rad", m.roll.to_radians()), ("pitch_rad", m.pitch.to_radians()), ("yaw_rad", m.yaw.to_radians())];
+        let roll = if orientation.turned() { m.roll + 180.0 } else { m.roll };
+        let pose = [("x_m", m.x), ("y_m", m.y), ("z_m", m.z), ("roll_rad", roll.to_radians()), ("pitch_rad", m.pitch.to_radians()), ("yaw_rad", m.yaw.to_radians())];
         for (name, value) in pose {
             fields.insert(format!("mount.{name}"), TypedConfigValue::F64(value));
         }
@@ -211,8 +267,27 @@ mod tests {
             distortion: Distortion { k1: 0.1, ..Distortion::default() },
             rms_px: Some(0.3),
             source: None,
+            orientation: Orientation::default(),
             saved_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn calibrations_follow_the_orientation() {
+        let base = CameraCalibration { model: LensModel::Pinhole, cx: 600.0, cy: 380.0, distortion: Distortion { p1: 0.01, p2: -0.02, ..Distortion::default() }, ..calibration(1280, 800) };
+        let turned = base.oriented(Orientation { hflip: true, vflip: true });
+        assert_eq!((turned.cx, turned.cy, turned.distortion.p1, turned.distortion.p2), (679.0, 419.0, -0.01, 0.02));
+        assert_eq!(turned.oriented(Orientation::default()), base, "and back");
+        let mirrored = base.oriented(Orientation { hflip: true, vflip: false });
+        assert_eq!((mirrored.cx, mirrored.cy, mirrored.distortion.p1, mirrored.distortion.p2), (679.0, 380.0, 0.01, 0.02));
+        let settings = |pairs: &[(&str, serde_json::Value)]| pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<BTreeMap<_, _>>();
+        assert_eq!(Orientation::from_settings(&settings(&[("rotation", 180.into())])), Orientation { hflip: true, vflip: true });
+        assert_eq!(Orientation::from_settings(&settings(&[("rotation", 180.into()), ("hflip", true.into())])), Orientation { hflip: false, vflip: true });
+        assert_eq!(Orientation::from_settings(&settings(&[])), Orientation::default());
+        let mount = CameraMount { x: 0.0, y: 0.0, z: 0.0, roll: 10.0, pitch: 0.0, yaw: 0.0 };
+        let fields = context_fields(Some(&base), Some(&mount), Orientation { hflip: true, vflip: true });
+        assert_eq!(fields["camera.cx_px"], TypedConfigValue::F64(679.0));
+        assert_eq!(fields["mount.roll_rad"], TypedConfigValue::F64(190f64.to_radians()));
     }
 
     #[test]
@@ -239,7 +314,7 @@ mod tests {
     #[test]
     fn context_fields_are_typed_with_units() {
         let mount = CameraMount { x: 0.3, y: 0.0, z: 0.25, roll: 0.0, pitch: -15.0, yaw: 180.0 };
-        let fields = context_fields(Some(&calibration(1280, 800)), Some(&mount));
+        let fields = context_fields(Some(&calibration(1280, 800)), Some(&mount), Orientation::default());
         assert_eq!(fields["camera.lens"], TypedConfigValue::String("fisheye".into()));
         assert_eq!(fields["camera.fx_px"], TypedConfigValue::F64(560.0));
         assert_eq!(fields["camera.k1"], TypedConfigValue::F64(0.1));
@@ -247,7 +322,7 @@ mod tests {
         assert_eq!(fields["mount.x_m"], TypedConfigValue::F64(0.3));
         assert_eq!(fields["mount.yaw_rad"], TypedConfigValue::F64(std::f64::consts::PI));
         assert_eq!(fields.len(), 21);
-        let uncalibrated = context_fields(None, None);
+        let uncalibrated = context_fields(None, None, Orientation::default());
         assert_eq!(uncalibrated["camera.fx_px"], TypedConfigValue::F64(0.0));
         assert_eq!(uncalibrated["camera.width_px"], TypedConfigValue::Int(0));
         assert!(!uncalibrated.keys().any(|key| key.starts_with("mount.")), "no mount, no mount fields");

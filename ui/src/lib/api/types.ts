@@ -390,6 +390,8 @@ export interface CameraCalibration {
   distortion?: Partial<Record<"k1" | "k2" | "k3" | "k4" | "k5" | "k6" | "p1" | "p2", number>>;
   rms_px?: number;
   source?: string;
+  /** The sensor orientation it was taken in (unflipped when absent); the API turns it into the camera's current one. */
+  orientation?: { hflip?: boolean; vflip?: boolean };
   saved_at_ms?: number;
 }
 

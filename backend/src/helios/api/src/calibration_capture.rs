@@ -17,7 +17,7 @@ use styx::{core::prelude::RecvOutcome, ipc::FrameClient, prelude::Frames};
 use tokio::sync::Mutex;
 
 use crate::{
-    camera_context::{CameraCalibration, Distortion, LensModel},
+    camera_context::{CameraCalibration, Distortion, LensModel, Orientation},
     error::{ApiError, ApiResult},
 };
 
@@ -148,7 +148,8 @@ impl CalibrationSessions {
         Ok(CaptureResult { corners, width, height, kept, views: session.views.len(), message: if request.keep { message } else { None } })
     }
 
-    pub async fn solve(&self, id: &str, request: SolveRequest) -> ApiResult<SolveResult> {
+    /// Solves the views kept for `id`; the calibration says it was taken in `orientation`.
+    pub async fn solve(&self, id: &str, request: SolveRequest, orientation: Orientation) -> ApiResult<SolveResult> {
         let sessions = self.sessions.lock().await;
         let session = sessions.get(id).ok_or_else(|| ApiError::conflict("no views captured for this camera"))?;
         let views: Vec<CalibrationView> = session.views.iter().enumerate().filter(|(index, _)| !request.drop.contains(index)).map(|(_, view)| view.clone()).collect();
@@ -172,6 +173,7 @@ impl CalibrationSessions {
             cy: i.cy,
             distortion: Distortion { k1: d.k1, k2: d.k2, k3: d.k3, k4: d.k4, k5: d.k5, k6: d.k6, p1: d.p1, p2: d.p2 },
             rms_px: Some(fit.rms),
+            orientation,
             source: Some(format!("helios charuco {}x{} {} mm {}, {} views", board.squares_x, board.squares_y, board.square_mm, board.dictionary, fit.view_rms.len())),
             saved_at_ms: 0,
         };
@@ -251,14 +253,14 @@ mod tests {
         let sessions = CalibrationSessions::default();
         let views = [(0.0, 0.3, 0.6), (0.3, 0.0, 0.7), (-0.25, 0.2, 0.5), (0.2, -0.3, 0.65), (-0.1, -0.2, 0.55), (0.35, 0.25, 0.8)].map(|(ax, ay, z)| view(ax, ay, z)).to_vec();
         sessions.sessions.lock().await.insert("cam".into(), Session { board: board(), width: 640, height: 400, views });
-        let result = sessions.solve("cam", SolveRequest::default()).await.expect("solves");
+        let result = sessions.solve("cam", SolveRequest::default(), Orientation::default()).await.expect("solves");
         let c = &result.calibration;
         assert!((c.fx - 600.0).abs() < 1.0 && (c.fy - 600.0).abs() < 1.0, "{c:?}");
         assert!((c.cx - 320.0).abs() < 1.0 && (c.cy - 200.0).abs() < 1.0, "{c:?}");
         assert!(c.rms_px.is_some_and(|rms| rms < 0.01));
         assert_eq!((c.width, c.height, result.views), (640, 400, 6));
         // Dropping views leaves too few.
-        assert!(sessions.solve("cam", SolveRequest { drop: vec![0, 1, 2], ..SolveRequest::default() }).await.is_err());
+        assert!(sessions.solve("cam", SolveRequest { drop: vec![0, 1, 2], ..SolveRequest::default() }, Orientation::default()).await.is_err());
     }
 
     #[test]

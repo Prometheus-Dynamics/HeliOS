@@ -199,6 +199,11 @@ function ov9782Controls(values: { exposureUs: number; gain: number; fps: number;
     control({ id: 0xf4000022, name: "ae_exposure_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: ["normal", "short", "long"] }),
     control({ id: 0xf4000023, name: "ae_metering_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: ["centre-weighted", "spot", "matrix"] }),
     control({ id: 0xf4000024, name: "ae_metering_region", kind: "rectangle", rect: { x: 0, y: 0, width: 0, height: 0 } }),
+    // Sensor orientation: Styx's service controls (SERVICE_HFLIP / VFLIP / ROTATION); setting one
+    // restarts the capture once.
+    control({ id: 0xf5f00002, name: "hflip", kind: "bool", default: false, value: false }),
+    control({ id: 0xf5f00003, name: "vflip", kind: "bool", default: false, value: false }),
+    control({ id: 0xf5f00004, name: "rotation", kind: "int", min: 0, max: 180, default: 0, step: 180, value: 0 }),
     crop(0xf4000100, "output_crop"),
     ...Array.from({ length: 15 }, (_, i) => crop(0xf4000101 + i, `region_crop_${i + 1}`)),
   ];

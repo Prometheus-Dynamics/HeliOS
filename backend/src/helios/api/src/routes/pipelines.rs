@@ -376,8 +376,10 @@ pub async fn camera_inputs_for<'a>(store: &Store, view: &StateView, bindings: im
     for (input, binding) in bindings.filter(|(_, binding)| view.resources.get(&binding.resource_id).is_some_and(|r| r.resource_type.as_str() == super::cameras::CAMERA_RESOURCE_TYPE)) {
         let size = binding.output_width.zip(binding.output_height);
         let matched = camera_context::match_calibration(calibrations.get(&binding.resource_id).map(Vec::as_slice).unwrap_or_default(), size);
-        inputs.contexts.insert(input.clone(), camera_context::context_fields(matched.calibration(), mounts.get(&binding.resource_id)));
-        if let Some(fps) = stored_frame_rate(&store.camera_settings(&binding.resource_id).await?) {
+        let settings = store.camera_settings(&binding.resource_id).await?;
+        let orientation = camera_context::Orientation::from_settings(&settings);
+        inputs.contexts.insert(input.clone(), camera_context::context_fields(matched.calibration(), mounts.get(&binding.resource_id), orientation));
+        if let Some(fps) = stored_frame_rate(&settings) {
             inputs.frame_rates.insert(input.clone(), fps);
         }
     }
@@ -1182,7 +1184,7 @@ mod tests {
             dictionary: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
-        let inputs = CameraInputs { contexts: BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None))]), frame_rates: BTreeMap::new() };
+        let inputs = CameraInputs { contexts: BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None, Default::default()))]), frame_rates: BTreeMap::new() };
         let (artifact, workload) = records_for("tags-front", &spec, &document, 3, "node-local", &inputs, None).expect("records");
         assert_eq!(workload.workload_id.as_str(), "pipeline.tags-front");
         assert_eq!(workload.runtime_type.as_str(), ENGINE_RUNTIME);

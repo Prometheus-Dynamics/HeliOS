@@ -10,7 +10,7 @@
   import Prop from "#lib/kit/Prop.svelte";
   import Slider from "#lib/kit/Slider.svelte";
   import Switch from "#lib/kit/Switch.svelte";
-  import { disabledReason, enumOptions, friendlyLabel, isChanged, resetTarget, unitOf, valueText } from "./controls.js";
+  import { disabledReason, enumOptions, friendlyLabel, helpOf, isChanged, resetTarget, unitOf, valueText } from "./controls.js";
   import { forgetControl, keyOf, writeControls } from "./write.js";
 
   let {
@@ -46,7 +46,7 @@
 
 <Prop
   label={title}
-  help="{control.name}{control.standard ? ` · standard ${control.standard}` : ''}"
+  help={helpOf(control)}
   changed={isChanged(control)}
   onreset={target !== null ? () => forgetControl(camera, control) : undefined}
 >

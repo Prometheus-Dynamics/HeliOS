@@ -45,6 +45,8 @@
   const controls = $derived(camera?.controls ?? []);
   const inGroup = (group: ReturnType<typeof groupOf>) => controls.filter((c) => groupOf(c) === group);
   const flicker = $derived(inGroup("flicker"));
+  /** Capture controls beyond the frame rate (its own field): the sensor's rotation. */
+  const capture = $derived(inGroup("capture").filter((c) => c.name !== "frame_rate"));
   const advanced = $derived(inGroup("advanced"));
   const crops = $derived(inGroup("crop"));
   let showCrop = $state(false);
@@ -154,6 +156,9 @@
         <span class="mono">{camera.settings.width}×{camera.settings.height} {camera.settings.format}</span>
       </Prop>
       <FrameRateField {camera} />
+      {#each capture as c (c.id)}
+        <ControlRow {camera} control={c} />
+      {/each}
       {#if camera.controlsError}
         <Prop label="Controls"><span class="warn">{camera.controlsError}</span></Prop>
       {:else if controls.length === 0}

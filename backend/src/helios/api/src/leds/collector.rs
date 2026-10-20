@@ -18,7 +18,7 @@ use super::detections::{Detections, multi_tag_valid, parse_detections, pick_cali
 use super::settings::LedSettings;
 use super::states::{CALIBRATION_VIEWS, Calibration, Facts};
 use crate::SharedState;
-use crate::camera_context::CameraCalibration;
+use crate::camera_context::{CameraCalibration, Orientation};
 use crate::events::ApiEvent;
 use crate::host::now_ms;
 use crate::orion::{enum_name, label_values};
@@ -145,7 +145,11 @@ fn absorb(fast: &mut Fast, event: &ApiEvent, now: u64) {
 async fn sample_slow(state: &SharedState) -> Slow {
     let mut slow = Slow::default();
     let nt4 = state.store.nt4_settings().await.unwrap_or_default();
-    slow.calibrations = state.store.calibrations().await.map(|map| map.into_values().flatten().collect()).unwrap_or_default();
+    // Each camera's calibrations, turned into the orientation its frames are read out in now.
+    for (camera, calibrations) in state.store.calibrations().await.unwrap_or_default() {
+        let orientation = Orientation::from_settings(&state.store.camera_settings(&camera).await.unwrap_or_default());
+        slow.calibrations.extend(calibrations.iter().map(|calibration| calibration.oriented(orientation)));
+    }
     slow.calibration = state.calibrations.most_views().await;
     slow.recording = state.recorder.status().is_some_and(|status| status.state.is_active());
     // Without Orion the engine is not running, and robot code is not connected (if it is wanted).

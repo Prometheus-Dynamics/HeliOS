@@ -42,7 +42,24 @@ const LABELS: Record<string, string> = {
   ae_exposure_mode: "Exposure mode",
   ae_metering_mode: "Metering",
   ae_metering_region: "Metering region",
+  rotation: "Rotation",
+  hflip: "Mirror left-right",
+  vflip: "Mirror top-bottom",
 };
+
+/** What a control does, where the name alone does not say (shown as the row's help). */
+const HELP: Record<string, string> = {
+  rotation:
+    "Turns the sensor's readout 180° for a camera mounted upside down. Restarts the capture once. The calibration and mount follow it.",
+  hflip: "Mirrors the image left-right. AprilTags do not decode mirrored; for an upside-down camera use Rotation. Restarts the capture once.",
+  vflip: "Mirrors the image top-bottom. AprilTags do not decode mirrored; for an upside-down camera use Rotation. Restarts the capture once.",
+};
+
+/** A control's help: what it does when known, and its device name. */
+export function helpOf(control: Pick<CameraControlInfo, "name" | "standard">): string {
+  const id = `${control.name}${control.standard ? ` · standard ${control.standard}` : ""}`;
+  return HELP[control.name] ? `${HELP[control.name]} (${id})` : id;
+}
 
 const UNITS: Record<string, string> = {
   exposure_time_us: "µs",
@@ -58,6 +75,7 @@ const UNITS: Record<string, string> = {
 /** Group of each control the device lists, by name. Anything else is "advanced". */
 const GROUP_BY_NAME: Record<string, ControlGroup> = {
   frame_rate: "capture",
+  rotation: "capture",
   exposure_time_us: "exposure",
   gain: "exposure",
   ae_enable: "exposure",
@@ -90,6 +108,10 @@ const ENUM_OPTIONS: Record<string, { value: number; label: string }[]> = {
     { value: 1, label: "50 Hz" },
     { value: 2, label: "60 Hz" },
     { value: 3, label: "Auto" },
+  ],
+  rotation: [
+    { value: 0, label: "0°" },
+    { value: 180, label: "180°" },
   ],
   ae_deflicker_mode: [
     { value: 0, label: "Off" },

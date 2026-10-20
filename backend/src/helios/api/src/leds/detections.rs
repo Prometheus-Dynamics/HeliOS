@@ -132,6 +132,7 @@ mod tests {
             distortion: Distortion::default(),
             rms_px: None,
             source: None,
+            orientation: Default::default(),
             saved_at_ms: 0,
         };
         let calibrations = [cal(320, 200), cal(640, 400)];
