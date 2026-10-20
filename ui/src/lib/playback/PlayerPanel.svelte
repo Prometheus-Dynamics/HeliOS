@@ -57,6 +57,7 @@
       <span class="src mono" title={sourceLabel(player.source)}>{sourceLabel(player.source)}</span>
     </div>
     <span class="kind">{player.kind === "images" ? "Image folder" : "Recording"}</span>
+    {#if player.fps !== null}<span class="fps mono" data-tip="Frames per second the player delivers">{player.fps} fps</span>{/if}
     <span class="tools">
       <IconButton icon="target" label="Overlays" size={34} onclick={(e) => menu.below(e.currentTarget as Element, overlayMenu(overlays, setOverlays), "end")} />
       {#if player.kind === "recording"}
