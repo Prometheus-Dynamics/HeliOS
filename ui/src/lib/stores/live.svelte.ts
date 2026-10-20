@@ -13,6 +13,8 @@ import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
+import { recordings } from "./recordings.svelte";
+import type { RecorderSettings, RecordingStatus } from "#lib/api/recording-types.js";
 
 /** The parts of the cluster store the live backend fills in. */
 export interface ClusterData {
@@ -148,7 +150,7 @@ export class LiveCluster {
 
   async refreshAll() {
     await this.refreshDevice();
-    await Promise.all([this.refreshCameras(), this.refreshPipelines(), this.refreshResources(), this.refreshLogs()]);
+    await Promise.all([this.refreshCameras(), this.refreshPipelines(), this.refreshResources(), this.refreshLogs(), recordings.refresh()]);
   }
 
   async refreshDevice() {
@@ -347,6 +349,12 @@ export class LiveCluster {
         else this.soon("cameras", () => this.refreshCameras());
         break;
       }
+      case "recording":
+        recordings.applyStatus(event.data as RecordingStatus);
+        break;
+      case "recording_settings":
+        recordings.applySettings(event.data as RecorderSettings);
+        break;
       case "update":
         if ((event.data as W.UpdateStatus).phase !== undefined) {
           this.snapshot.update = event.data as W.UpdateStatus;

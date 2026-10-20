@@ -75,6 +75,12 @@ export function registerScreens() {
     ),
   );
   workspaces.registerPreset(
+    "recordings",
+    ws("recordings", "Recordings", "player-record", 5, "Record a camera, capture the last seconds, and keep or export the recordings.",
+      row([0.62, 0.38], stack(pane("recordings")), col([0.6, 0.4], stack(pane("camera")), stack(pane("logs")))),
+    ),
+  );
+  workspaces.registerPreset(
     "hardware",
     ws("hardware", "Hardware", "cpu", 1, "Every device: processes and cores, fan, LEDs, GPIO, IMU, updates and recovery.",
       col([0.36, 0.64],

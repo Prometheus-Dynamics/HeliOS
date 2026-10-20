@@ -20,6 +20,7 @@ import MountsPane from "./MountsPane.svelte";
 import PeripheralsPane from "./PeripheralsPane.svelte";
 import PipelinesPane from "./PipelinesPane.svelte";
 import ProcessesPane from "./ProcessesPane.svelte";
+import RecordingsPane from "./RecordingsPane.svelte";
 import ProfilerPane from "./ProfilerPane.svelte";
 import Robot3DPane from "./Robot3DPane.svelte";
 import SettingsPane from "./SettingsPane.svelte";
@@ -37,7 +38,8 @@ const id = (k: string) => (p: Record<string, unknown>) => (p[k] as string) ?? nu
 definePane({ type: "setup", title: "Setup checklist", icon: "list-check", group: "System", summary: "What this robot still needs, step by step", component: SetupPane });
 definePane({ type: "status", title: "Robot status", icon: "heartbeat", group: "System", summary: "What needs attention, and every device's load", component: StatusPane });
 definePane({ type: "camera", title: "Camera", icon: "camera", group: "Vision", summary: "One live camera with overlays, ROI and histogram", component: CameraViewPane, label: pinnedCamera, identityOf: id("camera") });
-definePane({ type: "mosaic", title: "All cameras", icon: "layout-grid", group: "Vision", summary: "Every camera at once, tiled to fit", component: CameraMosaicPane });
+definePane({ type: "recordings", title: "Recordings", icon: "player-record", group: "Vision", summary: "Record a camera, capture the last seconds, keep and export recordings", component: RecordingsPane });
+definePane({ type: "mosaic",title: "All cameras", icon: "layout-grid", group: "Vision", summary: "Every camera at once, tiled to fit", component: CameraMosaicPane });
 definePane({ type: "cameras", title: "Cameras", icon: "aperture", group: "Vision", summary: "List of cameras by device", component: CameraListPane });
 definePane({ type: "camera-controls", title: "Camera controls", icon: "adjustments-horizontal", group: "Vision", summary: "Exposure, gain, ISP, ROI and transport", component: CameraControlsPane, label: (p) => (pinnedCamera(p) ? `${pinnedCamera(p)} controls` : null), identityOf: id("camera") });
 definePane({ type: "calibration", title: "Calibration", icon: "grid-4x4", group: "Vision", summary: "Guided camera calibration", component: CalibrationPane });
