@@ -30,6 +30,7 @@
 //! - TODO: the Styx and Lemnos commits are not recorded in `helios.versions` (only HeliOS's own
 //!   version and the device package's), since they are not known at run time.
 
+pub mod capture;
 pub mod catalog;
 pub mod error;
 pub mod frames;
@@ -39,17 +40,20 @@ pub mod lemnos;
 pub mod naming;
 pub mod pace;
 pub mod recorder;
+pub mod ring;
 pub mod session;
 pub mod settings;
 pub mod status;
 pub mod storage;
 pub mod writer;
 
+pub use capture::ClipRequest;
 pub use catalog::StoredRecording;
 pub use error::RecorderError;
 pub use host::{HostSender, boottime_ns};
 pub use info::{Attachment, RecordingInfo};
 pub use lemnos::LemnosSource;
-pub use recorder::{Recorder, RecordingRequest};
+pub use recorder::{Recorder, RecordingRequest, RingRequest};
+pub use ring::RingStatus;
 pub use settings::{RecordFrames, RecorderSettings};
 pub use status::{PartSummary, RecordingState, RecordingStatus};

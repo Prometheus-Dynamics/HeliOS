@@ -1405,6 +1405,7 @@ version = "1.0.0"
 dependencies = [
  "chrono",
  "lemnos-ipc",
+ "lz4",
  "mcap",
  "nix",
  "serde",

@@ -24,6 +24,8 @@ use crate::{
     status::PartSummary,
 };
 
+/// Bytes a clip may queue ahead of the disk (see [`PartWriter::wait_for_room`]).
+const CLIP_QUEUE_BYTES: u64 = 32 << 20;
 /// Clock samples on `/styx/clock` every second: frame clock to boot time, for offline alignment.
 const CLOCK_PERIOD: Duration = Duration::from_secs(1);
 
@@ -173,6 +175,16 @@ impl PartWriter {
     /// Bytes of the part on disk so far (what is flushed; the writer keeps a queue on top).
     pub fn bytes_on_disk(&self) -> u64 {
         fs::metadata(self.dir.join(&self.file)).map(|m| m.len()).unwrap_or_default()
+    }
+
+    /// Waits until the recorder's queue has room for `bytes` more, so a clip written from RAM (the
+    /// capture-last ring) is not dropped at the queue while the disk takes it. Gives up after ten
+    /// seconds; the frames then drop and are counted as usual.
+    pub fn wait_for_room(&self, bytes: u64) {
+        let end = Instant::now() + Duration::from_secs(10);
+        while self.recorder.stats().queued_bytes + bytes > CLIP_QUEUE_BYTES && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     /// Completes the part (flushes the queue, so this waits for the disk), writes its summary and

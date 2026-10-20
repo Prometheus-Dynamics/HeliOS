@@ -141,6 +141,12 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
     })
 }
 
+/// The board, camera label and commit a recording's file is named with (as `request_for` names it).
+pub fn file_names(state: &SharedState, camera: &str, record: &orion::control_plane::ResourceRecord) -> (String, String, String) {
+    let display = crate::orion::label_map(&record.labels).get("helios.display_name").cloned().unwrap_or_default();
+    (board_name(&state.config.node_id), camera_label(&display, camera), image_commit())
+}
+
 /// The image's description (`HELIOS_COMMIT`, `IMAGE_VERSION`, ...), written at build time.
 const IMAGE_ENV: &str = "/etc/default/helios-image.env";
 

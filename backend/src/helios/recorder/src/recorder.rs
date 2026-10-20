@@ -3,26 +3,29 @@
 //! returns at once (the state is `finishing` until the last part is complete).
 
 use std::{
-    path::PathBuf,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
 
 use crate::{
+    capture::{self, ClipRequest},
     error::RecorderError,
     frames::{self, FrameSource},
     host::HostSender,
     info::RecordingInfo,
     lemnos::LemnosSource,
     naming,
+    ring::{self, RingHandle, RingStatus},
     session::{self, SessionRun, Shared},
     settings::RecorderSettings,
-    status::{RecordingState, RecordingStatus},
+    status::{PartSummary, RecordingState, RecordingStatus},
     storage,
     writer::{self, PartWriter},
 };
@@ -50,10 +53,19 @@ struct Active {
     host: HostSender,
 }
 
-/// Runs at most one recording at a time.
+/// A camera whose capture-last ring should run, and the settings it runs with.
+pub struct RingRequest {
+    pub camera_id: String,
+    /// The camera service's frames socket.
+    pub frames_socket: PathBuf,
+    pub settings: RecorderSettings,
+}
+
+/// Runs at most one recording at a time, and a capture-last ring per camera that asked for one.
 #[derive(Default)]
 pub struct Recorder {
     active: Mutex<Option<Active>>,
+    rings: Mutex<BTreeMap<String, RingHandle>>,
 }
 
 impl Recorder {
@@ -154,4 +166,60 @@ impl Recorder {
         let active = self.active.lock().unwrap_or_else(|poison| poison.into_inner());
         active.as_ref().filter(|current| current.shared.lock().state.is_active()).map(|current| current.host.clone())
     }
+}
+
+impl Recorder {
+    fn rings_lock(&self) -> MutexGuard<'_, BTreeMap<String, RingHandle>> {
+        self.rings.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// Makes the rings match `wanted`: the rings of other cameras stop, missing ones start, those
+    /// whose settings changed restart, and failed ones are tried again. Opening a camera waits for
+    /// its camera service (a missing one fails at once). Returns the status of each wanted ring.
+    pub fn sync_rings(&self, wanted: &[RingRequest]) -> Vec<RingStatus> {
+        let mut rings = self.rings_lock();
+        rings.retain(|camera, _| wanted.iter().any(|request| &request.camera_id == camera));
+        for request in wanted {
+            if rings.get(&request.camera_id).is_some_and(|ring| ring.is_running() && ring.matches(&request.settings)) {
+                continue;
+            }
+            rings.remove(&request.camera_id);
+            let settings = &request.settings;
+            let handle = start_ring(request).unwrap_or_else(|error| RingHandle::failed(settings.capture_last_seconds, settings.frames, settings.max_fps, error.to_string()));
+            rings.insert(request.camera_id.clone(), handle);
+        }
+        wanted.iter().filter_map(|request| rings.get(&request.camera_id).map(|ring| ring.status(&request.camera_id))).collect()
+    }
+
+    /// Every ring's status.
+    pub fn rings(&self) -> Vec<RingStatus> {
+        self.rings_lock().iter().map(|(camera, ring)| ring.status(camera)).collect()
+    }
+
+    /// Writes the last `last` of `clip.camera_id`'s ring (all it holds when `None`) to a new
+    /// stored recording in `dir`. The ring keeps running.
+    pub fn capture_last(&self, last: Option<Duration>, clip: &ClipRequest<'_>, dir: &Path) -> Result<PartSummary, RecorderError> {
+        let frames = {
+            let rings = self.rings_lock();
+            let ring = rings.get(clip.camera_id).ok_or_else(|| RecorderError::NotFound(format!("no capture-last ring runs for {}", clip.camera_id)))?;
+            if !ring.is_running() {
+                let status = ring.status(clip.camera_id);
+                return Err(RecorderError::Camera(status.error.unwrap_or_else(|| "the capture-last ring is not running".into())));
+            }
+            ring.shared.lock().snapshot(last)
+        };
+        capture::write_clip(&frames, dir, clip)
+    }
+}
+
+/// Opens the camera for a ring and starts it, with a budget of RAM from the memory available now.
+fn start_ring(request: &RingRequest) -> Result<RingHandle, RecorderError> {
+    let settings = &request.settings;
+    settings.validate().map_err(RecorderError::Settings)?;
+    let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
+    let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
+    let frame_bytes = u64::from(delivered.size.0) * u64::from(delivered.size.1) * capture::bytes_per_pixel(delivered.format);
+    let fps = settings.max_fps.or(delivered.fps.map(f64::from)).unwrap_or(30.0);
+    let budget = ring::budget_bytes(settings.capture_last_seconds, fps, frame_bytes, ring::memory_available())?;
+    Ok(RingHandle::start(source, settings.capture_last_seconds, settings.frames, settings.max_fps, budget))
 }

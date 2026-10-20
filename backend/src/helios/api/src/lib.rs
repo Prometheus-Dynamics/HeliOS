@@ -19,6 +19,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod leds;
 pub mod orion;
+pub mod recording_rings;
 pub mod recordings;
 pub mod routes;
 pub mod startup;

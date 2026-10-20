@@ -49,6 +49,10 @@ pub struct RecorderSettings {
     pub imu_period_ms: u32,
     pub mag_period_ms: u32,
     pub power_period_ms: u32,
+    /// Seconds kept in RAM by each capture-last ring (`POST /v1/recordings/capture-last`).
+    pub capture_last_seconds: u32,
+    /// The cameras with a capture-last ring running (none by default: the rings cost RAM and CPU).
+    pub capture_last_cameras: Vec<String>,
 }
 
 impl Default for RecorderSettings {
@@ -67,6 +71,8 @@ impl Default for RecorderSettings {
             imu_period_ms: 20,
             mag_period_ms: 100,
             power_period_ms: 100,
+            capture_last_seconds: 10,
+            capture_last_cameras: Vec::new(),
         }
     }
 }
@@ -87,6 +93,9 @@ impl RecorderSettings {
         }
         if !(1..=86_400).contains(&self.max_file_seconds) {
             return Err("max_file_seconds must be 1 to 86400".into());
+        }
+        if !(1..=600).contains(&self.capture_last_seconds) {
+            return Err("capture_last_seconds must be 1 to 600".into());
         }
         if self.max_fps.is_some_and(|fps| !(fps.is_finite() && fps > 0.0 && fps <= 1000.0)) {
             return Err("max_fps must be above 0 and at most 1000 (or null for the camera's rate)".into());
@@ -113,6 +122,7 @@ mod tests {
         assert!(settings.validate().is_ok());
         assert_eq!(settings.max_fps, Some(30.0));
         assert_eq!(settings.frames, RecordFrames::Raw);
+        assert_eq!((settings.capture_last_seconds, settings.capture_last_cameras.len()), (10, 0));
         assert!(settings.compression);
         assert!(settings.queue_bytes >= 64 * MIB as usize);
         assert_eq!(settings.reserve_bytes, 2 * GIB);

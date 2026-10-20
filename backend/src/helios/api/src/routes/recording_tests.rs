@@ -61,7 +61,8 @@ async fn settings_default_then_persist_and_validate() {
     let (status, body) = call(&state, "GET", "/v1/recordings/settings", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["compression"], true);
-    assert!(body["max_fps"].is_null(), "the camera's rate by default");
+    assert_eq!(body["max_fps"], 30.0, "30 frames a second by default");
+    assert_eq!(body["frames"], "raw", "the sensor's raw frames by default");
 
     let (status, _) = call(&state, "PUT", "/v1/recordings/settings", Some(serde_json::json!({ "max_fps": -1 }))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -157,4 +158,48 @@ async fn starting_without_orion_is_unavailable_and_checks_the_body() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "unknown fields are refused");
     let (status, _) = call(&state, "POST", "/v1/recordings", Some(serde_json::json!({ "camera": "cam 0" }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn capture_last_is_refused_unless_the_settings_enable_a_ring() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    let (status, body) = call(&state, "POST", "/v1/recordings/capture-last", None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.to_string().contains("no camera has a capture-last ring"), "{body}");
+    call(&state, "PUT", "/v1/recordings/settings", Some(serde_json::json!({ "capture_last_cameras": ["cam0"] }))).await;
+    let (status, body) = call(&state, "POST", "/v1/recordings/capture-last", Some(serde_json::json!({ "camera": "cam1" }))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.to_string().contains("not enabled for cam1"), "{body}");
+}
+
+#[tokio::test]
+async fn capture_last_checks_the_window_and_needs_the_camera_present() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    call(&state, "PUT", "/v1/recordings/settings", Some(serde_json::json!({ "capture_last_cameras": ["cam0"], "capture_last_seconds": 10 }))).await;
+    let (status, body) = call(&state, "POST", "/v1/recordings/capture-last", Some(serde_json::json!({ "seconds": 30 }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, _) = call(&state, "POST", "/v1/recordings/capture-last", Some(serde_json::json!({ "seconds": 0 }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(&state, "POST", "/v1/recordings/capture-last", Some(serde_json::json!({ "bogus": 1 }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "unknown fields are refused");
+    // Without Orion the camera cannot be found, so the ring cannot run.
+    let (status, body) = call(&state, "POST", "/v1/recordings/capture-last", Some(serde_json::json!({ "seconds": 5 }))).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+}
+
+#[tokio::test]
+async fn the_ring_settings_are_checked_and_listed_with_the_recordings() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    let (status, _) = call(&state, "PUT", "/v1/recordings/settings", Some(serde_json::json!({ "capture_last_seconds": 0 }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, body) = call(&state, "GET", "/v1/recordings/settings", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!((body["capture_last_seconds"].as_u64(), body["frames"].as_str()), (Some(10), Some("raw")), "{body}");
+    assert_eq!(body["max_fps"].as_f64(), Some(30.0), "{body}");
+    let (status, body) = call(&state, "GET", "/v1/recordings", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["rings"], serde_json::json!([]), "{body}");
 }
