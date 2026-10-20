@@ -36,6 +36,8 @@ pub const GRAPHS: &[(&str, &str)] = &[
     ("aruco-4x4_50", include_str!("../../engine/graphs/aruco-4x4_50.graph.json")),
     ("apriltag-36h11-staged", include_str!("../../engine/graphs/apriltag-36h11-staged.graph.json")),
     ("aruco-4x4_50-staged", include_str!("../../engine/graphs/aruco-4x4_50-staged.graph.json")),
+    // Eidos's feature tracks (`eidos:features.track`): not a detector, so no dictionary.
+    ("features-track", include_str!("../../engine/graphs/features-track.graph.json")),
 ];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

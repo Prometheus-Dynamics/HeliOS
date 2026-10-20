@@ -1373,6 +1373,33 @@ mod tests {
     }
 
     #[test]
+    fn feature_tracks_template_is_a_deployable_non_detector_pipeline() {
+        for (id, _) in crate::startup::GRAPHS {
+            assert!(template_family(id).is_ok(), "{id} has a family");
+        }
+        assert_eq!(template_family("features-track").expect("family"), "features");
+        assert!(template_family("mystery").is_err());
+        let json = crate::startup::GRAPHS.iter().find(|(id, _)| *id == "features-track").map(|(_, json)| *json).expect("feature template");
+        let graph: serde_json::Value = serde_json::from_str(json).expect("template");
+        assert_eq!(dictionary_of(&graph), None);
+        assert_eq!(search_mode_of(&graph), None);
+        let spec = PipelineSpec {
+            name: "Feature tracks".into(),
+            graph,
+            bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]),
+            enabled: true,
+            search_mode: None,
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+            dictionary: None,
+        };
+        let document = validate_spec(&spec, &view_with_camera(), "node-local", None).expect("deploys");
+        assert!(document.requires.iter().any(|requirement| requirement.id == "eidos"), "{:?}", document.requires);
+    }
+
+    #[test]
     fn pose_summary_reports_status_tags_and_field() {
         let output = |port: &str, value: serde_json::Value| Output { pipeline: "p".into(), port: port.into(), value, observed_at_ms: 5 };
         assert_eq!(pose_summary(&[output("detections", serde_json::json!({}))]), None);
@@ -1474,7 +1501,7 @@ mod tests {
 #[derive(Debug, Serialize)]
 pub struct Template {
     pub id: String,
-    /// The detector family (`apriltag` or `aruco`).
+    /// The detector family (`apriltag` or `aruco`), or `features` for a non-detector template.
     pub family: String,
     /// `default` (one node that starts on a sliced frame's first rows; the first of its family)
     /// or `staged` (the node-group, profiled stage by stage).
@@ -1486,13 +1513,27 @@ pub struct Template {
     pub graph: serde_json::Value,
 }
 
+/// The family of a golden graph by its id: a detector family, or `features` (Eidos's feature
+/// tracks, which have no dictionary). An id that names none is an error, not a guess.
+fn template_family(id: &str) -> ApiResult<&'static str> {
+    if id.starts_with("aruco") {
+        Ok("aruco")
+    } else if id.starts_with("apriltag") {
+        Ok("apriltag")
+    } else if id.starts_with("features-") {
+        Ok("features")
+    } else {
+        Err(ApiError::internal(format!("template {id} has no known family")))
+    }
+}
+
 /// `GET /v1/pipelines/templates`: the graphs helios-engine ships, ready to deploy with a camera
 /// binding on `camera_input`.
 pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
     let mut out = Vec::new();
     for (id, json) in crate::startup::GRAPHS {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
-        let family = if id.starts_with("aruco") { "aruco" } else { "apriltag" };
+        let family = template_family(id)?;
         let variant = if id.ends_with("-staged") { "staged" } else { "default" };
         out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
     }
