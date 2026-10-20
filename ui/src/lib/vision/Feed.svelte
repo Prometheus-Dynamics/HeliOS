@@ -184,7 +184,7 @@
           <polyline points={points.map((p) => `${p.x},${p.y}`).join(" ")} class="trail" stroke-width={1.2 * k} />
         {/each}
         {#each featureView.tracks as t (t.id)}
-          <circle cx={t.x} cy={t.y} r={(t.status === "new" ? 3 : 2.2) * k} class="track" stroke-width={0.8 * k} style:fill={trackFill(t)} />
+          <circle cx={t.x} cy={t.y} r={(t.status === "new" ? 3.2 : 2.6) * k} class="track" stroke-width={1 * k} style:fill={trackFill(t)} />
         {/each}
       {/if}
       {#each markers as m (m.id + ":" + m.corners[0][0])}
@@ -323,13 +323,13 @@
   }
   .trail {
     fill: none;
-    stroke: rgba(34, 211, 238, 0.45);
+    stroke: rgba(34, 211, 238, 0.6);
     stroke-linejoin: round;
     stroke-linecap: round;
     pointer-events: none;
   }
   .track {
-    stroke: rgba(0, 0, 0, 0.55);
+    stroke: rgba(0, 0, 0, 0.7);
   }
   .hud {
     position: absolute;

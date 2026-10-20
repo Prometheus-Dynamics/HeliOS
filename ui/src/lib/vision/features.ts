@@ -97,11 +97,14 @@ export function toFeedSpace(features: CameraFeatures, fw: number, fh: number): {
   };
 }
 
-/** A track's dot colour: a new track is bright; an older one settles toward a calm cyan. */
+/**
+ * A track's dot colour: a new track is bright yellow; an older one settles from white-cyan to a
+ * calm cyan that stays readable on a lit scene (the dot's dark rim does the rest).
+ */
 export function trackFill(track: Pick<FeatureTrack, "status" | "age">): string {
   if (track.status === "new") return "#fef08a";
   const settled = Math.min(Math.max(track.age, 0), SETTLED_AGE) / SETTLED_AGE;
-  return `rgba(34, 211, 238, ${(0.9 - 0.4 * settled).toFixed(2)})`;
+  return `rgba(34, 211, 238, ${(1 - 0.2 * settled).toFixed(2)})`;
 }
 
 /** The summary chip's text: "12 tracks · 9 tracked · 3 new · 1 lost" (`short`, for a small feed: "12 · 3 new · 1 lost"). */
