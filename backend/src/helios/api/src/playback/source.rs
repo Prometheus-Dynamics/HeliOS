@@ -14,6 +14,8 @@ use crate::{
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png"];
 const RECORDING_EXTENSION: &str = "mcap";
+/// Video files Styx replays without a recording header (at their own rate, or the chosen fps).
+const MEDIA_EXTENSIONS: &[&str] = &["mjpeg", "mjpg", "avi"];
 /// What an image sequence's player says it cannot do yet.
 pub const NOTE_IMAGES: &str = "image sequence: plays at its frame rate; pause, seek and speed come with Styx's file backend controls";
 
@@ -40,6 +42,9 @@ pub struct Resolved {
     pub note: Option<String>,
     /// The recording's start-time facts (default for an image sequence).
     pub facts: RecordingFacts,
+    /// Whether the player's frame rate applies (an image sequence, a JPEG folder or a video file
+    /// without its own rate), so the view shows it.
+    pub fps_applies: bool,
 }
 
 pub fn resolve(roots: &Roots, source: &PlaybackSource) -> ApiResult<Resolved> {
@@ -67,11 +72,13 @@ fn resolve_path(roots: &Roots, path: &str) -> ApiResult<Resolved> {
     }
     let label = canonical.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
     let mut resolved = if canonical.is_dir() {
-        image_sequence(&canonical, label)?
-    } else if canonical.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(RECORDING_EXTENSION)) {
+        folder(&canonical, label)?
+    } else if has_extension(&canonical, RECORDING_EXTENSION) {
         recording_file(&canonical, label)?
+    } else if MEDIA_EXTENSIONS.iter().any(|known| has_extension(&canonical, known)) {
+        media_file(&canonical, label)
     } else {
-        return Err(ApiError::unprocessable(format!("{path} is neither a recording (.mcap) nor a folder of images")));
+        return Err(ApiError::unprocessable(format!("{path} is not a recording (.mcap), a video (.mjpeg, .avi) or a folder of images")));
     };
     resolved.source = PlaybackSource::Path { path: canonical.to_string_lossy().into_owned() };
     Ok(resolved)
@@ -91,20 +98,40 @@ fn recording_file(file: &Path, label: String) -> ApiResult<Resolved> {
         raw,
         note: None,
         facts,
+        fps_applies: false,
     })
 }
 
-/// A folder of JPEG and PNG images, in file name order.
-fn image_sequence(dir: &Path, label: String) -> ApiResult<Resolved> {
+fn has_extension(path: &Path, extension: &str) -> bool {
+    path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
+}
+
+/// A video file Styx replays: no recording header, so no raw frames and no start facts.
+fn media_file(file: &Path, label: String) -> Resolved {
+    Resolved {
+        kind: SourceKind::Recording,
+        source: PlaybackSource::Path { path: file.to_string_lossy().into_owned() },
+        label,
+        recording: Some(file.to_path_buf()),
+        images: Vec::new(),
+        raw: false,
+        note: None,
+        facts: RecordingFacts::default(),
+        fps_applies: true,
+    }
+}
+
+/// A folder: a JPEG-only folder replays as a video (with the replay controls, at the player's
+/// frame rate); a folder with PNG images plays as an image sequence (the file backend).
+fn folder(dir: &Path, label: String) -> ApiResult<Resolved> {
     let entries = std::fs::read_dir(dir).map_err(|error| ApiError::internal(format!("reading {}: {error}", dir.display())))?;
-    let mut images: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file() && path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| IMAGE_EXTENSIONS.iter().any(|known| ext.eq_ignore_ascii_case(known))))
-        .collect();
+    let mut images: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.is_file() && IMAGE_EXTENSIONS.iter().any(|known| has_extension(path, known))).collect();
     images.sort();
     if images.is_empty() {
         return Err(ApiError::unprocessable(format!("{} has no JPEG or PNG images", dir.display())));
+    }
+    if images.iter().all(|image| has_extension(image, "jpg") || has_extension(image, "jpeg")) {
+        return Ok(Resolved { recording: Some(dir.to_path_buf()), ..media_file(dir, label) });
     }
     Ok(Resolved {
         kind: SourceKind::Images,
@@ -115,6 +142,7 @@ fn image_sequence(dir: &Path, label: String) -> ApiResult<Resolved> {
         raw: false,
         note: Some(NOTE_IMAGES.to_string()),
         facts: RecordingFacts::default(),
+        fps_applies: true,
     })
 }
 
@@ -146,6 +174,23 @@ mod tests {
         std::fs::write(elsewhere.path().join("a.jpg"), b"x").expect("write");
         let error = resolve(&roots(allowed.path()), &PlaybackSource::Path { path: elsewhere.path().to_string_lossy().into_owned() }).expect_err("refused");
         assert_eq!(error.code.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn jpeg_folders_and_video_files_replay_at_the_player_frame_rate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let jpegs = dir.path().join("jpegs");
+        std::fs::create_dir(&jpegs).expect("folder");
+        for name in ["b.jpg", "a.jpeg"] {
+            std::fs::write(jpegs.join(name), b"x").expect("write");
+        }
+        std::fs::write(dir.path().join("clip.mjpeg"), b"not decoded here").expect("write");
+        let folder = resolve(&roots(dir.path()), &PlaybackSource::Path { path: jpegs.to_string_lossy().into_owned() }).expect("jpeg folder");
+        assert_eq!((folder.kind, folder.fps_applies, folder.raw), (SourceKind::Recording, true, false));
+        assert_eq!(folder.recording.as_deref(), Some(jpegs.canonicalize().expect("canonical").as_path()));
+        let clip = resolve(&roots(dir.path()), &PlaybackSource::Path { path: dir.path().join("clip.mjpeg").to_string_lossy().into_owned() }).expect("mjpeg");
+        assert_eq!((clip.kind, clip.fps_applies), (SourceKind::Recording, true));
+        assert!(clip.facts == RecordingFacts::default());
     }
 
     #[test]

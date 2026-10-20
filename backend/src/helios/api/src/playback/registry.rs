@@ -10,7 +10,7 @@ use super::{
     facts::RecordingFacts,
     new_token,
     player::{Player, StartOptions, device_for, serve, socket_path},
-    request::{PlayerView, SourceKind},
+    request::PlayerView,
     resource::{PlaybackPublisher, resource_record},
     source::Resolved,
 };
@@ -138,7 +138,7 @@ fn view_of(resolved: &Resolved, token: &str, options: StartOptions, created_at_m
         frames_endpoint,
         speed: options.speed,
         looping: options.looping,
-        fps: (resolved.kind == SourceKind::Images).then_some(options.fps),
+        fps: resolved.fps_applies.then_some(options.fps),
         created_at_ms,
         status: None,
         status_error: None,

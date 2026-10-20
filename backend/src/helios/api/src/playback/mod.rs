@@ -8,7 +8,10 @@
 //! the API's startup publishes the empty set, which clears any left by an earlier run.
 //!
 //! - `request.rs`: `POST /v1/playback` bodies and the player's JSON view.
-//! - `source.rs`: resolving a recording id or a folder into a replayable source.
+//! - `source.rs`: resolving a recording id, a video or a folder into a replayable source. Replayed
+//!   without conversion: MCAP recordings, Motion JPEG streams (`.mjpeg`), AVI (`.avi`) and JPEG
+//!   folders (at the player frame rate). H.264 or MP4 files: convert on a PC with
+//!   `styx-record convert IN OUT.mcap --gray --lz4` and copy the MCAP to the recordings directory.
 //! - `facts.rs`: a recording's `helios.camera` metadata (calibration, mount, mode).
 //! - `player.rs`: the device and the camera service of one player.
 //! - `registry.rs`: the open players, their limit and their Orion resources.

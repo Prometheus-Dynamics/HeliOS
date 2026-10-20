@@ -45,7 +45,8 @@ pub fn device_for(resolved: &Resolved, options: StartOptions) -> ApiResult<Probe
             // Speed 0 replays unpaced (every frame as fast as the consumers take them); any other
             // speed starts realtime and is set through `replay_speed` once the player is open.
             let pacing = if options.speed == 0.0 { ReplayPacing::Unpaced } else { ReplayPacing::Realtime };
-            let mut config = ReplaySourceConfig::new(path).hold_at_end(true).timestamps(ReplayTimestamps::Rebased).loop_forever(options.looping).pacing(pacing);
+            // The frame rate is for videos without one (Motion JPEG streams, JPEG folders).
+            let mut config = ReplaySourceConfig::new(path).hold_at_end(true).timestamps(ReplayTimestamps::Rebased).loop_forever(options.looping).pacing(pacing).frame_rate(options.fps);
             // Raw Bayer frames go through the software ISP as the camera would process them (the
             // recorded exposure, gains and white balance; no AE or AWB), so the player offers NV12.
             if resolved.raw {
