@@ -498,7 +498,7 @@ export class LiveCluster {
     }
     const created = await this.act(
       "Create pipeline",
-      () => api.createPipeline({ name, graph: template.graph, bindings: { [template.camera_input]: { resource_id: cameraId, pyramid: 1 } }, dictionary: dictionary ?? template.dictionary ?? undefined }),
+      () => api.createPipeline({ name, graph: template.graph, bindings: { [template.camera_input]: { resource_id: cameraId, pyramid: template.pyramid ?? 1 } }, dictionary: dictionary ?? template.dictionary ?? undefined }),
       (p) => `${p.name} deployed`,
     );
     await this.refreshPipelines();

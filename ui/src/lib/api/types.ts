@@ -351,6 +351,8 @@ export interface PipelineTemplate {
   variant?: "default" | "staged";
   dictionary: string | null;
   camera_input: string;
+  /** Half-size pyramid levels its camera binding asks for. */
+  pyramid?: number;
   graph: DaedalusGraphDocument;
 }
 

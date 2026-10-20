@@ -1510,6 +1510,9 @@ pub struct Template {
     pub dictionary: Option<String>,
     /// The graph input a camera binds to (its host bridge's frame input).
     pub camera_input: String,
+    /// Half-size pyramid levels its camera binding asks for: 1 for the detectors, 3 for feature
+    /// tracking (Lucas-Kanade's levels, made by the ISP where it can).
+    pub pyramid: u8,
     pub graph: serde_json::Value,
 }
 
@@ -1535,7 +1538,8 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = template_family(id)?;
         let variant = if id.ends_with("-staged") { "staged" } else { "default" };
-        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), graph });
+        let pyramid = if family == "features" { 3 } else { 1 };
+        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, graph });
     }
     Ok(Json(out))
 }
