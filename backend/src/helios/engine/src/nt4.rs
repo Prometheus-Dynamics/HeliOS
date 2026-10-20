@@ -5,12 +5,21 @@
 //! `GET /v1/outputs`), plus `<prefix>/<pipeline>/latency_ms` (input to outputs, `double`),
 //! `fps` (`double`) and `capture_time_us` (`int`: when the frame came in, on the NT server's
 //! clock, for latency compensation). Every topic carries properties `{"helios": 1, "kind": ..}`
-//! (the output port, or `latency_ms`, `fps`, `capture_time_us`). The graph thread only hands the tick's payloads over (one
-//! channel send, dropped when the publisher is behind); serializing and sending happen here.
+//! (the output port, or `latency_ms`, `fps`, `capture_time_us`, or a robot pose topic).
+//!
+//! A pipeline whose outputs include `multi_tag_pose` also gets typed robot pose topics on every
+//! tick (see [`robot_pose`]): `robot_pose` (`double[]` `[x, y, z, roll, pitch, yaw]`),
+//! `robot_pose_valid`, `robot_pose_struct` (`struct:Pose3d`), `tag_count` and, once the hook
+//! returns one, `robot_pose_std_devs`.
+//!
+//! The graph thread only hands the tick's payloads over (one channel send, dropped when the
+//! publisher is behind); serializing and sending happen here.
 //!
 //! Settings are helios-api's (`PUT /v1/device/nt4`), read from its state file whenever it
 //! changes: off, or the server (a team number's `10.TE.AM.2`, or a host) and the prefix
 //! (`/helios` by default).
+
+pub(crate) mod robot_pose;
 
 use std::{
     collections::HashMap,
@@ -29,6 +38,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::execution::outputs::payload_message;
+use robot_pose::RobotPoseTopics;
 
 /// Where helios-api keeps the NT4 settings.
 pub const DEFAULT_SETTINGS_PATH: &str = "/var/lib/helios/api/nt4.json";
@@ -172,7 +182,28 @@ impl Connection {
         self.set(format!("{base}/fps"), "double", Value::Double(tick.fps), "fps");
         for (port, payload) in &tick.outputs {
             let message = payload_message(payload, &tick.serializers);
+            if port == robot_pose::MULTI_TAG_POSE_PORT {
+                self.publish_robot_pose(&base, &message);
+            }
             self.set(format!("{base}/{}", topic_segment(port)), "string", Value::String(message), port);
+        }
+    }
+
+    /// The robot pose topics, from the `multi_tag_pose` JSON the output topic also carries. The
+    /// pose goes out before `robot_pose_valid`, and that before `tag_count`: sets reach the
+    /// server in order, so a reader that sees the newer `tag_count` sees this tick's validity.
+    fn publish_robot_pose(&mut self, base: &str, multi_tag_pose: &str) {
+        let json: serde_json::Value = serde_json::from_str(multi_tag_pose).unwrap_or(serde_json::Value::Null);
+        let topics = robot_pose::read(&json);
+        if let Some(pose) = &topics.pose {
+            self.set(format!("{base}/robot_pose"), "double[]", RobotPoseTopics::robot_pose_value(pose), "robot_pose");
+            let bytes = robot_pose::pose3d_struct_bytes(pose);
+            self.set(format!("{base}/robot_pose_struct"), robot_pose::POSE3D_STRUCT_TYPE, Value::Raw(bytes), "robot_pose_struct");
+        }
+        self.set(format!("{base}/robot_pose_valid"), "boolean", Value::Boolean(topics.valid()), "robot_pose_valid");
+        self.set(format!("{base}/tag_count"), "int", Value::Int(topics.tag_count), "tag_count");
+        if let Some([sigma_x, sigma_y, sigma_theta]) = topics.std_devs {
+            self.set(format!("{base}/robot_pose_std_devs"), "double[]", Value::DoubleArray(vec![sigma_x, sigma_y, sigma_theta]), "robot_pose_std_devs");
         }
     }
 }
@@ -292,6 +323,60 @@ mod tests {
         }
         assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
         assert_eq!(host.value("/helios/front/fps"), Some(Value::Double(30.0)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn robot_pose_topics_reach_an_nt4_server() {
+        use orion_nt4::{Server, ServerConfig};
+        let server = Server::start(ServerConfig { bind: "127.0.0.1:0".parse().unwrap(), ..ServerConfig::default() }).await.expect("server");
+        let port = server.local_addr().port();
+        let dir = std::env::temp_dir().join(format!("helios-nt4-pose-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nt4.json");
+        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
+        let (sink, _status) = spawn(path, "helios-test".into());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !sink.active() {
+            assert!(tokio::time::Instant::now() < deadline, "never connected");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let host = server.handle();
+        let offer = |multi_tag_pose: serde_json::Value| {
+            let payload = Payload::owned("eidos:aruco.multi_tag_pose", multi_tag_pose.to_string());
+            sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("multi_tag_pose".into(), payload)], serializers: ValueSerializerMap::default(), latency_ms: 4.5, fps: 30.0 });
+        };
+        let wait_for = |topic: &'static str, expected: Value| {
+            let host = host.clone();
+            async move {
+                while host.value(topic) != Some(expected.clone()) {
+                    assert!(tokio::time::Instant::now() < deadline, "{topic} never became {expected:?}");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        };
+
+        let with_rig = serde_json::json!({
+            "status": "calibrated", "valid": true, "inlier_tags": 3, "has_rig": true,
+            "reference_from_camera": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 9.0, "y": 9.0, "z": 9.0}},
+            "reference_from_rig": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 3.0, "y": 4.0, "z": 0.0}},
+        });
+        offer(with_rig);
+        wait_for("/helios/front/tag_count", Value::Int(3)).await;
+        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
+        assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
+        assert_eq!(host.value("/helios/front/robot_pose_std_devs"), None, "no std devs until the hook returns some");
+        assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
+
+        // Invalid, then valid without a rig: no robot pose. Waiting on `tag_count` (sent after
+        // `robot_pose_valid` in a tick) means that tick's validity has landed too.
+        offer(serde_json::json!({"status": "uncalibrated", "valid": false, "inlier_tags": 0, "has_rig": true}));
+        wait_for("/helios/front/tag_count", Value::Int(0)).await;
+        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        offer(serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 2, "has_rig": false}));
+        wait_for("/helios/front/tag_count", Value::Int(2)).await;
+        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

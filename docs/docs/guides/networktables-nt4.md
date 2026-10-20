@@ -30,6 +30,10 @@ Each pipeline publishes under `/helios/<pipeline>/` (the prefix can be changed u
 - one `string` topic per output, holding JSON (for example `detections`, `multi_tag_pose`);
 - `latency_ms`, `fps` and `capture_time_us`. `capture_time_us` is on the NT server's clock, so
   robot code can subtract it from the current time to get the result's age.
+- for a pipeline with a camera mount and a `multi_tag_pose` output, a typed robot pose:
+  `robot_pose` (`double[]` `[x, y, z, roll, pitch, yaw]` on the field, metres and radians),
+  `robot_pose_valid` (`boolean`, check it before using `robot_pose`), `robot_pose_struct`
+  (WPILib `Pose3d`) and `tag_count`.
 
 The full list is in the [NetworkTables API reference](../api/networktables.md).
 

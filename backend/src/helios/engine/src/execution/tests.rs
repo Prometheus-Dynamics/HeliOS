@@ -1008,6 +1008,12 @@ fn multi_tag_pose_gives_the_camera_and_robot_in_the_reference_frame() {
     let (cx, rx) = (camera["x"].as_f64().expect("x"), robot["x"].as_f64().expect("x"));
     let (cz, rz) = (camera["z"].as_f64().expect("z"), robot["z"].as_f64().expect("z"));
     assert!((cx - rx - 0.3).abs() < 0.05 && (cz - rz - 0.5).abs() < 0.05, "camera {camera}, robot {robot}");
+    // The NT4 robot pose reads the same output: a robot pose, valid, with the tag count.
+    let topics = crate::nt4::robot_pose::read(&multi);
+    assert!(topics.valid(), "{multi}");
+    assert_eq!(topics.tag_count, 1);
+    let pose = topics.pose.expect("robot pose");
+    assert!((pose.translation[0] - rx).abs() < 1e-9 && (pose.translation[2] - rz).abs() < 1e-9, "{pose:?}");
 }
 
 #[test]
