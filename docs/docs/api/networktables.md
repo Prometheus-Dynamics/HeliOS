@@ -49,7 +49,7 @@ up) and is the robot's pose through the camera's mount, so it needs a mount on t
 |---|---|---|
 | `<prefix>/<pipeline>/robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`: metres and radians, WPILib's `Rotation3d` (intrinsic `Z`-`Y`-`X`). Published only while there is a robot pose; it keeps its last value otherwise, so check `robot_pose_valid` |
 | `<prefix>/<pipeline>/robot_pose_valid` | `boolean` | There is a robot pose this tick: the solve is valid and the camera has a mount |
-| `<prefix>/<pipeline>/robot_pose_struct` | `raw` (`struct:Pose3d`) | The same pose as WPILib's `Pose3d` struct: translation `x, y, z` then rotation `w, x, y, z`, little-endian `f64`s (56 bytes). Published with `robot_pose`. The `/.schema/struct:Pose3d` topic is not published, so dashboards that need the schema cannot decode it yet; a robot-side `StructSubscriber` can |
+| `<prefix>/<pipeline>/robot_pose_struct` | `raw` (`struct:Pose3d`) | The same pose as WPILib's `Pose3d` struct: translation `x, y, z` then rotation `w, x, y, z`, little-endian `f64`s (56 bytes). Published with `robot_pose`, after its schemas (`/.schema/struct:Pose3d`, `Translation3d`, `Rotation3d`, `Quaternion`; type `structschema`), so robot code and dashboards such as AdvantageScope decode it |
 | `<prefix>/<pipeline>/tag_count` | `int` | Tags the solve used (`inlier_tags`); 0 when there is no solve |
 | `<prefix>/<pipeline>/robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]`. Reserved: not published yet |
 

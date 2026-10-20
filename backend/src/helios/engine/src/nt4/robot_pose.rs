@@ -10,9 +10,9 @@
 //!   its last value.
 //! - `robot_pose_struct` (`raw`, type `struct:Pose3d`): the same pose as WPILib's `Pose3d`
 //!   struct: translation `x, y, z` then rotation quaternion `w, x, y, z`, little-endian `f64`s
-//!   (56 bytes). Published with `robot_pose`. The `/.schema/struct:Pose3d` topic is not
-//!   published: orion-nt4 does not model the `structschema` type. Robot code that reads it with
-//!   a `StructSubscriber` does not need it.
+//!   (56 bytes). Published with `robot_pose`, after its schemas ([`POSE3D_SCHEMAS`]:
+//!   `/.schema/struct:Pose3d` and the structs it nests, type `structschema`), so dashboards
+//!   (AdvantageScope, Glass) decode it too.
 //! - `tag_count` (`int`): `inlier_tags`, 0 when missing.
 //! - `robot_pose_std_devs` (`double[]`: `[σx, σy, σθ]`), only when [`robot_pose_std_devs`]
 //!   returns `Some`.
@@ -34,6 +34,16 @@ use serde_json::Value as Json;
 pub const MULTI_TAG_POSE_PORT: &str = "multi_tag_pose";
 /// The NT4 type of `robot_pose_struct` (WPILib's `Pose3d`).
 pub const POSE3D_STRUCT_TYPE: &str = "struct:Pose3d";
+/// The NT4 type of a struct schema topic.
+pub const STRUCT_SCHEMA_TYPE: &str = "structschema";
+/// WPILib's schemas for `Pose3d` and the structs it nests, by schema topic (as WPILib's
+/// `Pose3dStruct`, `Translation3dStruct`, `Rotation3dStruct` and `QuaternionStruct` give them).
+pub const POSE3D_SCHEMAS: &[(&str, &str)] = &[
+    ("/.schema/struct:Pose3d", "Translation3d translation;Rotation3d rotation"),
+    ("/.schema/struct:Translation3d", "double x;double y;double z"),
+    ("/.schema/struct:Rotation3d", "Quaternion q"),
+    ("/.schema/struct:Quaternion", "double w;double x;double y;double z"),
+];
 
 /// The robot pose in the field: translation in metres, rotation as a unit quaternion and as
 /// WPILib's roll, pitch and yaw in radians.

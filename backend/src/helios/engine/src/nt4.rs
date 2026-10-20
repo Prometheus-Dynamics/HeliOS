@@ -198,6 +198,13 @@ impl Connection {
         if let Some(pose) = &topics.pose {
             self.set(format!("{base}/robot_pose"), "double[]", RobotPoseTopics::robot_pose_value(pose), "robot_pose");
             let bytes = robot_pose::pose3d_struct_bytes(pose);
+            // The schemas once per connection (a published topic keeps its value), before the
+            // first struct value that needs them.
+            for (topic, schema) in robot_pose::POSE3D_SCHEMAS {
+                if !self.publishers.contains_key(*topic) {
+                    self.set((*topic).to_string(), robot_pose::STRUCT_SCHEMA_TYPE, Value::Raw(schema.as_bytes().to_vec()), "schema");
+                }
+            }
             self.set(format!("{base}/robot_pose_struct"), robot_pose::POSE3D_STRUCT_TYPE, Value::Raw(bytes), "robot_pose_struct");
         }
         self.set(format!("{base}/robot_pose_valid"), "boolean", Value::Boolean(topics.valid()), "robot_pose_valid");
@@ -366,6 +373,7 @@ mod tests {
         assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(true)));
         assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
         assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
+        assert!(matches!(host.value("/.schema/struct:Pose3d"), Some(Value::Raw(bytes)) if bytes == b"Translation3d translation;Rotation3d rotation"));
         assert_eq!(host.value("/helios/front/robot_pose_std_devs"), None, "no std devs until the hook returns some");
         assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
 
