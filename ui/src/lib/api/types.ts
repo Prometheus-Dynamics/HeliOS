@@ -637,3 +637,87 @@ export interface Nt4State {
   connected: boolean;
   engine_reporting: boolean;
 }
+
+/** Playback (`/v1/playback`): a recording or an image folder, replayed as a camera. */
+export type PlaybackSource = { recording: string } | { path: string };
+
+/** `POST /v1/playback`: a source and how to start it (`fps` is for image folders). */
+export interface PlaybackCreate {
+  source: PlaybackSource;
+  loop?: boolean;
+  speed?: number;
+  start_paused?: boolean;
+  fps?: number;
+}
+
+/** A player's replay state from its camera service's replay controls. */
+export interface PlaybackStatus {
+  state: "playing" | "paused" | "ended" | "unknown" | string;
+  position_ms: number;
+  /** 0-based frame index, as the API counts frames. */
+  frame: number;
+  duration_ms: number;
+  frame_count: number;
+  speed: number | null;
+  loop: boolean;
+}
+
+export interface PlayerView {
+  id: string;
+  /** The player's camera resource: its frames, controls and pipeline bindings. */
+  resource_id: string;
+  name: string;
+  source: PlaybackSource;
+  kind: "recording" | "images";
+  raw_only: boolean;
+  note: string | null;
+  frames_endpoint: string;
+  speed: number;
+  loop: boolean;
+  fps: number | null;
+  created_at_ms: number;
+  status: PlaybackStatus | null;
+  status_error: string | null;
+}
+
+/** Where a run's calibration or mount came from. */
+export type RunContextFrom = { from: "recording" } | { from: "camera"; camera: string } | { from: "none" };
+
+/** `POST /v1/playback/{id}/runs`: the copy as a pipeline, and what its calibration and mount came from. */
+export interface PlaybackRun {
+  pipeline: Pipeline;
+  context: { calibration: RunContextFrom; mount: RunContextFrom };
+}
+
+export interface RecordingSummary {
+  session: string;
+  camera: string;
+  file: string;
+  index: number;
+  started_at_ms: number;
+  duration_ms: number;
+  bytes: number;
+  frames_written: number;
+  frames_dropped: number;
+  messages_written: number;
+  messages_dropped: number;
+  stop_reason: string | null;
+}
+
+/** One stored recording part (`GET /v1/recordings`, `stored`). */
+export interface StoredRecording {
+  id: string;
+  file: string;
+  bytes: number;
+  modified_at_ms: number;
+  /** Absent for a part that did not finish (power lost). */
+  summary: RecordingSummary | null;
+}
+
+/** `GET /v1/recordings`: the active recording (if any) and the stored parts, newest first. */
+export interface RecordingListing {
+  active: unknown | null;
+  stored: StoredRecording[];
+  storage: { dir: string; free_bytes: number | null; reserve_bytes: number } | null;
+  storage_error: string | null;
+}
