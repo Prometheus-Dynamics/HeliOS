@@ -203,3 +203,19 @@ async fn the_ring_settings_are_checked_and_listed_with_the_recordings() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["rings"], serde_json::json!([]), "{body}");
 }
+
+#[tokio::test]
+async fn an_eidos_export_needs_a_stored_readable_recording() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    std::fs::create_dir_all(dir.path().join("rec")).expect("dir");
+    call(&state, "PUT", "/v1/recordings/settings", Some(with_storage(dir.path()))).await;
+    let (status, body) = call(&state, "POST", "/v1/recordings/board-cam-20261019T101530Z-abc/export/eidos", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    std::fs::write(dir.path().join("rec").join("board-cam-x.mcap"), b"not a recording").expect("write");
+    let (status, body) = call(&state, "POST", "/v1/recordings/board-cam-x/export/eidos", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, _) = call(&state, "POST", "/v1/recordings/..%2Fsecret/export/eidos", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+

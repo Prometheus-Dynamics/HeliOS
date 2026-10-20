@@ -153,3 +153,37 @@ pub async fn capture_last(State(state): State<SharedState>, body: Option<Json<Ca
     let summary = recordings::capture_clip(&state, request.camera, request.seconds).await?;
     Ok((StatusCode::CREATED, Json(summary)))
 }
+
+/// What an Eidos export wrote: its directory (beside the recording, `<id>.eidos`), its files and
+/// the frames and the camera it holds.
+#[derive(Debug, Serialize)]
+pub struct EidosExport {
+    pub dir: String,
+    pub frames: u64,
+    pub width: u32,
+    pub height: u32,
+    /// `calibrated` or `nominal`.
+    pub camera: &'static str,
+    /// The files' names in the directory (`<id>.raw`, `<id>.replay.json`, `<id>.frames.jsonl`).
+    pub files: Vec<String>,
+}
+
+/// `POST /v1/recordings/{id}/export/eidos`: writes the recording's Eidos replay input into
+/// `<id>.eidos/` beside it (`201` with what was written). `409` while it is being written, `422`
+/// when the file is not a readable recording.
+pub async fn export_eidos(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<(StatusCode, Json<EidosExport>)> {
+    recordings::check_recording_id(&id)?;
+    if is_running(&state, &id) {
+        return Err(ApiError::conflict(format!("recording {id} is still running; stop it first")));
+    }
+    let (_, dir) = recordings_dir(&state).await?;
+    let path = catalog::file_of(&dir, &id).ok_or_else(|| ApiError::not_found(format!("no recording {id}")))?;
+    let out = dir.join(format!("{id}.eidos"));
+    let target = out.clone();
+    let summary = tokio::task::spawn_blocking(move || helios_recorder::export::export_eidos(&path, &target))
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::unprocessable(format!("not a readable recording: {error}")))?;
+    let names = [&summary.raw, &summary.replay, &summary.frames_file].iter().filter_map(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).collect();
+    Ok((StatusCode::CREATED, Json(EidosExport { dir: out.display().to_string(), frames: summary.frames, width: summary.width, height: summary.height, camera: summary.camera_status, files: names })))
+}

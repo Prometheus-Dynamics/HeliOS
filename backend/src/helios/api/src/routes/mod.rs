@@ -81,6 +81,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/recordings/{id}", get(recordings::download).delete(recordings::remove))
         .route("/v1/recordings/{id}/stop", post(recordings::stop))
         .route("/v1/recordings/capture-last", post(recordings::capture_last))
+        .route("/v1/recordings/{id}/export/eidos", post(recordings::export_eidos))
         // Pipelines (Daedalus graphs run by helios-engine) and their outputs
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))
