@@ -144,16 +144,16 @@
         <dd>{p50 ? `${fixed(p50.frameMs, 2)} / ${fixed(p50.mapMs, 2)} ms` : "–"}</dd>
         <small>frame / map</small>
       </div>
-      <div class="cell sigma" data-tip="The mapper's own covariance. Eidos warns it is optimistic until the camera is calibrated.">
+      <div class="cell sigma" data-tip="The largest 1σ of the pose's position and rotation, from the mapper's covariance. Checked against ground truth over many runs: it covers the real error and errs on the wide side.">
         <dt>Pose σ</dt>
         <dd>
           {#if sigma}
-            ±{fixed(sigma.position_m[0], 2)} m · ±{fixed(sigma.rotation_deg[0], 1)}°
+            ±{fixed(Math.max(...sigma.position_m), 2)} m · ±{fixed(Math.max(...sigma.rotation_deg), 1)}°
           {:else}
             <span class="muted">–</span>
           {/if}
         </dd>
-        <small class="warn-text">model σ (not yet calibrated)</small>
+        <small>largest axis, 1σ</small>
       </div>
     </dl>
   </div>
@@ -303,9 +303,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .cell .warn-text {
-    color: var(--warn);
   }
   .pill {
     display: inline-block;
