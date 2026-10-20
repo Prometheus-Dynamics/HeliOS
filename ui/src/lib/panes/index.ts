@@ -16,6 +16,7 @@ import FieldPane from "./FieldPane.svelte";
 import GraphPane from "./GraphPane.svelte";
 import InspectorPane from "./InspectorPane.svelte";
 import LogsPane from "./LogsPane.svelte";
+import MapPane from "./MapPane.svelte";
 import MountsPane from "./MountsPane.svelte";
 import PeripheralsPane from "./PeripheralsPane.svelte";
 import PipelinesPane from "./PipelinesPane.svelte";
@@ -49,7 +50,8 @@ definePane({ type: "board", title: "Board maker", icon: "printer", group: "Visio
 definePane({ type: "pipelines", title: "Pipelines", icon: "list-details", group: "Pipelines", summary: "Every pipeline with its state and speed", component: PipelinesPane });
 definePane({ type: "graph", title: "Graph", icon: "schema", group: "Pipelines", summary: "Edit a pipeline's node graph", component: GraphPane, label: pinnedWorkload, identityOf: id("workload") });
 definePane({ type: "catalog", title: "Nodes", icon: "box-multiple", group: "Pipelines", summary: "Node types from the installed plugins", component: CatalogPane });
-definePane({ type: "profiler", title: "Profiler", icon: "stopwatch", group: "Pipelines", summary: "Per-node timing against the frame budget", component: ProfilerPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "map", title: "Map", icon: "route", group: "Pipelines", summary: "A live map: point cloud, camera path, keyframes and tags in 3D, with the mapper's state and timings", component: MapPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "profiler",title: "Profiler", icon: "stopwatch", group: "Pipelines", summary: "Per-node timing against the frame budget", component: ProfilerPane, label: pinnedWorkload, identityOf: id("workload") });
 definePane({ type: "streams", title: "Streams", icon: "broadcast", group: "Pipelines", summary: "What pipelines publish and where it goes", component: StreamsPane });
 definePane({ type: "robot3d", title: "Robot 3D", icon: "cube", group: "Robot", summary: "Cameras, fields of view, tags and your CAD", component: Robot3DPane });
 definePane({ type: "mounts", title: "Mounts", icon: "ruler-2", group: "Robot", summary: "Camera positions on the robot and the CAD model", component: MountsPane });
