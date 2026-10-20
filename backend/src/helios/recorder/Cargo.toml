@@ -9,6 +9,11 @@ name = "helios_recorder"
 path = "src/lib.rs"
 doctest = false
 
+# `helios-recorder export --eidos <recording.mcap> <outdir>`.
+[[bin]]
+name = "helios-recorder"
+path = "src/bin/helios-recorder.rs"
+
 [lints]
 workspace = true
 
@@ -25,7 +30,12 @@ lz4 = "1.28"
 # Recordings as MCAP (`StreamRecorder::mcap`), with lz4 chunks (the default). lz4 builds a C library:
 # the aarch64 image's C toolchain provides it (gaia/docker/aarch64).
 styx = { workspace = true, default-features = false, features = ["facade", "replay-mcap", "replay-mcap-lz4"] }
+# Styx's software ISP: the raw frames' luma for Eidos's replay input (`export/grey.rs`).
+styx-softisp = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev" }
+# The camera mount and the field layout as Eidos poses (`export/replay.rs`).
+helios-field = { path = "../field" }
+# Host channels of a recording (`/helios/outputs`, `/styx/clock`, metadata, attachments) for the export.
+mcap = { version = "0.25", default-features = false, features = ["lz4"] }
 
 [dev-dependencies]
-mcap = { version = "0.25", default-features = false }
 tempfile = { workspace = true }

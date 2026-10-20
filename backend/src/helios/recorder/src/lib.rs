@@ -33,6 +33,7 @@
 pub mod capture;
 pub mod catalog;
 pub mod error;
+pub mod export;
 pub mod frames;
 pub mod host;
 pub mod info;

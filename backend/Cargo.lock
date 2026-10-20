@@ -1405,6 +1405,7 @@ name = "helios-recorder"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "helios-field",
  "lemnos-ipc",
  "lz4",
  "mcap",
@@ -1412,6 +1413,7 @@ dependencies = [
  "serde",
  "serde_json",
  "styx",
+ "styx-softisp",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
