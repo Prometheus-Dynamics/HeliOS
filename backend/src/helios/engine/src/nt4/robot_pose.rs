@@ -135,8 +135,14 @@ pub fn robot_pose_std_devs(multi_tag_pose: &Json, translation: [f64; 3]) -> Opti
     if !(vx >= 0.0 && vy >= 0.0 && vtheta >= 0.0) {
         return None;
     }
-    Some([vx.sqrt(), vy.sqrt(), vtheta.sqrt()])
+    Some([vx.sqrt().max(MIN_POSITION_STD_DEV_M), vy.sqrt().max(MIN_POSITION_STD_DEV_M), vtheta.sqrt().max(MIN_HEADING_STD_DEV_RAD)])
 }
+
+/// The smallest std devs robot code is given. Each frame's covariance comes from that one solve's
+/// residuals, so it is right on average but now and then far too small (Eidos's Monte Carlo); a
+/// pose estimator would then snap to that frame. The floors are the field's own placement error.
+pub const MIN_POSITION_STD_DEV_M: f64 = 0.01;
+pub const MIN_HEADING_STD_DEV_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
 
 /// `reference_from_rig` as a robot pose; `None` unless every field is there and finite and the
 /// quaternion is not zero.
@@ -194,6 +200,12 @@ mod tests {
     }
 
     #[test]
+    fn std_devs_never_go_below_the_floor() {
+        let pose = json!({ "covariance": diagonal([0.0; 6]) });
+        assert_eq!(robot_pose_std_devs(&pose, [1.0, 1.0, 0.0]), Some([MIN_POSITION_STD_DEV_M, MIN_POSITION_STD_DEV_M, MIN_HEADING_STD_DEV_RAD]));
+    }
+
+    #[test]
     fn std_devs_at_the_origin_are_the_translation_and_yaw_sigmas() {
         let pose = json!({ "covariance": diagonal([1e-4, 4e-4, 9e-4, 0.01, 0.04, 0.09]) });
         let [sx, sy, st] = robot_pose_std_devs(&pose, [0.0, 0.0, 0.0]).expect("std devs");
@@ -205,7 +217,7 @@ mod tests {
         // Only yaw uncertainty (0.01 rad): at (10, 0, 0) it is 10 cm across the field (y), none along x.
         let pose = json!({ "covariance": diagonal([0.0, 0.0, 1e-4, 0.0, 0.0, 0.0]) });
         let [sx, sy, st] = robot_pose_std_devs(&pose, [10.0, 0.0, 0.0]).expect("std devs");
-        assert!(sx.abs() < 1e-12 && (sy - 0.1).abs() < 1e-12 && (st - 0.01).abs() < 1e-12, "{sx} {sy} {st}");
+        assert!((sx - MIN_POSITION_STD_DEV_M).abs() < 1e-12 && (sy - 0.1).abs() < 1e-12 && (st - 0.01).abs() < 1e-12, "{sx} {sy} {st}");
     }
 
     #[test]
