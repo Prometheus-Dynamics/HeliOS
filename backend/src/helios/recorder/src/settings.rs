@@ -9,6 +9,17 @@ use serde::{Deserialize, Serialize};
 pub const GIB: u64 = 1 << 30;
 pub const MIB: u64 = 1 << 20;
 
+/// What a recording stores of each frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordFrames {
+    /// The sensor's 16-bit Bayer frames as they are, before the ISP (`Frames::sensor_raw`).
+    #[default]
+    Raw,
+    /// The ISP's 8-bit luma at the camera's mode size.
+    Luma,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RecorderSettings {
@@ -25,8 +36,11 @@ pub struct RecorderSettings {
     pub max_file_bytes: u64,
     /// ... or after this long.
     pub max_file_seconds: u64,
-    /// Frames per second at most; `None` records the camera's rate, every frame.
+    /// Frames per second at most; `None` records the camera's rate, every frame. The camera's
+    /// 120 fps is subsampled to this (30 by default: the rate the CM5 eMMC sustains with raw + lz4).
     pub max_fps: Option<f64>,
+    /// What each frame is: the raw sensor frames (default) or the ISP's luma.
+    pub frames: RecordFrames,
     /// lz4 chunk compression (the default), else uncompressed chunks.
     pub compression: bool,
     /// Encoded bytes waiting for the disk before frames and host messages are dropped and counted.
@@ -46,7 +60,8 @@ impl Default for RecorderSettings {
             reserve_bytes: 2 * GIB,
             max_file_bytes: 2 * GIB,
             max_file_seconds: 600,
-            max_fps: None,
+            max_fps: Some(30.0),
+            frames: RecordFrames::Raw,
             compression: true,
             queue_bytes: 64 * (MIB as usize),
             imu_period_ms: 20,
@@ -93,10 +108,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_valid_and_record_the_camera_rate_compressed() {
+    fn defaults_are_valid_raw_at_30_fps_compressed() {
         let settings = RecorderSettings::default();
         assert!(settings.validate().is_ok());
-        assert_eq!(settings.max_fps, None);
+        assert_eq!(settings.max_fps, Some(30.0));
+        assert_eq!(settings.frames, RecordFrames::Raw);
         assert!(settings.compression);
         assert!(settings.queue_bytes >= 64 * MIB as usize);
         assert_eq!(settings.reserve_bytes, 2 * GIB);

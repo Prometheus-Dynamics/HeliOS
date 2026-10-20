@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::settings::RecordFrames;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingState {
@@ -69,6 +71,9 @@ pub struct RecordingStatus {
     pub free_bytes: Option<u64>,
     pub reserve_bytes: u64,
     pub max_fps: Option<f64>,
+    /// What the frames are (`raw` or `luma`), and the delivered format and size (`BYR2 1280x800`).
+    pub frames: RecordFrames,
+    pub format: String,
     pub compression: bool,
     /// Why it stopped: `requested`, `storage_reserve`, `camera_lost`.
     pub stop_reason: Option<String>,

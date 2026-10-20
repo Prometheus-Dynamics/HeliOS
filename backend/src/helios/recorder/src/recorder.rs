@@ -12,11 +12,10 @@ use std::{
 };
 
 use chrono::Utc;
-use styx::planner::FrameRequest;
 
 use crate::{
     error::RecorderError,
-    frames::FrameSource,
+    frames::{self, FrameSource},
     host::HostSender,
     info::RecordingInfo,
     lemnos::LemnosSource,
@@ -33,8 +32,6 @@ pub struct RecordingRequest {
     pub camera_id: String,
     /// The camera service's frames socket (`styx-frames+unix://...`, its path).
     pub frames_socket: PathBuf,
-    /// What frames to record (`frames::luma_request()` today).
-    pub frames: FrameRequest,
     /// The board's name, for the file name (its hostname).
     pub board: String,
     /// The camera's short label, for the file name (`ov9782`); the full id is in the metadata.
@@ -75,8 +72,9 @@ impl Recorder {
         let dir = storage::resolve_dir(&settings)?;
         let free = storage::check_reserve(&dir, settings.reserve_bytes)?;
         let session = naming::unused_session_stem(&dir, &naming::session_stem(&request.board, &request.camera_label, Utc::now(), &request.commit));
-        let source = FrameSource::open(&request.frames_socket, &request.frames)?;
+        let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
         let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
+        let format = format!("{} {}x{}", delivered.format, delivered.size.0, delivered.size.1);
         let header = writer::header_for(&request.camera_id, delivered.format, delivered.size, delivered.fps)?;
         let options = writer::options_for(settings.compression, settings.queue_bytes);
         let first = PartWriter::open(&dir, &session, &request.camera_id, 1, &header, options.clone(), &request.info)?;
@@ -100,6 +98,8 @@ impl Recorder {
                 free_bytes: Some(free),
                 reserve_bytes: settings.reserve_bytes,
                 max_fps: settings.max_fps,
+                frames: settings.frames,
+                format,
                 compression: settings.compression,
                 stop_reason: None,
                 error: None,

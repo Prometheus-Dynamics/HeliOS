@@ -23,6 +23,7 @@ use crate::{
     host::HostMessage,
     info::RecordingInfo,
     lemnos::{self, LemnosSource},
+    pace::Pacer,
     settings::RecorderSettings,
     status::{PartSummary, RecordingState, RecordingStatus},
     storage,
@@ -96,13 +97,14 @@ struct Loop {
     host_dropped_reported: u64,
     free: Option<u64>,
     error: Option<String>,
-    last_frame: Option<Instant>,
+    pacer: Pacer,
 }
 
 fn run_loop(mut run: SessionRun) {
     // The lemnosd reader lives as long as this recording: it stops with the same flag.
     let lemnos_stop = Arc::new(AtomicBool::new(false));
     let lemnos_thread = run.lemnos.take().map(|(source, sender)| lemnos::spawn(source, sender, lemnos_stop.clone()));
+    let pacer = Pacer::new(run.settings.max_fps);
     let mut state = Loop {
         shared: run.shared,
         source: run.source,
@@ -121,7 +123,7 @@ fn run_loop(mut run: SessionRun) {
         host_dropped_reported: 0,
         free: None,
         error: None,
-        last_frame: None,
+        pacer,
     };
     let reason = state.drive();
     state.finish(reason);
@@ -135,7 +137,6 @@ impl Loop {
     /// Runs until the recording ends; returns why (`requested`, `storage_reserve`, `camera_lost`,
     /// or `error`).
     fn drive(&mut self) -> &'static str {
-        let min_interval = self.settings.max_fps.map(|fps| Duration::from_secs_f64(1.0 / fps));
         let mut last_tick = Instant::now();
         let mut ending: Option<&'static str> = None;
         loop {
@@ -148,7 +149,7 @@ impl Loop {
             if let Some(writer) = self.current.as_mut() {
                 match self.source.next(POLL) {
                     Ok(Some(frame)) => {
-                        if due(&mut self.last_frame, min_interval)
+                        if self.pacer.admit(Instant::now())
                             && let Err(error) = writer.record(&frame)
                         {
                             self.error = Some(error.to_string());
@@ -290,35 +291,10 @@ impl Loop {
     }
 }
 
-/// Whether a frame arriving now is recorded, under the frame rate limit.
-fn due(last: &mut Option<Instant>, min_interval: Option<Duration>) -> bool {
-    let Some(min) = min_interval else { return true };
-    match last {
-        Some(at) if at.elapsed() < min => false,
-        _ => {
-            *last = Some(Instant::now());
-            true
-        }
-    }
-}
-
 /// Writes the host messages waiting now (a bounded number, so frames are not held up).
 fn write_host(writer: &mut PartWriter, rx: &Receiver<HostMessage>) -> Result<(), RecorderError> {
     for message in rx.try_iter().take(HOST_PER_PASS) {
         writer.write(&message)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_rate_limit_keeps_one_frame_per_interval() {
-        let mut last = None;
-        assert!(due(&mut last, None));
-        assert!(due(&mut last, Some(Duration::from_secs(10))));
-        assert!(!due(&mut last, Some(Duration::from_secs(10))));
-    }
 }

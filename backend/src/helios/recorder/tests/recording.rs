@@ -8,7 +8,7 @@ use std::{
 };
 
 use helios_recorder::{
-    Attachment, Recorder, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingState, RecordingStatus, catalog, frames,
+    Attachment, RecordFrames, Recorder, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingState, RecordingStatus, catalog,
     host::{self, TOPIC_EVENTS, TOPIC_OUTPUT_PREFIX},
     info::{ATTACHMENT_FIELD, ATTACHMENT_PIPELINE_PREFIX},
     storage::StorageError,
@@ -28,6 +28,15 @@ fn luma_camera(socket: &Path) -> CameraServiceHandle {
     CameraService::new(device).keep_streaming().serve(socket).expect("serve camera")
 }
 
+/// A virtual sensor on `socket`: 16-bit Bayer (BYR2) 320x200 at 60 fps, so the recorder's 30 fps
+/// limit has frames to subsample. Stands in for the camera service's raw companion frames
+/// (which need a native camera): the raw request is served the same way here.
+fn raw_camera(socket: &Path) -> CameraServiceHandle {
+    let mode = Mode::with_interval(MediaFormat::new(FourCc::new(*b"BYR2"), Resolution::new(320, 200).expect("resolution"), ColorSpace::Srgb), Interval::from_fps(60).expect("interval"));
+    let device = styx::capture_api::make_virtual_device("raw", [mode]);
+    CameraService::new(device).keep_streaming().serve(socket).expect("serve raw camera")
+}
+
 fn info() -> RecordingInfo {
     RecordingInfo {
         session: BTreeMap::from([("board".into(), "test-board".into())]),
@@ -42,7 +51,6 @@ fn request(socket: &Path, settings: RecorderSettings) -> RecordingRequest {
     RecordingRequest {
         camera_id: "cam".into(),
         frames_socket: socket.to_path_buf(),
-        frames: frames::luma_request(),
         board: "test-board".into(),
         camera_label: "cam".into(),
         commit: "abc1234".into(),
@@ -55,7 +63,7 @@ fn request(socket: &Path, settings: RecorderSettings) -> RecordingRequest {
 fn settings(dir: &Path) -> RecorderSettings {
     // A small reserve: the temp directory's free space depends on the host, and the tests that
     // are about the reserve set their own.
-    RecorderSettings { storage_dir: Some(dir.to_path_buf()), reserve_bytes: 16 * MIB, ..RecorderSettings::default() }
+    RecorderSettings { storage_dir: Some(dir.to_path_buf()), reserve_bytes: 16 * MIB, frames: RecordFrames::Luma, ..RecorderSettings::default() }
 }
 
 /// Polls until the recording is no longer active (or `limit` passes).
@@ -239,4 +247,28 @@ fn a_second_recording_is_refused_while_one_runs() {
     assert_ne!(again.id, first.id, "a new file, not the first one's");
     recorder.stop(&again.id).expect("stop");
     wait_idle(&recorder, Duration::from_secs(30));
+}
+
+#[test]
+fn raw_sensor_frames_are_recorded_at_the_frame_rate_limit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("raw.styx.sock");
+    let _camera = raw_camera(&socket);
+    let recordings = dir.path().join("recordings");
+    let recorder = Recorder::default();
+    // The default settings: raw frames, at most 30 a second, compressed.
+    let defaults = RecorderSettings { storage_dir: Some(recordings.clone()), reserve_bytes: 16 * MIB, ..RecorderSettings::default() };
+    assert_eq!(defaults.frames, RecordFrames::Raw);
+    let started = recorder.start(request(&socket, defaults)).expect("start");
+    assert!(started.format.starts_with("BYR2 "), "{started:?}");
+    assert_eq!(started.frames, RecordFrames::Raw);
+    std::thread::sleep(Duration::from_millis(2000));
+    recorder.stop(&started.id).expect("stop");
+    let done = wait_idle(&recorder, Duration::from_secs(30));
+    assert_eq!(done.state, RecordingState::Stopped, "{done:?}");
+    // 60 fps in, 30 fps out: about two seconds of 30 frames (generous bounds for a loaded host).
+    assert!((40..=70).contains(&done.frames_written), "{done:?}");
+    assert_eq!(done.frames_dropped, 0, "{done:?}");
+    let contents = read(&mcaps(&recordings)[0]);
+    assert_eq!(contents.frames(), done.frames_written);
 }

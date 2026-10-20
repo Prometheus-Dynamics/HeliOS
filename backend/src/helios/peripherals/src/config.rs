@@ -27,6 +27,14 @@ pub struct PeripheralConfig {
     pub lemnosd_startup_wait_ms: u64,
     pub lease_ttl_ms: u64,
     pub camera_idle_pause_ms: u64,
+    /// The camera services carry the sensor's raw frames (16-bit Bayer, zero copy) as a companion
+    /// of every processed frame, so a raw consumer (a recording) joins without restarting the
+    /// capture. Costs four more front-end buffers per camera (about 8 MB at 1280x800).
+    pub camera_sensor_raw: bool,
+    /// Low-priority clients a camera capture is sized for beyond those connected when it starts:
+    /// the preview, a calibration capture, a recording and its capture-last ring. Each costs one
+    /// more set of the capture's buffers (5.8 MB at 1280x800 with NV12 + a 640x400 output).
+    pub camera_spare_clients: usize,
 }
 
 impl Default for PeripheralConfig {
@@ -44,6 +52,8 @@ impl Default for PeripheralConfig {
             lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,
             camera_idle_pause_ms: 2_000,
+            camera_sensor_raw: true,
+            camera_spare_clients: 4,
         }
     }
 }
@@ -92,6 +102,12 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_CAMERA_IDLE_PAUSE_MS").and_then(|v| v.parse::<u64>().ok()) {
             config.camera_idle_pause_ms = value;
         }
+        if let Some(value) = env.get("HELIOS_CAMERA_SENSOR_RAW") {
+            config.camera_sensor_raw = !matches!(value.as_str(), "0" | "false" | "False" | "FALSE" | "no" | "NO");
+        }
+        if let Some(value) = env.get("HELIOS_CAMERA_SPARE_CLIENTS").and_then(|v| v.parse::<usize>().ok()) {
+            config.camera_spare_clients = value;
+        }
         config
     }
 }
@@ -122,6 +138,8 @@ mod tests {
             ("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS", "1500"),
             ("HELIOS_LEASE_TTL_MS", "7500"),
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
+            ("HELIOS_CAMERA_SENSOR_RAW", "0"),
+            ("HELIOS_CAMERA_SPARE_CLIENTS", "6"),
         ]);
         assert_eq!(config.node_id, "node-a");
         assert_eq!(config.ipc_dir, PathBuf::from("/tmp/helios-peripherals"));
@@ -134,6 +152,15 @@ mod tests {
         assert_eq!(config.lemnosd_startup_wait_ms, 1_500);
         assert_eq!(config.lease_ttl_ms, 7_500);
         assert_eq!(config.camera_idle_pause_ms, 3_000);
+        assert!(!config.camera_sensor_raw);
+        assert_eq!(config.camera_spare_clients, 6);
+    }
+
+    #[test]
+    fn camera_raw_is_on_and_four_spare_clients_by_default() {
+        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]);
+        assert!(config.camera_sensor_raw);
+        assert_eq!(config.camera_spare_clients, 4);
     }
 
     #[test]

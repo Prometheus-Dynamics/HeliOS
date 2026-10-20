@@ -11,13 +11,14 @@
 //! directory; a recording is refused, or stops cleanly, below the free-space reserve.
 //!
 //! Frames are `FrameLease`s all the way: the recorder copies each one into the MCAP message on
-//! the recording thread and never holds a lease across the disk.
+//! the recording thread and never holds a lease across the disk. By default a recording stores
+//! the sensor's raw frames (`RecordFrames::Raw`, 16-bit Bayer, at most `max_fps`, 30 by default);
+//! the camera service keeps raw on for every capture, so a recording never restarts it.
 //!
 //! Status (for the design doc's status section; the design doc itself is not in this tree):
 //! - TODO: capture-last ring buffer (recent frames kept for an on-demand clip).
 //! - TODO: auto-record when the robot is enabled.
 //! - TODO: Eidos exporter (recordings to Eidos's dataset format).
-//! - TODO: raw sensor frames (`sensor_raw`): the request is already a parameter, see [`frames`].
 //! - TODO: outputs are stamped on receipt, not with the frame that produced them; the engine
 //!   would have to publish the frame sequence for an exact alignment.
 //! - TODO: NetworkTables `/helios/record` (true starts, false stops, on the default camera) and the
@@ -36,6 +37,7 @@ pub mod host;
 pub mod info;
 pub mod lemnos;
 pub mod naming;
+pub mod pace;
 pub mod recorder;
 pub mod session;
 pub mod settings;
@@ -49,5 +51,5 @@ pub use host::{HostSender, boottime_ns};
 pub use info::{Attachment, RecordingInfo};
 pub use lemnos::LemnosSource;
 pub use recorder::{Recorder, RecordingRequest};
-pub use settings::RecorderSettings;
+pub use settings::{RecordFrames, RecorderSettings};
 pub use status::{PartSummary, RecordingState, RecordingStatus};

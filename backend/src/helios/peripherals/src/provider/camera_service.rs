@@ -21,7 +21,6 @@ use crate::{
 /// Scheme of the endpoint a camera resource advertises for its Styx `CameraService` socket.
 pub const STYX_FRAMES_ENDPOINT_SCHEME: &str = "styx-frames+unix";
 const CAMERA_SERVICE_SOCKET_SUFFIX: &str = ".styx.sock";
-const CAMERA_SPARE_CLIENTS: usize = 2;
 /// Sensor line at which the first slice of a frame is processed (of 800 on the OV9782).
 const CAMERA_SLICE_LINE: u16 = 600;
 const CAMERA_SERVICE_SOCKET_MODE: u32 = 0o660;
@@ -92,17 +91,10 @@ impl CameraServices {
             let socket_path = camera_service_socket_path(&config.stream_dir, resource);
             match CameraService::new(device.clone())
                 .pause_when_idle(Duration::from_millis(config.camera_idle_pause_ms))
-                // Room for two low-priority clients beside the pipelines (the UI's preview and a
-                // calibration capture) without restarting the capture; about 5.8 MB more per
-                // running 1280x800 camera.
-                .spare_clients(CAMERA_SPARE_CLIENTS)
-                // The back end's first job runs on the top rows while the rest are read out
-                // (Styx's rp1-cfe line event): every client gets complete frames ~1 ms sooner, and a
-                // client asking for sliced frames can start on the first slice. The back end
-                // buffers beyond the first few are allocated as clients hold frames, not up front
-                // (Styx 5bb3a0c, CM5: 37.6 MiB against 70.6 MiB per camera; one late frame the
-                // first time several are added).
-                .capture_config(styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_lazy_output_buffers(true))
+                // Room for the low-priority clients beside the pipelines (preview, calibration,
+                // a recording and its capture-last ring) without restarting the capture.
+                .spare_clients(config.camera_spare_clients)
+                .capture_config(camera_capture_config(config))
                 .socket_mode(CAMERA_SERVICE_SOCKET_MODE)
                 .serve(&socket_path)
             {
@@ -114,6 +106,16 @@ impl CameraServices {
             }
         }
     }
+}
+
+/// The capture settings of every camera service. The back end's first job runs on the top rows
+/// while the rest are read out (Styx's rp1-cfe line event): every client gets complete frames
+/// ~1 ms sooner, and a client asking for sliced frames can start on the first slice. The back end
+/// buffers beyond the first few are allocated as clients hold frames, not up front (Styx 5bb3a0c,
+/// CM5: 37.6 MiB against 70.6 MiB per camera). Sensor raw frames are on permanently: a raw
+/// consumer (a recording) then joins the running capture, and joining or leaving never restarts it.
+fn camera_capture_config(config: &PeripheralConfig) -> styx::capture_api::StyxConfig {
+    styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_lazy_output_buffers(true).native_sensor_raw(config.camera_sensor_raw)
 }
 
 fn find_capture_device<'a>(devices: &'a [ProbedDevice], resource: &ResourceDescriptor) -> Option<&'a ProbedDevice> {
@@ -152,6 +154,14 @@ mod tests {
         assert_eq!(endpoint, "styx-frames+unix:///run/helios/streams/cam.styx.sock");
         assert_eq!(StyxFramesEndpoint::from_payload("/run/helios/streams/cam.styx.sock").map(|endpoint| endpoint.socket_path), Some(PathBuf::from("/run/helios/streams/cam.styx.sock")));
         assert_eq!(StyxFramesEndpoint::from_payload("relative.sock"), None);
+    }
+
+    #[test]
+    fn sensor_raw_is_part_of_every_camera_capture_by_default() {
+        let config = PeripheralConfig::default();
+        assert!(camera_capture_config(&config).backends.native.sensor_raw);
+        let off = PeripheralConfig { camera_sensor_raw: false, ..PeripheralConfig::default() };
+        assert!(!camera_capture_config(&off).backends.native.sensor_raw);
     }
 
     #[test]

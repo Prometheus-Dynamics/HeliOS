@@ -1,6 +1,6 @@
 //! The camera's frames for a recording: a low-priority client of the camera service on its
-//! frames socket, so it never restarts or re-plans the capture the pipelines use. The request is
-//! a parameter: luma at the camera's size today, raw sensor frames later.
+//! frames socket, so it never restarts or re-plans the capture the pipelines use. What it asks
+//! for is the recording's `frames` setting: the sensor's raw frames (the default) or luma.
 
 use std::{path::Path, time::Duration};
 
@@ -10,7 +10,7 @@ use styx::{
     planner::{Delivered, FrameRequest, Frames},
 };
 
-use crate::error::RecorderError;
+use crate::{error::RecorderError, settings::RecordFrames};
 
 /// How long opening the camera service's connection may take.
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -18,12 +18,17 @@ pub const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 /// queue is `RecorderSettings::queue_bytes`).
 pub const CLIENT_QUEUE: usize = 8;
 
-/// Luma at the camera's mode size, every frame (queued up to `CLIENT_QUEUE`).
-pub fn luma_request() -> FrameRequest {
-    Frames::gray().every_frame(CLIENT_QUEUE)
+/// The frames a recording asks the camera service for, every frame (the recorder subsamples them
+/// to `max_fps`). Raw is the sensor's 16-bit Bayer, a companion of the processed capture (no
+/// copy); the camera service keeps it on, so asking for it never restarts the capture.
+pub fn request(frames: RecordFrames) -> FrameRequest {
+    match frames {
+        RecordFrames::Raw => Frames::sensor_raw().every_frame(CLIENT_QUEUE),
+        RecordFrames::Luma => Frames::gray().every_frame(CLIENT_QUEUE),
+    }
 }
 
-/// A reconnecting low-priority client of a camera service, and what its frames are.
+/// A low-priority client of a camera service, and what its frames are.
 pub struct FrameSource {
     client: FrameClient,
     delivered: Option<Delivered>,

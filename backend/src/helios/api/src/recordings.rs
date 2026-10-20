@@ -6,7 +6,7 @@
 use std::{path::Path, time::Duration};
 
 use helios_recorder::{
-    Attachment, LemnosSource, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus, frames,
+    Attachment, LemnosSource, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus,
     host::{self, HostSender, TOPIC_EVENTS},
     info::{ATTACHMENT_FIELD, ATTACHMENT_PIPELINE_PREFIX},
 };
@@ -126,7 +126,6 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
     Ok(RecordingRequest {
         camera_id: camera.to_string(),
         frames_socket: socket,
-        frames: frames::luma_request(),
         board: board_name(&state.config.node_id),
         camera_label: camera_label(crate::orion::label_map(&record.labels).get("helios.display_name").map_or("", String::as_str), camera),
         commit: image_commit(),
