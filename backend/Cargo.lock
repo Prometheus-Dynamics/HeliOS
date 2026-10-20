@@ -9,15 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aho-corasick"
-version = "1.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -400,6 +391,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1018,6 +1018,18 @@ checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
  "embedded-hal",
 ]
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encoding_rs"
@@ -2049,15 +2061,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matchers"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
-dependencies = [
- "regex-automata",
-]
-
-[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2499,6 +2502,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2627,23 +2642,6 @@ checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
 ]
-
-[[package]]
-name = "regex-automata"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-syntax",
-]
-
-[[package]]
-name = "regex-syntax"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rend"
@@ -2979,7 +2977,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3014,7 +3012,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "libm",
  "serde",
@@ -3026,7 +3024,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "serde",
  "smallvec",
@@ -3036,7 +3034,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "parking_lot",
  "serde",
@@ -3052,7 +3050,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "crossbeam-queue",
  "daedalus-rs",
@@ -3071,7 +3069,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "libm",
  "thiserror 2.0.21",
@@ -3080,7 +3078,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "futures-core",
  "libc",
@@ -3090,7 +3088,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3100,7 +3098,7 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "libc",
 ]
@@ -3108,7 +3106,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -3124,7 +3122,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "bytemuck",
  "serde",
@@ -3144,7 +3142,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "bytemuck",
  "libm",
@@ -3154,7 +3152,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -3166,7 +3164,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3174,6 +3172,7 @@ dependencies = [
  "lemnos-hal",
  "libm",
  "portable-atomic-util",
+ "postcard",
  "serde",
  "styx-hal",
  "thiserror 2.0.21",
@@ -3183,7 +3182,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "serde",
  "styx-core-rs",
@@ -3193,7 +3192,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#497928efc07e9744e1527d1c23233e88cc7cfb3a"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#de12fd8d7e7b03596b747c7ad12722e8c2d3133e"
 dependencies = [
  "libc",
  "smallvec",
@@ -3560,16 +3559,12 @@ version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
- "matchers",
  "nu-ansi-term",
- "once_cell",
- "regex-automata",
  "serde",
  "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing",
  "tracing-core",
  "tracing-log",
  "tracing-serde",

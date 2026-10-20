@@ -14,12 +14,11 @@ use styx::{
     ipc::CameraService,
     prelude::{CaptureRequest, CaptureStartPolicy, RecvOutcome},
 };
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
-    let _ = fmt().with_env_filter(filter).try_init();
+    let _ = fmt().finish().with(log_filter()).try_init();
 
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "idle".to_string());
@@ -194,4 +193,10 @@ async fn wait_frame(handle: &styx::prelude::CaptureHandle) -> Result<styx::core:
         }
     }
     Err("timed out waiting for frame".into())
+}
+
+/// Log filter: `RUST_LOG` as `target=level,...` (`filter::Targets`: no regex in the binary), else
+/// `warn`.
+fn log_filter() -> tracing_subscriber::filter::Targets {
+    std::env::var("RUST_LOG").ok().and_then(|value| value.parse().ok()).unwrap_or_else(|| "warn".parse().expect("default filter"))
 }

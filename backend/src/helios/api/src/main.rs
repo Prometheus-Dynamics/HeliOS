@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use helios_api::{ApiConfig, AppState, auth_state, events, playback, router, routes, startup};
 use tracing::info;
 
@@ -75,7 +76,7 @@ fn auth(command: AuthCommand) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn serve() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).try_init();
+    let _ = tracing_subscriber::fmt().finish().with(log_filter()).try_init();
     let config = ApiConfig::from_env().context("invalid helios-api configuration")?;
     let bind = config.bind;
     let state = AppState::new(config);
@@ -114,4 +115,10 @@ async fn shutdown_requested() {
         _ = tokio::signal::ctrl_c() => {}
         _ = terminate => {}
     }
+}
+
+/// Log filter: `RUST_LOG` as `target=level,...` (`filter::Targets`: no regex in the binary), else
+/// `info`.
+fn log_filter() -> tracing_subscriber::filter::Targets {
+    std::env::var("RUST_LOG").ok().and_then(|value| value.parse().ok()).unwrap_or_else(|| "info".parse().expect("default filter"))
 }
