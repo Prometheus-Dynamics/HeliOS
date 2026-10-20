@@ -70,7 +70,8 @@ impl CreatePlayback {
 pub enum SourceKind {
     /// A recording (MCAP) with the replay controls.
     Recording,
-    /// A folder of JPEG or PNG images, played at a fixed rate (no replay controls).
+    /// A folder of JPEG or PNG images, replayed at the player's frame rate (with the replay
+    /// controls).
     Images,
 }
 

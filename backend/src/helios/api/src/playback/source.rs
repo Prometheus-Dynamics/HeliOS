@@ -16,8 +16,6 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png"];
 const RECORDING_EXTENSION: &str = "mcap";
 /// Video files Styx replays without a recording header (at their own rate, or the chosen fps).
 const MEDIA_EXTENSIONS: &[&str] = &["mjpeg", "mjpg", "avi"];
-/// What an image sequence's player says it cannot do yet.
-pub const NOTE_IMAGES: &str = "image sequence: plays at its frame rate; pause, seek and speed come with Styx's file backend controls";
 
 /// The folders a source may be under: the recordings directory, and the configured roots.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +35,6 @@ pub struct Resolved {
     /// The recording file, for a recording.
     pub recording: Option<PathBuf>,
     /// The frames of an image sequence, in order.
-    pub images: Vec<PathBuf>,
     pub raw: bool,
     pub note: Option<String>,
     /// The recording's start-time facts (default for an image sequence).
@@ -94,7 +91,6 @@ fn recording_file(file: &Path, label: String) -> ApiResult<Resolved> {
         source: PlaybackSource::Path { path: file.to_string_lossy().into_owned() },
         label,
         recording: Some(file.to_path_buf()),
-        images: Vec::new(),
         raw,
         note: None,
         facts,
@@ -113,7 +109,6 @@ fn media_file(file: &Path, label: String) -> Resolved {
         source: PlaybackSource::Path { path: file.to_string_lossy().into_owned() },
         label,
         recording: Some(file.to_path_buf()),
-        images: Vec::new(),
         raw: false,
         note: None,
         facts: RecordingFacts::default(),
@@ -121,8 +116,8 @@ fn media_file(file: &Path, label: String) -> Resolved {
     }
 }
 
-/// A folder: a JPEG-only folder replays as a video (with the replay controls, at the player's
-/// frame rate); a folder with PNG images plays as an image sequence (the file backend).
+/// A folder of JPEG images or of PNG images (not both: Styx replays one kind per folder), replayed
+/// in name order at the player's frame rate, with the replay controls.
 fn folder(dir: &Path, label: String) -> ApiResult<Resolved> {
     let entries = std::fs::read_dir(dir).map_err(|error| ApiError::internal(format!("reading {}: {error}", dir.display())))?;
     let mut images: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.is_file() && IMAGE_EXTENSIONS.iter().any(|known| has_extension(path, known))).collect();
@@ -130,20 +125,11 @@ fn folder(dir: &Path, label: String) -> ApiResult<Resolved> {
     if images.is_empty() {
         return Err(ApiError::unprocessable(format!("{} has no JPEG or PNG images", dir.display())));
     }
-    if images.iter().all(|image| has_extension(image, "jpg") || has_extension(image, "jpeg")) {
-        return Ok(Resolved { recording: Some(dir.to_path_buf()), ..media_file(dir, label) });
+    let pngs = images.iter().filter(|image| has_extension(image, "png")).count();
+    if pngs != 0 && pngs != images.len() {
+        return Err(ApiError::unprocessable(format!("{} has both JPEG and PNG images; a folder plays one kind", dir.display())));
     }
-    Ok(Resolved {
-        kind: SourceKind::Images,
-        source: PlaybackSource::Path { path: dir.to_string_lossy().into_owned() },
-        label,
-        recording: None,
-        images,
-        raw: false,
-        note: Some(NOTE_IMAGES.to_string()),
-        facts: RecordingFacts::default(),
-        fps_applies: true,
-    })
+    Ok(Resolved { kind: SourceKind::Images, ..media_file(dir, label) })
 }
 
 #[cfg(test)]
@@ -155,16 +141,17 @@ mod tests {
     }
 
     #[test]
-    fn image_folders_list_their_images_in_order() {
+    fn image_folders_replay_one_kind_of_image() {
         let dir = tempfile::tempdir().expect("tempdir");
-        for name in ["b.png", "a.jpg", "c.JPEG", "notes.txt"] {
+        for name in ["b.png", "a.png", "notes.txt"] {
             std::fs::write(dir.path().join(name), b"x").expect("write");
         }
-        let resolved = resolve(&roots(dir.path()), &PlaybackSource::Path { path: dir.path().to_string_lossy().into_owned() }).expect("images");
-        assert_eq!(resolved.kind, SourceKind::Images);
-        let names: Vec<String> = resolved.images.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-        assert_eq!(names, ["a.jpg", "b.png", "c.JPEG"]);
-        assert_eq!(resolved.note.as_deref(), Some(NOTE_IMAGES));
+        let resolved = resolve(&roots(dir.path()), &PlaybackSource::Path { path: dir.path().to_string_lossy().into_owned() }).expect("pngs");
+        assert_eq!((resolved.kind, resolved.fps_applies, resolved.raw), (SourceKind::Images, true, false));
+        assert_eq!(resolved.recording.as_deref(), Some(dir.path().canonicalize().expect("canonical").as_path()));
+        std::fs::write(dir.path().join("c.jpg"), b"x").expect("write");
+        let mixed = resolve(&roots(dir.path()), &PlaybackSource::Path { path: dir.path().to_string_lossy().into_owned() }).expect_err("mixed");
+        assert_eq!(mixed.code.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[test]
@@ -186,7 +173,7 @@ mod tests {
         }
         std::fs::write(dir.path().join("clip.mjpeg"), b"not decoded here").expect("write");
         let folder = resolve(&roots(dir.path()), &PlaybackSource::Path { path: jpegs.to_string_lossy().into_owned() }).expect("jpeg folder");
-        assert_eq!((folder.kind, folder.fps_applies, folder.raw), (SourceKind::Recording, true, false));
+        assert_eq!((folder.kind, folder.fps_applies, folder.raw), (SourceKind::Images, true, false));
         assert_eq!(folder.recording.as_deref(), Some(jpegs.canonicalize().expect("canonical").as_path()));
         let clip = resolve(&roots(dir.path()), &PlaybackSource::Path { path: dir.path().join("clip.mjpeg").to_string_lossy().into_owned() }).expect("mjpeg");
         assert_eq!((clip.kind, clip.fps_applies), (SourceKind::Recording, true));

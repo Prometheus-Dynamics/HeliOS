@@ -122,20 +122,26 @@ async fn the_limit_refuses_another_player_until_one_closes() {
     assert_eq!(players.views().await.len(), 2);
 }
 
+/// A 2x2 grey PNG (Styx reads the first image when the player opens).
+const TINY_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 0, 0, 0, 0, 87, 221, 82, 248, 0, 0, 0, 14, 73, 68, 65, 84, 120, 156, 99, 16, 80, 96, 48, 112, 0, 0, 1,
+    118, 0, 161, 236, 48, 138, 244, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 #[tokio::test]
-async fn an_image_folder_opens_as_an_image_player_with_its_frame_rate() {
+async fn an_image_folder_opens_as_a_replay_at_its_frame_rate() {
     let dir = tempfile::tempdir().expect("tempdir");
     let frames = dir.path().join("frames");
     std::fs::create_dir(&frames).expect("folder");
     for index in 0..3 {
-        std::fs::write(frames.join(format!("{index:04}.png")), b"not decoded until a frame is asked for").expect("image");
+        std::fs::write(frames.join(format!("{index:04}.png")), TINY_PNG).expect("image");
     }
     let players = Players::recorded(settings(dir.path(), 2));
     let resolved = resolve(&roots(dir.path()), &PlaybackSource::Path { path: frames.to_string_lossy().into_owned() }).expect("resolves");
     let view = players.open(resolved, StartOptions { fps: 12, ..options() }, 1).await.expect("opens");
     assert_eq!(view.kind, SourceKind::Images);
     assert_eq!(view.fps, Some(12));
-    assert!(view.note.is_some(), "image sequences say what they cannot do yet");
+    assert!(view.note.is_none(), "image folders have the replay controls");
     assert!(players.socket(&view.id).await.expect("socket").exists());
     players.close(&view.id).await.expect("closes");
 }

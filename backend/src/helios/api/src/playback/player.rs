@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use styx::{
     ProbedDevice,
-    capture_api::{CaptureRequest, FileSourceConfig},
+    capture_api::CaptureRequest,
     ipc::{CameraService, CameraServiceHandle},
     replay::{ReplayPacing, ReplaySourceConfig, ReplayTimestamps},
 };
@@ -40,7 +40,7 @@ pub struct StartOptions {
 /// kept open for seeks and loops), or an image sequence.
 pub fn device_for(resolved: &Resolved, options: StartOptions) -> ApiResult<ProbedDevice> {
     match resolved.kind {
-        SourceKind::Recording => {
+        SourceKind::Recording | SourceKind::Images => {
             let path = resolved.recording.as_ref().ok_or_else(|| ApiError::internal("a recording source without its file"))?;
             // Speed 0 replays unpaced (every frame as fast as the consumers take them); any other
             // speed starts realtime and is set through `replay_speed` once the player is open.
@@ -54,10 +54,6 @@ pub fn device_for(resolved: &Resolved, options: StartOptions) -> ApiResult<Probe
             }
             let source = CaptureRequest::replay_source(config).map_err(|error| ApiError::unprocessable(format!("replay: {error}")))?;
             Ok(source.into_device())
-        }
-        SourceKind::Images => {
-            let config = FileSourceConfig::new(resolved.images.clone()).name(resolved.label.clone()).fps(options.fps).loop_forever(options.looping);
-            Ok(CaptureRequest::file_source(config).into_device())
         }
     }
 }

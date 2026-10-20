@@ -30,7 +30,7 @@ pub fn resource_record(view: &PlayerView, provider: &str) -> ResourceRecord {
     };
     let (kind, backend) = match view.kind {
         SourceKind::Recording => ("recording", "replay"),
-        SourceKind::Images => ("images", "file"),
+        SourceKind::Images => ("images", "replay"),
     };
     ProviderResource::new(ResourceId::new(view.resource_id.clone()), CAMERA_TYPE, ProviderId::new(provider.to_string()))
         .ownership_mode(ResourceOwnershipMode::SharedRead)
@@ -159,7 +159,7 @@ mod tests {
     fn image_players_name_the_folder_they_play() {
         let record = resource_record(&view(SourceKind::Images, PlaybackSource::Path { path: "/data/frames".into() }), "provider.playback.node-local");
         assert!(record.labels.iter().any(|label| label == "helios.playback.kind=images"));
-        assert!(record.labels.iter().any(|label| label == "helios.label.styx.backend=file"));
+        assert!(record.labels.iter().any(|label| label == "helios.label.styx.backend=replay"));
         assert!(record.labels.iter().any(|label| label == "helios.playback.source=/data/frames"));
     }
 

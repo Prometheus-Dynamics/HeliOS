@@ -68,7 +68,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -79,7 +79,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -312,12 +312,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "byteorder-lite"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
-
-[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,25 +458,6 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
-name = "crossbeam-deque"
-version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
-dependencies = [
- "crossbeam-utils",
-]
 
 [[package]]
 name = "crossbeam-queue"
@@ -1092,7 +1067,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1709,21 +1684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "image"
-version = "0.25.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
-dependencies = [
- "bytemuck",
- "byteorder-lite",
- "moxcms",
- "num-traits",
- "png",
- "zune-core",
- "zune-jpeg",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1770,15 +1730,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "jpeg-decoder"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
-dependencies = [
- "rayon",
-]
 
 [[package]]
 name = "js-sys"
@@ -2176,16 +2127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "moxcms"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
-dependencies = [
- "num-traits",
- "pxfm",
-]
-
-[[package]]
 name = "multer"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2273,7 +2214,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2614,12 +2555,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pxfm"
-version = "0.1.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
-
-[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2682,26 +2617,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
-]
-
-[[package]]
-name = "rayon"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
 ]
 
 [[package]]
@@ -2829,7 +2744,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3024,7 +2939,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3064,18 +2979,17 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "image",
- "jpeg-decoder",
  "lemnos-linux",
  "libc",
  "lz4",
  "mcap",
  "parking_lot",
+ "png",
  "reqwest",
  "serde",
  "serde_json",
@@ -3089,6 +3003,7 @@ dependencies = [
  "styx-native",
  "styx-pipeline",
  "styx-pisp",
+ "styx-sensor",
  "styx-softisp",
  "styx-v4l2",
  "thiserror 2.0.21",
@@ -3099,7 +3014,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "libm",
  "serde",
@@ -3111,7 +3026,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "serde",
  "smallvec",
@@ -3121,7 +3036,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "parking_lot",
  "serde",
@@ -3137,7 +3052,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "crossbeam-queue",
  "daedalus-rs",
@@ -3156,7 +3071,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "libm",
  "thiserror 2.0.21",
@@ -3165,7 +3080,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "futures-core",
  "libc",
@@ -3175,7 +3090,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3185,7 +3100,7 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "libc",
 ]
@@ -3193,7 +3108,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -3209,7 +3124,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "bytemuck",
  "serde",
@@ -3229,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "bytemuck",
  "libm",
@@ -3239,7 +3154,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -3251,7 +3166,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -3268,7 +3183,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "serde",
  "styx-core-rs",
@@ -3278,7 +3193,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3ece0d02067d33eccca12896786c32e693a25024"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#167c9fc30fb6157aa5edde4b9c25a2a1e2bf7efa"
 dependencies = [
  "libc",
  "smallvec",
@@ -3356,7 +3271,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3893,7 +3808,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4200,18 +4115,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zune-core"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
-
-[[package]]
-name = "zune-jpeg"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
-dependencies = [
- "zune-core",
-]
