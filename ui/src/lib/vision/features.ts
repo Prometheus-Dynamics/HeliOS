@@ -6,6 +6,12 @@ import type { FeatureTrack, FeatureTracks } from "#lib/api/model.js";
 
 /** Positions kept per track id for its trail (the newest last). */
 export const TRAIL_LENGTH = 10;
+/**
+ * The largest step between ticks a trail draws, in frame pixels. A longer one is a jump (a
+ * tracker outlier, or the frame changed) and starts the trail again, so it never draws a line
+ * across the frame.
+ */
+export const MAX_TRAIL_STEP = 48;
 /** Ages from this one draw as fully settled. */
 const SETTLED_AGE = 30;
 
@@ -33,7 +39,9 @@ export class TrailBook {
   advance(tracks: FeatureTrack[]): Map<number, TrailPoint[]> {
     const next = new Map<number, TrailPoint[]>();
     for (const track of tracks) {
-      const previous = this.trails.get(track.id) ?? [];
+      let previous = this.trails.get(track.id) ?? [];
+      const last = previous[previous.length - 1];
+      if (last && Math.hypot(track.x - last.x, track.y - last.y) > MAX_TRAIL_STEP) previous = [];
       next.set(track.id, [...previous, { x: track.x, y: track.y }].slice(-TRAIL_LENGTH));
     }
     this.trails = next;

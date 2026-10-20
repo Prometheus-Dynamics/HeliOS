@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mockCameraFeatures, mockFeatureTracks } from "../src/lib/api/mock";
-import { featureSummaryText, toFeatureTracks, toFeedSpace, TrailBook, trackFill, TRAIL_LENGTH, type CameraFeatures } from "../src/lib/vision/features";
+import { featureSummaryText, toFeatureTracks, toFeedSpace, TrailBook, trackFill, TRAIL_LENGTH, MAX_TRAIL_STEP, type CameraFeatures } from "../src/lib/vision/features";
 
 const track = (id: number, x: number, y: number, age = 1, status: "new" | "tracked" = "tracked") => ({ id, x, y, age, status });
 
@@ -63,6 +63,14 @@ describe("trails", () => {
     expect([...without.keys()]).toEqual([1]);
     const back = book.advance([track(1, 3, 0), track(2, 9, 9)]);
     expect(back.get(2)).toEqual([{ x: 9, y: 9 }]);
+  });
+
+  test("start again after a jump, so no line crosses the frame", () => {
+    const book = new TrailBook();
+    book.advance([track(3, 100, 100)]);
+    book.advance([track(3, 110, 100)]);
+    const jumped = book.advance([track(3, 110 + MAX_TRAIL_STEP + 1, 100)]);
+    expect(jumped.get(3)).toEqual([{ x: 110 + MAX_TRAIL_STEP + 1, y: 100 }]);
   });
 
   test("hold their points as state: an advance never mutates an earlier map", () => {
