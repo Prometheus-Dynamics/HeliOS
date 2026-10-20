@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use helios_api::{ApiConfig, AppState, auth_state, events, router, routes, startup};
+use helios_api::{ApiConfig, AppState, auth_state, events, playback, router, routes, startup};
 use tracing::info;
 
 /// The HeliOS application API. Without a subcommand it serves `/v1` and the UI.
@@ -84,6 +84,8 @@ async fn serve() -> anyhow::Result<()> {
     helios_api::leds::start(&state, PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
     // Stored camera settings are applied whenever a camera service appears.
     let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
+    // Playback players left by an earlier helios-api are gone: their resources are cleared.
+    let _playback = playback::spawn_startup(state.clone());
     // The startup file's default pipeline, created once a camera is there and no pipeline is.
     let _default_pipeline = startup::load_default_pipeline(&state.config.startup_file).map(|default| startup::spawn_default_pipeline(state.clone(), default));
     // Capture-last rings for the cameras the recording settings ask for.

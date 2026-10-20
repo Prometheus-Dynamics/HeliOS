@@ -172,7 +172,8 @@ async fn settle(state: &SharedState, default: &DefaultPipeline) -> ApiResult<boo
     let record = state.store.default_pipeline_record().await?;
     let view = state.orion.view().await?;
     let managed = pipelines::managed_pipeline_count(&view) > 0;
-    let camera = cameras::camera_records(&view).map(|record| record.resource_id.to_string()).min();
+    // A playback player is not a camera to start a default on.
+    let camera = cameras::camera_records(&view).filter(|record| !crate::playback::is_player(record.resource_id.as_str())).map(|record| record.resource_id.to_string()).min();
     match (should_create_default_pipeline(managed, camera.is_some(), record.is_some()), camera) {
         (true, Some(camera)) => {
             let spec = default.spec(&camera).map_err(|error| ApiError::internal(format!("{error:#}")))?;

@@ -7,6 +7,7 @@ pub mod leds;
 pub mod logs;
 pub mod nt4;
 pub mod pipelines;
+pub mod playback;
 pub mod recordings;
 pub mod resources;
 pub mod system;
@@ -82,6 +83,11 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/recordings/{id}/stop", post(recordings::stop))
         .route("/v1/recordings/capture-last", post(recordings::capture_last))
         .route("/v1/recordings/{id}/export/eidos", post(recordings::export_eidos))
+        // Playback (`playback/`): recordings and image folders served as cameras
+        .route("/v1/playback", get(playback::list).post(playback::create))
+        .route("/v1/playback/{id}", get(playback::get_one).delete(playback::close))
+        .route("/v1/playback/{id}/seek", post(playback::seek))
+        .route("/v1/playback/{id}/runs", post(playback::run))
         // Pipelines (Daedalus graphs run by helios-engine) and their outputs
         .route("/v1/catalog", get(pipelines::catalog))
         .route("/v1/plugins", get(pipelines::plugins))

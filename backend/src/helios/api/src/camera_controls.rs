@@ -212,7 +212,8 @@ impl CameraClient {
             });
         }
         // Kept under its own name: the value is in the backend's units, not the standard ones.
-        let persist_as = (control.standard != Some(StandardControl::AfTrigger)).then(|| control.meta.name.clone());
+        // A player's transport (its replay controls) is a session, not a setting: not kept.
+        let persist_as = (control.standard != Some(StandardControl::AfTrigger) && !crate::playback::transport::is_transport_control(&control.meta.name)).then(|| control.meta.name.clone());
         Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(control.meta.id), value: backend_value(key, value)?, standard: control.standard, persist_as, forget: false })
     }
 

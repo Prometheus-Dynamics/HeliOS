@@ -54,6 +54,8 @@ pub struct ApiConfig {
     pub startup_file: PathBuf,
     /// lemnosd's socket: the IMU, magnetometer and power samples a recording takes.
     pub lemnos_socket: PathBuf,
+    /// Playback players (`playback/`): their concurrent limit, sockets and allowed folders.
+    pub playback: crate::playback::PlaybackSettings,
 }
 
 impl Default for ApiConfig {
@@ -77,6 +79,7 @@ impl Default for ApiConfig {
             preview: crate::camera_preview::PreviewSettings::default(),
             startup_file: DEFAULT_STARTUP_FILE.into(),
             lemnos_socket: helios_recorder::lemnos::DEFAULT_SOCKET.into(),
+            playback: crate::playback::PlaybackSettings::default(),
         }
     }
 }
@@ -151,6 +154,17 @@ impl ApiConfig {
             let quality: u8 = value.parse()?;
             anyhow::ensure!((1..=100).contains(&quality), "HELIOS_API_PREVIEW_QUALITY must be 1 to 100, got {value}");
             config.preview.quality = quality;
+        }
+        if let Some(value) = env.get("HELIOS_API_PLAYBACK_MAX") {
+            let max: usize = value.parse()?;
+            anyhow::ensure!((1..=8).contains(&max), "HELIOS_API_PLAYBACK_MAX must be 1 to 8, got {value}");
+            config.playback.max_players = max;
+        }
+        if let Some(value) = env.get("HELIOS_API_PLAYBACK_STREAM_DIR") {
+            config.playback.stream_dir = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_API_PLAYBACK_ROOTS") {
+            config.playback.roots = value.split(':').filter(|root| !root.is_empty()).map(PathBuf::from).collect();
         }
         Ok(config)
     }

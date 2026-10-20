@@ -19,6 +19,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod leds;
 pub mod orion;
+pub mod playback;
 pub mod recording_nt;
 pub mod recording_rings;
 pub mod recordings;
@@ -61,6 +62,8 @@ pub struct AppState {
     pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
     /// The LED director: HeliOS's state on the status ring (`leds`, started by `leds::start`).
     pub leds: leds::LedHandle,
+    /// The open playback players (recordings and image folders served as cameras).
+    pub playback: playback::Players,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -82,6 +85,7 @@ impl AppState {
             update_lock: routes::update::new_update_lock(),
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
+            playback: playback::Players::new(::orion::client::LocalNodeRuntime::new(config.orion_socket.clone(), config.orion_stream_socket.clone()), &config.node_id, config.playback.clone()),
             config,
         })
     }
