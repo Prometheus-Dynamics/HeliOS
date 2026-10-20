@@ -37,7 +37,7 @@ fn checker_scene(dx: usize, timestamp: u64) -> FrameLease {
     for y in 0..height {
         for x in 0..width {
             let shifted = x + dx;
-            let light = (shifted / square + y / square) % 2 == 0;
+            let light = (shifted / square + y / square).is_multiple_of(2);
             pixels[y * width + x] = if light { 220 } else { 30 };
         }
     }
