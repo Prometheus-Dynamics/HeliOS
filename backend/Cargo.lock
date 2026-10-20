@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "eidos-aruco"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-calibration",
  "eidos-contour",
@@ -788,7 +788,7 @@ dependencies = [
 [[package]]
 name = "eidos-calibration"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
 ]
@@ -796,7 +796,7 @@ dependencies = [
 [[package]]
 name = "eidos-color"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -806,7 +806,7 @@ dependencies = [
 [[package]]
 name = "eidos-contour"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -817,7 +817,7 @@ dependencies = [
 [[package]]
 name = "eidos-core"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-macros",
  "serde",
@@ -829,7 +829,7 @@ dependencies = [
 [[package]]
 name = "eidos-daedalus"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "daedalus-rs",
  "eidos-aruco",
@@ -858,7 +858,7 @@ dependencies = [
 [[package]]
 name = "eidos-detectors"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-aruco",
  "eidos-calibration",
@@ -872,7 +872,7 @@ dependencies = [
 [[package]]
 name = "eidos-draw"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-aruco",
  "eidos-calibration",
@@ -887,7 +887,7 @@ dependencies = [
 [[package]]
 name = "eidos-estimation"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-calibration",
  "eidos-core",
@@ -896,7 +896,7 @@ dependencies = [
 [[package]]
 name = "eidos-features"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "eidos-filter"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -917,7 +917,7 @@ dependencies = [
 [[package]]
 name = "eidos-frame"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "smallvec",
@@ -928,7 +928,7 @@ dependencies = [
 [[package]]
 name = "eidos-geometry"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-calibration",
  "eidos-core",
@@ -939,7 +939,7 @@ dependencies = [
 [[package]]
 name = "eidos-io"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -951,12 +951,12 @@ dependencies = [
 [[package]]
 name = "eidos-macros"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 
 [[package]]
 name = "eidos-mapping"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-aruco",
  "eidos-calibration",
@@ -971,7 +971,7 @@ dependencies = [
 [[package]]
 name = "eidos-mask"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -982,7 +982,7 @@ dependencies = [
 [[package]]
 name = "eidos-motion"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-filter",
@@ -993,7 +993,7 @@ dependencies = [
 [[package]]
 name = "eidos-sampling"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-core",
  "eidos-frame",
@@ -1002,12 +1002,12 @@ dependencies = [
 [[package]]
 name = "eidos-scratch"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 
 [[package]]
 name = "eidos-temporal"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#ca6a2701d9f9fc014a0a13c64714d9c037ba65ab"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=dev#1a73e1f71ae4eae766b76c7bcb3862b0dd2c8d58"
 dependencies = [
  "eidos-aruco",
  "eidos-core",
