@@ -394,6 +394,14 @@ export interface CameraCalibration {
   cy: number;
   distortion?: Partial<Record<"k1" | "k2" | "k3" | "k4" | "k5" | "k6" | "p1" | "p2", number>>;
   rms_px?: number;
+  /** How well the intrinsics are known; absent means estimated (the conservative defaults). A solved one carries its fit's sigmas and covariance, in Eidos's order. */
+  uncertainty?: {
+    kind: "estimated" | "known" | "solved";
+    rms_px: number;
+    views: number;
+    sigma: { fx: number; fy: number; cx: number; cy: number; distortion: number[] };
+    covariance: number[];
+  };
   source?: string;
   /** The sensor orientation it was taken in (unflipped when absent); the API turns it into the camera's current one. */
   orientation?: { hflip?: boolean; vflip?: boolean };

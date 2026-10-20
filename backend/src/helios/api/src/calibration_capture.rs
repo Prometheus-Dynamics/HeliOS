@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     camera_context::{CameraCalibration, Distortion, LensModel, Orientation},
+    camera_uncertainty::CalibrationUncertainty,
     error::{ApiError, ApiResult},
 };
 
@@ -173,6 +174,7 @@ impl CalibrationSessions {
             cy: i.cy,
             distortion: Distortion { k1: d.k1, k2: d.k2, k3: d.k3, k4: d.k4, k5: d.k5, k6: d.k6, p1: d.p1, p2: d.p2 },
             rms_px: Some(fit.rms),
+            uncertainty: Some(CalibrationUncertainty::solved(&fit.covariance, fit.rms, fit.view_rms.len(), model)),
             orientation,
             source: Some(format!("helios charuco {}x{} {} mm {}, {} views", board.squares_x, board.squares_y, board.square_mm, board.dictionary, fit.view_rms.len())),
             saved_at_ms: 0,
@@ -258,6 +260,9 @@ mod tests {
         assert!((c.fx - 600.0).abs() < 1.0 && (c.fy - 600.0).abs() < 1.0, "{c:?}");
         assert!((c.cx - 320.0).abs() < 1.0 && (c.cy - 200.0).abs() < 1.0, "{c:?}");
         assert!(c.rms_px.is_some_and(|rms| rms < 0.01));
+        let uncertainty = c.uncertainty.as_ref().expect("solved uncertainty");
+        assert_eq!((uncertainty.kind, uncertainty.covariance.len(), uncertainty.sigma.distortion.len()), (crate::camera_uncertainty::UncertaintyKind::Solved, 81, 5), "{uncertainty:?}");
+        assert!(uncertainty.sigma.fx > 0.0 && uncertainty.sigma.cx > 0.0, "{uncertainty:?}");
         assert_eq!((c.width, c.height, result.views), (640, 400, 6));
         // Dropping views leaves too few.
         assert!(sessions.solve("cam", SolveRequest { drop: vec![0, 1, 2], ..SolveRequest::default() }, Orientation::default()).await.is_err());

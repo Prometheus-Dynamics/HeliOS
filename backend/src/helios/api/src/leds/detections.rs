@@ -131,6 +131,7 @@ mod tests {
             cy: 0.0,
             distortion: Distortion::default(),
             rms_px: None,
+            uncertainty: None,
             source: None,
             orientation: Default::default(),
             saved_at_ms: 0,

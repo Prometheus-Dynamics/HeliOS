@@ -7,6 +7,9 @@
 //! - `camera.lens` (`pinhole` | `fisheye`), `camera.fx_px`, `camera.fy_px`, `camera.cx_px`,
 //!   `camera.cy_px`, `camera.skew_px`, `camera.k1` ... `camera.k6`, `camera.p1`, `camera.p2`,
 //!   `camera.width_px`, `camera.height_px`: the calibration matching the binding's frame size;
+//! - `camera.uncertainty.{kind, rms_px, views, sigma.fx, sigma.fy, sigma.cx, sigma.cy}` and, as
+//!   JSON strings, `camera.uncertainty.sigma.distortion` and `camera.uncertainty.covariance`
+//!   (Eidos's `uncertainty`; absent for a calibration without one, which Eidos reads as estimated);
 //! - `mount.x_m`, `mount.y_m`, `mount.z_m`, `mount.roll_rad`, `mount.pitch_rad`, `mount.yaw_rad`:
 //!   the camera's pose on the robot (WPILib's forward-left-up robot frame; `helios_field`).
 //!
@@ -56,6 +59,10 @@ const CAMERA_NUMBERS: [(&str, &str); 13] = [
 ];
 const CAMERA_SIZES: [(&str, &str); 2] = [("width_px", "width"), ("height_px", "height")];
 const LENSES: [&str; 2] = ["pinhole", "fisheye"];
+/// The calibration's uncertainty fields (`camera.uncertainty.*`, Eidos's `uncertainty`).
+const UNCERTAINTY_PREFIX: &str = "camera.uncertainty.";
+const UNCERTAINTY_KINDS: [&str; 3] = ["estimated", "known", "solved"];
+const UNCERTAINTY_FIELDS: [&str; 9] = ["kind", "rms_px", "views", "sigma.fx", "sigma.fy", "sigma.cx", "sigma.cy", "sigma.distortion", "covariance"];
 
 /// What a context push holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,10 +146,62 @@ pub(crate) fn camera_value(context: &BTreeMap<String, ContextValue>) -> Result<O
         }
         value.insert(field.into(), (size as u32).into());
     }
-    if let Some(unknown) = context.keys().filter_map(|key| key.strip_prefix(CAMERA_PREFIX)).find(|key| *key != "lens" && !CAMERA_NUMBERS.iter().chain(&CAMERA_SIZES).any(|(name, _)| name == key)) {
+    if let Some(unknown) = context
+        .keys()
+        .filter_map(|key| key.strip_prefix(CAMERA_PREFIX))
+        .find(|key| *key != "lens" && !key.starts_with("uncertainty.") && !CAMERA_NUMBERS.iter().chain(&CAMERA_SIZES).any(|(name, _)| name == key))
+    {
         return Err(format!("unknown context field camera.{unknown}"));
     }
+    if let Some(uncertainty) = uncertainty_value(context)? {
+        value.insert("uncertainty".into(), uncertainty);
+    }
     Ok(Some(serde_json::Value::Object(value)))
+}
+
+/// The `uncertainty` of `eidos:camera_calibration` from the `camera.uncertainty.*` fields; `None`
+/// without any (Eidos reads an absent one as estimated). The sigma list and the covariance are
+/// JSON strings, as context carries no lists.
+fn uncertainty_value(context: &BTreeMap<String, ContextValue>) -> Result<Option<serde_json::Value>, String> {
+    if !context.keys().any(|key| key.starts_with(UNCERTAINTY_PREFIX)) {
+        return Ok(None);
+    }
+    if let Some(unknown) = context.keys().filter_map(|key| key.strip_prefix(UNCERTAINTY_PREFIX)).find(|key| !UNCERTAINTY_FIELDS.contains(key)) {
+        return Err(format!("unknown context field camera.uncertainty.{unknown}"));
+    }
+    let kind = match context.get("camera.uncertainty.kind") {
+        Some(ContextValue::Name(kind)) if UNCERTAINTY_KINDS.contains(&kind.as_str()) => kind.as_str(),
+        Some(other) => return Err(format!("context camera.uncertainty.kind must be one of {UNCERTAINTY_KINDS:?}, not {other:?}")),
+        None => return Err("context camera.uncertainty needs camera.uncertainty.kind".into()),
+    };
+    let views = number(context, "camera.uncertainty.views")?.unwrap_or(0.0);
+    if !(0.0..=f64::from(u32::MAX)).contains(&views) || views.fract() != 0.0 {
+        return Err(format!("context camera.uncertainty.views must be a whole number, not {views}"));
+    }
+    let mut sigma = serde_json::Map::new();
+    for name in ["fx", "fy", "cx", "cy"] {
+        sigma.insert(name.into(), number(context, &format!("{UNCERTAINTY_PREFIX}sigma.{name}"))?.unwrap_or(0.0).into());
+    }
+    sigma.insert("distortion".into(), json_list(context, "camera.uncertainty.sigma.distortion")?);
+    Ok(Some(serde_json::json!({
+        "kind": kind,
+        "rms_px": number(context, "camera.uncertainty.rms_px")?.unwrap_or(0.0),
+        "views": views as u32,
+        "sigma": sigma,
+        "covariance": json_list(context, "camera.uncertainty.covariance")?,
+    })))
+}
+
+/// A JSON list of numbers held in a context string; absent is an empty list.
+fn json_list(context: &BTreeMap<String, ContextValue>, key: &str) -> Result<serde_json::Value, String> {
+    match context.get(key) {
+        None => Ok(serde_json::json!([])),
+        Some(ContextValue::Name(text)) => {
+            let list: Vec<f64> = serde_json::from_str(text).map_err(|error| format!("context {key} must be a JSON list of numbers: {error}"))?;
+            Ok(serde_json::json!(list))
+        }
+        Some(ContextValue::Number(_)) => Err(format!("context {key} must be a JSON list of numbers, not a number")),
+    }
 }
 
 /// The `eidos:camera_extrinsics` value of the `mount.*` fields; `None` without any.
@@ -205,6 +264,32 @@ mod tests {
         for (key, want) in [("w", 0.5), ("x", -0.5), ("y", 0.5), ("z", -0.5)] {
             assert!((pose["rotation"][key].as_f64().expect("number") - want).abs() < 1e-12, "{pose}");
         }
+    }
+
+    #[test]
+    fn uncertainty_context_becomes_eidos_uncertainty() {
+        let covariance = serde_json::to_string(&(0..81).map(|k| if k % 10 == 0 { 0.01 } else { 0.0 }).collect::<Vec<f64>>()).expect("json");
+        let b = binding(&[
+            ("camera.width_px", ContextValue::Number(640.0)),
+            ("camera.uncertainty.kind", ContextValue::Name("solved".into())),
+            ("camera.uncertainty.rms_px", ContextValue::Number(0.25)),
+            ("camera.uncertainty.views", ContextValue::Number(40.0)),
+            ("camera.uncertainty.sigma.fx", ContextValue::Number(0.5)),
+            ("camera.uncertainty.sigma.distortion", ContextValue::Name("[0.1,0.1,0.1,0.1,0.1]".into())),
+            ("camera.uncertainty.covariance", ContextValue::Name(covariance)),
+        ]);
+        let camera = context_pushes(&b, true).expect("pushes")[0].value.clone();
+        assert_eq!(camera["uncertainty"]["kind"], "solved");
+        // Eidos's own type reads it, and checks the covariance's size against the lens.
+        let typed: eidos_daedalus::types::CameraCalibration = serde_json::from_value(camera.clone()).expect("eidos camera");
+        assert_eq!(typed.uncertainty.map(|u| (u.views, u.distortion_count, u.covariance_count)), Some((40, 5, 81)));
+        // Without any uncertainty field, none is written (Eidos reads it as estimated).
+        let plain = context_pushes(&binding(&[("camera.width_px", ContextValue::Number(640.0))]), true).expect("pushes")[0].value.clone();
+        assert!(plain.get("uncertainty").is_none(), "{plain}");
+        // A kind is required, and the fields are known.
+        assert!(context_pushes(&binding(&[("camera.uncertainty.rms_px", ContextValue::Number(0.1))]), true).is_err());
+        assert!(context_pushes(&binding(&[("camera.uncertainty.kind", ContextValue::Name("precise".into()))]), true).is_err());
+        assert!(context_pushes(&binding(&[("camera.uncertainty.kind", ContextValue::Name("known".into())), ("camera.uncertainty.sigma.k9", ContextValue::Number(1.0))]), true).is_err());
     }
 
     #[test]

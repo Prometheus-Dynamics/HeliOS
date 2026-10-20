@@ -85,6 +85,7 @@ mod tests {
             cy: 400.0,
             distortion: Default::default(),
             rms_px: None,
+            uncertainty: None,
             source: None,
             orientation: Default::default(),
             saved_at_ms: 0,

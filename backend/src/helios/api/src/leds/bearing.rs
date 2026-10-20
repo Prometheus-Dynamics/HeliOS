@@ -78,7 +78,7 @@ mod tests {
     use super::*;
 
     fn calibration(model: LensModel, distortion: Distortion) -> CameraCalibration {
-        CameraCalibration { width: 640, height: 400, model, fx: 500.0, fy: 500.0, cx: 320.0, cy: 200.0, distortion, rms_px: None, source: None, orientation: Default::default(), saved_at_ms: 0 }
+        CameraCalibration { width: 640, height: 400, model, fx: 500.0, fy: 500.0, cx: 320.0, cy: 200.0, distortion, rms_px: None, uncertainty: None, source: None, orientation: Default::default(), saved_at_ms: 0 }
     }
 
     #[test]

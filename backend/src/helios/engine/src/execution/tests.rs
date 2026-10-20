@@ -56,6 +56,9 @@ mod features;
 /// The live-map template (`eidos:mapping.live_map`) and its golden document.
 #[cfg(test)]
 mod live_map;
+/// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
+#[cfg(test)]
+mod camera_uncertainty;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");

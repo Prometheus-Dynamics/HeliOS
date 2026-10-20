@@ -115,6 +115,7 @@
           <div><span>RMS error</span><b>{r.rms.toFixed(3)}</b><i>px</i></div>
           <div><span>Views</span><b>{r.views}</b></div>
         </div>
+        <p class="small">Uncertainty: {r.device?.uncertainty?.kind ?? "estimated"}. A solved fit tightens the pose covariances.</p>
         <div class="errs" aria-label="Error per view">
           {#each cal.captures as c, i (i)}<span style:height="{Math.min(100, ((c.error ?? 0) / 1) * 100)}%" class:bad={(c.error ?? 0) > r.rms * 1.4} data-tip="view {i + 1}: {c.error} px"></span>{/each}
         </div>

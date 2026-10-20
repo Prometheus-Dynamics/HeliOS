@@ -15,6 +15,7 @@ use orion::control_plane::TypedConfigValue;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    camera_uncertainty::CalibrationUncertainty,
     error::{ApiError, ApiResult},
     store::CameraMount,
 };
@@ -102,6 +103,10 @@ pub struct CameraCalibration {
     /// Reprojection error of the fit, pixels (informational).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rms_px: Option<f64>,
+    /// How well the intrinsics are known (Eidos's `uncertainty`); absent means estimated, the
+    /// library's conservative defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncertainty: Option<CalibrationUncertainty>,
     /// Where it came from (a tool, a board, a date); informational.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -138,6 +143,9 @@ impl CameraCalibration {
         if self.rms_px.is_some_and(|rms| !rms.is_finite() || rms < 0.0) {
             return Err(ApiError::unprocessable("rms_px must be a non-negative number"));
         }
+        if let Some(uncertainty) = &self.uncertainty {
+            uncertainty.validate(self.model).map_err(ApiError::unprocessable)?;
+        }
         Ok(())
     }
 
@@ -147,7 +155,8 @@ impl CameraCalibration {
     pub fn scaled_to(&self, width: u32, height: u32) -> Self {
         let sx = f64::from(width) / f64::from(self.width);
         let sy = f64::from(height) / f64::from(self.height);
-        Self { width, height, fx: self.fx * sx, fy: self.fy * sy, cx: (self.cx + 0.5) * sx - 0.5, cy: (self.cy + 0.5) * sy - 0.5, ..self.clone() }
+        let uncertainty = self.uncertainty.as_ref().map(|u| u.scaled(sx, sy));
+        Self { width, height, fx: self.fx * sx, fy: self.fy * sy, cx: (self.cx + 0.5) * sx - 0.5, cy: (self.cy + 0.5) * sy - 0.5, uncertainty, ..self.clone() }
     }
 
     /// The same camera read out in `orientation`: a mirror moves the principal point to the
@@ -156,7 +165,7 @@ impl CameraCalibration {
     /// lengths are unchanged.
     pub fn oriented(&self, orientation: Orientation) -> Self {
         let (h, v) = (self.orientation.hflip != orientation.hflip, self.orientation.vflip != orientation.vflip);
-        let mut out = Self { orientation, ..self.clone() };
+        let mut out = Self { orientation, uncertainty: self.uncertainty.as_ref().map(|u| u.mirrored(self.model, h, v)), ..self.clone() };
         if h {
             out.cx = f64::from(self.width) - 1.0 - self.cx;
             out.distortion.p2 = -self.distortion.p2;
@@ -216,6 +225,7 @@ pub fn match_calibration(calibrations: &[CameraCalibration], size: Option<(u32, 
 /// The context fields for a camera binding: `camera.lens` (`pinhole` | `fisheye`),
 /// `camera.fx_px`, `camera.fy_px`, `camera.cx_px`, `camera.cy_px`, `camera.k1` ... `camera.k6`,
 /// `camera.p1`, `camera.p2`, `camera.width_px`, `camera.height_px` (the calibrated image size;
+/// with an uncertainty, `camera.uncertainty.*` (see `uncertainty_fields`);
 /// Eidos reports `image_size_mismatch` for frames of another size), and with a mount
 /// `mount.x_m`, `mount.y_m`, `mount.z_m`, `mount.roll_rad`, `mount.pitch_rad`, `mount.yaw_rad`:
 /// the API's mount (metres and degrees, WPILib's robot frame: x forward, y left, z up;
@@ -228,6 +238,7 @@ pub fn match_calibration(calibrations: &[CameraCalibration], size: Option<(u32, 
 pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&CameraMount>, orientation: Orientation) -> BTreeMap<String, TypedConfigValue> {
     let mut fields = BTreeMap::new();
     let calibration = calibration.map(|c| c.oriented(orientation));
+    let uncertainty = calibration.as_ref().map(|c| uncertainty_fields(c.uncertainty.as_ref())).unwrap_or_default();
     let (lens, intrinsics, distortion, size) = match calibration {
         Some(c) => (c.model, [c.fx, c.fy, c.cx, c.cy], c.distortion, (c.width, c.height)),
         None => (LensModel::Pinhole, [0.0; 4], Distortion::default(), (0, 0)),
@@ -239,6 +250,7 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
     for (name, value) in distortion.fields() {
         fields.insert(format!("camera.{name}"), TypedConfigValue::F64(value));
     }
+    fields.extend(uncertainty);
     fields.insert("camera.width_px".to_string(), TypedConfigValue::Int(i64::from(size.0)));
     fields.insert("camera.height_px".to_string(), TypedConfigValue::Int(i64::from(size.1)));
     if let Some(m) = mount {
@@ -248,6 +260,24 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
             fields.insert(format!("mount.{name}"), TypedConfigValue::F64(value));
         }
     }
+    fields
+}
+
+/// The `camera.uncertainty.*` fields of a calibration that has an uncertainty (none otherwise:
+/// Eidos reads an absent one as estimated). The sigma list and the covariance are JSON strings,
+/// as context carries no lists.
+fn uncertainty_fields(uncertainty: Option<&CalibrationUncertainty>) -> BTreeMap<String, TypedConfigValue> {
+    let Some(u) = uncertainty else { return BTreeMap::new() };
+    let json = |values: &[f64]| serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string());
+    let numbers = [("sigma.fx", u.sigma.fx), ("sigma.fy", u.sigma.fy), ("sigma.cx", u.sigma.cx), ("sigma.cy", u.sigma.cy), ("rms_px", u.rms_px)];
+    let mut fields = BTreeMap::new();
+    fields.insert("camera.uncertainty.kind".to_string(), TypedConfigValue::String(u.kind.name().into()));
+    fields.insert("camera.uncertainty.views".to_string(), TypedConfigValue::Int(i64::from(u.views)));
+    for (name, value) in numbers {
+        fields.insert(format!("camera.uncertainty.{name}"), TypedConfigValue::F64(value));
+    }
+    fields.insert("camera.uncertainty.sigma.distortion".to_string(), TypedConfigValue::String(json(&u.sigma.distortion)));
+    fields.insert("camera.uncertainty.covariance".to_string(), TypedConfigValue::String(json(&u.covariance)));
     fields
 }
 
@@ -266,6 +296,7 @@ mod tests {
             cy: 399.5,
             distortion: Distortion { k1: 0.1, ..Distortion::default() },
             rms_px: Some(0.3),
+            uncertainty: None,
             source: None,
             orientation: Orientation::default(),
             saved_at_ms: 0,
@@ -327,5 +358,54 @@ mod tests {
         assert_eq!(uncalibrated["camera.width_px"], TypedConfigValue::Int(0));
         assert!(!uncalibrated.keys().any(|key| key.starts_with("mount.")), "no mount, no mount fields");
         assert_eq!(uncalibrated.len(), 15);
+    }
+
+    fn solved_uncertainty() -> CalibrationUncertainty {
+        CalibrationUncertainty::solved(&(0..81).map(|k| if k % 10 == 0 { 0.01 } else { 0.0 }).collect::<Vec<_>>(), 0.25, 30, LensModel::Pinhole)
+    }
+
+    #[test]
+    fn uncertainty_fields_are_written_only_with_an_uncertainty() {
+        let plain = context_fields(Some(&calibration(1280, 800)), None, Orientation::default());
+        assert!(!plain.keys().any(|key| key.starts_with("camera.uncertainty.")), "estimated: no fields");
+        let solved = CameraCalibration { model: LensModel::Pinhole, uncertainty: Some(solved_uncertainty()), ..calibration(1280, 800) };
+        let fields = context_fields(Some(&solved), None, Orientation::default());
+        assert_eq!(fields["camera.uncertainty.kind"], TypedConfigValue::String("solved".into()));
+        assert_eq!(fields["camera.uncertainty.rms_px"], TypedConfigValue::F64(0.25));
+        assert_eq!(fields["camera.uncertainty.views"], TypedConfigValue::Int(30));
+        assert_eq!(fields["camera.uncertainty.sigma.fx"], TypedConfigValue::F64(0.1));
+        assert_eq!(fields["camera.uncertainty.sigma.distortion"], TypedConfigValue::String("[0.1,0.1,0.1,0.1,0.1]".into()));
+        let covariance: Vec<f64> = match &fields["camera.uncertainty.covariance"] {
+            TypedConfigValue::String(text) => serde_json::from_str(text).expect("json array"),
+            other => panic!("covariance is a string: {other:?}"),
+        };
+        assert_eq!(covariance.len(), 81);
+        assert_eq!(fields.len(), 15 + 9, "the calibrated fields plus nine uncertainty ones");
+        assert!(!context_fields(None, None, Orientation::default()).keys().any(|key| key.starts_with("camera.uncertainty.")));
+    }
+
+    #[test]
+    fn uncertainty_follows_scale_and_orientation() {
+        let base = CameraCalibration { model: LensModel::Pinhole, uncertainty: Some(solved_uncertainty()), ..calibration(1280, 800) };
+        let half = base.scaled_to(640, 400);
+        assert_eq!(half.uncertainty.as_ref().map(|u| u.sigma.fx), Some(0.05), "fx scales with sx");
+        let turned = base.oriented(Orientation { hflip: true, vflip: true });
+        let u = turned.uncertainty.clone().expect("kept");
+        assert_eq!(u.sigma.cx, base.uncertainty.as_ref().expect("base").sigma.cx, "a mirror keeps the variance");
+        assert_eq!(turned.oriented(Orientation::default()).uncertainty, base.uncertainty, "and back");
+    }
+
+    #[test]
+    fn stored_calibrations_without_an_uncertainty_load_and_validate_with_one() {
+        let stored = serde_json::json!({ "width": 1280, "height": 800, "model": "pinhole", "fx": 600.0, "fy": 600.0, "cx": 639.5, "cy": 399.5, "saved_at_ms": 7 });
+        let loaded: CameraCalibration = serde_json::from_value(stored).expect("loads");
+        assert_eq!(loaded.uncertainty, None);
+        assert!(!serde_json::to_value(&loaded).expect("json").as_object().expect("object").contains_key("uncertainty"));
+        let with = CameraCalibration { uncertainty: Some(solved_uncertainty()), ..loaded.clone() };
+        let json = serde_json::to_value(&with).expect("json");
+        assert_eq!(serde_json::from_value::<CameraCalibration>(json).expect("round trip"), with);
+        with.validate().expect("valid");
+        let bad = CameraCalibration { uncertainty: Some(CalibrationUncertainty { rms_px: f64::NAN, ..solved_uncertainty() }), ..loaded };
+        assert!(bad.validate().is_err());
     }
 }
