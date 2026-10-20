@@ -6,6 +6,7 @@
 import { CATALOG_BY_ID, defaults } from "./catalog";
 import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
+import type { MapPoints, MapPosedFrame, MapSnapshot, MapTag, MapTransform, MapView } from "../vision/map";
 
 const now = Date.now();
 
@@ -360,8 +361,46 @@ function featuresGraph(): GraphDocument {
   };
 }
 
+/** The live map's graph: the tracked AprilTag detector feeding Eidos's live mapper (`eidos:mapping.live_map`). */
+function liveMapGraph(): GraphDocument {
+  return {
+    format: "daedalus.graph",
+    schema_version: 1,
+    requires: [{ id: "styx.frames" }, { id: "eidos" }, { id: "helios" }],
+    nodes: [
+      node("camera", "styx:camera", 0, 80),
+      node("detector", "eidos:detectors.tracked_detect", 270, 40, { dictionary: "apriltag_36h11" }),
+      node("mapper", "eidos:mapping.live_map", 540, 40),
+      node("stream", "helios:stream", 810, 40, { name: "map" }),
+    ],
+    edges: [
+      edge("camera", "frame", "detector", "frame"),
+      edge("camera", "frame", "mapper", "frame"),
+      edge("detector", "detections", "mapper", "detections"),
+      edge("detector", "rejected", "mapper", "rejected"),
+      edge("detector", "refined_corners", "mapper", "refined_corners"),
+      edge("mapper", "pose", "stream", "value"),
+    ],
+  };
+}
+
 export const WORKLOADS: Workload[] = [
   tagWorkload("tags-front", "AprilTags · front", "raze-front", "camera.raze-front.cam0", "/helios/front"),
+  {
+    id: "live-map-front",
+    name: "Live map · front",
+    nodeId: "raze-front",
+    revision: 1,
+    state: "running",
+    restarts: 0,
+    bindings: { camera: "camera.raze-front.cam0" },
+    graph: liveMapGraph(),
+    outputs: ["stream.live-map-front.pose", "stream.live-map-front.snapshot", "stream.live-map-front.timing"],
+    cpu: null,
+    cpuApplied: null,
+    cpuError: null,
+    perf: { tickP50Ms: 4.2, tickP99Ms: 6.1, fps: 16, memMiB: 14.6, nodeMs: { camera: 0.02, detector: 1.1, mapper: 2.9 }, tickHistory: history(4.2, 0.4) },
+  },
   {
     id: "features-front",
     name: "Feature tracks · front",
@@ -456,3 +495,158 @@ export const LOGS: LogLine[] = Array.from({ length: 40 }, (_, i) => {
   const nodeId = unit === "photonvision-adapter" ? "pv-coproc" : unit.includes("left") || text.includes("left") ? "raze-left" : NODES[i % 4].id;
   return { ts: now - (40 - i) * 47_000, nodeId, unit, level, text };
 });
+
+// --- The live map (`eidos:mapping.live_map`), simulated -----------------------------------------
+// A 5 x 3.6 m room: points on its walls and floor, a camera looping through it, six tags on the
+// walls. The points are built once; `mockMapView` moves the camera and the keyframes.
+
+const MOCK_ROOM = { halfX: 2.5, halfZ: 1.8, height: 2.4 };
+/** The mock map's ticks per second (the pane's frame rate). */
+const MOCK_MAP_HZ = 16;
+
+/** A small seeded generator, so the mock room is the same on every load. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function buildMockPoints(): MapPoints {
+  const rand = seeded(20260);
+  const count = 2600;
+  const xyz = new Float32Array(count * 3);
+  const ids = new Uint32Array(count);
+  const observations = new Uint16Array(count);
+  const grey = new Uint8Array(count);
+  const { halfX, halfZ, height } = MOCK_ROOM;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < count; i++) {
+    let x: number;
+    let y: number;
+    let z: number;
+    if (rand() < 0.2) {
+      // Floor.
+      x = (rand() * 2 - 1) * halfX;
+      z = (rand() * 2 - 1) * halfZ;
+      y = 0;
+    } else {
+      // Walls: the long ones (z = ±halfZ) and the short ones (x = ±halfX).
+      y = rand() * height;
+      const wall = Math.floor(rand() * 4);
+      if (wall < 2) {
+        x = (rand() * 2 - 1) * halfX;
+        z = wall === 0 ? -halfZ : halfZ;
+      } else {
+        z = (rand() * 2 - 1) * halfZ;
+        x = wall === 2 ? -halfX : halfX;
+      }
+    }
+    const p = [x, y, z];
+    xyz.set(p, i * 3);
+    p.forEach((v, axis) => {
+      min[axis] = Math.min(min[axis], v);
+      max[axis] = Math.max(max[axis], v);
+    });
+    ids[i] = i + 1;
+    observations[i] = 2 + Math.floor(rand() * 18);
+    grey[i] = 70 + Math.floor(rand() * 150);
+  }
+  return { count, min_xyz: min, max_xyz: max, ids, xyz, observations, grey };
+}
+
+let mockPoints: MapPoints | null = null;
+
+/** A camera at `position`, turned to face the room's centre (yaw only; it stays level). */
+function lookAtCentre(position: [number, number, number]): MapTransform {
+  const [px, py, pz] = position;
+  const yaw = Math.atan2(-px, -pz);
+  return { translation: { x: px, y: py, z: pz }, rotation: { w: Math.cos(yaw / 2), x: 0, y: Math.sin(yaw / 2), z: 0 } };
+}
+
+/** The camera's path: an ellipse through the room, one lap every ~210 ticks. */
+function mockCameraAt(tick: number): [number, number, number] {
+  const phase = tick * 0.03;
+  return [1.6 * Math.cos(phase), 1.1 + 0.04 * Math.sin(2 * phase), 1.0 * Math.sin(phase)];
+}
+
+/** The six mock tags on the walls. `placed` is the frame the map placed it at (0: the first tag). */
+const MOCK_TAGS: { id: number; position: [number, number, number]; yaw: number; placed: number }[] = [
+  { id: 1, position: [-MOCK_ROOM.halfX, 1.2, -0.9], yaw: Math.PI / 2, placed: 0 },
+  { id: 2, position: [-MOCK_ROOM.halfX, 1.2, 0.9], yaw: Math.PI / 2, placed: 0 },
+  { id: 3, position: [MOCK_ROOM.halfX, 1.2, -0.6], yaw: -Math.PI / 2, placed: 0 },
+  { id: 4, position: [0.6, 1.2, -MOCK_ROOM.halfZ], yaw: 0, placed: 0 },
+  { id: 41, position: [-0.6, 1.2, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 14 },
+  { id: 42, position: [1.2, 0.9, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 37 },
+];
+
+function mockTagPose(tag: (typeof MOCK_TAGS)[number]): MapTransform {
+  const [x, y, z] = tag.position;
+  return { translation: { x, y, z }, rotation: { w: Math.cos(tag.yaw / 2), x: 0, y: Math.sin(tag.yaw / 2), z: 0 } };
+}
+
+/** The mock live-map view at tick `tick`: the camera has moved `tick` ticks along its path. */
+export function mockMapView(tick: number): MapView {
+  mockPoints ??= buildMockPoints();
+  const position = mockCameraAt(tick);
+  const sigmaPos = 0.08 + 0.02 * Math.sin(tick * 0.09);
+  const trajectory: MapPosedFrame[] = [];
+  for (let i = Math.max(0, tick - 240); i <= tick; i += 2) {
+    trajectory.push({
+      frame: i,
+      pose: lookAtCentre(mockCameraAt(i)),
+      sigma: { position_m: [0.08, 0.08, 0.06], rotation_deg: [2, 2, 1] },
+      keyframe: i % 16 === 0,
+    });
+  }
+  const snapshot: MapSnapshot = {
+    seq: Math.floor(tick / (MOCK_MAP_HZ / 2)),
+    run_id: 7,
+    tag_size_m: 0.1651,
+    aligned: false,
+    estimated: true,
+    trajectory,
+    keyframes: trajectory.filter((f) => f.keyframe).map((f) => f.frame),
+    points: mockPoints,
+    tags: MOCK_TAGS.map((tag) => ({ id: tag.id, pose: mockTagPose(tag), placed: tag.placed }) satisfies MapTag),
+  };
+  const map_ms = 1.6 + (tick % 5) * 0.04;
+  const t_ns = Math.round((tick * 1e9) / MOCK_MAP_HZ);
+  return {
+    pose: {
+      frame: tick,
+      t_ns,
+      state: "tracking",
+      reason: "tags",
+      valid: true,
+      estimate: {
+        reference_from_camera: lookAtCentre(position),
+        covariance: [],
+        sigma: { position_m: [sigmaPos, sigmaPos * 1.1, sigmaPos * 0.8], rotation_deg: [4, 3.5, 1.2] },
+        source: "tags",
+        rms_px: 0.42,
+        points: 0,
+      },
+      calibration: { estimated: true, rms_px: 0.4, views: 107, frames: 150 },
+      alignment: { aligned: false, matched_tags: 0, residual_m: 0 },
+    },
+    snapshot,
+    timing: {
+      frame: tick,
+      t_ns,
+      frame_ms: 3.8 + (tick % 7) * 0.05,
+      map_ms,
+      stages: [
+        { name: "track", ms: 0.6 },
+        { name: "tag detect", ms: 0.9 },
+        { name: "solve", ms: 0.8 + (tick % 5) * 0.02 },
+        { name: "map", ms: map_ms },
+      ],
+    },
+  };
+}

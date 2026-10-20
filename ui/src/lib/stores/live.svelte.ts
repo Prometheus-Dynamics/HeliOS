@@ -11,6 +11,7 @@ import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resou
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
+import { parseMapPose, parseMapSnapshot, parseMapTiming, TimingWindow, type MapView } from "#lib/vision/map.js";
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
@@ -94,6 +95,10 @@ export class LiveCluster {
   private features = $state<Record<string, CameraFeatures>>({});
   /** One trail book per camera resource: its tracks' trails, advanced once per new tick. */
   private trailBooks = new Map<string, TrailBook>();
+  /** The latest live-map outputs per pipeline (`pose`, `snapshot`, `timing`), for the Map pane. */
+  private maps = $state<Record<string, MapView>>({});
+  /** The frame timings of each live-map pipeline over the last second, for the Map pane's p50s. */
+  private mapTimings = new Map<string, TimingWindow>();
   private snapshot: Partial<DeviceSnapshot> = {};
   private timers: number[] = [];
   private unsubscribers: (() => void)[] = [];
@@ -257,6 +262,7 @@ export class LiveCluster {
       if (Object.keys(this.detections).length) this.detections = {};
       this.features = {};
       this.trailBooks.clear();
+      this.maps = {};
       return;
     }
     let outputs: W.PipelineOutput[];
@@ -278,6 +284,65 @@ export class LiveCluster {
     this.detections = next;
     this.features = nextFeatures;
     for (const camera of this.trailBooks.keys()) if (!(camera in nextFeatures)) this.trailBooks.delete(camera);
+    const nextMaps: Record<string, MapView> = {};
+    for (const p of running) {
+      const view = this.mapFromOutputs(p.id, outputs);
+      if (view) nextMaps[p.id] = view;
+    }
+    this.maps = nextMaps;
+  }
+
+  /** The live-map view of a pipeline from a list of its outputs (null when it has none of them). */
+  private mapFromOutputs(pipelineId: string, outputs: W.PipelineOutput[]): MapView | null {
+    const value = (port: string) => outputs.find((o) => o.pipeline === pipelineId && o.port === port)?.value;
+    const pose = parseMapPose(value("pose"));
+    const snapshot = parseMapSnapshot(value("snapshot"));
+    const timing = parseMapTiming(value("timing"));
+    if (!pose && !snapshot && !timing) return null;
+    if (timing) this.mapWindow(pipelineId).push(performance.now(), timing.frame_ms, timing.map_ms);
+    return { pose, snapshot, timing };
+  }
+
+  private mapWindow(pipelineId: string): TimingWindow {
+    let window = this.mapTimings.get(pipelineId);
+    if (!window) {
+      window = new TimingWindow(1000);
+      this.mapTimings.set(pipelineId, window);
+    }
+    return window;
+  }
+
+  /** A live-map `pose`, `snapshot` or `timing` event: that output alone changes. */
+  private applyMap(pipelineId: string, port: string, data: { change: string; value?: W.PipelineOutput }) {
+    const pipeline = this.pipelines.get(pipelineId);
+    if (data.change === "removed" || !data.value || !pipeline || pipeline.state !== "running") {
+      if (pipelineId in this.maps) {
+        const { [pipelineId]: _, ...rest } = this.maps;
+        this.maps = rest;
+      }
+      this.mapTimings.delete(pipelineId);
+      return;
+    }
+    const current = this.maps[pipelineId] ?? { pose: null, snapshot: null, timing: null };
+    const raw = data.value.value;
+    if (port === "pose") current.pose = parseMapPose(raw);
+    else if (port === "snapshot") current.snapshot = parseMapSnapshot(raw) ?? current.snapshot;
+    else if (port === "timing") {
+      current.timing = parseMapTiming(raw);
+      if (current.timing) this.mapWindow(pipelineId).push(performance.now(), current.timing.frame_ms, current.timing.map_ms);
+    }
+    this.maps = { ...this.maps, [pipelineId]: { ...current } };
+  }
+
+  /** The live-map view of a pipeline: its latest pose, snapshot and timing. */
+  mapFor(pipelineId: string): MapView | null {
+    return this.maps[pipelineId] ?? null;
+  }
+
+  /** The p50 frame and map milliseconds of a live-map pipeline over the last second. */
+  mapTimingP50(pipelineId: string): { frameMs: number; mapMs: number } | null {
+    const p50 = this.mapTimings.get(pipelineId)?.p50(performance.now());
+    return p50 ? { frameMs: p50.frameMs, mapMs: p50.mapMs } : null;
   }
 
   /** The camera resource feeding a pipeline. */
@@ -290,6 +355,7 @@ export class LiveCluster {
     this.lastOutputEvent = performance.now();
     const [pipelineId, port] = data.id.split("/");
     if (port === "tracks") return this.applyTracks(pipelineId, data);
+    if (port === "pose" || port === "snapshot" || port === "timing") return this.applyMap(pipelineId, port, data);
     if (port !== "detections") return;
     const pipeline = this.pipelines.get(pipelineId);
     const camera = pipeline && this.cameraOfPipeline(pipeline);

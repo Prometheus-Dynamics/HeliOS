@@ -7,8 +7,9 @@ import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, mockCameraFeatures } from "#lib/api/mock.js";
+import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, mockCameraFeatures, mockMapView } from "#lib/api/mock.js";
 import type { CameraFeatures } from "#lib/vision/features.js";
+import type { MapView } from "#lib/vision/map.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
 import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
@@ -25,6 +26,8 @@ interface PoseData {
 
 const FEED_FRAMES = 480;
 const FEED_FPS = 16;
+/** The node type of Eidos's live mapper, as a workload's graph names it. */
+const LIVE_MAP_NODE = "eidos:mapping.live_map";
 
 /**
  * Mock only: a control write as the device takes it (clamped to the range it takes now; read-only
@@ -168,6 +171,23 @@ class ClusterStore {
     if (this.live) return this.live.featureTracksFor(camera.resourceId);
     const tracking = this.workloads.some((w) => w.state === "running" && w.outputs.some((o) => o.endsWith(".tracks")) && Object.values(w.bindings).includes(camera.resourceId));
     return tracking ? mockCameraFeatures(this.feedIndex(camera)) : null;
+  }
+
+  /** Whether a workload runs Eidos's live mapper (`eidos:mapping.live_map`). */
+  isLiveMap(w: Workload): boolean {
+    return w.graph.nodes.some((n) => n.type === LIVE_MAP_NODE);
+  }
+
+  /** A live-map workload's latest pose, snapshot and timing (null before its first output). */
+  mapFor(w: Workload): MapView | null {
+    if (this.live) return this.live.mapFor(w.id);
+    return this.isLiveMap(w) && w.state === "running" ? mockMapView(this.frame) : null;
+  }
+
+  /** The p50 frame and map milliseconds of a live-map workload over the last second. */
+  mapTimingP50(w: Workload): { frameMs: number; mapMs: number } | null {
+    if (this.live) return this.live.mapTimingP50(w.id);
+    return this.isLiveMap(w) && w.state === "running" ? { frameMs: 3.8 + (this.frame % 7) * 0.05, mapMs: 1.6 + (this.frame % 5) * 0.04 } : null;
   }
 
   posesFor(camera: Camera): TagPose[] {
