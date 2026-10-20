@@ -50,12 +50,17 @@ use crate::{
 /// Playback players (a recording served as a camera, bound like a live one).
 #[cfg(test)]
 mod playback;
+/// The feature-tracking template (`eidos:features.track`) and its golden document.
+#[cfg(test)]
+mod features;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
 /// The same detectors as node-groups, each stage a node of its own (per-stage profiling).
 const APRILTAG_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-staged.graph.json");
 const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50-staged.graph.json");
+/// Eidos's feature tracks (`eidos:features.track`) as one camera frame in, `tracks` out.
+const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-track.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -171,8 +176,13 @@ fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layou
         if has_field { " and multi-tag field pose" } else { "" }
     );
     document.metadata.insert("title".into(), title.into());
-    // As helios-api stores graphs: without the metadata copied from the node declarations
-    // (the planner reads node-group graphs from the registry).
+    stored_form(&document)
+}
+
+/// A template as helios-api stores it: without the metadata copied from the node declarations
+/// (the planner reads node-group graphs from the registry), and compact, because helios-api embeds
+/// the templates and indentation is most of a pretty one.
+fn stored_form(document: &daedalus::planner::GraphDocument) -> String {
     let mut value: serde_json::Value = serde_json::from_str(&document.to_json().expect("document json")).expect("json");
     for node in value["graph"]["nodes"].as_array_mut().into_iter().flatten() {
         if let Some(metadata) = node.get_mut("metadata").and_then(serde_json::Value::as_object_mut) {
@@ -182,7 +192,6 @@ fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layou
             });
         }
     }
-    // Compact: helios-api embeds the templates, and indentation is most of a pretty one.
     serde_json::to_string(&value).expect("document json")
 }
 
@@ -372,6 +381,7 @@ fn graph_documents_are_eidos_templates() {
             APRILTAG_STAGED_GRAPH_DOCUMENT,
         ),
         ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
+        ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");

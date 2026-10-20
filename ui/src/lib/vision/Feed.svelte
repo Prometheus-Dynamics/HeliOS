@@ -7,6 +7,7 @@
   import { selection } from "#lib/core/selection.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { Overlays } from "./overlays";
+  import { featureSummaryText, toFeedSpace, trackFill } from "./features";
 
 
   let {
@@ -46,6 +47,9 @@
       d.frame ? { ...d, corners: d.corners.map(([x, y]) => [(x * fw) / d.frame!.w, (y * fh) / d.frame!.h] as [number, number]) } : d,
     ),
   );
+  // Feature tracks (a `tracks` output) scaled into the feed's pixels the way the corners are.
+  const features = $derived(cluster.featureTracksFor(camera));
+  const featureView = $derived(features && overlays.features ? toFeedSpace(features, fw, fh) : null);
   const sx = $derived(camera.settings.width / fw);
   const sy = $derived(camera.settings.height / fh);
   const tint = $derived(colorVar(identity.get(camera.resourceId).color));
@@ -175,6 +179,14 @@
           <text x={shown.x + 4 * k} y={shown.y - 5 * k} class="roi-label" style:font-size="{11 * k}px">ROI {Math.round(shown.w * sx)}×{Math.round(shown.h * sy)}</text>
         {/if}
       {/if}
+      {#if featureView}
+        {#each featureView.trails as [id, points] (id)}
+          <polyline points={points.map((p) => `${p.x},${p.y}`).join(" ")} class="trail" stroke-width={1.2 * k} />
+        {/each}
+        {#each featureView.tracks as t (t.id)}
+          <circle cx={t.x} cy={t.y} r={(t.status === "new" ? 3 : 2.2) * k} class="track" stroke-width={0.8 * k} style:fill={trackFill(t)} />
+        {/each}
+      {/if}
       {#each markers as m (m.id + ":" + m.corners[0][0])}
         {@const sel = selection.is("tag", String(m.id))}
         {#if overlays.outlines}
@@ -209,6 +221,9 @@
       <div class="hud bl mono">
         {camera.stats.fps.toFixed(0)} fps · {camera.stats.latencyMs.toFixed(1)} ms{#if !compact} · {markers.length} tags · #{index}{/if}
       </div>
+    {/if}
+    {#if features && featureView}
+      <span class="hud fe mono">{featureSummaryText(features.tracks.summary, compact)}</span>
     {/if}
     {#if overlays.histogram && histPath && !compact}
       <svg class="hist" viewBox="0 0 128 40" preserveAspectRatio="none" aria-label="Brightness histogram">
@@ -306,6 +321,16 @@
   circle {
     pointer-events: none;
   }
+  .trail {
+    fill: none;
+    stroke: rgba(34, 211, 238, 0.45);
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    pointer-events: none;
+  }
+  .track {
+    stroke: rgba(0, 0, 0, 0.55);
+  }
   .hud {
     position: absolute;
     display: flex;
@@ -340,6 +365,15 @@
   .bl {
     bottom: 6px;
     left: 6px;
+  }
+  .fe {
+    top: 30px;
+    left: 6px;
+    max-width: calc(100% - 12px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #a5f3fc;
   }
   .mono {
     font-family: var(--font-code);

@@ -10,6 +10,7 @@ import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
+import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
@@ -89,6 +90,10 @@ export class LiveCluster {
   private pipelines = new Map<string, W.Pipeline>();
   /** The latest detections per camera resource, from its running pipeline's `detections` output. */
   private detections = $state<Record<string, Detection[]>>({});
+  /** The latest feature tracks per camera resource, from its running pipeline's `tracks` output. */
+  private features = $state<Record<string, CameraFeatures>>({});
+  /** One trail book per camera resource: its tracks' trails, advanced once per new tick. */
+  private trailBooks = new Map<string, TrailBook>();
   private snapshot: Partial<DeviceSnapshot> = {};
   private timers: number[] = [];
   private unsubscribers: (() => void)[] = [];
@@ -250,6 +255,8 @@ export class LiveCluster {
     const running = [...this.pipelines.values()].filter((p) => p.state === "running");
     if (!running.length) {
       if (Object.keys(this.detections).length) this.detections = {};
+      this.features = {};
+      this.trailBooks.clear();
       return;
     }
     let outputs: W.PipelineOutput[];
@@ -259,12 +266,18 @@ export class LiveCluster {
       return;
     }
     const next: Record<string, Detection[]> = {};
+    const nextFeatures: Record<string, CameraFeatures> = {};
     for (const p of running) {
       const camera = this.cameraOfPipeline(p);
       const out = outputs.find((o) => o.pipeline === p.id && o.port === "detections");
       if (camera && out) next[camera] = toDetections(out.value);
+      const tracks = outputs.find((o) => o.pipeline === p.id && o.port === "tracks");
+      const features = camera && tracks ? this.featuresOf(camera, p, tracks.value) : null;
+      if (camera && features) nextFeatures[camera] = features;
     }
     this.detections = next;
+    this.features = nextFeatures;
+    for (const camera of this.trailBooks.keys()) if (!(camera in nextFeatures)) this.trailBooks.delete(camera);
   }
 
   /** The camera resource feeding a pipeline. */
@@ -276,6 +289,7 @@ export class LiveCluster {
   private applyOutput(data: { id: string; change: string; value?: W.PipelineOutput }) {
     this.lastOutputEvent = performance.now();
     const [pipelineId, port] = data.id.split("/");
+    if (port === "tracks") return this.applyTracks(pipelineId, data);
     if (port !== "detections") return;
     const pipeline = this.pipelines.get(pipelineId);
     const camera = pipeline && this.cameraOfPipeline(pipeline);
@@ -292,6 +306,51 @@ export class LiveCluster {
 
   detectionsFor(cameraId: string): Detection[] {
     return this.detections[cameraId] ?? [];
+  }
+
+  /** A `tracks` output event: the camera's tracks, or none once its pipeline stops or the output goes. */
+  private applyTracks(pipelineId: string, data: { change: string; value?: W.PipelineOutput }) {
+    const pipeline = this.pipelines.get(pipelineId);
+    if (!pipeline) return;
+    const camera = this.cameraOfPipeline(pipeline);
+    if (!camera) return;
+    const features = data.change === "removed" || !data.value || pipeline.state !== "running" ? null : this.featuresOf(camera, pipeline, data.value.value);
+    if (features) this.features = { ...this.features, [camera]: features };
+    else {
+      this.trailBooks.delete(camera);
+      if (camera in this.features) {
+        const { [camera]: _, ...rest } = this.features;
+        this.features = rest;
+      }
+    }
+  }
+
+  /** A camera's features from its `tracks` value. An unchanged value is the same tick, so its trails are kept as they are. */
+  private featuresOf(camera: string, pipeline: W.Pipeline, value: unknown): CameraFeatures | null {
+    const signature = JSON.stringify(value);
+    const previous = this.features[camera];
+    if (previous?.signature === signature) return previous;
+    const tracks = toFeatureTracks(value, this.frameOf(pipeline, camera));
+    if (!tracks) return null;
+    let book = this.trailBooks.get(camera);
+    if (!book) {
+      book = new TrailBook();
+      this.trailBooks.set(camera, book);
+    }
+    return { tracks, trails: book.advance(tracks.tracks), signature };
+  }
+
+  /** The frame a pipeline's tracks are in: its binding's output size, else the camera's own size. */
+  private frameOf(pipeline: W.Pipeline, camera: string): { w: number; h: number } | undefined {
+    const binding = Object.values(pipeline.bindings).find((b) => b.resource_id === camera);
+    if (binding?.output_width && binding.output_height) return { w: binding.output_width, h: binding.output_height };
+    const settings = this.data.cameras.find((c) => c.resourceId === camera)?.settings;
+    return settings ? { w: settings.width, h: settings.height } : undefined;
+  }
+
+  /** The latest feature tracks of a camera's running pipeline (`tracks`), with their trails. */
+  featureTracksFor(cameraId: string): CameraFeatures | null {
+    return this.features[cameraId] ?? null;
   }
 
   async refreshResources() {

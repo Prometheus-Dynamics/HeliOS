@@ -8,14 +8,17 @@ export interface Overlays {
   crosshair: boolean;
   histogram: boolean;
   hud: boolean;
+  /** Feature tracks of a `tracks` output: dots and trails. */
+  features: boolean;
 }
 
-export const DEFAULT_OVERLAYS: Overlays = { outlines: true, corners: true, ids: true, grid: false, crosshair: false, histogram: true, hud: true };
+export const DEFAULT_OVERLAYS: Overlays = { outlines: true, corners: true, ids: true, grid: false, crosshair: false, histogram: true, hud: true, features: true };
 
 const LABELS: [keyof Overlays, string][] = [
   ["outlines", "Tag outlines"],
   ["corners", "Corner dots (by index)"],
   ["ids", "Tag ids"],
+  ["features", "Feature tracks"],
   ["hud", "Camera info"],
   ["histogram", "Histogram"],
   ["grid", "Rule-of-thirds grid"],
