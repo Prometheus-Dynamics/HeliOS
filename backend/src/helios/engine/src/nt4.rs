@@ -10,7 +10,9 @@
 //! A pipeline whose outputs include `multi_tag_pose` also gets typed robot pose topics on every
 //! tick (see [`robot_pose`]): `robot_pose` (`double[]` `[x, y, z, roll, pitch, yaw]`),
 //! `robot_pose_valid`, `robot_pose_struct` (`struct:Pose3d`), `tag_count` and, from the pose's
-//! covariance, `robot_pose_std_devs` (`[σx, σy, σθ]`).
+//! covariance, `robot_pose_std_devs` (`[σx, σy, σθ]`). A pipeline whose `pose` output is a map
+//! pose (`eidos:map_pose`, the live mapper) gets the same from the map's robot pose, plus
+//! `map_state` and the opt-in `weak_*` topics; beside `multi_tag_pose` its names are `map_*`.
 //!
 //! The graph thread only hands the tick's payloads over (one channel send, dropped when the
 //! publisher is behind); serializing and sending happen here.
@@ -38,7 +40,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::execution::outputs::payload_message;
-use robot_pose::RobotPoseTopics;
+use robot_pose::{RobotPose, RobotPoseTopics, WeakPoseTopics};
 
 /// Where helios-api keeps the NT4 settings.
 pub const DEFAULT_SETTINGS_PATH: &str = "/var/lib/helios/api/nt4.json";
@@ -99,6 +101,9 @@ pub struct Nt4Tick {
     pub serializers: ValueSerializerMap,
     pub latency_ms: f64,
     pub fps: f64,
+    /// The pipeline's graph also outputs `multi_tag_pose`, so its map pose's topics are `map_`
+    /// prefixed. Set per pipeline, not per tick: the names must not change between ticks.
+    pub map_pose_prefix: bool,
 }
 
 /// Where graph threads hand their ticks over. Cheap to clone; a no-op while NT4 is off.
@@ -183,35 +188,76 @@ impl Connection {
         for (port, payload) in &tick.outputs {
             let message = payload_message(payload, &tick.serializers);
             if port == robot_pose::MULTI_TAG_POSE_PORT {
-                self.publish_robot_pose(&base, &message);
+                self.publish_multi_tag_pose(&base, &message);
+            } else if port == robot_pose::MAP_POSE_PORT {
+                self.publish_map_pose(&base, tick.map_pose_prefix, &message);
             }
             self.set(format!("{base}/{}", topic_segment(port)), "string", Value::String(message), port);
         }
     }
 
-    /// The robot pose topics, from the `multi_tag_pose` JSON the output topic also carries. The
-    /// pose goes out before `robot_pose_valid`, and that before `tag_count`: sets reach the
-    /// server in order, so a reader that sees the newer `tag_count` sees this tick's validity.
-    fn publish_robot_pose(&mut self, base: &str, multi_tag_pose: &str) {
+    /// The robot pose topics of a `multi_tag_pose` JSON (the output topic also carries it).
+    fn publish_multi_tag_pose(&mut self, base: &str, multi_tag_pose: &str) {
         let json: serde_json::Value = serde_json::from_str(multi_tag_pose).unwrap_or(serde_json::Value::Null);
-        let topics = robot_pose::read(&json);
+        self.publish_robot_pose(base, "", &robot_pose::read(&json));
+    }
+
+    /// The topics of an `eidos:map_pose` JSON, when the output is one (the port name alone is not
+    /// enough: see [`robot_pose::is_map_pose`]): the robot pose, `map_state`, and the weak
+    /// candidate's topics. The robot pose's names get a `map_` prefix when `prefixed` (the pipeline
+    /// also has `multi_tag_pose`).
+    fn publish_map_pose(&mut self, base: &str, prefixed: bool, map_pose: &str) {
+        let json: serde_json::Value = serde_json::from_str(map_pose).unwrap_or(serde_json::Value::Null);
+        let Some(topics) = robot_pose::read_map_pose(&json) else {
+            return;
+        };
+        let prefix = if prefixed { "map_" } else { "" };
+        self.publish_robot_pose(base, prefix, &topics.robot);
+        self.set(format!("{base}/map_state"), "string", Value::String(topics.state), "map_state");
+        self.publish_weak_pose(base, &topics.weak);
+    }
+
+    /// The robot pose topics `<prefix>robot_pose`, `<prefix>robot_pose_valid`, `<prefix>tag_count`
+    /// and `<prefix>robot_pose_std_devs`. The pose goes out before `robot_pose_valid`, and that
+    /// before `tag_count`: sets reach the server in order, so a reader that sees the newer
+    /// `tag_count` sees this tick's validity.
+    fn publish_robot_pose(&mut self, base: &str, prefix: &str, topics: &RobotPoseTopics) {
         if let Some(pose) = &topics.pose {
-            self.set(format!("{base}/robot_pose"), "double[]", RobotPoseTopics::robot_pose_value(pose), "robot_pose");
-            let bytes = robot_pose::pose3d_struct_bytes(pose);
-            // The schemas once per connection (a published topic keeps its value), before the
-            // first struct value that needs them.
-            for (topic, schema) in robot_pose::POSE3D_SCHEMAS {
-                if !self.publishers.contains_key(*topic) {
-                    self.set((*topic).to_string(), robot_pose::STRUCT_SCHEMA_TYPE, Value::Raw(schema.as_bytes().to_vec()), "schema");
-                }
-            }
-            self.set(format!("{base}/robot_pose_struct"), robot_pose::POSE3D_STRUCT_TYPE, Value::Raw(bytes), "robot_pose_struct");
+            self.publish_pose(base, &format!("{prefix}robot_pose"), pose);
         }
-        self.set(format!("{base}/robot_pose_valid"), "boolean", Value::Boolean(topics.valid()), "robot_pose_valid");
-        self.set(format!("{base}/tag_count"), "int", Value::Int(topics.tag_count), "tag_count");
+        self.set(format!("{base}/{prefix}robot_pose_valid"), "boolean", Value::Boolean(topics.valid()), &format!("{prefix}robot_pose_valid"));
+        self.set(format!("{base}/{prefix}tag_count"), "int", Value::Int(topics.tag_count), &format!("{prefix}tag_count"));
         if let Some([sigma_x, sigma_y, sigma_theta]) = topics.std_devs {
-            self.set(format!("{base}/robot_pose_std_devs"), "double[]", Value::DoubleArray(vec![sigma_x, sigma_y, sigma_theta]), "robot_pose_std_devs");
+            self.set(format!("{base}/{prefix}robot_pose_std_devs"), "double[]", Value::DoubleArray(vec![sigma_x, sigma_y, sigma_theta]), &format!("{prefix}robot_pose_std_devs"));
         }
+    }
+
+    /// The weak candidate's topics: `weak_robot_pose` (with its struct), `weak_robot_pose_valid`,
+    /// `weak_robot_pose_std_devs` and `weak_source`. Opt-in, and never in `robot_pose`.
+    fn publish_weak_pose(&mut self, base: &str, weak: &WeakPoseTopics) {
+        if let Some(pose) = &weak.pose {
+            self.publish_pose(base, "weak_robot_pose", pose);
+        }
+        self.set(format!("{base}/weak_robot_pose_valid"), "boolean", Value::Boolean(weak.valid()), "weak_robot_pose_valid");
+        if let Some([sigma_x, sigma_y, sigma_theta]) = weak.std_devs {
+            self.set(format!("{base}/weak_robot_pose_std_devs"), "double[]", Value::DoubleArray(vec![sigma_x, sigma_y, sigma_theta]), "weak_robot_pose_std_devs");
+        }
+        self.set(format!("{base}/weak_source"), "string", Value::String(weak.source.clone()), "weak_source");
+    }
+
+    /// A robot pose as `<name>` (`double[]`) and `<name>_struct` (`struct:Pose3d`), the struct
+    /// after its schemas.
+    fn publish_pose(&mut self, base: &str, name: &str, pose: &RobotPose) {
+        self.set(format!("{base}/{name}"), "double[]", RobotPoseTopics::robot_pose_value(pose), name);
+        let bytes = robot_pose::pose3d_struct_bytes(pose);
+        // The schemas once per connection (a published topic keeps its value), before the first
+        // struct value that needs them.
+        for (topic, schema) in robot_pose::POSE3D_SCHEMAS {
+            if !self.publishers.contains_key(*topic) {
+                self.set((*topic).to_string(), robot_pose::STRUCT_SCHEMA_TYPE, Value::Raw(schema.as_bytes().to_vec()), "schema");
+            }
+        }
+        self.set(format!("{base}/{name}_struct"), robot_pose::POSE3D_STRUCT_TYPE, Value::Raw(bytes), &format!("{name}_struct"));
     }
 }
 
@@ -322,7 +368,7 @@ mod tests {
         }
         assert!(status.lock().unwrap().connected);
         let serializers = ValueSerializerMap::default();
-        sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", 3_i64))], serializers, latency_ms: 4.5, fps: 30.0 });
+        sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", 3_i64))], serializers, latency_ms: 4.5, fps: 30.0, map_pose_prefix: false });
         let host = server.handle();
         while host.value("/helios/front/count").is_none() {
             assert!(tokio::time::Instant::now() < deadline, "no value");
@@ -351,7 +397,14 @@ mod tests {
         let host = server.handle();
         let offer = |multi_tag_pose: serde_json::Value| {
             let payload = Payload::owned("eidos:aruco.multi_tag_pose", multi_tag_pose.to_string());
-            sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("multi_tag_pose".into(), payload)], serializers: ValueSerializerMap::default(), latency_ms: 4.5, fps: 30.0 });
+            sink.offer(Nt4Tick {
+                pipeline: "front".into(),
+                outputs: vec![("multi_tag_pose".into(), payload)],
+                serializers: ValueSerializerMap::default(),
+                latency_ms: 4.5,
+                fps: 30.0,
+                map_pose_prefix: false,
+            });
         };
         let wait_for = |topic: &'static str, expected: Value| {
             let host = host.clone();
@@ -385,6 +438,96 @@ mod tests {
         offer(serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 2, "has_rig": false}));
         wait_for("/helios/front/tag_count", Value::Int(2)).await;
         assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn map_pose_topics_reach_an_nt4_server() {
+        use orion_nt4::{Server, ServerConfig};
+        let server = Server::start(ServerConfig { bind: "127.0.0.1:0".parse().unwrap(), ..ServerConfig::default() }).await.expect("server");
+        let port = server.local_addr().port();
+        let dir = std::env::temp_dir().join(format!("helios-nt4-map-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nt4.json");
+        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
+        let (sink, _status) = spawn(path, "helios-test".into());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !sink.active() {
+            assert!(tokio::time::Instant::now() < deadline, "never connected");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let host = server.handle();
+        let identity = serde_json::json!({"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0});
+        let covariance: Vec<f64> = (0..36).map(|i| if i % 7 == 0 { 1e-4 } else { 0.0 }).collect();
+        let map_pose = |aligned: bool, rig_translation: [f64; 3]| {
+            serde_json::json!({
+                "frame": 50, "t_ns": 1, "state": "tracking", "reason": "tags", "valid": true,
+                "alignment": {"aligned": aligned, "matched_tags": if aligned { 2 } else { 0 }, "residual_m": 0.0},
+                "calibration": {"estimated": false, "rms_px": 0.0, "views": 0, "frames": 0},
+                "pose": {
+                    "reference_from_camera": {"rotation": identity.clone(), "translation": {"x": 9.0, "y": 9.0, "z": 9.0}},
+                    "covariance": covariance.clone(), "source": "tags", "rms_px": 0.2, "points": 4, "sigma": {"position_m": [0.1, 0.1, 0.1], "rotation_deg": [1.0, 1.0, 1.0]},
+                    "hypotheses": {"count": 0, "chosen": 0, "why": "", "weights": []},
+                    "rig": {
+                        "covariance": covariance.clone(),
+                        "reference_from_rig": {"rotation": identity.clone(), "translation": {"x": rig_translation[0], "y": rig_translation[1], "z": rig_translation[2]}}
+                    }
+                },
+                "weak": {
+                    "reference_from_camera": {"rotation": identity.clone(), "translation": {"x": 1.0, "y": 0.0, "z": 0.0}},
+                    "covariance": covariance.clone(), "sigma": {"position_m": [0.5, 0.5, 0.5], "rotation_deg": [5.0, 5.0, 5.0]},
+                    "source": "lone small tag, not mapped", "tag": 3, "side_px": 12.0, "view_deg": 40.0, "rms_px": 0.3
+                }
+            })
+        };
+        let offer = |pipeline: &str, map_pose_prefix: bool, outputs: Vec<(&str, serde_json::Value)>| {
+            let outputs = outputs.into_iter().map(|(port, json)| (port.to_string(), Payload::owned("test:json", json.to_string()))).collect();
+            sink.offer(Nt4Tick { pipeline: pipeline.into(), outputs, serializers: ValueSerializerMap::default(), latency_ms: 4.5, fps: 30.0, map_pose_prefix });
+        };
+        let wait_for = |topic: &'static str, expected: Value| {
+            let host = host.clone();
+            async move {
+                while host.value(topic) != Some(expected.clone()) {
+                    assert!(tokio::time::Instant::now() < deadline, "{topic} never became {expected:?}");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        };
+
+        // A map pose alone, on a pipeline whose graph has no `multi_tag_pose`: the plain names.
+        // `weak_source` is set last in a tick, so waiting on it means the rest of the tick is there.
+        offer("front", false, vec![("pose", map_pose(true, [3.0, 4.0, 0.1]))]);
+        wait_for("/helios/front/weak_source", Value::String("lone small tag, not mapped".into())).await;
+        assert_eq!(host.value("/helios/front/map_state"), Some(Value::String("tracking".into())));
+        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/front/tag_count"), Some(Value::Int(2)));
+        assert!(matches!(host.value("/helios/front/robot_pose_std_devs"), Some(Value::DoubleArray(v)) if v.len() == 3));
+        assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
+        assert_eq!(host.value("/helios/front/weak_robot_pose_valid"), Some(Value::Boolean(false)), "the weak candidate has no rig");
+        assert_eq!(host.value("/helios/front/weak_robot_pose"), None);
+        assert_eq!(host.value("/helios/front/map_robot_pose_valid"), None, "no prefix without a multi_tag_pose");
+
+        // Unaligned on the same pipeline: no robot pose this tick, the names do not change, and the
+        // last robot pose stays.
+        offer("front", false, vec![("pose", map_pose(false, [5.0, 5.0, 0.0]))]);
+        wait_for("/helios/front/tag_count", Value::Int(0)).await;
+        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
+
+        // Beside a multi_tag_pose (pipeline `back`): the map's topics are `map_`-prefixed, and the
+        // AprilTag ones keep their names.
+        let multi = serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 3, "has_rig": true,
+            "reference_from_rig": {"rotation": identity, "translation": {"x": 3.0, "y": 4.0, "z": 0.0}}});
+        offer("back", true, vec![("multi_tag_pose", multi), ("pose", map_pose(true, [7.0, 1.0, 0.2]))]);
+        wait_for("/helios/back/map_tag_count", Value::Int(2)).await;
+        assert_eq!(host.value("/helios/back/map_robot_pose"), Some(Value::DoubleArray(vec![7.0, 1.0, 0.2, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/back/map_robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/back/map_state"), Some(Value::String("tracking".into())));
+        assert_eq!(host.value("/helios/back/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/back/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/back/tag_count"), Some(Value::Int(3)));
+        assert_eq!(host.value("/helios/back/robot_pose_std_devs"), None, "the multi-tag pose has no covariance here");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

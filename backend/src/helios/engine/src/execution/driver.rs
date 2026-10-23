@@ -203,7 +203,8 @@ impl WorkloadDriver {
         let run = next_run_id();
         let publisher = Publisher { bus: bus.clone(), pipeline: pipeline.clone(), run };
         let feeds = PipelineFeeds::new(bus.clone(), &workload.bindings);
-        let nt4 = Nt4Output { sink: nt4, live, pipeline: pipeline.clone(), serializers: serializers.clone() };
+        let map_pose_prefix = graph.output_ports.iter().any(|port| port == crate::nt4::robot_pose::MULTI_TAG_POSE_PORT);
+        let nt4 = Nt4Output { sink: nt4, live, pipeline: pipeline.clone(), serializers: serializers.clone(), map_pose_prefix };
         let recorder = TickRecorder::new(&graph, shared.clone(), nt4, publisher);
         let graph_loop = GraphLoop { recorder, graph, inbound, frame_inputs, feeds, shared: shared.clone(), stop: stop.clone(), cpu: workload.cpu, nice: workload.nice };
         // Registered before the thread runs: a consumer that starts with this pipeline waits for its
@@ -541,6 +542,8 @@ struct Nt4Output {
     live: crate::live::LiveSink,
     pipeline: String,
     serializers: ValueSerializerMap,
+    /// The graph also outputs `multi_tag_pose` (see [`Nt4Tick::map_pose_prefix`]).
+    map_pose_prefix: bool,
 }
 
 impl Nt4Output {
@@ -549,7 +552,7 @@ impl Nt4Output {
             self.live.offer(crate::live::LiveTick { pipeline: self.pipeline.clone(), outputs: outputs.clone(), serializers: self.serializers.clone(), frame_ts_ns });
         }
         if self.sink.active() {
-            self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps });
+            self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps, map_pose_prefix: self.map_pose_prefix });
         }
     }
 }
