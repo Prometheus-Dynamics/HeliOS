@@ -124,7 +124,7 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (497928e), Eidos dev (c357fb91,
+#   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (07cc5da, simulated cameras: feature `sim`), Eidos dev (c357fb91,
 #   feature tracks `eidos:features.track`; tracking overrides and tracked stage nodes), Orion v4 main (4fadba9:
 #   request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`; also the Gaia
 #   `orion` source), Lemnos dev (b2634fc: fault reasons and the lemnosd -> Orion bridge; also the

@@ -41,6 +41,7 @@ const sidebars: SidebarsConfig = {
         'getting-started/install',
         'getting-started/quickstart',
         'getting-started/update',
+        'getting-started/simulator',
       ],
     },
     {

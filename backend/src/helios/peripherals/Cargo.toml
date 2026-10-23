@@ -39,6 +39,11 @@ orion = { workspace = true, default-features = false, features = ["client"] }
 lemnos-ipc = { workspace = true }
 styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg"] }
 
+[features]
+# Simulated cameras (Styx's `sim`): the x86 sim (`tools/sim/up.sh`) serves them next to, or
+# instead of, real ones, selected by STYX_SIM_CAMERAS. Off on the board.
+sim = ["styx/sim"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # The real lemnosd over mock hardware (claims, edges, transactions, restores on disconnect).
