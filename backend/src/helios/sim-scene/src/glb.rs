@@ -10,10 +10,26 @@ pub const TARGET_ARRAY_BUFFER: u32 = 34962;
 const TARGET_ELEMENT_ARRAY_BUFFER: u32 = 34963;
 const COMPONENT_UNSIGNED_SHORT: u32 = 5123;
 const COMPONENT_FLOAT: u32 = 5126;
-/// NEAREST magnification and minification, REPEAT wrapping.
-const SAMPLER_NEAREST_REPEAT: usize = 0;
 const FILTER_NEAREST: u32 = 9728;
+const FILTER_LINEAR: u32 = 9729;
 const WRAP_REPEAT: u32 = 10497;
+
+/// A texture's magnification and minification filter (REPEAT wrapping).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Filter {
+    Nearest,
+    Linear,
+}
+
+impl Filter {
+    fn gl(self) -> u32 {
+        match self {
+            Self::Nearest => FILTER_NEAREST,
+            Self::Linear => FILTER_LINEAR,
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Builder {
@@ -22,6 +38,7 @@ pub struct Builder {
     accessors: Vec<Value>,
     images: Vec<Value>,
     textures: Vec<Value>,
+    samplers: Vec<Value>,
     materials: Vec<Value>,
     meshes: Vec<Value>,
     nodes: Vec<Value>,
@@ -91,12 +108,25 @@ impl Builder {
         self.accessors.len() - 1
     }
 
-    /// A PNG image (embedded) and a texture of it with the scene's sampler.
-    pub fn texture_png(&mut self, png: &[u8]) -> usize {
+    /// A PNG image (embedded) and a texture of it, sampled with `filter` and REPEAT wrapping.
+    pub fn texture_png(&mut self, png: &[u8], filter: Filter) -> usize {
         let view = self.view(png, None);
         self.images.push(json!({ "bufferView": view, "mimeType": "image/png" }));
-        self.textures.push(json!({ "source": self.images.len() - 1, "sampler": SAMPLER_NEAREST_REPEAT }));
+        let sampler = self.sampler(filter);
+        self.textures.push(json!({ "source": self.images.len() - 1, "sampler": sampler }));
         self.textures.len() - 1
+    }
+
+    /// The index of the sampler with `filter`, added on first use.
+    fn sampler(&mut self, filter: Filter) -> usize {
+        let value = json!({ "magFilter": filter.gl(), "minFilter": filter.gl(), "wrapS": WRAP_REPEAT, "wrapT": WRAP_REPEAT });
+        match self.samplers.iter().position(|s| *s == value) {
+            Some(index) => index,
+            None => {
+                self.samplers.push(value);
+                self.samplers.len() - 1
+            }
+        }
     }
 
     /// An unlit-looking material: the texture as base colour, double-sided (a tag is seen from
@@ -184,7 +214,7 @@ impl Builder {
             "materials": self.materials,
             "textures": self.textures,
             "images": self.images,
-            "samplers": [{ "magFilter": FILTER_NEAREST, "minFilter": FILTER_NEAREST, "wrapS": WRAP_REPEAT, "wrapT": WRAP_REPEAT }],
+            "samplers": self.samplers,
             "accessors": self.accessors,
             "bufferViews": self.buffer_views,
             "buffers": [{ "byteLength": self.bin.len() }],

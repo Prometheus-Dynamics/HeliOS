@@ -3,6 +3,8 @@
 # sim (up.sh) with Styx rendering that layout along that camera path, as a glTF scene, then scenario.ts (the
 # live-map template with the layout, each pose against Styx's truth), then stops the sim.
 #   tools/sim/scenario.sh far-lone-tag
+# A scenario directory may hold scenery.json (textured boxes, helios-sim-scene --scenery) and scenario.json
+# ({"calibration": "none"} runs the mapper without a camera calibration; see scenario.ts).
 #   SIM_SCENARIO_S=64   how long poses are recorded
 #   SIM_PROFILE=dev-release (default here): the cargo profile up.sh builds
 #   SIM_BIND, SIM_RUN_DIR, SIM_SKIP_BUILD, ...: as for up.sh
@@ -22,6 +24,8 @@ CALIBRATION="$ROOT/tools/sim/ov9782-calibration.json"
 # up.sh builds the scene from these (helios-sim-scene) and sets the camera spec, as for the default.
 unset STYX_SIM_CAMERAS
 export SIM_SCENE_LAYOUT="$DIR/layout.json" SIM_SCENE_CAMERA="$DIR/camera.json" SIM_SCENE_CALIBRATION="$CALIBRATION"
+# Textured scenery besides the tags (scenery.json), when the scenario has one.
+if [[ -f "$DIR/scenery.json" ]]; then export SIM_SCENE_SCENERY="$DIR/scenery.json"; else unset SIM_SCENE_SCENERY; fi
 
 "$ROOT/tools/sim/up.sh" > "$SIM_RUN_DIR/up.log" 2>&1 &
 UP=$!
