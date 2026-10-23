@@ -13,6 +13,8 @@ mod driver;
 mod frame_source;
 mod graph;
 pub(crate) mod outputs;
+mod pipeline_bus;
+mod pipeline_inputs;
 mod stats;
 #[cfg(test)]
 mod tests;
@@ -31,6 +33,7 @@ pub use graph::GraphSettings;
 
 use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, LoadedPlugin};
 use bindings::resolve_bindings;
+use pipeline_bus::PipelineBus;
 use driver::WorkloadDriver;
 use frame_source::{FrameSource, StyxFrameSource};
 use graph::compile_workload_graph;
@@ -77,6 +80,8 @@ pub struct ResidentExecutionSet {
     outputs_ready: Arc<Notify>,
     /// Where graph threads hand each tick's outputs to NetworkTables.
     sinks: driver::OutputSinks,
+    /// The pipelines' latest outputs, for the pipelines that take them as inputs.
+    bus: PipelineBus,
     /// Where each workload's full plan is written (published as a summary and this path).
     plan_dir: Option<std::path::PathBuf>,
 }
@@ -89,7 +94,7 @@ impl Default for ResidentExecutionSet {
 
 impl ResidentExecutionSet {
     pub fn new(settings: GraphSettings) -> Self {
-        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), sinks: driver::OutputSinks::default(), plan_dir: None }
+        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), sinks: driver::OutputSinks::default(), bus: PipelineBus::default(), plan_dir: None }
     }
 
     /// Publish every workload's outputs to NetworkTables through `sink` (drivers started after).
@@ -150,6 +155,10 @@ impl ResidentExecutionSet {
     ) -> Result<(ExecutionSessionState, Vec<ExecutionArtifactRecord>), ExecutionError> {
         let id = workload.workload_id.as_str();
         let mut resolved = resolve_bindings(workload, resources)?;
+        // Pipeline inputs are synced before each frame's tick: a graph without a camera has none.
+        if resolved.frames.is_empty() && workload.bindings.iter().any(|binding| binding.pipeline.is_some()) {
+            return Err(ExecutionError::Plan(format!("the pipeline inputs of {id} need a camera binding: the camera's frames pace the graph")));
+        }
         if let GraphRef::InlineSpec(graph) = &workload.graph_ref
             && bindings::graph_takes_sliced_frames(graph)
         {
@@ -168,7 +177,7 @@ impl ResidentExecutionSet {
                 .iter()
                 .map(|spec| StyxFrameSource::open(spec.clone()).map(|source| (spec.clone(), Box::new(source) as Box<dyn FrameSource>)).map_err(ExecutionError::Execute))
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.sinks.clone())?;
+            let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.sinks.clone(), self.bus.clone())?;
             if let Some(dir) = &self.plan_dir {
                 driver.externalize_plan(dir);
             }

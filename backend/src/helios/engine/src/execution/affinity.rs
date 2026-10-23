@@ -47,9 +47,41 @@ pub(crate) fn pin_current_thread(cpu: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Set the calling thread's nice value (`nice` in the workload config): its scheduling priority
+/// against the other threads of the machine, 0 the default and higher is lower. Linux keeps it per
+/// thread, so the graph thread's priority is its own.
+#[allow(unsafe_code)]
+pub(crate) fn set_current_thread_nice(nice: u32) -> Result<(), String> {
+    // SAFETY: pid 0 is the calling thread on Linux; no memory is passed.
+    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, nice as libc::c_int) };
+    if result != 0 {
+        return Err(format!("setpriority nice {nice}: {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nice_applies_to_the_calling_thread_only() {
+        let (own, other) = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                set_current_thread_nice(7).expect("nice");
+                current_nice()
+            });
+            (current_nice(), worker.join().expect("worker"))
+        });
+        assert_eq!(other, 7);
+        assert_ne!(own, 7, "the test thread keeps its own priority");
+    }
+
+    #[allow(unsafe_code)]
+    fn current_nice() -> i32 {
+        // SAFETY: pid 0 is the calling thread on Linux.
+        unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) }
+    }
 
     #[test]
     fn pinning_to_an_allowed_core_moves_the_thread_there() {

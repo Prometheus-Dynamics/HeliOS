@@ -30,12 +30,12 @@ use crate::{
 };
 use styx::ipc::StandardControl;
 
-use super::check_id;
+use super::{check_id, pipeline_bindings::{self, BindingSource, PipelineInputHint}};
 
 pub const ENGINE_RUNTIME: &str = "helios.engine.execution.v1";
 const ENGINE_CONFIG_SCHEMA: &str = "helios.engine.execution.config.v1";
 const GRAPH_CONTENT_TYPE: &str = "application/vnd.daedalus.graph+json";
-const WORKLOAD_PREFIX: &str = "pipeline.";
+pub(super) const WORKLOAD_PREFIX: &str = "pipeline.";
 const ARTIFACT_PREFIX: &str = "artifact.pipeline.";
 const NAME_LABEL: &str = "helios.pipeline.name";
 const REVISION_LABEL: &str = "helios.pipeline.revision";
@@ -47,11 +47,27 @@ const TELEMETRY_KIND: &str = "execution.telemetry";
 const METRICS_KIND: &str = "execution.metrics";
 const HOST_OUTPUT_PREFIX: &str = "host_output:";
 
-/// Frame-source options for a camera binding (all optional).
+/// What a graph input takes: a resource (a camera's frames, by default) or another pipeline's
+/// host output (`source: "pipeline"`, see `pipeline_bindings`). Camera options apply to a camera.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
+    /// The resource (a camera) the input takes; empty for a pipeline input.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub resource_id: String,
+    /// `resource` (the default) or `pipeline`.
+    #[serde(default, skip_serializing_if = "BindingSource::is_resource")]
+    pub source: BindingSource,
+    /// Pipeline inputs: the producing pipeline's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+    /// Pipeline inputs: the producer's host output port (`pose`, `timing`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+    /// Pipeline inputs: how long a frame waits for the producer's value of the same frame, in
+    /// milliseconds (0 to 1000; default 50). Past it the graph ticks with the producer's latest value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wait_ms: Option<u32>,
     /// Which camera of the service (name, part of it, or an identity key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<String>,
@@ -109,11 +125,20 @@ pub struct PipelineSpec {
     /// applied in the pipeline's telemetry (`cpu`, `cpu_error`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<u32>,
+    /// The nice value of the graph thread (`0` to `MAX_PIPELINE_NICE`): a lower scheduling priority
+    /// than the default, so a heavy pipeline (dense mapping) yields to a live one on the same
+    /// machine. Unset keeps the default. The engine reports what it applied (`nice`, `nice_error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nice: Option<u32>,
 }
 
 /// The highest CPU core number a pipeline may name (a 64-core machine's last core). Which cores
 /// the engine may use is the engine's to check: a core outside them is reported in telemetry.
 pub const MAX_PIPELINE_CPU: u32 = 63;
+
+/// The highest nice value a pipeline may name: the lowest scheduling priority. Raising a thread's
+/// priority needs privileges the engine may not have, so a pipeline only ever lowers its own.
+pub const MAX_PIPELINE_NICE: u32 = 19;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -478,6 +503,8 @@ pub struct Pipeline {
     pub dictionary: Option<String>,
     /// The CPU core the graph thread is pinned to (the spec's `cpu`); `null` for the scheduler's.
     pub cpu: Option<u32>,
+    /// The nice value of the graph thread (the spec's `nice`); `null` for the default.
+    pub nice: Option<u32>,
     /// Managed by this API (created through `/v1/pipelines`) rather than written by other tools.
     pub managed: bool,
 }
@@ -586,6 +613,16 @@ pub fn decode_bindings(workload: &WorkloadRecord) -> BTreeMap<String, Binding> {
     inputs
         .into_iter()
         .filter_map(|input| {
+            if let Some(pipeline) = config_string(workload, &format!("binding.{input}.pipeline")) {
+                let binding = Binding {
+                    source: BindingSource::Pipeline,
+                    pipeline: Some(pipeline),
+                    port: config_string(workload, &format!("binding.{input}.port")),
+                    max_wait_ms: config_u64(workload, &format!("binding.{input}.max_wait_ms")).map(|v| v as u32),
+                    ..Binding::default()
+                };
+                return Some((input, binding));
+            }
             let resource_id = config_string(workload, &format!("binding.{input}.resource_id"))?;
             let binding = Binding {
                 resource_id,
@@ -593,6 +630,7 @@ pub fn decode_bindings(workload: &WorkloadRecord) -> BTreeMap<String, Binding> {
                 output_width: config_u64(workload, &format!("binding.{input}.output_width")).map(|v| v as u32),
                 output_height: config_u64(workload, &format!("binding.{input}.output_height")).map(|v| v as u32),
                 pyramid: config_u64(workload, &format!("binding.{input}.pyramid")).map(|v| v as u8),
+                ..Binding::default()
             };
             Some((input, binding))
         })
@@ -677,6 +715,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         outputs,
         dictionary,
         cpu: config_u64(workload, "cpu").and_then(|cpu| u32::try_from(cpu).ok()),
+        nice: config_u64(workload, "nice").and_then(|nice| u32::try_from(nice).ok()),
         search_mode,
         full_search_every,
         loss_full_search_after: tuning.map(|tuning| tuning.loss_full_search_after),
@@ -753,12 +792,14 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
         if !super::valid_id(input) || input.contains('.') {
             return Err(ApiError::unprocessable(format!("invalid binding input name {input:?}")));
         }
-        if !view.resources.contains_key(&binding.resource_id) {
-            return Err(ApiError::unprocessable(format!("binding {input} names unknown resource {}", binding.resource_id)));
-        }
+        pipeline_bindings::validate(input, binding, view)?;
         if binding.output_width.is_some() != binding.output_height.is_some() || binding.output_width == Some(0) || binding.output_height == Some(0) {
             return Err(ApiError::unprocessable(format!("binding {input}: output_width and output_height are set together and non-zero")));
         }
+    }
+    // Pipeline inputs are paced by a camera's frames: a graph with one needs a camera binding.
+    if spec.bindings.values().any(|binding| binding.source == BindingSource::Pipeline) && camera_inputs(spec, view).next().is_none() {
+        return Err(ApiError::unprocessable("a pipeline input needs a camera binding: the camera's frames pace the graph"));
     }
     Ok(document)
 }
@@ -783,13 +824,23 @@ pub fn records_for(id: &str, spec: &PipelineSpec, document: &GraphDocument, revi
     for (index, requirement) in document.requires.iter().enumerate() {
         config = config.field(format!("plugin.{index}.name"), TypedConfigValue::String(requirement.id.clone()));
     }
+    if spec.nice.is_some_and(|nice| nice > MAX_PIPELINE_NICE) {
+        return Err(ApiError::unprocessable(format!("nice is 0 to {MAX_PIPELINE_NICE} (a lower priority than the default)")));
+    }
     if let Some(cpu) = spec.cpu {
         config = config.field("cpu", TypedConfigValue::Int(i64::from(cpu)));
+    }
+    if let Some(nice) = spec.nice {
+        config = config.field("nice", TypedConfigValue::Int(i64::from(nice)));
     }
     let mut builder = WorkloadRecord::builder(WorkloadId::new(workload_id), ENGINE_RUNTIME, ArtifactId::new(artifact_id))
         .desired_state(if spec.enabled { DesiredState::Running } else { DesiredState::Stopped })
         .assigned_to(NodeId::new(node_id));
     for (input, binding) in &spec.bindings {
+        if binding.source == BindingSource::Pipeline {
+            config = pipeline_bindings::config_fields(input, binding).into_iter().fold(config, |config, (key, value)| config.field(key, value));
+            continue;
+        }
         config = config.field(format!("binding.{input}.resource_id"), TypedConfigValue::String(binding.resource_id.clone()));
         if let Some(camera) = &binding.camera {
             config = config.field(format!("binding.{input}.camera"), TypedConfigValue::String(camera.clone()));
@@ -837,6 +888,7 @@ async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &Pipe
 
 /// Write `spec` as pipeline `id` (a new revision, kept for rollback) and return the pipeline.
 pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiResult<Pipeline> {
+    pipeline_bindings::check_not_self(id, &spec)?;
     let view = state.orion.view().await?;
     let revision = state.store.history(id).await?.next_revision();
     apply_spec(state, &view, id, &spec, revision).await?;
@@ -998,6 +1050,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
                 field_layout: pipeline.field_layout,
                 dictionary: None,
                 cpu: pipeline.cpu,
+                nice: pipeline.nice,
             }
         }
     };
@@ -1194,7 +1247,7 @@ mod tests {
         let spec = PipelineSpec {
             name: "Tags front".into(),
             graph: sample_document(),
-            bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None })]),
+            bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None, ..Binding::default() })]),
             enabled: true,
             search_mode: None,
             full_search_every: None,
@@ -1203,6 +1256,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let document = validate_spec(&spec, &view, "node-local", None).expect("valid spec");
         let inputs = CameraInputs { contexts: BTreeMap::from([("camera".to_string(), camera_context::context_fields(None, None, Default::default()))]), frame_rates: BTreeMap::new() };
@@ -1281,6 +1335,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         }
     }
 
@@ -1362,6 +1417,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let graph = effective_graph(&spec, &view).expect("tracked");
         assert_eq!(search_tuning_of(&graph), Some(SearchTuning { full_search_every: DEFAULT_FULL_SEARCH_EVERY, loss_full_search_after: 2, margin_growth_misses: 9 }));
@@ -1405,6 +1461,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
 
         let full = effective_graph(&spec, &view).expect("full");
@@ -1458,6 +1515,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let document = validate_spec(&spec, &view_with_camera(), "node-local", None).expect("deploys");
         assert!(document.requires.iter().any(|requirement| requirement.id == "eidos"), "{:?}", document.requires);
@@ -1481,6 +1539,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let document = validate_spec(&spec, &view_with_camera(), "node-local", None).expect("deploys");
         assert!(document.requires.iter().any(|requirement| requirement.id == "eidos"), "{:?}", document.requires);
@@ -1531,6 +1590,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("bare graph JSON");
         assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
@@ -1556,6 +1616,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         let error = validate_spec(&spec, &view, "node-local", None).expect_err("eidos is not loaded");
         assert!(error.message.contains("eidos"));
@@ -1576,6 +1637,7 @@ mod tests {
             field_layout: None,
             dictionary: None,
             cpu: None,
+            nice: None,
         };
         assert!(validate_spec(&spec, &view, "node-local", None).is_err());
     }
@@ -1600,9 +1662,13 @@ pub struct Template {
     pub dictionary: Option<String>,
     /// The graph input a camera binds to (its host bridge's frame input).
     pub camera_input: String,
-    /// Half-size pyramid levels its camera binding asks for: 1 for the detectors, 3 for feature
-    /// tracking (Lucas-Kanade's levels, made by the ISP where it can).
+    /// Half-size pyramid levels its camera binding asks for: 1 for the detectors and the dense
+    /// mapper, 3 for feature tracking and the live mapper (Lucas-Kanade's levels, made by the ISP
+    /// where it can).
     pub pyramid: u8,
+    /// The graph inputs that take another pipeline's output: bind each with `source: "pipeline"`,
+    /// `pipeline` set to the id of a pipeline running `producer_template`, and `port`.
+    pub pipeline_inputs: Vec<PipelineInputHint>,
     pub graph: serde_json::Value,
 }
 
@@ -1615,7 +1681,7 @@ fn template_family(id: &str) -> ApiResult<&'static str> {
         Ok("apriltag")
     } else if id.starts_with("features-") {
         Ok("features")
-    } else if id.starts_with("live-map") {
+    } else if id.starts_with("live-map") || id.starts_with("dense-map") {
         Ok("mapping")
     } else {
         Err(ApiError::internal(format!("template {id} has no known family")))
@@ -1631,8 +1697,9 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
         let family = template_family(id)?;
         let variant = if id.ends_with("-staged") { "staged" } else { "default" };
         // The feature tracks and the live mapper (`lk_levels` 4) read three half-size levels.
-        let pyramid = if matches!(family, "features" | "mapping") { 3 } else { 1 };
-        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, graph });
+        let pyramid = if family == "features" || *id == "live-map" { 3 } else { 1 };
+        let pipeline_inputs = pipeline_bindings::template_pipeline_inputs(id);
+        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, pipeline_inputs, graph });
     }
     Ok(Json(out))
 }

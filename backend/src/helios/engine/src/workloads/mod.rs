@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, deserialize_config};
 use serde::Deserialize;
 
-use crate::model::{ContextValue, EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PluginRequirement};
+use crate::model::{
+    ContextValue, DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS, EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PipelineInputSource, PluginRequirement,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +19,9 @@ struct EngineWorkloadConfig {
     /// The CPU core the graph thread is pinned to (the API's pipeline `cpu`).
     #[serde(default)]
     cpu: Option<u32>,
+    /// The graph thread's nice value (the API's pipeline `nice`).
+    #[serde(default)]
+    nice: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -44,7 +49,18 @@ enum GraphKind {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BindingConfig {
-    resource_id: String,
+    /// A resource's id (a camera, or a resource whose state is fed as JSON). Absent for a pipeline
+    /// input (`pipeline` and `port` set instead).
+    #[serde(default)]
+    resource_id: Option<String>,
+    /// Pipeline inputs only: the producing pipeline's id and its host output port (`source:
+    /// "pipeline"` in the API), and how long a frame may wait for the producer's value of it.
+    #[serde(default)]
+    pipeline: Option<String>,
+    #[serde(default)]
+    port: Option<String>,
+    #[serde(default)]
+    max_wait_ms: Option<u32>,
     /// Camera frame sources only: which camera of the service to request.
     #[serde(default)]
     camera: Option<String>,
@@ -146,6 +162,7 @@ pub fn decode_assigned_workload(record: &WorkloadRecord, node_id: &str) -> Resul
         bindings,
         plugin_requirements,
         cpu: decoded.cpu,
+        nice: decoded.nice,
     })
 }
 
@@ -172,10 +189,22 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
 
     let mut bindings = Vec::new();
     for (input, binding) in &decoded.binding {
-        let node_id = bound_nodes.get(&binding.resource_id).cloned().unwrap_or_else(|| record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default());
+        if let Some(pipeline) = &binding.pipeline {
+            let workload_id = record.workload_id.as_str().to_string();
+            if binding.resource_id.is_some() {
+                return Err(WorkloadDecodeError::InvalidField { workload_id, field: format!("binding.{input}.resource_id"), message: "a pipeline input names a pipeline and port, not a resource".into() });
+            }
+            let port = binding.port.clone().ok_or_else(|| WorkloadDecodeError::MissingField { workload_id, field: format!("binding.{input}.port") })?;
+            let source = PipelineInputSource { pipeline: pipeline.clone(), port, max_wait_ms: binding.max_wait_ms.unwrap_or(DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS) };
+            let node_id = record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default();
+            bindings.push(ExecutionBinding { input: input.clone(), node_id, pipeline: Some(source), ..ExecutionBinding::default() });
+            continue;
+        }
+        let resource_id = binding.resource_id.clone().ok_or_else(|| WorkloadDecodeError::MissingField { workload_id: record.workload_id.as_str().to_string(), field: format!("binding.{input}.resource_id") })?;
+        let node_id = bound_nodes.get(&resource_id).cloned().unwrap_or_else(|| record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default());
         let frame_request = decode_frame_request(record, input, binding)?;
         let context = decode_context(record, input, binding)?;
-        bindings.push(ExecutionBinding { input: input.clone(), resource_id: binding.resource_id.clone(), node_id, frame_request, context });
+        bindings.push(ExecutionBinding { input: input.clone(), resource_id, node_id, frame_request, context, pipeline: None });
     }
 
     if bindings.is_empty() {
@@ -185,6 +214,7 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
             node_id: binding.node_id.as_str().to_string(),
             frame_request: FrameRequestOptions::default(),
             context: BTreeMap::new(),
+            pipeline: None,
         }));
     }
 
