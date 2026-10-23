@@ -8,12 +8,14 @@
 //   5. GET /v1/live/ws delivers the pipeline's outputs, each with frame_ts_ns;
 //   6. the camera's preview WebSocket (SPV1 frames) carries capture times that match live outputs,
 //      which is what lets a viewer draw each frame's overlays with that frame;
-//   7. with SIM_TRUTH (Styx's tag scene ground truth, which up.sh writes): the detections of each
+//   7. with SIM_TRUTH (Styx's glTF scene ground truth, which up.sh writes): the detections of each
 //      frame match the frame's true tags, ids and corners (mean corner error under 2 px).
 //
 // Checks 5 and 6 record both streams in one window, so the capture times can meet.
 // Prints a pass/fail line per check with its time, then the timings and a summary.
 // Exit 1 when any check fails. Needs bun (WebSocket and fetch built in); no other dependencies.
+
+import { readTruth } from "./truth.ts";
 
 const BASE = (process.env.SIM_URL ?? "http://127.0.0.1:5800").replace(/\/$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
@@ -215,16 +217,11 @@ if (pipelineOk) {
 
   if (TRUTH) {
     await check("detections match the ground truth", async () => {
-      // Styx's truth: {timestamp_ns, tags: [{id, corners: [[x, y] x4]}]} per frame, on the same
-      // clock as the outputs' frame_ts_ns. The truth is stamped at frame start and the frame a few
-      // tens of microseconds later, so each detection frame takes the nearest truth frame within
-      // a quarter of the frame period.
-      const truth: { ts: number; tags: { id: number; corners: [number, number][] }[] }[] = [];
-      for (const line of (await Bun.file(TRUTH).text()).split("\n").filter(Boolean)) {
-        const frame = JSON.parse(line);
-        truth.push({ ts: frame.timestamp_ns, tags: frame.tags ?? [] });
-      }
-      truth.sort((a, b) => a.ts - b.ts);
+      // Styx's truth (truth.ts): each frame's tags with their four corners, on the same clock as
+      // the outputs' frame_ts_ns. The truth is stamped at frame start and the frame a few tens of
+      // microseconds later, so each detection frame takes the nearest truth frame within a quarter
+      // of the frame period.
+      const truth = readTruth(await Bun.file(TRUTH).text()).sort((a, b) => a.ts - b.ts);
       const period = truth.length > 1 ? (truth[truth.length - 1].ts - truth[0].ts) / (truth.length - 1) : Number.POSITIVE_INFINITY;
       const nearest = (ts: number) => {
         let lo = 0;

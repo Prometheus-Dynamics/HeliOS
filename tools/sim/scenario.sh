@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs a pose scenario (tools/sim/scenarios/<name>: layout.json and camera.json) end to end: the
-# sim (up.sh) with Styx rendering that layout along that camera path, then scenario.ts (the
+# sim (up.sh) with Styx rendering that layout along that camera path, as a glTF scene, then scenario.ts (the
 # live-map template with the layout, each pose against Styx's truth), then stops the sim.
 #   tools/sim/scenario.sh far-lone-tag
 #   SIM_SCENARIO_S=64   how long poses are recorded
@@ -15,7 +15,9 @@ command -v bun >/dev/null || { echo "scenario.sh needs bun" >&2; exit 2; }
 export SIM_RUN_DIR="${SIM_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/helios-scenario.XXXXXX")}"
 export SIM_BIND="${SIM_BIND:-127.0.0.1:5800}"
 CALIBRATION="$ROOT/tools/sim/ov9782-calibration.json"
-export STYX_SIM_CAMERAS="ov9782,scene=tags,layout=$DIR/layout.json,camera=$DIR/camera.json,calibration=$CALIBRATION,truth=$SIM_RUN_DIR/truth.jsonl"
+# up.sh builds the scene from these (helios-sim-scene) and sets the camera spec, as for the default.
+unset STYX_SIM_CAMERAS
+export SIM_SCENE_LAYOUT="$DIR/layout.json" SIM_SCENE_CAMERA="$DIR/camera.json" SIM_SCENE_CALIBRATION="$CALIBRATION"
 
 "$ROOT/tools/sim/up.sh" > "$SIM_RUN_DIR/up.log" 2>&1 &
 UP=$!
