@@ -22,6 +22,12 @@
 #   SIM_SCENE_CAMERA=PATH     the default scene's camera (default tools/sim/scenarios/default/camera.json)
 #   SIM_SCENE_CALIBRATION=PATH  the default scene's lens (default tools/sim/ov9782-calibration.json)
 #   SIM_SCENE_SCENERY=PATH    textured scenery besides the tags, a scenery.json (default: none)
+#   SIM_CLOCK=lockstep        Styx's sim clock (default real): lockstep advances each frame's time
+#                             by exactly one frame period however slow the render, so the camera
+#                             moves per frame as at the mode's frame rate (slower than wall time)
+#   SIM_SCENE_TIME_SCALE=N    play the camera path N times slower (default 1): with the sim
+#                             rendering at R fps, N = 120 / R gives each frame the motion of a
+#                             120 fps camera
 #   LEMNOSD_BIN_DIR=DIR       lemnosd and lemnos-orion built with `sim,orion` (default: built from
 #                             Lemnos at the commit backend/Cargo.lock pins)
 #   SIM_LEMNOS=0              run without lemnosd (the services' no-hardware paths)
@@ -136,8 +142,9 @@ if [[ -z "$STYX_SIM_CAMERAS" ]]; then
   fi
   log "building the scene into $RUN/scene.glb"
   LENS_SPEC="$("$SIM_BIN_DIR/helios-sim-scene" --layout "$SIM_SCENE_LAYOUT" --camera "$SIM_SCENE_CAMERA" \
-    --calibration "$SIM_SCENE_CALIBRATION" "${SCENERY_ARGS[@]}" --out "$RUN/scene.glb")" || die "helios-sim-scene failed"
-  STYX_SIM_CAMERAS="ov9782,scene=gltf,path=$RUN/scene.glb,$LENS_SPEC,truth=$RUN/truth.jsonl"
+    --calibration "$SIM_SCENE_CALIBRATION" "${SCENERY_ARGS[@]}" --time-scale "${SIM_SCENE_TIME_SCALE:-1}" \
+    --out "$RUN/scene.glb")" || die "helios-sim-scene failed"
+  STYX_SIM_CAMERAS="ov9782,scene=gltf,path=$RUN/scene.glb,$LENS_SPEC,clock=${SIM_CLOCK:-real},truth=$RUN/truth.jsonl"
 fi
 export STYX_SIM_CAMERAS
 # An empty startup file: no default pipeline (smoke.sh creates its own).

@@ -116,21 +116,38 @@ console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_I
 
 const lines: string[] = [];
 const timingLines: string[] = [];
+// SIM_SCENARIO_S of scene time: the frames' own timestamps (under Styx's lockstep clock the sim
+// runs slower than wall time), with a wall-clock cap of SIM_SCENARIO_WALL_S (default 20x).
+const WALL_S = Number(process.env.SIM_SCENARIO_WALL_S ?? SECONDS * 20);
+let firstTs: number | undefined;
+let wallStopped = false;
 await new Promise<void>((resolve, reject) => {
   const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=pose,timing`);
-  const timer = setTimeout(() => {
+  const finish = () => {
+    clearTimeout(timer);
     socket.close();
     resolve();
-  }, SECONDS * 1000);
+  };
+  const timer = setTimeout(() => {
+    wallStopped = true;
+    finish();
+  }, WALL_S * 1000);
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
-    for (const line of event.data.split("\n").filter(Boolean)) (line.includes('"port":"timing"') ? timingLines : lines).push(line);
+    for (const line of event.data.split("\n").filter(Boolean)) {
+      (line.includes('"port":"timing"') ? timingLines : lines).push(line);
+      const ts = Number(/"frame_ts_ns":(\d+)/.exec(line)?.[1]);
+      if (!Number.isFinite(ts)) continue;
+      firstTs ??= ts;
+      if (ts - firstTs >= SECONDS * 1e9) return finish();
+    }
   };
   socket.onerror = () => {
     clearTimeout(timer);
     reject(new Error("live WebSocket failed"));
   };
 });
+if (wallStopped) console.log(`[scenario] stopped at the wall-clock cap (${WALL_S} s) before ${SECONDS} s of scene time`);
 const telemetry = (await api("GET", `/v1/pipelines/${PIPELINE_ID}`)).telemetry ?? {};
 await Bun.write(`${OUT}/poses.jsonl`, lines.join("\n") + "\n");
 await Bun.write(`${OUT}/timing.jsonl`, timingLines.join("\n") + "\n");

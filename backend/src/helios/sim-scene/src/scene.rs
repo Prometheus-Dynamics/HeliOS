@@ -158,6 +158,15 @@ impl CameraPlan {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         Self::parse(&text).with_context(|| format!("in {}", path.display()))
     }
+
+    /// The same path `factor` times slower (each key's time times `factor`): a renderer slower
+    /// than the camera's frame rate then still sees the per-frame motion of the real one.
+    pub fn slowed(self, factor: f64) -> Self {
+        match self {
+            Self::Path(keys) => Self::Path(keys.into_iter().map(|k| Key { t: k.t * factor, ..k }).collect()),
+            still => still,
+        }
+    }
 }
 
 /// The WPILib corner of tag `tag` at `half` from its centre, as the tag frame's (Y, Z).
@@ -331,9 +340,18 @@ fn dot4(a: &[f64; 4], b: &[f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::glb::reader;
     use crate::geometry::quat_to_matrix;
     use helios_field::FRC_TAG_SIDE_M;
+
+    #[test]
+    fn a_slowed_path_keeps_its_poses_and_stretches_its_times() {
+        let plan = CameraPlan::parse(r#"{"trajectory":[{"t":0,"x":1,"y":0,"z":0.5},{"t":2,"x":2,"y":0,"z":0.5}]}"#).expect("plan");
+        let CameraPlan::Path(keys) = plan.slowed(8.0) else { panic!("a path") };
+        assert_eq!(keys.iter().map(|k| k.t).collect::<Vec<_>>(), vec![0.0, 16.0]);
+        assert_eq!(keys[1].position, [2.0, 0.0, 0.5]);
+    }
 
     fn sub(a: Vec3, b: Vec3) -> Vec3 {
         [a[0] - b[0], a[1] - b[1], a[2] - b[2]]

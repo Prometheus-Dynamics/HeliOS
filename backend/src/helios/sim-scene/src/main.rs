@@ -38,15 +38,21 @@ struct Args {
     /// WPILib coordinates; see `scenery.rs`). Without it the scene has the tags and the floor only.
     #[arg(long)]
     scenery: Option<PathBuf>,
+    /// Play the camera's trajectory this many times slower (1: as written). For a sim that
+    /// renders slower than the camera's frame rate: slowed by camera fps / rendered fps, each
+    /// frame's motion is the real camera's.
+    #[arg(long, default_value_t = 1.0)]
+    time_scale: f64,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    ensure_positive(args.tag_size)?;
+    ensure_positive("tag-size", args.tag_size)?;
     let layout_text = std::fs::read_to_string(&args.layout).with_context(|| format!("reading {}", args.layout.display()))?;
     let (layout, _format): (FieldLayout, _) =
         FieldLayout::parse(&layout_text, args.tag_size).with_context(|| format!("reading the layout {}", args.layout.display()))?;
-    let camera = scene::CameraPlan::read(&args.camera)?;
+    ensure_positive("time-scale", args.time_scale)?;
+    let camera = scene::CameraPlan::read(&args.camera)?.slowed(args.time_scale);
     let calibration_text = std::fs::read_to_string(&args.calibration).with_context(|| format!("reading {}", args.calibration.display()))?;
     let calibration: scene::Calibration =
         serde_json::from_str(&calibration_text).with_context(|| format!("reading the calibration {}", args.calibration.display()))?;
@@ -62,7 +68,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn ensure_positive(tag_size: f64) -> Result<()> {
-    anyhow::ensure!(tag_size.is_finite() && tag_size > 0.0, "--tag-size must be a positive length");
+fn ensure_positive(flag: &str, value: f64) -> Result<()> {
+    anyhow::ensure!(value.is_finite() && value > 0.0, "--{flag} must be positive");
     Ok(())
 }

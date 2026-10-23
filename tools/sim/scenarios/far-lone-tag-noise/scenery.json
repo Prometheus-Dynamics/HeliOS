@@ -1,0 +1,13 @@
+{
+  "textures": {
+    "wall": { "kind": "noise", "seed": 11, "cell_m": 0.02, "filter": "nearest" },
+    "floor": { "kind": "noise", "seed": 5, "cell_m": 0.03, "filter": "linear" }
+  },
+  "boxes": [
+    { "name": "back_wall", "centre": [5.2, 0.0, 1.2], "size": [0.1, 6.0, 2.4], "yaw": 0, "texture": "wall" },
+    { "name": "left_wall", "centre": [2.0, 2.2, 1.2], "size": [7.0, 0.1, 2.4], "yaw": 0, "texture": "wall" },
+    { "name": "right_wall", "centre": [2.0, -2.2, 1.2], "size": [7.0, 0.1, 2.4], "yaw": 0, "texture": "wall" },
+    { "name": "rear_wall", "centre": [-1.2, 0.0, 1.2], "size": [0.1, 6.0, 2.4], "yaw": 0, "texture": "wall" },
+    { "name": "floor", "centre": [2.0, 0.0, 0.005], "size": [7.0, 4.4, 0.01], "yaw": 0, "texture": "floor" }
+  ]
+}

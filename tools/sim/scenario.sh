@@ -6,6 +6,9 @@
 # A scenario directory may hold scenery.json (textured boxes, helios-sim-scene --scenery) and scenario.json
 # ({"calibration": "none"} runs the mapper without a camera calibration; see scenario.ts).
 #   SIM_SCENARIO_S=64   how long poses are recorded
+#   SIM_CLOCK=lockstep (default here): frames one frame period apart however slow the render;
+#                       the recording then covers SIM_SCENARIO_S of wall time, less scene time
+#   SIM_SCENE_TIME_SCALE=N  with SIM_CLOCK=real: play the camera path N times slower instead
 #   SIM_PROFILE=dev-release (default here): the cargo profile up.sh builds
 #   SIM_BIND, SIM_RUN_DIR, SIM_SKIP_BUILD, ...: as for up.sh
 set -euo pipefail
@@ -20,6 +23,9 @@ mkdir -p "$SIM_RUN_DIR"
 export SIM_BIND="${SIM_BIND:-127.0.0.1:5800}"
 # Poses are only worth judging at speed: an optimized build (release settings without LTO) unless told otherwise.
 export SIM_PROFILE="${SIM_PROFILE:-dev-release}"
+# Tracking is judged at the camera's own frame spacing: lockstep time (the sim runs slower than
+# wall time, each frame one frame period after the last), unless SIM_CLOCK=real.
+export SIM_CLOCK="${SIM_CLOCK:-lockstep}"
 CALIBRATION="$ROOT/tools/sim/ov9782-calibration.json"
 # up.sh builds the scene from these (helios-sim-scene) and sets the camera spec, as for the default.
 unset STYX_SIM_CAMERAS

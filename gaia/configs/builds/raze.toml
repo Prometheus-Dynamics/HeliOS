@@ -126,13 +126,14 @@ rev = "f3c022beca6f1429505be37d26b9b32a3dcd1d59"
 # kernel-modules/rp1-cfe: the receiver's mid-frame line event for sliced delivery;
 # kernel-modules/pispbe: back end job setup in ~7 us). HeliOS always runs Styx, so all three
 # ship, installed to /lib/modules/<ver>/updates over the stock drivers. The same Styx commit as
-# backend/Cargo.lock's styx crate. History: a22bebd (simulated scenes: scene=gltf, a glTF scene
-# the application builds; 53e873d had scene=tags) changed no kernel module.
+# backend/Cargo.lock's styx crate. History: ab05a57 (simulated cameras: clock=lockstep) and
+# a22bebd (simulated scenes: scene=gltf, a glTF scene the application builds; 53e873d had
+# scene=tags) changed no kernel module.
 [[sources]]
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "a22bebde734eace2e5b946a02a0af2df7dccf331"
+rev = "ab05a576d8c9ee4cc5fedfee91edd16f3a7288d1"
 
 [[sources]]
 id = "orion"
