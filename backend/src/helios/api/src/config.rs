@@ -56,6 +56,8 @@ pub struct ApiConfig {
     pub lemnos_socket: PathBuf,
     /// Playback players (`playback/`): their concurrent limit, sockets and allowed folders.
     pub playback: crate::playback::PlaybackSettings,
+    /// The node's live stream the UI shows, and the history a new client starts with.
+    pub live_streams: crate::live_streams::LiveStreamSettings,
 }
 
 impl Default for ApiConfig {
@@ -80,6 +82,7 @@ impl Default for ApiConfig {
             startup_file: DEFAULT_STARTUP_FILE.into(),
             lemnos_socket: helios_recorder::lemnos::DEFAULT_SOCKET.into(),
             playback: crate::playback::PlaybackSettings::default(),
+            live_streams: crate::live_streams::LiveStreamSettings::default(),
         }
     }
 }
@@ -135,6 +138,12 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_LEMNOSD_SOCKET") {
             config.lemnos_socket = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_LIVE_STREAM_ID") {
+            config.live_streams.stream_id = value.clone();
+        }
+        if let Some(value) = env.get("HELIOS_LIVE_STREAM_BACKFILL_MS") {
+            config.live_streams.backfill_ms = value.parse()?;
         }
         if let Some(value) = env.get("HELIOS_API_STARTUP_FILE") {
             config.startup_file = value.into();
