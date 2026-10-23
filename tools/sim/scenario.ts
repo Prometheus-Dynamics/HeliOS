@@ -276,13 +276,35 @@ const toLayout = aligned || fitted.length < 3 ? (p: Vec3) => p : rigidFit(fitted
 
 // --- Report -----------------------------------------------------------------------------------
 
-const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm,phase,cal_estimated,cal_rms_px,cal_views,cal_frames,cal_model,cal_fx,cal_fy,cal_cx,cal_cy"];
+const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm,phase,cal_estimated,cal_rms_px,cal_views,cal_frames,cal_model,cal_fx,cal_fy,cal_cx,cal_cy,nees,weak_source,weak_x,weak_y,weak_z,weak_error_cm,weak_nees"];
 const errors: number[] = [];
 let jumps = 0;
 let worstJump = 0;
 let unmatched = 0;
 let posed = 0;
 const states = new Map<string, number>();
+// Position NEES (normalised estimation error squared): e' Σ⁻¹ e with Σ the translation block of
+// the pose's 6x6 covariance ([rx, ry, rz, tx, ty, tz], row-major, the reference frame). An
+// honest covariance gives a mean near 3. Only meaningful in the layout frame (aligned).
+function positionNees(error: Vec3, covariance: unknown): number {
+  if (!Array.isArray(covariance) || covariance.length !== 36) return Number.NaN;
+  const c = (i: number, j: number) => Number(covariance[(i + 3) * 6 + (j + 3)]);
+  const [a, b, d, e, g, h, k, l, m] = [c(0, 0), c(0, 1), c(0, 2), c(1, 0), c(1, 1), c(1, 2), c(2, 0), c(2, 1), c(2, 2)];
+  const det = a * (g * m - h * l) - b * (e * m - h * k) + d * (e * l - g * k);
+  if (!(Math.abs(det) > 0)) return Number.NaN;
+  const inv = [
+    [(g * m - h * l) / det, (d * l - b * m) / det, (b * h - d * g) / det],
+    [(h * k - e * m) / det, (a * m - d * k) / det, (d * e - a * h) / det],
+    [(e * l - g * k) / det, (b * k - a * l) / det, (a * g - b * e) / det],
+  ];
+  let sum = 0;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) sum += error[i] * inv[i][j] * error[j];
+  return sum;
+}
+const neesMain: number[] = [];
+const weakErrors: number[] = [];
+const weakNees: number[] = [];
+let weakFrames = 0;
 const errorsBySize = new Map<string, number[]>();
 const errorsByPhase = new Map<Phase, number[]>();
 const jumpsBySize = new Map<string, number>();
@@ -322,6 +344,20 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
   } else {
     previous = undefined;
   }
+  const truthError = (p: Vec3): Vec3 => [p[0] - frame.position[0], p[1] - frame.position[1], p[2] - frame.position[2]];
+  const nees = aligned && estimate ? positionNees(truthError(estimate), solved?.covariance) : Number.NaN;
+  if (Number.isFinite(nees)) neesMain.push(nees);
+  const weak = pose.weak;
+  const weakAt = weak ? translationOf(weak.reference_from_camera) : undefined;
+  let weakError = Number.NaN;
+  let weakNeesValue = Number.NaN;
+  if (weak) weakFrames += 1;
+  if (weakAt && aligned) {
+    weakError = norm(truthError(weakAt)) * 100;
+    weakErrors.push(weakError);
+    weakNeesValue = positionNees(truthError(weakAt), weak.covariance);
+    if (Number.isFinite(weakNeesValue)) weakNees.push(weakNeesValue);
+  }
   const position = solved?.sigma?.position_m;
   const sigmaT = Array.isArray(position) ? Math.max(...position) * 100 : typeof position === "number" ? position * 100 : Number.NaN;
   const f = (v: number, digits = 3) => (Number.isFinite(v) ? v.toFixed(digits) : "");
@@ -346,6 +382,11 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
       calibrationReport.frames ?? "",
       calibrationReport.model ?? "",
       ...["fx", "fy", "cx", "cy"].map((k) => f(Number(calibrationReport[k] ?? Number.NaN), 2)),
+      f(nees, 2),
+      weak?.source ?? "",
+      ...(weakAt ?? [Number.NaN, Number.NaN, Number.NaN]).map((v) => f(v)),
+      f(weakError, 1),
+      f(weakNeesValue, 2),
     ].join(","),
   );
 }
@@ -357,6 +398,11 @@ const percentile = (values: number[], p: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 };
 console.log(`[scenario] ${lines.length} pose outputs, ${unmatched} without a truth frame, ${posed} posed; states ${JSON.stringify(Object.fromEntries(states))}`);
+{
+  const q = (values: number[], p: number) => (values.length ? [...values].sort((x, y) => x - y)[Math.min(values.length - 1, Math.floor(p * values.length))] : Number.NaN);
+  console.log(`[scenario] main pose position NEES (honest ≈ 3): median ${q(neesMain, 0.5).toFixed(2)}, p90 ${q(neesMain, 0.9).toFixed(2)} over ${neesMain.length} frames`);
+  console.log(`[scenario] weak pose: ${weakFrames} frames; error p50 ${q(weakErrors, 0.5).toFixed(1)} cm, p90 ${q(weakErrors, 0.9).toFixed(1)} cm; NEES median ${q(weakNees, 0.5).toFixed(2)}, p90 ${q(weakNees, 0.9).toFixed(2)}`);
+}
 console.log(aligned ? "[scenario] the map aligned to the layout: errors in the layout frame" : `[scenario] the map never aligned to the layout: errors after a rigid fit of ${fitted.length} poses to the truth`);
 console.log(`[scenario] error cm: p50 ${percentile(errors, 0.5).toFixed(1)}, p95 ${percentile(errors, 0.95).toFixed(1)}, max ${percentile(errors, 1).toFixed(1)}`);
 for (const [bucket, values] of [...errorsBySize].sort()) {
