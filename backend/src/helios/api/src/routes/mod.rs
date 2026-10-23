@@ -10,6 +10,7 @@ pub mod pipelines;
 pub mod playback;
 pub mod recordings;
 pub mod resources;
+pub mod streams;
 pub mod system;
 pub mod update;
 
@@ -61,6 +62,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/logs", get(logs::query))
         .route("/v1/logs/stream", get(logs::stream))
         .route("/v1/events", get(events::events))
+        // Live streams (the node's Orion stream, shared by every client)
+        .route("/v1/streams/ws", get(streams::ws))
         // Cameras
         .route("/v1/cameras", get(cameras::list))
         .route("/v1/cameras/{id}", get(cameras::get_one))

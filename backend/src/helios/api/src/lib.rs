@@ -20,6 +20,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod leds;
 pub mod live_outputs;
+pub mod live_streams;
 pub mod orion;
 pub mod playback;
 pub mod recording_nt;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub leds: leds::LedHandle,
     /// The open playback players (recordings and image folders served as cameras).
     pub playback: playback::Players,
+    /// The node's live streams for the UI (`/v1/streams/ws`): one subscription, shared.
+    pub live_streams: Arc<live_streams::LiveStreams>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -74,8 +77,10 @@ impl AppState {
     pub fn new(config: ApiConfig) -> SharedState {
         let store = Arc::new(store::Store::new(config.state_dir.clone()));
         let events = Arc::new(events::EventHub::new(256));
+        let orion_link = orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone());
         Arc::new(Self {
-            orion: orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone()),
+            live_streams: live_streams::LiveStreams::new(config.live_streams.clone(), orion_link.clone()),
+            orion: orion_link,
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
             calibrations: calibration_capture::CalibrationSessions::default(),

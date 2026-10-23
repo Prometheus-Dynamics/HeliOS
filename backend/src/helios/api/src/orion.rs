@@ -20,6 +20,7 @@ use crate::error::{ApiError, ApiResult};
 const CLIENT_NAME: &str = "helios-api";
 const EVENTS_CLIENT_NAME: &str = "helios-api-events";
 const ACTIONS_CLIENT_NAME: &str = "helios-api-actions";
+const LIVE_STREAMS_CLIENT_NAME: &str = "helios-api-live";
 
 /// Anything that runs an Orion action and waits for its result: [`Orion`] in the server, a fake in
 /// the tests of the action routes.
@@ -100,6 +101,12 @@ impl Orion {
         events.subscribe_state_and_observed(Revision::ZERO).await.map_err(fail)?;
         events.subscribe_status(StatusQuery::all()).await.map_err(fail)?;
         Ok(events)
+    }
+
+    /// An event stream on the node's stream socket for live streams only (`live_streams`): the
+    /// caller subscribes to the stream it wants, nothing else is sent.
+    pub async fn live_stream_events(&self) -> ApiResult<ControlPlaneEventStream> {
+        ControlPlaneEventStream::connect_at(&self.stream_socket, LIVE_STREAMS_CLIENT_NAME).await.map_err(|error| unreachable(&self.stream_socket, error))
     }
 
     /// Every live status entry of the node (its status lane: the Lemnos bridge's device readings
