@@ -61,6 +61,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/logs", get(logs::query))
         .route("/v1/logs/stream", get(logs::stream))
         .route("/v1/events", get(events::events))
+        .route("/v1/live/ws", get(crate::live_outputs::live_ws))
         // Cameras
         .route("/v1/cameras", get(cameras::list))
         .route("/v1/cameras/{id}", get(cameras::get_one))

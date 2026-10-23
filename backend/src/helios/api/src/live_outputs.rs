@@ -1,14 +1,27 @@
 //! Pipeline outputs as they are produced: helios-engine's live socket (`helios_engine::live`,
-//! `HELIOS_ENGINE_LIVE_SOCKET`) read while anyone follows the event stream, each line published at
-//! once as an `output` event (the same shape the Orion watcher sends, `GET /v1/outputs`'s
-//! entries). The engine coalesces to about the display rate, so a 120 fps pipeline's overlay
-//! follows its frames instead of Orion's publish interval (250 ms).
+//! `HELIOS_ENGINE_LIVE_SOCKET`: every output of every tick, newline-delimited JSON with the
+//! frame's capture time) relayed to clients on `GET /v1/live/ws`, unchanged and in full.
+//!
+//! One generic stream for everything that reads outputs: a camera view matches each preview
+//! frame to the outputs of the same `frame_ts_ns`, tables and charts take what they show, tools
+//! take everything. The socket is read only while a client is connected, and the relay never
+//! waits on a slow client (it skips to the newest data).
 
-use std::{path::PathBuf, sync::atomic::Ordering, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
+use axum::{
+    extract::{
+        Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    response::Response,
+};
+use futures_util::StreamExt;
+use serde::Deserialize;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
+    sync::broadcast,
 };
 
 use crate::SharedState;
@@ -17,53 +30,146 @@ use crate::SharedState;
 pub const DEFAULT_SOCKET: &str = "/run/helios/engine-live.sock";
 /// Wait between connection attempts while the engine is not there.
 const RETRY: Duration = Duration::from_secs(1);
+/// Chunks waiting for slow clients; beyond this a client skips ahead.
+const FANOUT: usize = 1024;
 
 pub fn socket_path() -> PathBuf {
     std::env::var_os("HELIOS_ENGINE_LIVE_SOCKET").map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from)
 }
 
-/// Follow the live outputs while the event stream has subscribers.
-pub fn spawn(state: SharedState, socket: PathBuf) -> tokio::task::JoinHandle<()> {
+/// The relay: whole lines read from the engine, fanned out to every client.
+pub struct LiveRelay {
+    lines: broadcast::Sender<Arc<str>>,
+    wanted: tokio::sync::Notify,
+}
+
+impl LiveRelay {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { lines: broadcast::channel(FANOUT).0, wanted: tokio::sync::Notify::new() })
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
+        let rx = self.lines.subscribe();
+        self.wanted.notify_one();
+        rx
+    }
+
+    fn clients(&self) -> usize {
+        self.lines.receiver_count()
+    }
+}
+
+/// Read the engine's socket while anyone is connected to `/v1/live/ws`.
+pub fn spawn(relay: Arc<LiveRelay>, socket: PathBuf) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            state.events.wait_for_subscriber().await;
+            while relay.clients() == 0 {
+                relay.wanted.notified().await;
+            }
             match UnixStream::connect(&socket).await {
-                Ok(stream) => {
-                    state.events.live_outputs.store(true, Ordering::Release);
-                    follow(&state, stream).await;
-                    state.events.live_outputs.store(false, Ordering::Release);
-                }
+                Ok(stream) => follow(&relay, stream).await,
                 Err(_) => tokio::time::sleep(RETRY).await,
             }
         }
     })
 }
 
-/// Publish each line until the engine closes the socket or nobody is subscribed any more.
-async fn follow(state: &SharedState, stream: UnixStream) {
-    let mut lines = BufReader::with_capacity(64 * 1024, stream).lines();
+/// Fan out what the engine sends, in chunks of whole lines, until it closes or nobody is left.
+async fn follow(relay: &LiveRelay, mut stream: UnixStream) {
+    let mut buffer = Vec::with_capacity(256 * 1024);
+    let mut chunk = vec![0_u8; 64 * 1024];
     let mut idle = tokio::time::interval(Duration::from_secs(2));
     loop {
         tokio::select! {
-            line = lines.next_line() => match line {
-                Ok(Some(line)) => {
-                    if let Some((id, value)) = output_event(&line) {
-                        state.events.publish("output", serde_json::json!({ "id": id, "change": "updated", "value": value }));
+            read = stream.read(&mut chunk) => match read {
+                Ok(0) | Err(_) => return,
+                Ok(n) => {
+                    buffer.extend_from_slice(&chunk[..n]);
+                    // Everything up to the last newline is whole lines; the rest waits.
+                    if let Some(end) = buffer.iter().rposition(|b| *b == b'\n') {
+                        let lines = String::from_utf8_lossy(&buffer[..=end]).into_owned();
+                        buffer.drain(..=end);
+                        let _ = relay.lines.send(lines.into());
                     }
                 }
-                Ok(None) | Err(_) => return,
             },
-            // Disconnecting with nobody watching stops the engine serializing for no one.
-            _ = idle.tick() => if state.events.subscribers() == 0 { return },
+            // Disconnecting with nobody left stops the engine serializing for no one.
+            _ = idle.tick() => if relay.clients() == 0 {
+                let _ = stream.shutdown().await;
+                return;
+            },
         }
     }
 }
 
-/// A live line as the `output` event's id (`<pipeline>/<port>`) and value.
-fn output_event(line: &str) -> Option<(String, serde_json::Value)> {
-    let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    let id = format!("{}/{}", value.get("pipeline")?.as_str()?, value.get("port")?.as_str()?);
-    Some((id, value))
+/// What a client asks for: only these pipelines and/or ports (all when absent), comma-separated.
+#[derive(Debug, Default, Deserialize)]
+pub struct LiveFilter {
+    pub pipelines: Option<String>,
+    pub ports: Option<String>,
+}
+
+impl LiveFilter {
+    fn parts(text: &Option<String>) -> Vec<String> {
+        text.as_deref().unwrap_or_default().split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+    }
+
+    /// The lines of `chunk` this filter keeps (all of them without a filter).
+    fn keep(&self, chunk: &str) -> Option<String> {
+        let (pipelines, ports) = (Self::parts(&self.pipelines), Self::parts(&self.ports));
+        if pipelines.is_empty() && ports.is_empty() {
+            return None;
+        }
+        let mut out = String::new();
+        for line in chunk.lines() {
+            let Ok(head) = serde_json::from_str::<LineHead>(line) else { continue };
+            if (pipelines.is_empty() || pipelines.contains(&head.pipeline)) && (ports.is_empty() || ports.contains(&head.port)) {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        Some(out)
+    }
+}
+
+#[derive(Deserialize)]
+struct LineHead {
+    pipeline: String,
+    port: String,
+}
+
+/// `GET /v1/live/ws[?pipelines=a,b][&ports=detections,tracks]`: every output of every tick, as
+/// text messages of newline-delimited JSON (`{"pipeline", "port", "observed_at_ms",
+/// "frame_ts_ns", "value"}` per line).
+pub async fn live_ws(State(state): State<SharedState>, Query(filter): Query<LiveFilter>, upgrade: WebSocketUpgrade) -> Response {
+    let rx = state.live.subscribe();
+    upgrade.on_upgrade(move |socket| relay_to(socket, rx, filter))
+}
+
+async fn relay_to(mut socket: WebSocket, mut rx: broadcast::Receiver<Arc<str>>, filter: LiveFilter) {
+    loop {
+        tokio::select! {
+            chunk = rx.recv() => match chunk {
+                Ok(chunk) => {
+                    let text = match filter.keep(&chunk) {
+                        Some(kept) if kept.is_empty() => continue,
+                        Some(kept) => kept,
+                        None => chunk.to_string(),
+                    };
+                    if socket.send(Message::Text(text.into())).await.is_err() {
+                        return;
+                    }
+                }
+                // Behind: the newer chunks are coming; skip to them.
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            message = socket.next() => match message {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -71,11 +177,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_line_becomes_an_output_event_with_the_outputs_shape() {
-        let (id, value) = output_event(r#"{"pipeline":"front","port":"detections","observed_at_ms":5,"value":{"detections":[]}}"#).expect("event");
-        assert_eq!(id, "front/detections");
-        assert_eq!(value["value"]["detections"], serde_json::json!([]));
-        assert_eq!(value["observed_at_ms"], 5);
-        assert!(output_event("not json").is_none());
+    fn a_filter_keeps_the_lines_asked_for() {
+        let chunk = concat!(
+            r#"{"pipeline":"front","port":"detections","value":{}}"#,
+            "\n",
+            r#"{"pipeline":"front","port":"tracks","value":{}}"#,
+            "\n",
+            r#"{"pipeline":"back","port":"detections","value":{}}"#,
+            "\n"
+        );
+        assert!(LiveFilter::default().keep(chunk).is_none(), "no filter: everything as is");
+        let ports = LiveFilter { ports: Some("detections".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
+        assert_eq!(ports.lines().count(), 2);
+        let both = LiveFilter { pipelines: Some("front".into()), ports: Some("tracks".into()) }.keep(chunk).expect("filtered");
+        assert_eq!(both.lines().count(), 1);
+        assert!(both.contains("\"tracks\""));
     }
 }

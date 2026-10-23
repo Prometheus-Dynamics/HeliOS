@@ -475,7 +475,7 @@ impl TickRecorder {
                 state.metrics.set_frame_overhead(&report);
             }
             if let Some(outputs) = nt4_outputs {
-                self.nt4.offer(outputs, state.stats.last_tick_ms, state.stats.fps);
+                self.nt4.offer(outputs, state.stats.last_tick_ms, state.stats.fps, state.stats.last_frame_timestamp);
             }
         }
         self.shared.outputs_ready.notify_one();
@@ -505,9 +505,9 @@ struct Nt4Output {
 }
 
 impl Nt4Output {
-    fn offer(&self, outputs: Vec<(String, Payload)>, latency_ms: f64, fps: f64) {
+    fn offer(&self, outputs: Vec<(String, Payload)>, latency_ms: f64, fps: f64, frame_ts_ns: Option<u64>) {
         if self.live.active() {
-            self.live.offer(crate::live::LiveTick { pipeline: self.pipeline.clone(), outputs: outputs.clone(), serializers: self.serializers.clone() });
+            self.live.offer(crate::live::LiveTick { pipeline: self.pipeline.clone(), outputs: outputs.clone(), serializers: self.serializers.clone(), frame_ts_ns });
         }
         if self.sink.active() {
             self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps });

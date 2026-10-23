@@ -64,6 +64,8 @@ pub struct AppState {
     pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
     /// The LED director: HeliOS's state on the status ring (`leds`, started by `leds::start`).
     pub leds: leds::LedHandle,
+    /// Every pipeline output of every tick, relayed from helios-engine (`GET /v1/live/ws`).
+    pub live: Arc<live_outputs::LiveRelay>,
     /// The open playback players (recordings and image folders served as cameras).
     pub playback: playback::Players,
 }
@@ -87,6 +89,7 @@ impl AppState {
             update_lock: routes::update::new_update_lock(),
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
+            live: live_outputs::LiveRelay::new(),
             playback: playback::Players::new(::orion::client::LocalNodeRuntime::new(config.orion_socket.clone(), config.orion_stream_socket.clone()), &config.node_id, config.playback.clone()),
             config,
         })

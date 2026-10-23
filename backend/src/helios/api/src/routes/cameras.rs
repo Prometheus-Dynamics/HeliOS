@@ -369,6 +369,9 @@ pub async fn preview_ws(State(state): State<SharedState>, Path(id): Path<String>
     Ok(upgrade.on_upgrade(move |socket| send_preview(socket, preview)))
 }
 
+/// Each frame as a binary message (Styx's header, with the frame's sequence and capture time,
+/// then the JPEG). A viewer draws each frame with the pipeline outputs of the same capture time
+/// from `GET /v1/live/ws`.
 async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::preview::Preview>) {
     let mut viewer = preview.subscribe();
     loop {

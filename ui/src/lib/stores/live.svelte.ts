@@ -6,7 +6,8 @@
 import { dictionaryLabel } from "#lib/format.js";
 import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import type { Detection } from "#lib/api/model.js";
-import { api, ApiError, errorText, isNotAvailable } from "#lib/api/client.js";
+import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl } from "#lib/api/client.js";
+import { LiveOutputs } from "./live-outputs";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
@@ -114,8 +115,14 @@ export class LiveCluster {
     return this.snapshot.device?.node_id ?? "device";
   }
 
+  /** Every output of every tick (`/v1/live/ws`): the latest applied once per frame, a short history per output for frame matching. */
+  readonly liveOutputs = new LiveOutputs(liveOutputsUrl(), (outputs) => {
+    for (const output of outputs) this.applyOutput({ id: output.id, change: "updated", value: output.value }, true);
+  });
+
   start(): () => void {
     void this.refreshAll();
+    this.unsubscribers.push(this.liveOutputs.start());
     this.unsubscribers.push(
       api.events({
         onOpen: () => {
@@ -352,9 +359,42 @@ export class LiveCluster {
   }
 
   /** An `output` event: a pipeline published a new value of a host output. */
-  private applyOutput(data: { id: string; change: string; value?: W.PipelineOutput }) {
+  /** Cameras whose preview arrives with its overlays frame by frame (refcounted by viewer). */
+  private frameOverlays = new Map<string, number>();
+
+  /** A camera view now draws its overlays with each preview frame; returns the stop. */
+  beginFrameOverlay(cameraId: string): () => void {
+    this.frameOverlays.set(cameraId, (this.frameOverlays.get(cameraId) ?? 0) + 1);
+    return () => {
+      const left = (this.frameOverlays.get(cameraId) ?? 1) - 1;
+      if (left > 0) this.frameOverlays.set(cameraId, left);
+      else this.frameOverlays.delete(cameraId);
+    };
+  }
+
+  /** Draw camera `cameraId`'s overlays as they were at the frame captured at `frameTs` (ns). */
+  applyFrameOverlay(cameraId: string, frameTs: number) {
+    for (const pipeline of this.pipelines.values()) {
+      if (this.cameraOfPipeline(pipeline) !== cameraId) continue;
+      for (const port of ["detections", "tracks"]) {
+        const output = this.liveOutputs.at(`${pipeline.id}/${port}`, frameTs);
+        if (output) this.applyOutput({ id: output.id, change: "updated", value: output.value }, true, true);
+      }
+    }
+  }
+
+  private applyOutput(data: { id: string; change: string; value?: W.PipelineOutput }, live = false, frame = false) {
     this.lastOutputEvent = performance.now();
     const [pipelineId, port] = data.id.split("/");
+    // With the live stream connected, the event stream's (older, slower) copies are ignored;
+    // removals still come from there.
+    if (!live && this.liveOutputs.connected && data.change !== "removed") return;
+    // A camera view drawing its overlays frame by frame takes them from its frames only.
+    if (!frame && (port === "tracks" || port === "detections") && data.change !== "removed") {
+      const pipeline = this.pipelines.get(pipelineId);
+      const camera = pipeline && this.cameraOfPipeline(pipeline);
+      if (camera && this.frameOverlays.has(camera)) return;
+    }
     if (port === "tracks") return this.applyTracks(pipelineId, data);
     if (port === "pose" || port === "snapshot" || port === "timing") return this.applyMap(pipelineId, port, data);
     if (port !== "detections") return;

@@ -53,14 +53,11 @@ pub struct ApiEvent {
 pub struct EventHub {
     tx: broadcast::Sender<ApiEvent>,
     subscribed: Notify,
-    /// The engine's live outputs are connected (`live_outputs`): `output` updates come from
-    /// there, every tick, instead of from Orion's publish interval.
-    pub live_outputs: std::sync::atomic::AtomicBool,
 }
 
 impl EventHub {
     pub fn new(capacity: usize) -> Self {
-        Self { tx: broadcast::channel(capacity).0, subscribed: Notify::new(), live_outputs: std::sync::atomic::AtomicBool::new(false) }
+        Self { tx: broadcast::channel(capacity).0, subscribed: Notify::new() }
     }
 
     pub fn publish(&self, kind: &str, data: serde_json::Value) {
@@ -84,6 +81,8 @@ impl EventHub {
             self.subscribed.notified().await;
         }
     }
+
+
 }
 
 /// What the watcher compares between polls.
@@ -237,13 +236,7 @@ impl Watch {
                     outputs: routes::pipelines::outputs_digest(&view),
                 };
                 if let Some(before) = &self.seen.last {
-                    let live = state.events.live_outputs.load(std::sync::atomic::Ordering::Acquire);
                     for (kind, data) in diff(before, &digest) {
-                        // With the live outputs connected, Orion's (older) output values would
-                        // only make the UI step back; removals still come from here.
-                        if live && kind == "output" && data["change"] != "removed" {
-                            continue;
-                        }
                         state.events.publish(kind, data);
                     }
                 }

@@ -8,6 +8,7 @@
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { Overlays } from "./overlays";
   import { featureSummaryText, toFeedSpace, trackFill } from "./features";
+  import { openPreview, previewSocketUrl } from "./preview-socket";
 
 
   let {
@@ -31,10 +32,42 @@
   // The live preview's own size (scaled by the device, 640x400 by default) once it loads.
   let natural = $state<{ w: number; h: number } | null>(null);
   let previewFailed = $state(false);
+  // The live preview comes over its WebSocket, each frame with its overlays, drawn together on a
+  // canvas; the MJPEG <img> is the fallback when the socket cannot be used.
+  let socketFailed = $state(false);
+  const socketMode = $derived(Boolean(live) && !socketFailed && typeof WebSocket !== "undefined" && Boolean(cluster.live));
+  let screen = $state<HTMLCanvasElement>();
   $effect(() => {
     void live;
     natural = null;
     previewFailed = false;
+    socketFailed = false;
+  });
+  $effect(() => {
+    if (!socketMode || !live || !screen || !cluster.live) return;
+    const target = screen;
+    const store = cluster.live;
+    const stopOverlay = store.beginFrameOverlay(camera.resourceId);
+    const close = openPreview(
+      previewSocketUrl(live, location.href),
+      (frame) => {
+        if (!natural || natural.w !== frame.width || natural.h !== frame.height) natural = { w: frame.width, h: frame.height };
+        if (target.width !== frame.bitmap.width || target.height !== frame.bitmap.height) {
+          target.width = frame.bitmap.width;
+          target.height = frame.bitmap.height;
+        }
+        target.getContext("2d")?.drawImage(frame.bitmap, 0, 0);
+        frame.bitmap.close();
+        // The outputs of this very frame, so the SVG redraws with the image.
+        store.applyFrameOverlay(camera.resourceId, frame.timestampNs);
+        if (overlays.histogram && frame.sequence % 8 === 0) sample(true);
+      },
+      () => (socketFailed = true),
+    );
+    return () => {
+      close();
+      stopOverlay();
+    };
   });
   // Feed frames are a scaled replay; overlays use the feed's pixel space and
   // the ROI is stored in sensor pixels.
@@ -113,18 +146,19 @@
   }
   // An MJPEG stream fires `load` once, so the live preview is sampled on a timer.
   $effect(() => {
-    if (!live || !overlays.histogram) return;
+    if (!live || socketMode || !overlays.histogram) return;
     const timer = setInterval(() => sample(true), 500);
     return () => clearInterval(timer);
   });
   function sample(force = false) {
-    if (!overlays.histogram || !img || !img.complete || !img.naturalWidth || (!force && index % 4)) return;
+    const source: CanvasImageSource | undefined = socketMode ? screen : img;
+    if (!overlays.histogram || !source || (!socketMode && (!img?.complete || !img.naturalWidth)) || (!force && index % 4)) return;
     canvas ??= document.createElement("canvas");
     canvas.width = 128;
     canvas.height = 80;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
-    ctx.drawImage(img, 0, 0, 128, 80);
+    ctx.drawImage(source, 0, 0, 128, 80);
     let data: Uint8ClampedArray;
     try {
       data = ctx.getImageData(0, 0, 128, 80).data;
@@ -146,7 +180,9 @@
 
 <div class="feed" bind:this={host} style:--tint={tint}>
   <div class="frame" style:width="{fit.w}px" style:height="{fit.h}px">
-    {#if (live && !previewFailed) || camera.feed.base}
+    {#if socketMode}
+      <canvas bind:this={screen} class="screen" aria-label="{camera.name} camera"></canvas>
+    {:else if (live && !previewFailed) || camera.feed.base}
       <img bind:this={img} {src} alt="{camera.name} camera" draggable="false" onload={loaded} onerror={() => live && (previewFailed = true)} />
     {:else}
       <div class="no-preview">
@@ -250,6 +286,7 @@
     position: relative;
   }
   img,
+  .screen,
   svg:not(.hist) {
     position: absolute;
     inset: 0;
@@ -257,6 +294,10 @@
     height: 100%;
   }
   img {
+    user-select: none;
+  }
+  .screen {
+    display: block;
     user-select: none;
   }
   .no-preview {

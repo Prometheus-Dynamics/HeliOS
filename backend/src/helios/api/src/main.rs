@@ -82,7 +82,7 @@ async fn serve() -> anyhow::Result<()> {
     let state = AppState::new(config);
     let _watcher = events::spawn_state_watcher(state.clone());
     // Pipeline outputs every tick from helios-engine, while anyone follows the event stream.
-    let _live_outputs = helios_api::live_outputs::spawn(state.clone(), helios_api::live_outputs::socket_path());
+    let _live_outputs = helios_api::live_outputs::spawn(state.live.clone(), helios_api::live_outputs::socket_path());
     // The LED director: HeliOS's state on the status ring, through lemnosd.
     helios_api::leds::start(&state, PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
     // Stored camera settings are applied whenever a camera service appears.

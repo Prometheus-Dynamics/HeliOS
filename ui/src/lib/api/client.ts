@@ -88,6 +88,13 @@ function url(path: string, query?: Query): string {
 const enc = encodeURIComponent;
 
 /** The camera's live MJPEG preview (`GET /v1/cameras/{id}/preview`), for an `<img>`. */
+/** The live outputs' WebSocket (`GET /v1/live/ws`): every pipeline output of every tick. */
+export function liveOutputsUrl(): string {
+  const address = new URL(url("/v1/live/ws"), typeof location === "undefined" ? "http://localhost/" : location.href);
+  address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
+  return address.toString();
+}
+
 export function previewUrl(cameraId: string): string {
   return url(`/v1/cameras/${enc(cameraId)}/preview`);
 }

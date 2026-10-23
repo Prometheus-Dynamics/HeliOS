@@ -3,16 +3,16 @@
 //! (`HELIOS_ENGINE_PUBLISH_INTERVAL_MS`, 250 ms). Tag overlays and values then follow the frames.
 //!
 //! The socket (`HELIOS_ENGINE_LIVE_SOCKET`, [`DEFAULT_SOCKET`]) carries newline-delimited JSON,
-//! one line per output: `{"pipeline", "port", "observed_at_ms", "value"}`, the value being the
-//! same JSON `GET /v1/outputs` shows. Each subscriber gets the latest value of every output at
-//! most every [`FLUSH_INTERVAL`] (a 120 fps pipeline is coalesced to twice the preview's 15 fps),
-//! so a slow reader never holds the engine back.
+//! one line per output and tick: `{"pipeline", "port", "observed_at_ms", "frame_ts_ns",
+//! "value"}`, the value being the same JSON `GET /v1/outputs` shows and `frame_ts_ns` the capture
+//! time of the frame the tick ran on (the preview's frames carry the same clock), so a viewer can
+//! draw each frame with its own detections. Every tick is sent; a reader that falls behind skips
+//! to the newest lines instead of holding the engine back.
 //!
 //! Graph threads only hand the tick's payloads over (shared, no copy), and only while someone is
 //! connected; serializing happens here, once per output whatever the number of subscribers.
 
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -33,9 +33,6 @@ use crate::execution::outputs::payload_message;
 
 /// Where helios-api finds the live outputs.
 pub const DEFAULT_SOCKET: &str = "/run/helios/engine-live.sock";
-/// How often a subscriber is sent what changed: 30 Hz, twice the camera preview's frame rate, so
-/// overlays keep up with the video without sending feature tracks or maps 120 times a second.
-pub const FLUSH_INTERVAL: Duration = Duration::from_millis(33);
 /// Ticks waiting to be serialized; more are dropped (the newest tick matters, not every tick).
 const QUEUE: usize = 32;
 /// Serialized outputs waiting for the subscribers' flushes.
@@ -47,6 +44,8 @@ pub struct LiveTick {
     pub pipeline: String,
     pub outputs: Vec<(String, Payload)>,
     pub serializers: ValueSerializerMap,
+    /// The capture time of the frame the tick ran on (`FrameMeta::timestamp`), when it had one.
+    pub frame_ts_ns: Option<u64>,
 }
 
 /// Where graph threads hand their ticks over. Cheap to clone; a no-op with nobody connected.
@@ -77,7 +76,6 @@ impl LiveSink {
 /// One output, serialized: its key and its line.
 #[derive(Clone)]
 struct Line {
-    key: Arc<str>,
     text: Arc<str>,
 }
 
@@ -118,18 +116,19 @@ async fn serialize(mut rx: mpsc::Receiver<LiveTick>, lines: broadcast::Sender<Li
         let observed_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         for (port, payload) in &tick.outputs {
             let message = payload_message(payload, &tick.serializers);
-            let _ = lines.send(Line { key: format!("{}/{port}", tick.pipeline).into(), text: line(&tick.pipeline, port, observed_at_ms, &message).into() });
+            let _ = lines.send(Line { text: line(&tick.pipeline, port, observed_at_ms, tick.frame_ts_ns, &message).into() });
         }
     }
 }
 
 /// One output as a line: its value inline when the message is JSON, else as a JSON string (as
 /// `GET /v1/outputs` parses it).
-fn line(pipeline: &str, port: &str, observed_at_ms: u64, message: &str) -> String {
+fn line(pipeline: &str, port: &str, observed_at_ms: u64, frame_ts_ns: Option<u64>, message: &str) -> String {
     let value = if serde_json::from_str::<serde::de::IgnoredAny>(message).is_ok() { message.to_string() } else { serde_json::Value::String(message.to_string()).to_string() };
     let pipeline = serde_json::Value::String(pipeline.to_string());
     let port = serde_json::Value::String(port.to_string());
-    format!("{{\"pipeline\":{pipeline},\"port\":{port},\"observed_at_ms\":{observed_at_ms},\"value\":{value}}}\n")
+    let frame = frame_ts_ns.map_or_else(|| "null".to_string(), |ts| ts.to_string());
+    format!("{{\"pipeline\":{pipeline},\"port\":{port},\"observed_at_ms\":{observed_at_ms},\"frame_ts_ns\":{frame},\"value\":{value}}}\n")
 }
 
 async fn accept(listener: UnixListener, lines: broadcast::Sender<Line>, inner: Arc<SinkInner>) {
@@ -151,29 +150,23 @@ async fn accept(listener: UnixListener, lines: broadcast::Sender<Line>, inner: A
     }
 }
 
-/// Send one subscriber the latest line of every output that changed, every [`FLUSH_INTERVAL`].
+/// Send one subscriber every line as it comes, whatever is queued written at once.
 async fn serve(mut stream: UnixStream, mut rx: broadcast::Receiver<Line>) {
-    let mut pending: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
-    let mut flush = tokio::time::interval(FLUSH_INTERVAL);
-    flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut buffer = Vec::with_capacity(16 * 1024);
     loop {
-        tokio::select! {
-            line = rx.recv() => match line {
-                Ok(line) => { pending.insert(line.key, line.text); }
-                // Behind: the newer lines are still coming, and only the latest of each matters.
-                Err(broadcast::error::RecvError::Lagged(_)) => {}
-                Err(broadcast::error::RecvError::Closed) => return,
-            },
-            _ = flush.tick(), if !pending.is_empty() => {
-                buffer.clear();
-                for (_, text) in std::mem::take(&mut pending) {
-                    buffer.extend_from_slice(text.as_bytes());
-                }
-                if stream.write_all(&buffer).await.is_err() {
-                    return;
-                }
-            }
+        let first = match rx.recv().await {
+            Ok(line) => line,
+            // Behind: skip to the newer lines; the latest of each is what a viewer draws.
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => return,
+        };
+        buffer.clear();
+        buffer.extend_from_slice(first.text.as_bytes());
+        while let Ok(line) = rx.try_recv() {
+            buffer.extend_from_slice(line.text.as_bytes());
+        }
+        if stream.write_all(&buffer).await.is_err() {
+            return;
         }
     }
 }
@@ -185,9 +178,9 @@ mod tests {
 
     #[test]
     fn lines_carry_json_values_inline_and_text_as_strings() {
-        let json: serde_json::Value = serde_json::from_str(line("front", "detections", 7, r#"{"a":1}"#).trim()).expect("json");
-        assert_eq!(json, serde_json::json!({ "pipeline": "front", "port": "detections", "observed_at_ms": 7, "value": { "a": 1 } }));
-        let text: serde_json::Value = serde_json::from_str(line("front", "note", 7, "not json").trim()).expect("json");
+        let json: serde_json::Value = serde_json::from_str(line("front", "detections", 7, Some(42), r#"{"a":1}"#).trim()).expect("json");
+        assert_eq!(json, serde_json::json!({ "pipeline": "front", "port": "detections", "observed_at_ms": 7, "frame_ts_ns": 42, "value": { "a": 1 } }));
+        let text: serde_json::Value = serde_json::from_str(line("front", "note", 7, None, "not json").trim()).expect("json");
         assert_eq!(text["value"], "not json");
     }
 
@@ -207,7 +200,7 @@ mod tests {
         }
         assert!(sink.active());
         for n in 0..5 {
-            sink.offer(LiveTick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", format!("{{\"n\":{n}}}")))], serializers: ValueSerializerMap::default() });
+            sink.offer(LiveTick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", format!("{{\"n\":{n}}}")))], serializers: ValueSerializerMap::default(), frame_ts_ns: Some(n) });
         }
         let first = tokio::time::timeout(Duration::from_secs(2), reader.next_line()).await.expect("in time").expect("read").expect("a line");
         let json: serde_json::Value = serde_json::from_str(&first).expect("json");
