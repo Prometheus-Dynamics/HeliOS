@@ -44,6 +44,10 @@ imports = [
   # root, <id>.slot.tar and the slot first-flash disk next to the A/B image).
   { source = "atlas", path = "devices/raze/gaia/initramfs.toml", when = { profile = "full", target = "raze" } },
   { source = "atlas", path = "devices/raze/gaia/slots.toml", when = { profile = "full", target = "raze" } },
+  # Layered slots: the root as base, platform and app layers (image-layers.toml), and the
+  # <id>.layered.slot.tar bundle next to the one-image one; an app change ships as one layer.
+  { path = "../layers/image-layers.toml", when = { profile = "full", target = "raze" } },
+  { source = "atlas", path = "devices/raze/gaia/slots-layered.toml", when = { profile = "full", target = "raze" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
 ]
@@ -84,7 +88,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "d90d9e4c1f20a91e09b58c041f9976f850762c39"
+rev = "c093ec952c7db8248278f203c75771333fef0c16"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe

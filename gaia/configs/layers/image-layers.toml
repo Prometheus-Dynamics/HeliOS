@@ -1,0 +1,18 @@
+description = "Image layers: the Raze root split into base, platform and app (Gaia docs/configuration.md, \"Image Layers\"), each its own erofs with dm-verity, so a HeliOS change ships as the app layer alone (`atlas slots <board> push <out>/layers/app.erofs --manifest <out>/layers/layers.json`). HeliOS's per-build files live under /usr so a push applies live; /etc changes apply at the next boot."
+
+[image.layers]
+order = ["base", "platform", "app"]
+default = "base"
+erofs = true
+verity = true
+
+# The board's: kernel, modules (Styx's out-of-tree drivers in updates/ included) and firmware.
+[image.layers.platform]
+packages = ["linux", "linux-ext-*", "rpi-firmware"]
+paths = ["/lib/modules", "/lib/firmware"]
+
+# HeliOS: its binaries and plugin, the UI, its runtime config and units.
+[image.layers.app]
+installs = ["install-helios-*"]
+stage = ["ui-static-build", "runtime-helios-*", "runtime-api-startup", "runtime-lemnos-helios-looks"]
+services = ["helios-*"]
