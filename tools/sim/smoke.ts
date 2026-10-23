@@ -215,20 +215,37 @@ if (pipelineOk) {
 
   if (TRUTH) {
     await check("detections match the ground truth", async () => {
-      // Styx's truth: {timestamp_ns, tags: [{id, corners: [[x, y] x4]}]} per frame, frame start on
-      // the same clock as the outputs' frame_ts_ns.
-      const truth = new Map<number, { id: number; corners: [number, number][] }[]>();
+      // Styx's truth: {timestamp_ns, tags: [{id, corners: [[x, y] x4]}]} per frame, on the same
+      // clock as the outputs' frame_ts_ns. The truth is stamped at frame start and the frame a few
+      // tens of microseconds later, so each detection frame takes the nearest truth frame within
+      // a quarter of the frame period.
+      const truth: { ts: number; tags: { id: number; corners: [number, number][] }[] }[] = [];
       for (const line of (await Bun.file(TRUTH).text()).split("\n").filter(Boolean)) {
         const frame = JSON.parse(line);
-        truth.set(frame.timestamp_ns, frame.tags ?? []);
+        truth.push({ ts: frame.timestamp_ns, tags: frame.tags ?? [] });
       }
+      truth.sort((a, b) => a.ts - b.ts);
+      const period = truth.length > 1 ? (truth[truth.length - 1].ts - truth[0].ts) / (truth.length - 1) : Number.POSITIVE_INFINITY;
+      const nearest = (ts: number) => {
+        let lo = 0;
+        let hi = truth.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (truth[mid].ts < ts) lo = mid + 1;
+          else hi = mid;
+        }
+        const best = [truth[lo - 1], truth[lo]]
+          .filter(Boolean)
+          .reduce<(typeof truth)[number] | undefined>((a, b) => (!a || Math.abs(b.ts - ts) < Math.abs(a.ts - ts) ? b : a), undefined);
+        return best && Math.abs(best.ts - ts) <= period / 4 ? best.tags : undefined;
+      };
       let frames = 0;
       let tags = 0;
       let missed = 0;
       let errorSum = 0;
       let corners = 0;
       for (const [ts, detections] of detectionsByFrame) {
-        const expected = truth.get(ts);
+        const expected = nearest(ts);
         if (!expected) continue;
         frames += 1;
         for (const tag of expected) {
@@ -245,7 +262,7 @@ if (pipelineOk) {
           }
         }
       }
-      if (frames === 0) throw new Error(`no detection frame matched a truth frame (${detectionsByFrame.size} detection frames, ${truth.size} truth frames)`);
+      if (frames === 0) throw new Error(`no detection frame matched a truth frame (${detectionsByFrame.size} detection frames, ${truth.length} truth frames)`);
       const mean = corners ? errorSum / corners : Number.NaN;
       if (missed > 0) throw new Error(`${missed} of ${tags} true tags not detected over ${frames} frames`);
       if (!(mean <= MAX_CORNER_ERROR_PX)) throw new Error(`mean corner error ${mean.toFixed(2)} px over ${corners} corners (max ${MAX_CORNER_ERROR_PX})`);
