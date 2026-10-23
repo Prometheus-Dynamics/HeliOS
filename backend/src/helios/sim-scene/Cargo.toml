@@ -1,0 +1,19 @@
+[package]
+name = "helios-sim-scene"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Dev-only: builds the glTF scene (AprilTags, floor, ground truth, camera path) that Styx's simulated camera renders with scene=gltf. Never part of a board image."
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+# The 36h11 bits: the same marker tables and cell order the engine's live-map test renders.
+eidos-aruco = { workspace = true }
+helios-field = { path = "../field" }
+png = "0.18"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

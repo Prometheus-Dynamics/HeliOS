@@ -17,6 +17,8 @@
 //   SIM_CALIBRATION (default tools/sim/ov9782-calibration.json),
 //   SIM_SCENARIO_JUMP_CM (a jump above this counts, default 10).
 
+import { type TruthFrame, readTruth } from "./truth.ts";
+
 const BASE = (process.env.SIM_URL ?? "http://127.0.0.1:5800").replace(/\/$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
 const TRUTH = process.env.SIM_TRUTH ?? "";
@@ -100,17 +102,8 @@ await Bun.write(`${OUT}/poses.jsonl`, lines.join("\n") + "\n");
 
 // --- Truth ------------------------------------------------------------------------------------
 
-interface TruthFrame {
-  ts: number;
-  position: Vec3;
-  tags: { id: number; corners: [number, number][] }[];
-}
-const truth: TruthFrame[] = (await Bun.file(TRUTH).text())
-  .split("\n")
-  .filter(Boolean)
-  .map((line) => JSON.parse(line))
-  .map((f) => ({ ts: f.timestamp_ns, position: f.camera.position as Vec3, tags: f.tags ?? [] }))
-  .sort((a, b) => a.ts - b.ts);
+// Styx's truth (truth.ts): the camera in the field (WPILib frame) and each tag's corners in pixels.
+const truth: TruthFrame[] = readTruth(await Bun.file(TRUTH).text()).sort((a, b) => a.ts - b.ts);
 const period = (truth[truth.length - 1].ts - truth[0].ts) / Math.max(1, truth.length - 1);
 function nearestTruth(ts: number): TruthFrame | undefined {
   let lo = 0;

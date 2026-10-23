@@ -14,9 +14,13 @@
 #   SIM_UI_DIR=DIR            the UI's static build (default: ui/build, built with bun when missing)
 #   SIM_RUN_DIR=DIR           runtime dir (default: a fresh mktemp dir; kept after exit for its logs)
 #   SIM_BIND=ADDR:PORT        helios-api's address (default 127.0.0.1:5800)
-#   STYX_SIM_CAMERAS=SPEC     simulated cameras (default: an OV9782 seeing AprilTags through a real
-#                             Raze lens, tools/sim/ov9782-calibration.json, with ground truth in
-#                             <run dir>/truth.jsonl; see docs/simulation.md in Styx)
+#   STYX_SIM_CAMERAS=SPEC     simulated cameras (default: an OV9782 rendering a glTF scene built by
+#                             helios-sim-scene from SIM_SCENE_LAYOUT and SIM_SCENE_CAMERA, through a
+#                             real Raze lens (SIM_SCENE_CALIBRATION, tools/sim/ov9782-calibration.json),
+#                             with ground truth in <run dir>/truth.jsonl; see docs/simulation.md in Styx)
+#   SIM_SCENE_LAYOUT=PATH     the default scene's tags (default tools/sim/scenarios/default/layout.json)
+#   SIM_SCENE_CAMERA=PATH     the default scene's camera (default tools/sim/scenarios/default/camera.json)
+#   SIM_SCENE_CALIBRATION=PATH  the default scene's lens (default tools/sim/ov9782-calibration.json)
 #   LEMNOSD_BIN_DIR=DIR       lemnosd and lemnos-orion built with `sim,orion` (default: built from
 #                             Lemnos at the commit backend/Cargo.lock pins)
 #   SIM_LEMNOS=0              run without lemnosd (the services' no-hardware paths)
@@ -47,7 +51,7 @@ if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
   log "building HeliOS services ($SIM_PROFILE profile, Styx sim feature)"
   # Board builds never set `sim`: only this script's build enables helios-peripherals/sim.
   nice -n 10 cargo build --manifest-path "$BACKEND/Cargo.toml" -j "$SIM_JOBS" --profile "$SIM_PROFILE" \
-    -p helios-peripherals -p helios-engine -p helios-api -p helios-eidos-plugin \
+    -p helios-peripherals -p helios-engine -p helios-api -p helios-eidos-plugin -p helios-sim-scene \
     --features helios-peripherals/sim
 fi
 
@@ -91,7 +95,7 @@ fi
 SIM_LEMNOS_BOARD="${SIM_LEMNOS_BOARD:-$ROOT/tools/sim/raze-board.toml}"
 SIM_LEMNOS_SCRIPT="${SIM_LEMNOS_SCRIPT:-$ROOT/tools/sim/lemnos-sim.toml}"
 
-for bin in helios-peripherals helios-engine helios-api libhelios_eidos_plugin.so; do
+for bin in helios-peripherals helios-engine helios-api helios-sim-scene libhelios_eidos_plugin.so; do
   [[ -e "$SIM_BIN_DIR/$bin" ]] || die "missing $SIM_BIN_DIR/$bin (build without SIM_SKIP_BUILD, or set SIM_BIN_DIR)"
 done
 
@@ -116,9 +120,18 @@ RUN="${SIM_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/helios-sim.XXXXXX")}"
 mkdir -p "$RUN"/{orion,orion-state,ipc/streams,engine,plugins,state,api/state,api/uploads,streams,logs,lemnos,board}
 # Only the Eidos plugin library: the engine loads every .so in its plugin directories.
 ln -sf "$SIM_BIN_DIR/libhelios_eidos_plugin.so" "$RUN/plugins/libhelios_eidos_plugin.so"
-# The default camera: AprilTags (Styx's tag scene) through a real Raze OV9782 lens, each frame's
-# true camera pose and tag corners in truth.jsonl, which the smoke test scores detections against.
-[[ -n "$STYX_SIM_CAMERAS" ]] || STYX_SIM_CAMERAS="ov9782,scene=tags,calibration=$ROOT/tools/sim/ov9782-calibration.json,truth=$RUN/truth.jsonl"
+# The default camera: a glTF scene of AprilTags (helios-sim-scene) through a real Raze OV9782 lens.
+# Each frame's true camera pose and truth points go to truth.jsonl, which the smoke test scores
+# detections against. Styx's spec keys for the lens come from helios-sim-scene's stdout.
+if [[ -z "$STYX_SIM_CAMERAS" ]]; then
+  SIM_SCENE_LAYOUT="${SIM_SCENE_LAYOUT:-$ROOT/tools/sim/scenarios/default/layout.json}"
+  SIM_SCENE_CAMERA="${SIM_SCENE_CAMERA:-$ROOT/tools/sim/scenarios/default/camera.json}"
+  SIM_SCENE_CALIBRATION="${SIM_SCENE_CALIBRATION:-$ROOT/tools/sim/ov9782-calibration.json}"
+  log "building the scene into $RUN/scene.glb"
+  LENS_SPEC="$("$SIM_BIN_DIR/helios-sim-scene" --layout "$SIM_SCENE_LAYOUT" --camera "$SIM_SCENE_CAMERA" \
+    --calibration "$SIM_SCENE_CALIBRATION" --out "$RUN/scene.glb")" || die "helios-sim-scene failed"
+  STYX_SIM_CAMERAS="ov9782,scene=gltf,path=$RUN/scene.glb,$LENS_SPEC,truth=$RUN/truth.jsonl"
+fi
 export STYX_SIM_CAMERAS
 # An empty startup file: no default pipeline (smoke.sh creates its own).
 : > "$RUN/startup.toml"

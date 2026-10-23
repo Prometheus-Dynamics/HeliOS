@@ -32,7 +32,7 @@ state, logs; printed at start), and waits until `GET /v1/health` answers.
 ```text
   HeliOS sim is up.
   UI and API:  http://127.0.0.1:5800/
-  Cameras:     ov9782,scene=chart
+  Cameras:     ov9782,scene=gltf,path=<run dir>/scene.glb,lens=fisheye,...
   Smoke test:  tools/sim/smoke.sh (SIM_URL=http://127.0.0.1:5800)
 ```
 
@@ -44,7 +44,7 @@ Useful settings (environment variables):
 
 | Variable | Default | What it does |
 |---|---|---|
-| `STYX_SIM_CAMERAS` | `ov9782,scene=chart` | Simulated cameras, one spec per `;`. See Styx's `docs/simulation.md` (faults, recordings, flat scenes). |
+| `STYX_SIM_CAMERAS` | the default scene (below) | Simulated cameras, one spec per `;`. See Styx's `docs/simulation.md` (faults, recordings, chart and flat scenes). |
 | `SIM_BIND` | `127.0.0.1:5800` | helios-api's address. |
 | `SIM_RUN_DIR` | a new `mktemp` directory | Runtime directory to use (and keep). |
 | `SIM_SKIP_BUILD=1` | off | Run prebuilt binaries: no cargo, no bun. Set `SIM_BIN_DIR` and `ORION_NODE_BIN` to them. |
@@ -52,6 +52,18 @@ Useful settings (environment variables):
 | `SIM_JOBS` | `8` | Cargo jobs. |
 
 Two simulated cameras: `STYX_SIM_CAMERAS="ov9782,scene=chart;ov9782,scene=flat,noise=off"`.
+
+## The default scene
+
+The default camera renders a glTF scene, built at start by `helios-sim-scene` (a dev-only crate in
+`backend/src/helios/sim-scene`, never part of a board image). It places the four AprilTags of
+`tools/sim/scenarios/default/layout.json` (ids 1 to 4, 36h11, FRC size) on a wall 3 m ahead, with
+a floor, and puts the camera at `camera.json`'s pose, seen through the Raze OV9782 lens of
+`tools/sim/ov9782-calibration.json`. Styx renders the scene's `.glb` (`scene=gltf`) and writes each
+frame's true camera pose and tag corners to `truth.jsonl`, which the smoke test scores detections
+against. The builder takes any WPILib field layout and a camera pose or trajectory, so
+`tools/sim/scenario.sh` uses it for each scenario under `tools/sim/scenarios/`.
+`SIM_SCENE_LAYOUT`, `SIM_SCENE_CAMERA` and `SIM_SCENE_CALIBRATION` replace the default's files.
 
 ## Check it
 
