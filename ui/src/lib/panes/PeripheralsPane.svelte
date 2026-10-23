@@ -17,6 +17,7 @@
   import PaneBar from "#lib/workspace/PaneBar.svelte";
   import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
+  import ImuPanel from "#lib/imu/ImuPanel.svelte";
   import { follow } from "./follow.svelte";
 
   let { pane, ws }: PaneProps = $props();
@@ -114,25 +115,14 @@
     {#if hw.imu}
       {@const imu = hw.imu}
       <Section title="IMU" key="hw-imu">
-        <div class="imu">
-          <svg viewBox="-50 -50 100 100" class="compass" aria-label="Heading {imu.yaw.toFixed(0)}°">
-            <circle r="44" class="ring" />
-            {#each Array.from({ length: 12 }) as _, i (i)}<line y1="-44" y2={i % 3 ? "-40" : "-36"} transform="rotate({i * 30})" class="tick" />{/each}
-            <g transform="rotate({imu.yaw})"><path d="M0,-34 L6,4 L0,0 L-6,4Z" class="needle" /></g>
-            <text y="18" class="hd">{imu.yaw.toFixed(1)}°</text>
-          </svg>
-          <div class="att">
-            <Prop label="Yaw · pitch · roll"><span class="mono">{imu.yaw.toFixed(2)}° · {imu.pitch.toFixed(2)}° · {imu.roll.toFixed(2)}°</span></Prop>
-            {#if !Number.isNaN(imu.temperatureC)}<Prop label="Temperature"><span class="mono">{imu.temperatureC.toFixed(1)} °C</span></Prop>{/if}
-            {#if !hw.live}
-            <Prop label="Gyro bias"><span class="mono">{imu.gyroBias.map((b) => b.toFixed(4)).join(" ")} °/s</span></Prop>
-            <Prop label="Actions">
-              <button type="button" class="btn" onclick={() => (imu.yaw = 0)}>Zero yaw</button>
-              <button type="button" class="btn" onclick={() => system.calibrateGyro(node.id)}>Calibrate gyro</button>
-            </Prop>
-            {/if}
-          </div>
-        </div>
+        <ImuPanel />
+        {#if !hw.live}
+          {#if !Number.isNaN(imu.temperatureC)}<Prop label="Temperature"><span class="mono">{imu.temperatureC.toFixed(1)} °C</span></Prop>{/if}
+          <Prop label="Gyro bias"><span class="mono">{imu.gyroBias.map((b) => b.toFixed(4)).join(" ")} °/s</span></Prop>
+          <Prop label="Actions">
+            <button type="button" class="btn" onclick={() => system.calibrateGyro(node.id)}>Calibrate gyro</button>
+          </Prop>
+        {/if}
         {#if !hw.live}
         <Prop label="Output rate"><Choice value={imu.rateHz} options={[100, 200, 400, 1000, 2000].map((v) => ({ value: v, label: `${v} Hz` }))} onchange={(v) => (imu.rateHz = v)} /></Prop>
         <Prop label="Gyro range"><Choice value={imu.gyroRange} options={[125, 250, 500, 1000, 2000].map((v) => ({ value: v, label: `±${v} °/s` }))} onchange={(v) => (imu.gyroRange = v)} /></Prop>
@@ -300,36 +290,6 @@
   }
   .lvl.hi {
     color: var(--ok);
-  }
-  .imu {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    padding-left: 10px;
-  }
-  .compass {
-    width: 96px;
-    height: 96px;
-    flex-shrink: 0;
-  }
-  .ring {
-    fill: var(--inset);
-    stroke: var(--line-strong);
-  }
-  .tick {
-    stroke: var(--fg-3);
-  }
-  .needle {
-    fill: var(--accent);
-  }
-  .hd {
-    font-size: 10px;
-    font-family: var(--font-code);
-    fill: var(--fg-2);
-    text-anchor: middle;
-  }
-  .att {
-    flex: 1;
   }
   .mono {
     font-family: var(--font-code);
