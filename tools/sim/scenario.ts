@@ -13,7 +13,7 @@
 // the ray to the camera).
 //
 //   SIM_URL (default http://127.0.0.1:5800), SIM_TRUTH (required), SIM_SCENARIO (required: name),
-//   SIM_SCENARIO_S (default 64), SIM_SCENARIO_OUT (default: the truth file's directory),
+//   SIM_SCENARIO_S (default 64, scene seconds), SIM_SCENARIO_FPS (default 120), SIM_SCENARIO_OUT (default: the truth file's directory),
 //   SIM_CALIBRATION (default tools/sim/ov9782-calibration.json),
 //   SIM_SCENARIO_JUMP_CM (a jump above this counts, default 10).
 //
@@ -37,6 +37,9 @@ const WS_BASE = BASE.replace(/^http/, "ws");
 const TRUTH = process.env.SIM_TRUTH ?? "";
 const NAME = process.env.SIM_SCENARIO ?? "";
 const SECONDS = Number(process.env.SIM_SCENARIO_S ?? 64);
+/** The camera's frame rate (the OV9782's 120 fps mode, as on the robot); with Styx's lockstep
+ * clock the frames are then exactly one 120 fps period apart in scene time. */
+const FPS = Number(process.env.SIM_SCENARIO_FPS ?? 120);
 const JUMP_CM = Number(process.env.SIM_SCENARIO_JUMP_CM ?? 10);
 const CALIBRATION = process.env.SIM_CALIBRATION ?? new URL("./ov9782-calibration.json", import.meta.url).pathname;
 if (!TRUTH || !NAME) {
@@ -95,6 +98,8 @@ if (CALIBRATED) {
   const left = await api("GET", `/v1/cameras/${encodeURIComponent(camera.id)}/calibration`);
   if ((left?.calibrations ?? []).length) throw new Error(`the camera still has ${left.calibrations.length} calibration(s)`);
 }
+const settings = await api("PATCH", `/v1/cameras/${encodeURIComponent(camera.id)}/settings`, { fps: FPS });
+console.log(`[scenario] camera frame rate ${FPS} fps: ${JSON.stringify(settings?.applied ?? settings)}`);
 const layoutText = await Bun.file(`${DIR}layout.json`).text();
 await fetch(`${BASE}/v1/field-layouts/${LAYOUT_ID}`, { method: "DELETE" });
 await api("POST", `/v1/field-layouts?id=${LAYOUT_ID}&name=${encodeURIComponent(`Sim ${NAME}`)}`, layoutText);
@@ -271,7 +276,7 @@ const toLayout = aligned || fitted.length < 3 ? (p: Vec3) => p : rigidFit(fitted
 
 // --- Report -----------------------------------------------------------------------------------
 
-const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm,phase,cal_estimated,cal_rms_px,cal_views,cal_frames"];
+const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm,phase,cal_estimated,cal_rms_px,cal_views,cal_frames,cal_model,cal_fx,cal_fy,cal_cx,cal_cy"];
 const errors: number[] = [];
 let jumps = 0;
 let worstJump = 0;
@@ -339,6 +344,8 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
       f(Number(calibrationReport.rms_px ?? Number.NaN), 3),
       calibrationReport.views ?? "",
       calibrationReport.frames ?? "",
+      calibrationReport.model ?? "",
+      ...["fx", "fy", "cx", "cy"].map((k) => f(Number(calibrationReport[k] ?? Number.NaN), 2)),
     ].join(","),
   );
 }
@@ -379,8 +386,17 @@ const TRUE_INTRINSICS: Record<string, number> = {
   fx: LENS.fx, fy: LENS.fy, cx: LENS.cx, cy: LENS.cy,
   ...Object.fromEntries(Object.entries(LENS.distortion ?? {}).map(([k, v]) => [k, Number(v)])),
 };
-const PROVENANCE = new Set(["estimated", "rms_px", "views", "frames", "uncertainty"]);
-const reportedIntrinsics = finalCalibration ? Object.keys(finalCalibration).filter((k) => !PROVENANCE.has(k)) : [];
+// Eidos's map_pose.calibration: {estimated, rms_px, views, frames, model, fx, fy, cx, cy,
+// distortion[8]} with distortion in the order k1..k6, p1, p2 (a fisheye uses k1..k4).
+const DISTORTION_ORDER = ["k1", "k2", "k3", "k4", "k5", "k6", "p1", "p2"];
+const reportedValues: Record<string, number> = {};
+if (finalCalibration && finalCalibration.model) {
+  for (const k of ["fx", "fy", "cx", "cy"]) if (typeof finalCalibration[k] === "number") reportedValues[k] = finalCalibration[k];
+  (finalCalibration.distortion ?? []).forEach((v: number, i: number) => {
+    if (DISTORTION_ORDER[i] in TRUE_INTRINSICS || v !== 0) reportedValues[DISTORTION_ORDER[i]] = v;
+  });
+}
+const reportedIntrinsics = Object.keys(reportedValues);
 const trueText = `true lens (${LENS.model}): ${Object.entries(TRUE_INTRINSICS).map(([k, v]) => `${k} ${Number(v).toPrecision(6)}`).join(", ")}`;
 if (!finalCalibration) {
   console.log(`[scenario] reported calibration: none (no pose); ${trueText}`);
@@ -389,8 +405,8 @@ if (!finalCalibration) {
     `[scenario] reported calibration (final pose): estimated ${finalCalibration.estimated}, rms ${Number(finalCalibration.rms_px).toFixed(3)} px, ${finalCalibration.views} tag views over ${finalCalibration.frames} frames`,
   );
   if (reportedIntrinsics.length) {
-    const compared = reportedIntrinsics.map((k) => `${k} ${Number(finalCalibration[k]).toPrecision(6)} vs ${k in TRUE_INTRINSICS ? Number(TRUE_INTRINSICS[k]).toPrecision(6) : "n/a"}`);
-    console.log(`[scenario] reported intrinsics: ${compared.join(", ")}`);
+    const compared = reportedIntrinsics.map((k) => `${k} ${reportedValues[k].toPrecision(6)} vs ${k in TRUE_INTRINSICS ? Number(TRUE_INTRINSICS[k]).toPrecision(6) : "n/a"}`);
+    console.log(`[scenario] reported intrinsics (${finalCalibration.model}, reported vs true): ${compared.join(", ")}`);
   } else {
     console.log("[scenario] reported intrinsics: none (the pose's calibration has no intrinsics to compare)");
   }

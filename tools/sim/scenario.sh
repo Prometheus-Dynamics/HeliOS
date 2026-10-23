@@ -36,7 +36,13 @@ if [[ -f "$DIR/scenery.json" ]]; then export SIM_SCENE_SCENERY="$DIR/scenery.jso
 "$ROOT/tools/sim/up.sh" > "$SIM_RUN_DIR/up.log" 2>&1 &
 UP=$!
 trap 'kill -TERM "$UP" 2>/dev/null || true; wait "$UP" 2>/dev/null || true' EXIT
-deadline=$((SECONDS + ${SIM_UP_TIMEOUT_S:-900}))
+# The build takes what it takes (a shared machine can make it slow); the timeout counts from the
+# first service's start.
+until grep -q '^\[sim\] started' "$SIM_RUN_DIR/up.log" 2>/dev/null; do
+  kill -0 "$UP" 2>/dev/null || { echo "the sim exited while building (see $SIM_RUN_DIR/up.log)" >&2; exit 1; }
+  sleep 2
+done
+deadline=$((SECONDS + ${SIM_UP_TIMEOUT_S:-300}))
 until curl -fsS "http://$SIM_BIND/v1/health" >/dev/null 2>&1; do
   kill -0 "$UP" 2>/dev/null || { echo "the sim exited (see $SIM_RUN_DIR/up.log)" >&2; exit 1; }
   ((SECONDS < deadline)) || { echo "the sim did not come up (see $SIM_RUN_DIR/up.log)" >&2; exit 1; }
