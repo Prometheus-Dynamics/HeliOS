@@ -1,0 +1,69 @@
+{
+  "textures": {
+    "paper": {
+      "kind": "noise",
+      "seed": 11,
+      "cell_m": 0.02,
+      "filter": "nearest"
+    },
+    "pillar": {
+      "kind": "noise",
+      "seed": 23,
+      "cell_m": 0.012,
+      "filter": "nearest"
+    },
+    "soft": {
+      "kind": "noise",
+      "seed": 5,
+      "cell_m": 0.03,
+      "filter": "linear"
+    }
+  },
+  "boxes": [
+    {
+      "name": "wall",
+      "centre": [
+        1.0,
+        3.2,
+        0.9
+      ],
+      "size": [
+        6.0,
+        0.1,
+        2.4
+      ],
+      "yaw": 0,
+      "texture": "paper"
+    },
+    {
+      "name": "pillar_a",
+      "centre": [
+        0.8,
+        2.6,
+        0.5
+      ],
+      "size": [
+        0.3,
+        0.3,
+        1.2
+      ],
+      "yaw": 20,
+      "texture": "pillar"
+    },
+    {
+      "name": "pillar_b",
+      "centre": [
+        2.6,
+        2.2,
+        0.4
+      ],
+      "size": [
+        0.4,
+        0.4,
+        0.8
+      ],
+      "yaw": -15,
+      "texture": "soft"
+    }
+  ]
+}

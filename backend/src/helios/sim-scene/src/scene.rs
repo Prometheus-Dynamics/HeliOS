@@ -14,7 +14,8 @@ use serde::Deserialize;
 use crate::geometry::{
     Mat3, Vec3, add, camera_node_rotation, matrix_to_quat, mul_v, quat_to_matrix, rotation_from_rpy_degrees, to_gltf,
 };
-use crate::glb::{Builder, MeshAccessors, TARGET_ARRAY_BUFFER};
+use crate::glb::{Builder, Filter, MeshAccessors, TARGET_ARRAY_BUFFER};
+use crate::scenery::{self, Scenery};
 
 /// A tag's image: 10 cells across (a 1-cell white quiet zone, the 8-cell black square with its
 /// 1-cell black border, the 6x6 data inside), 16 pixels a cell.
@@ -184,7 +185,7 @@ fn tag_cell_is_white(grid: &BitGrid, column: usize, row: usize) -> bool {
     }
 }
 
-fn encode_png(width: u32, height: u32, rgb: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn encode_png(width: u32, height: u32, rgb: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, width, height);
     encoder.set_color(png::ColorType::Rgb);
@@ -217,8 +218,9 @@ fn floor_png() -> Result<Vec<u8>> {
     encode_png(2, 2, &rgb)
 }
 
-/// Builds the `.glb` for a field layout, a camera plan and the camera's lens.
-pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibration) -> Result<Vec<u8>> {
+/// Builds the `.glb` for a field layout, a camera plan, the camera's lens and the scenery (textured
+/// boxes besides the tags; `Scenery::default()` for none).
+pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibration, scenery: &Scenery) -> Result<Vec<u8>> {
     ensure!(calibration.width > 0 && calibration.height > 0 && calibration.fy > 0.0, "the calibration has no size or focal length");
     let mut glb = Builder::default();
     let mut roots = Vec::new();
@@ -231,7 +233,7 @@ pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibratio
         ensure!(tag.side_m.is_finite() && tag.side_m > 0.0, "tag {} has no size", tag.id);
         let grid = BitGrid::from_marker(dictionary, tag.id, 0)
             .with_context(|| format!("tag {} is not in AprilTag 36h11", tag.id))?;
-        let texture = glb.texture_png(&tag_png(&grid)?);
+        let texture = glb.texture_png(&tag_png(&grid)?, Filter::Nearest);
         let material = glb.material(texture);
 
         let half = quad_half(tag.side_m);
@@ -267,7 +269,7 @@ pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibratio
     let floor_positions: Vec<f32> = floor.iter().flat_map(|&(x, y)| to_gltf([x, y, 0.0]).map(|v| v as f32)).collect();
     let floor_normals: Vec<f32> = [0.0_f32, 1.0, 0.0].repeat(4);
     let floor_uvs: Vec<f32> = floor.iter().flat_map(|&(x, y)| [(x * 0.5) as f32, (y * 0.5) as f32]).collect();
-    let floor_texture = glb.texture_png(&floor_png()?);
+    let floor_texture = glb.texture_png(&floor_png()?, Filter::Nearest);
     let floor_material = glb.material(floor_texture);
     let floor_accessors = MeshAccessors {
         positions: glb.floats(&floor_positions, 3, Some(TARGET_ARRAY_BUFFER)),
@@ -277,6 +279,9 @@ pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibratio
     };
     let floor_mesh = glb.mesh("floor", &floor_accessors, floor_material);
     roots.push(glb.node("floor", [0.0; 3], IDENTITY_ROTATION, Some(floor_mesh), None));
+
+    // The scenery: textured boxes for a feature tracker to follow where no tag is in view.
+    roots.extend(scenery::add_to(&mut glb, scenery)?);
 
     // The camera: its own perspective (the lens keys are what Styx renders with).
     let camera_index = glb.camera(calibration.yfov_rad(), f64::from(calibration.width) / f64::from(calibration.height));
@@ -366,7 +371,7 @@ mod tests {
     /// The camera node and the truth points of a built scene: (translation, rotation, points).
     fn scene_of(camera: &CameraPlan) -> (Vec<u8>, reader::Glb) {
         let (layout, _) = FieldLayout::parse(LAYOUT, FRC_TAG_SIDE_M).expect("layout");
-        let bytes = build(&layout, camera, &pinhole()).expect("scene");
+        let bytes = build(&layout, camera, &pinhole(), &Scenery::default()).expect("scene");
         let glb = reader::parse(&bytes).expect("a valid glb");
         (bytes, glb)
     }
@@ -492,7 +497,7 @@ mod tests {
     fn a_tag_outside_the_marker_dictionary_is_refused() {
         let layout_text = LAYOUT.replace("\"ID\": 1", "\"ID\": 9999");
         let (layout, _) = FieldLayout::parse(&layout_text, FRC_TAG_SIDE_M).expect("layout");
-        let error = build(&layout, &still_at_origin(), &pinhole()).expect_err("not in 36h11");
+        let error = build(&layout, &still_at_origin(), &pinhole(), &Scenery::default()).expect_err("not in 36h11");
         assert!(error.to_string().contains("tag 9999"), "{error}");
     }
 }

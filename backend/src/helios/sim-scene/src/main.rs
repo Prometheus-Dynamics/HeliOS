@@ -7,6 +7,7 @@
 mod geometry;
 mod glb;
 mod scene;
+mod scenery;
 
 use std::path::PathBuf;
 
@@ -33,6 +34,10 @@ struct Args {
     /// The black square's side for a WPILib layout (metres; a .fmap has its own sizes).
     #[arg(long, default_value_t = FRC_TAG_SIDE_M)]
     tag_size: f64,
+    /// Textured scenery besides the tags (`scenery.json`: boxes with procedural textures, in
+    /// WPILib coordinates; see `scenery.rs`). Without it the scene has the tags and the floor only.
+    #[arg(long)]
+    scenery: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -46,9 +51,13 @@ fn main() -> Result<()> {
     let calibration: scene::Calibration =
         serde_json::from_str(&calibration_text).with_context(|| format!("reading the calibration {}", args.calibration.display()))?;
 
-    let glb = scene::build(&layout, &camera, &calibration)?;
+    let scenery = match &args.scenery {
+        Some(path) => scenery::Scenery::read(path)?,
+        None => scenery::Scenery::default(),
+    };
+    let glb = scene::build(&layout, &camera, &calibration, &scenery)?;
     std::fs::write(&args.out, &glb).with_context(|| format!("writing {}", args.out.display()))?;
-    eprintln!("[sim-scene] {} tags, {} bytes -> {}", layout.tags.len(), glb.len(), args.out.display());
+    eprintln!("[sim-scene] {} tags, {} scenery boxes, {} bytes -> {}", layout.tags.len(), scenery.boxes.len(), glb.len(), args.out.display());
     println!("{}", calibration.lens_spec()?);
     Ok(())
 }

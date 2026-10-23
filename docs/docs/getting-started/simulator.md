@@ -65,6 +65,19 @@ against. The builder takes any WPILib field layout and a camera pose or trajecto
 `tools/sim/scenario.sh` uses it for each scenario under `tools/sim/scenarios/`.
 `SIM_SCENE_LAYOUT`, `SIM_SCENE_CAMERA` and `SIM_SCENE_CALIBRATION` replace the default's files.
 
+## Scenery and uncalibrated runs
+
+A scenario directory may hold a `scenery.json`: boxes (a quad is a thin box) in WPILib
+coordinates, each with a procedural `noise` texture (black and white cells, seeded, `cell_m`
+metres a cell, `nearest` or `linear` filtering). `helios-sim-scene --scenery` adds them to the
+glTF scene besides the tags, so a feature tracker has corners to follow where no tag is in view.
+Each texture is one 256x256 image shared by its boxes, so the `.glb` stays small. A scenario
+with `scenario.json` `{"calibration": "none"}` runs without a camera calibration: the sim clears
+any stored one and does not PUT the lens, so the mapper estimates the camera from its opening
+frames (Styx still renders the true lens). `tools/sim/scenarios/selfcal-tagless` is one such
+run: tags for 10 s, then 40 s of tag-free scenery, then the tags again. `scenario.sh` prints
+each phase's pose error and the calibration the pose reports against the true lens.
+
 ## Check it
 
 With the sim running, in another shell:

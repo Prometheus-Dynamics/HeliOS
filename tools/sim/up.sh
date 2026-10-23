@@ -21,6 +21,7 @@
 #   SIM_SCENE_LAYOUT=PATH     the default scene's tags (default tools/sim/scenarios/default/layout.json)
 #   SIM_SCENE_CAMERA=PATH     the default scene's camera (default tools/sim/scenarios/default/camera.json)
 #   SIM_SCENE_CALIBRATION=PATH  the default scene's lens (default tools/sim/ov9782-calibration.json)
+#   SIM_SCENE_SCENERY=PATH    textured scenery besides the tags, a scenery.json (default: none)
 #   LEMNOSD_BIN_DIR=DIR       lemnosd and lemnos-orion built with `sim,orion` (default: built from
 #                             Lemnos at the commit backend/Cargo.lock pins)
 #   SIM_LEMNOS=0              run without lemnosd (the services' no-hardware paths)
@@ -127,9 +128,15 @@ if [[ -z "$STYX_SIM_CAMERAS" ]]; then
   SIM_SCENE_LAYOUT="${SIM_SCENE_LAYOUT:-$ROOT/tools/sim/scenarios/default/layout.json}"
   SIM_SCENE_CAMERA="${SIM_SCENE_CAMERA:-$ROOT/tools/sim/scenarios/default/camera.json}"
   SIM_SCENE_CALIBRATION="${SIM_SCENE_CALIBRATION:-$ROOT/tools/sim/ov9782-calibration.json}"
+  SIM_SCENE_SCENERY="${SIM_SCENE_SCENERY:-}"
+  SCENERY_ARGS=()
+  if [[ -n "$SIM_SCENE_SCENERY" ]]; then
+    [[ -f "$SIM_SCENE_SCENERY" ]] || die "no scenery file $SIM_SCENE_SCENERY"
+    SCENERY_ARGS=(--scenery "$SIM_SCENE_SCENERY")
+  fi
   log "building the scene into $RUN/scene.glb"
   LENS_SPEC="$("$SIM_BIN_DIR/helios-sim-scene" --layout "$SIM_SCENE_LAYOUT" --camera "$SIM_SCENE_CAMERA" \
-    --calibration "$SIM_SCENE_CALIBRATION" --out "$RUN/scene.glb")" || die "helios-sim-scene failed"
+    --calibration "$SIM_SCENE_CALIBRATION" "${SCENERY_ARGS[@]}" --out "$RUN/scene.glb")" || die "helios-sim-scene failed"
   STYX_SIM_CAMERAS="ov9782,scene=gltf,path=$RUN/scene.glb,$LENS_SPEC,truth=$RUN/truth.jsonl"
 fi
 export STYX_SIM_CAMERAS

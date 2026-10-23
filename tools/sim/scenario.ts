@@ -16,6 +16,19 @@
 //   SIM_SCENARIO_S (default 64), SIM_SCENARIO_OUT (default: the truth file's directory),
 //   SIM_CALIBRATION (default tools/sim/ov9782-calibration.json),
 //   SIM_SCENARIO_JUMP_CM (a jump above this counts, default 10).
+//
+// Calibration: scenario.json in the scenario directory, `{"calibration": "file"}` (the default: the
+// lens of SIM_CALIBRATION is PUT to the camera) or `{"calibration": "none"}` (no calibration is given:
+// any stored one is cleared, and the mapper estimates the camera from its opening frames). Styx renders
+// with the true lens either way.
+//
+// Phases: a truth frame is "tags" while a tag corner is in the image before any frame without one, then
+// "tag-free" while none is, then "tags again" for the tagged frames after that. Each phase's pose error
+// is printed, and the report's `phase` column says which phase a frame is in.
+//
+// The calibration a pose reports (`calibration`: estimated, rms_px, views, frames) is in the report's
+// cal_* columns. A pose that carries intrinsics would be compared with the true lens; the summary says
+// when it carries none.
 
 import { type TruthFrame, readTruth } from "./truth.ts";
 
@@ -34,6 +47,18 @@ const DIR = new URL(`./scenarios/${NAME}/`, import.meta.url).pathname;
 const OUT = process.env.SIM_SCENARIO_OUT ?? TRUTH.replace(/\/[^/]*$/, "");
 const PIPELINE_ID = `sim-scenario-${NAME}`;
 const LAYOUT_ID = `sim-${NAME}`;
+type Phase = "tags" | "tag-free" | "tags again";
+
+// The lens the scene was rendered with (the same file the sim's camera is built from).
+const LENS = await Bun.file(CALIBRATION).json();
+const SCENARIO_CONFIG_PATH = `${DIR}scenario.json`;
+const scenarioConfig = (await Bun.file(SCENARIO_CONFIG_PATH).exists()) ? await Bun.file(SCENARIO_CONFIG_PATH).json() : {};
+const CALIBRATION_MODE: string = scenarioConfig.calibration ?? "file";
+if (CALIBRATION_MODE !== "file" && CALIBRATION_MODE !== "none") {
+  console.error(`${SCENARIO_CONFIG_PATH}: calibration must be "file" or "none", not ${JSON.stringify(CALIBRATION_MODE)}`);
+  process.exit(2);
+}
+const CALIBRATED = CALIBRATION_MODE === "file";
 
 type Vec3 = [number, number, number];
 
@@ -62,7 +87,14 @@ const camera = await poll(async () => {
   const cameras: any[] = await api("GET", "/v1/cameras");
   return cameras.find((c) => String(c.name).includes("simulated") && c.frames_endpoint);
 }, "the simulated camera");
-await api("PUT", `/v1/cameras/${encodeURIComponent(camera.id)}/calibration`, await Bun.file(CALIBRATION).json());
+if (CALIBRATED) {
+  await api("PUT", `/v1/cameras/${encodeURIComponent(camera.id)}/calibration`, LENS);
+} else {
+  // No calibration: clear every stored one (DELETE with no size forgets all) and check that none is left.
+  await api("DELETE", `/v1/cameras/${encodeURIComponent(camera.id)}/calibration`);
+  const left = await api("GET", `/v1/cameras/${encodeURIComponent(camera.id)}/calibration`);
+  if ((left?.calibrations ?? []).length) throw new Error(`the camera still has ${left.calibrations.length} calibration(s)`);
+}
 const layoutText = await Bun.file(`${DIR}layout.json`).text();
 await fetch(`${BASE}/v1/field-layouts/${LAYOUT_ID}`, { method: "DELETE" });
 await api("POST", `/v1/field-layouts?id=${LAYOUT_ID}&name=${encodeURIComponent(`Sim ${NAME}`)}`, layoutText);
@@ -78,7 +110,7 @@ await api("POST", "/v1/pipelines", {
   field_layout: LAYOUT_ID,
   enabled: true,
 });
-console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, recording ${SECONDS} s`);
+console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}, recording ${SECONDS} s`);
 
 // --- Record -----------------------------------------------------------------------------------
 
@@ -119,6 +151,16 @@ function nearestTruth(ts: number): TruthFrame | undefined {
   let best: TruthFrame | undefined;
   for (const candidate of [truth[lo - 1], truth[lo]]) if (candidate && (!best || Math.abs(candidate.ts - ts) < Math.abs(best.ts - ts))) best = candidate;
   return best && Math.abs(best.ts - ts) <= period / 4 ? best : undefined;
+}
+
+// The phase of each truth frame (see the header): is a tag's corner in the image?
+const inImage = ([x, y]: [number, number]) => x >= 0 && x < LENS.width && y >= 0 && y < LENS.height;
+const phaseOf = new Map<TruthFrame, Phase>();
+let seenTagFree = false;
+for (const frame of truth) {
+  const visible = frame.tags.some((tag) => tag.corners.some(inImage));
+  phaseOf.set(frame, visible ? (seenTagFree ? "tags again" : "tags") : "tag-free");
+  if (!visible) seenTagFree = true;
 }
 
 // The layout's tags: centre and normal (a WPILib tag faces its +X).
@@ -212,7 +254,7 @@ const toLayout = aligned || fitted.length < 3 ? (p: Vec3) => p : rigidFit(fitted
 
 // --- Report -----------------------------------------------------------------------------------
 
-const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm"];
+const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm,phase,cal_estimated,cal_rms_px,cal_views,cal_frames"];
 const errors: number[] = [];
 let jumps = 0;
 let worstJump = 0;
@@ -220,6 +262,7 @@ let unmatched = 0;
 let posed = 0;
 const states = new Map<string, number>();
 const errorsBySize = new Map<string, number[]>();
+const errorsByPhase = new Map<Phase, number[]>();
 const jumpsBySize = new Map<string, number>();
 let previous: { truth: Vec3; estimate: Vec3 } | undefined;
 for (const { parsed, pose, frame, estimate: raw } of samples) {
@@ -235,6 +278,8 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
   const side = sizes.length ? Math.min(...sizes) : Number.NaN;
   const view = angles.length ? Math.max(...angles) : Number.NaN;
   const bucket = Number.isNaN(side) ? "no tag" : side < 30 ? "<30 px" : side < 45 ? "30-45 px" : ">=45 px";
+  const phase = phaseOf.get(frame) as Phase;
+  const calibrationReport = pose.calibration ?? {};
   let error = Number.NaN;
   let jump = Number.NaN;
   if (estimate) {
@@ -242,6 +287,7 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
     error = norm(sub(estimate, frame.position)) * 100;
     errors.push(error);
     errorsBySize.set(bucket, [...(errorsBySize.get(bucket) ?? []), error]);
+    errorsByPhase.set(phase, [...(errorsByPhase.get(phase) ?? []), error]);
     if (previous) {
       jump = norm(sub(sub(estimate, previous.estimate), sub(frame.position, previous.truth))) * 100;
       if (jump > JUMP_CM) {
@@ -271,6 +317,11 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
       f(error, 1),
       f(jump, 1),
       f(sigmaT, 1),
+      phase,
+      calibrationReport.estimated === undefined ? "" : String(calibrationReport.estimated),
+      f(Number(calibrationReport.rms_px ?? Number.NaN), 3),
+      calibrationReport.views ?? "",
+      calibrationReport.frames ?? "",
     ].join(","),
   );
 }
@@ -289,6 +340,45 @@ for (const [bucket, values] of [...errorsBySize].sort()) {
 }
 console.log(`[scenario] jumps over ${JUMP_CM} cm: ${jumps}, worst ${worstJump.toFixed(1)} cm`);
 console.log(`[scenario] pipeline: ${telemetry.ticks_processed ?? "?"} ticks, ${telemetry.ticks_failed ?? "?"} failed, last tick ${telemetry.last_tick_ms ?? "?"} ms (x86, not a board timing)`);
+// Each phase's time in the recorded window: the truth frames' own intervals (Styx's frames are not
+// evenly spaced), and the poses' errors.
+const windowStart = Math.min(...samples.map((s) => Number(s.parsed.frame_ts_ns)));
+const windowEnd = Math.max(...samples.map((s) => Number(s.parsed.frame_ts_ns)));
+const phaseSeconds = new Map<Phase, number>();
+for (let i = 0; i + 1 < truth.length; i++) {
+  const phase = phaseOf.get(truth[i]);
+  if (!phase || truth[i].ts < windowStart || truth[i].ts > windowEnd) continue;
+  phaseSeconds.set(phase, (phaseSeconds.get(phase) ?? 0) + (truth[i + 1].ts - truth[i].ts) / 1e9);
+}
+for (const phase of ["tags", "tag-free", "tags again"] as Phase[]) {
+  const values = errorsByPhase.get(phase) ?? [];
+  console.log(
+    `[scenario] phase ${phase}: ${(phaseSeconds.get(phase) ?? 0).toFixed(1)} s of truth, ${values.length} posed poses, error p50 ${percentile(values, 0.5).toFixed(1)} cm, p95 ${percentile(values, 0.95).toFixed(1)} cm, max ${percentile(values, 1).toFixed(1)} cm`,
+  );
+}
+// The calibration the node reports: the final pose's `calibration` (provenance, and intrinsics if it has any).
+const finalCalibration = [...samples].reverse().find((s) => s.pose.calibration)?.pose.calibration;
+const TRUE_INTRINSICS: Record<string, number> = {
+  fx: LENS.fx, fy: LENS.fy, cx: LENS.cx, cy: LENS.cy,
+  ...Object.fromEntries(Object.entries(LENS.distortion ?? {}).map(([k, v]) => [k, Number(v)])),
+};
+const PROVENANCE = new Set(["estimated", "rms_px", "views", "frames", "uncertainty"]);
+const reportedIntrinsics = finalCalibration ? Object.keys(finalCalibration).filter((k) => !PROVENANCE.has(k)) : [];
+const trueText = `true lens (${LENS.model}): ${Object.entries(TRUE_INTRINSICS).map(([k, v]) => `${k} ${Number(v).toPrecision(6)}`).join(", ")}`;
+if (!finalCalibration) {
+  console.log(`[scenario] reported calibration: none (no pose); ${trueText}`);
+} else {
+  console.log(
+    `[scenario] reported calibration (final pose): estimated ${finalCalibration.estimated}, rms ${Number(finalCalibration.rms_px).toFixed(3)} px, ${finalCalibration.views} tag views over ${finalCalibration.frames} frames`,
+  );
+  if (reportedIntrinsics.length) {
+    const compared = reportedIntrinsics.map((k) => `${k} ${Number(finalCalibration[k]).toPrecision(6)} vs ${k in TRUE_INTRINSICS ? Number(TRUE_INTRINSICS[k]).toPrecision(6) : "n/a"}`);
+    console.log(`[scenario] reported intrinsics: ${compared.join(", ")}`);
+  } else {
+    console.log("[scenario] reported intrinsics: none (the pose's calibration has no intrinsics to compare)");
+  }
+  console.log(`[scenario] ${trueText}`);
+}
 console.log(`[scenario] wrote ${OUT}/report.csv and ${OUT}/poses.jsonl`);
 
 // The mapper's own timing per stage (its `timing` output), milliseconds: `stages` as an object of
