@@ -27,12 +27,33 @@
 //!
 //! Roll, pitch and yaw follow WPILib's `Rotation3d` (intrinsic `Z`-`Y`-`X`, the quaternion
 //! `w, x, y, z`).
+//!
+//! A pipeline whose outputs include `pose` of type `eidos:map_pose` (the live mapper, the
+//! `live-map` and `dense-map` templates; see [`read_map_pose`]) gets the same topics from the
+//! map's `pose.rig`, valid only while the map is aligned to the field layout (the frame is the
+//! field's only then). When the pipeline also has `multi_tag_pose`, its topics keep their names
+//! and the map's get a `map_` prefix (`map_robot_pose`, `map_robot_pose_valid`, ...). Also:
+//!
+//! - `map_state` (`string`): the tracker's state, `bootstrapping`, `tracking`, `coasting`, `lost`
+//!   or `relocalized`.
+//! - `weak_robot_pose`, `weak_robot_pose_valid`, `weak_robot_pose_struct`,
+//!   `weak_robot_pose_std_devs` and `weak_source` (`string`): the map's weak candidate (a lone
+//!   small or ambiguous tag the map does not map yet). Opt-in: separate from `robot_pose`, and
+//!   never in it. The candidate's robot pose needs a rig: it is read from `weak.rig` (the shape
+//!   of `pose.rig`) when there is one. Eidos's weak candidate at 676cbf20 has no rig, so
+//!   `weak_robot_pose_valid` is false until it does. `weak_source` is empty without a candidate.
+//!
+//! Roll, pitch and yaw follow WPILib's `Rotation3d` (intrinsic `Z`-`Y`-`X`, the quaternion
+//! `w, x, y, z`).
 
 use orion_nt4::Value;
 use serde_json::Value as Json;
 
 /// The output port whose JSON these topics come from.
 pub const MULTI_TAG_POSE_PORT: &str = "multi_tag_pose";
+/// The output port of the live mapper's pose (`eidos:map_pose`). Only its shape tells it apart
+/// from the AprilTag graphs' `pose` outputs: see [`is_map_pose`].
+pub const MAP_POSE_PORT: &str = "pose";
 /// The NT4 type of `robot_pose_struct` (WPILib's `Pose3d`).
 pub const POSE3D_STRUCT_TYPE: &str = "struct:Pose3d";
 /// The NT4 type of a struct schema topic.
@@ -80,19 +101,94 @@ impl RobotPoseTopics {
     }
 }
 
+/// A map pose's topics (`eidos:map_pose`, see [`read_map_pose`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapPoseTopics {
+    /// `state`: `bootstrapping`, `tracking`, `coasting`, `lost` or `relocalized`.
+    pub state: String,
+    /// The main track's robot pose; `tag_count` is `alignment.matched_tags`.
+    pub robot: RobotPoseTopics,
+    /// The weak candidate's robot pose (the opt-in topics).
+    pub weak: WeakPoseTopics,
+}
+
+/// The weak candidate's topics: a lone small or ambiguous tag the map does not map yet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeakPoseTopics {
+    /// `Some` when the map is aligned and the candidate has a rig (see the module docs).
+    pub pose: Option<RobotPose>,
+    /// `Some` with `pose`, when its covariance is usable.
+    pub std_devs: Option<[f64; 3]>,
+    /// `weak.source`: why the tag is weak. Empty without a candidate.
+    pub source: String,
+}
+
+impl WeakPoseTopics {
+    /// `weak_robot_pose_valid`.
+    pub fn valid(&self) -> bool {
+        self.pose.is_some()
+    }
+}
+
+/// Whether `json` is an `eidos:map_pose`. The port name is not enough (the AprilTag graphs have
+/// `pose` outputs too), so this checks the shape: a `state` string and an `alignment` object.
+pub fn is_map_pose(json: &Json) -> bool {
+    json.get("state").is_some_and(Json::is_string) && json.get("alignment").is_some_and(Json::is_object)
+}
+
+/// Read an `eidos:map_pose` JSON (the output as `GET /v1/outputs` shows it); `None` for any other
+/// JSON (see [`is_map_pose`]).
+///
+/// The robot pose is `pose.rig`'s `reference_from_rig`, and it is published only while the map is
+/// aligned to the field layout and there is a rig. Eidos leaves `rig` out when the camera has no
+/// mount: it reads as the identity with an empty covariance, which is not a pose. Without the
+/// rig there is no robot pose (`valid` false), as for `multi_tag_pose`.
+pub fn read_map_pose(json: &Json) -> Option<MapPoseTopics> {
+    if !is_map_pose(json) {
+        return None;
+    }
+    let aligned = json["alignment"]["aligned"].as_bool().unwrap_or(false);
+    let valid = json.get("valid").and_then(Json::as_bool).unwrap_or(false);
+    let (pose, std_devs) = if valid { robot_pose_of_estimate(&json["pose"], aligned) } else { (None, None) };
+    let weak = json.get("weak").filter(|weak| weak.is_object());
+    let (weak_pose, weak_std_devs) = weak.map_or((None, None), |weak| robot_pose_of_estimate(weak, aligned));
+    Some(MapPoseTopics {
+        state: json["state"].as_str().unwrap_or_default().to_string(),
+        robot: RobotPoseTopics { tag_count: json["alignment"]["matched_tags"].as_i64().unwrap_or(0), pose, std_devs },
+        weak: WeakPoseTopics { pose: weak_pose, std_devs: weak_std_devs, source: weak.and_then(|weak| weak.get("source")).and_then(Json::as_str).unwrap_or_default().to_string() },
+    })
+}
+
+/// The robot pose of one estimate (a map pose's `pose` or `weak`) and its std devs: from its
+/// `rig`, when the map is aligned and the rig has its 36-value covariance.
+fn robot_pose_of_estimate(estimate: &Json, aligned: bool) -> (Option<RobotPose>, Option<[f64; 3]>) {
+    let Some(rig) = estimate.get("rig").filter(|rig| aligned && has_covariance(rig)) else {
+        return (None, None);
+    };
+    let pose = rig.get("reference_from_rig").and_then(robot_pose_from_transform);
+    let std_devs = pose.as_ref().and_then(|pose| robot_pose_std_devs(rig, pose.translation));
+    (pose, std_devs)
+}
+
+/// Whether `object` has a 6 x 6 `covariance` (36 values).
+fn has_covariance(object: &Json) -> bool {
+    object.get("covariance").and_then(Json::as_array).is_some_and(|values| values.len() == 36)
+}
+
 /// Read a `multi_tag_pose` JSON (the output as `GET /v1/outputs` shows it). Missing or
 /// malformed fields give no robot pose (`valid` false), never a guessed one.
 pub fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
     let has_rig = multi_tag_pose.get("has_rig").and_then(Json::as_bool).unwrap_or(false);
     let valid = multi_tag_pose.get("valid").and_then(Json::as_bool).unwrap_or(false);
-    let pose = if valid && has_rig { robot_pose_from_rig(multi_tag_pose) } else { None };
+    let pose = if valid && has_rig { multi_tag_pose.get("reference_from_rig").and_then(robot_pose_from_transform) } else { None };
     let std_devs = pose.as_ref().and_then(|pose| robot_pose_std_devs(multi_tag_pose, pose.translation));
     RobotPoseTopics { tag_count: multi_tag_pose.get("inlier_tags").and_then(Json::as_i64).unwrap_or(0), pose, std_devs }
 }
 
 /// The robot pose's standard deviations `[σx, σy, σθ]` (metres, metres, radians: what WPILib's
-/// pose estimators take), from `multi_tag_pose.covariance`, for a robot at `translation` (field
-/// frame). `None` without a usable covariance.
+/// pose estimators take), from the covariance in `estimate` (an object with a `covariance`: the
+/// `multi_tag_pose`, or a map pose's `rig`, whose covariance is the camera's), for a robot at
+/// `translation` (field frame). `None` without a usable covariance.
 ///
 /// Eidos's convention: 6 x 6 row-major `[rx, ry, rz, tx, ty, tz]`, the left perturbation
 /// `reference_from_camera' = exp([w, v]^) reference_from_camera`, `w` and `v` in the reference
@@ -101,8 +197,8 @@ pub fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
 /// robot's position error is `v - [t]× w` (rotation error turns about the field origin):
 /// `Σt = V - Cᵀ[t]×ᵀ - [t]× C + [t]× W [t]×ᵀ` with `W`, `C`, `V` the rotation, rotation-translation
 /// and translation blocks. `σθ` is the error about the field's `z` (`w_z`).
-pub fn robot_pose_std_devs(multi_tag_pose: &Json, translation: [f64; 3]) -> Option<[f64; 3]> {
-    let values = multi_tag_pose.get("covariance")?.as_array()?;
+pub fn robot_pose_std_devs(estimate: &Json, translation: [f64; 3]) -> Option<[f64; 3]> {
+    let values = estimate.get("covariance")?.as_array()?;
     if values.len() != 36 {
         return None;
     }
@@ -144,12 +240,11 @@ pub fn robot_pose_std_devs(multi_tag_pose: &Json, translation: [f64; 3]) -> Opti
 pub const MIN_POSITION_STD_DEV_M: f64 = 0.01;
 pub const MIN_HEADING_STD_DEV_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
 
-/// `reference_from_rig` as a robot pose; `None` unless every field is there and finite and the
-/// quaternion is not zero.
-fn robot_pose_from_rig(multi_tag_pose: &Json) -> Option<RobotPose> {
-    let rig = multi_tag_pose.get("reference_from_rig")?;
-    let translation = rig.get("translation")?;
-    let rotation = rig.get("rotation")?;
+/// A `reference_from_rig` transform (`{translation, rotation}`) as a robot pose; `None` unless
+/// every field is there and finite and the quaternion is not zero.
+fn robot_pose_from_transform(transform: &Json) -> Option<RobotPose> {
+    let translation = transform.get("translation")?;
+    let rotation = transform.get("rotation")?;
     let translation = [number(translation, "x")?, number(translation, "y")?, number(translation, "z")?];
     let raw = [number(rotation, "w")?, number(rotation, "x")?, number(rotation, "y")?, number(rotation, "z")?];
     let norm = raw.iter().map(|c| c * c).sum::<f64>().sqrt();
@@ -349,5 +444,125 @@ mod tests {
         scaled["reference_from_rig"]["rotation"] = json!({"w": 0.0, "x": 0.0, "y": 0.0, "z": 2.0});
         let pose = read(&scaled).pose.expect("a robot pose");
         assert_eq!(pose.quaternion, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    /// A recorded `eidos:map_pose` from a simulator run of the live map: `tracking`, aligned to
+    /// the layout by one tag, with no mount (`rig` is the identity with an empty covariance).
+    const RECORDED_MAP_POSE: &str = r#"{"alignment":{"aligned":true,"matched_tags":1,"residual_m":0.0},"calibration":{"estimated":false,"frames":0,"rms_px":0.0,"views":0},"frame":50,"pose":{"covariance":[0.00025738762911545904,-0.0009181988682054043,-1.1943684986205787e-05,0.0004563093623984005,0.0001917703074587258,-0.003350650540182484,-0.0009181988682055767,0.006966704277136646,7.063100758548332e-05,-0.003466920213365822,-0.0008342132007037621,0.027513324005900137,-1.1943684986199051e-05,7.063100758522983e-05,0.02839884579091783,0.0017398525475707323,-0.13437105115217013,0.00032625548367885273,0.00045630936239848726,-0.0034669202133658676,0.0017398525475706178,0.0031838755813809795,-0.010380103389826527,-0.013682926205436883,0.00019177030745869152,-0.0008342132007024116,-0.1343710511521693,-0.010380103389827179,0.6464427135269668,-0.0034178276312190146,-0.0033506505401835096,0.02751332400590161,0.0003262554836801152,-0.013682926205437396,-0.003417827631225824,0.11397049956519029],"hypotheses":{"chosen":0,"count":0,"weights":[],"why":""},"points":0,"reference_from_camera":{"rotation":{"w":0.5395005352963929,"x":-0.5400136831425433,"y":0.4569982668047262,"z":-0.45659279294707106},"translation":{"x":3.422192356110152,"y":-0.24991488920721347,"z":0.4991956071259854}},"rig":{"covariance":[],"reference_from_rig":{"rotation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0},"translation":{"x":0.0,"y":0.0,"z":0.0}}},"rms_px":0.14691589982824188,"sigma":{"position_m":[0.06418397392687641,0.24343230836475382,0.08584188059431067],"rotation_deg":[0.9192136548565283,4.782294537106446,9.655460180407216]},"source":"bootstrap"},"reason":"bootstrap","state":"tracking","t_ns":3929783590420729,"valid":true}"#;
+
+    fn recorded_map_pose() -> Json {
+        serde_json::from_str(RECORDED_MAP_POSE).expect("the recorded map pose")
+    }
+
+    /// The recorded map pose with a mount: `rig` at `translation`, yaw pi, with the camera's
+    /// covariance (as Eidos gives it).
+    fn with_mount(mut map_pose: Json, translation: [f64; 3]) -> Json {
+        let covariance = map_pose["pose"]["covariance"].clone();
+        map_pose["pose"]["rig"] = json!({
+            "covariance": covariance,
+            "reference_from_rig": {
+                "rotation": {"w": 0.0, "x": 0.0, "y": 0.0, "z": 1.0},
+                "translation": {"x": translation[0], "y": translation[1], "z": translation[2]}
+            }
+        });
+        map_pose
+    }
+
+    #[test]
+    fn map_pose_is_recognised_by_its_shape() {
+        assert!(is_map_pose(&recorded_map_pose()));
+        assert!(!is_map_pose(&pose_json(true, true)), "an AprilTag pose output is not a map pose");
+        assert!(!is_map_pose(&json!({"state": "tracking"})));
+        assert!(!is_map_pose(&json!({"alignment": {"aligned": true}})));
+        assert!(read_map_pose(&pose_json(true, true)).is_none());
+    }
+
+    #[test]
+    fn recorded_map_pose_without_a_mount_has_no_robot_pose() {
+        let topics = read_map_pose(&recorded_map_pose()).expect("a map pose");
+        assert_eq!(topics.state, "tracking");
+        assert_eq!(topics.robot.tag_count, 1, "tag_count is the matched layout tags");
+        assert!(!topics.robot.valid(), "the identity placeholder is not a pose");
+        assert_eq!(topics.robot.std_devs, None);
+        assert!(!topics.weak.valid());
+        assert_eq!(topics.weak.source, "");
+    }
+
+    #[test]
+    fn aligned_map_pose_with_a_mount_is_the_robot_pose() {
+        let topics = read_map_pose(&with_mount(recorded_map_pose(), [3.0, 4.0, 0.1])).expect("a map pose");
+        assert!(topics.robot.valid());
+        let pose = topics.robot.pose.expect("a robot pose");
+        assert_eq!(pose.translation, [3.0, 4.0, 0.1]);
+        assert_rpy(pose.rpy, [0.0, 0.0, PI]);
+        assert_eq!(topics.robot.tag_count, 1);
+        let [sx, sy, st] = topics.robot.std_devs.expect("std devs from the rig's covariance");
+        assert!(sx > 0.0 && sy > 0.0 && st > 0.0 && [sx, sy, st].iter().all(|s| s.is_finite()));
+        assert!(!topics.weak.valid());
+    }
+
+    #[test]
+    fn unaligned_map_pose_has_no_robot_pose() {
+        let mut map_pose = with_mount(recorded_map_pose(), [3.0, 4.0, 0.1]);
+        map_pose["alignment"]["aligned"] = json!(false);
+        map_pose["weak"] = json!({
+            "reference_from_camera": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 1.0, "y": 0.0, "z": 0.0}},
+            "source": "lone small tag, not mapped",
+            "rig": {"covariance": map_pose["pose"]["covariance"].clone(), "reference_from_rig": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 7.0, "y": 1.0, "z": 0.2}}}
+        });
+        let topics = read_map_pose(&map_pose).expect("a map pose");
+        assert!(!topics.robot.valid());
+        assert_eq!(topics.robot.std_devs, None);
+        assert!(!topics.weak.valid(), "the weak topics need the alignment too");
+    }
+
+    #[test]
+    fn absent_weak_candidate_means_weak_is_not_valid() {
+        let absent = read_map_pose(&with_mount(recorded_map_pose(), [3.0, 4.0, 0.1])).expect("a map pose");
+        assert!(!absent.weak.valid());
+        assert_eq!(absent.weak.source, "");
+        // Eidos writes a missing weak candidate as null.
+        let mut null_weak = with_mount(recorded_map_pose(), [3.0, 4.0, 0.1]);
+        null_weak["weak"] = Json::Null;
+        let topics = read_map_pose(&null_weak).expect("a map pose");
+        assert!(!topics.weak.valid());
+        assert_eq!(topics.weak.source, "");
+        assert!(topics.robot.valid(), "the main track is unaffected");
+    }
+
+    #[test]
+    fn weak_candidate_without_a_rig_reports_its_source_only() {
+        let mut map_pose = recorded_map_pose();
+        map_pose["weak"] = json!({
+            "reference_from_camera": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 1.0, "y": 0.0, "z": 0.0}},
+            "covariance": diagonal([1e-4, 1e-4, 1e-4, 0.01, 0.01, 0.01]),
+            "source": "lone small tag, not mapped"
+        });
+        let topics = read_map_pose(&map_pose).expect("a map pose");
+        assert!(!topics.weak.valid());
+        assert_eq!(topics.weak.source, "lone small tag, not mapped");
+        assert!(!topics.robot.valid());
+    }
+
+    #[test]
+    fn weak_candidate_with_a_rig_is_its_own_robot_pose() {
+        let mut map_pose = with_mount(recorded_map_pose(), [3.0, 4.0, 0.1]);
+        map_pose["weak"] = json!({
+            "reference_from_camera": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 1.0, "y": 0.0, "z": 0.0}},
+            "covariance": diagonal([1e-4, 1e-4, 1e-4, 0.01, 0.01, 0.01]),
+            "source": "lone small tag, not mapped",
+            "rig": {
+                "covariance": diagonal([1e-4, 1e-4, 1e-4, 0.01, 0.01, 0.01]),
+                "reference_from_rig": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 7.0, "y": 1.0, "z": 0.2}}
+            }
+        });
+        let topics = read_map_pose(&map_pose).expect("a map pose");
+        assert!(topics.weak.valid());
+        let weak = topics.weak.pose.expect("a weak robot pose");
+        assert_eq!(weak.translation, [7.0, 1.0, 0.2]);
+        assert_eq!(topics.weak.source, "lone small tag, not mapped");
+        assert!(topics.weak.std_devs.is_some());
+        // The main track's robot pose is its own rig's, never the weak candidate's.
+        assert_eq!(topics.robot.pose.expect("the main robot pose").translation, [3.0, 4.0, 0.1]);
     }
 }

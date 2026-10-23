@@ -55,3 +55,52 @@ up) and is the robot's pose through the camera's mount, so it needs a mount on t
 
 Their `kind` properties are `robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `tag_count`
 and `robot_pose_std_devs`.
+
+### Map pose
+
+A pipeline whose `pose` output is an `eidos:map_pose` (the live mapper, from the `live-map` and
+`dense-map` templates) also publishes the map's robot pose, on every tick. The map's pose is
+`pose.rig` (the robot through the camera's mount, in the field frame), so it needs a mount on the
+camera, as the AprilTag pose does. The `pose` output is recognised by its shape (a `state` and an
+`alignment`), not by its name alone: the AprilTag graphs have `pose` outputs too.
+
+The robot pose is valid only while the map is aligned to the field layout (`alignment.aligned`),
+because the map's frame is the field's only then. Before that, or without a mount, the map's
+`robot_pose` topics are not updated and `robot_pose_valid` is `false`.
+
+If the pipeline's graph also outputs `multi_tag_pose`, its robot pose topics keep their names above
+and the map's get a `map_` prefix (`map_robot_pose`, `map_robot_pose_valid`, and so on). The
+choice follows the graph's outputs, not each tick's, so the names do not change. A pipeline with
+only a map pose uses the plain names.
+
+| Topic | Type | Value |
+|---|---|---|
+| `<prefix>/<pipeline>/robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `robot_pose_std_devs` | as above | The map's robot pose, the same as the AprilTag one. `robot_pose_std_devs` is the map's covariance carried to the robot's field position, with the same floors |
+| `<prefix>/<pipeline>/tag_count` | `int` | `alignment.matched_tags`: the placed tags that are in the layout |
+| `<prefix>/<pipeline>/map_state` | `string` | The tracker's state: `bootstrapping`, `tracking`, `coasting`, `lost` or `relocalized`. Use it to see whether the pose is current |
+
+With a `multi_tag_pose` beside it, the map's robot pose topics are `map_robot_pose`,
+`map_robot_pose_valid`, `map_robot_pose_struct`, `map_robot_pose_std_devs` and `map_tag_count`.
+`map_state` keeps its name.
+
+#### Weak candidate (opt-in)
+
+The map also reports a weak candidate: a lone small or ambiguous tag that the map does not map
+yet, which the main track has no pose for. Its robot pose is published on separate topics, so a
+robot program opts in by reading them and weighting the pose by its std devs. It is never in
+`robot_pose`.
+
+| Topic | Type | Value |
+|---|---|---|
+| `<prefix>/<pipeline>/weak_robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`, as `robot_pose`. Keeps its last value; check `weak_robot_pose_valid` |
+| `<prefix>/<pipeline>/weak_robot_pose_valid` | `boolean` | There is a weak robot pose this tick: the map is aligned, there is a candidate and it has a rig |
+| `<prefix>/<pipeline>/weak_robot_pose_struct` | `raw` (`struct:Pose3d`) | The weak pose as `robot_pose_struct` |
+| `<prefix>/<pipeline>/weak_robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]`, with `weak_robot_pose`: the candidate's covariance, carried to the robot's field position. Looser than the main track's: the tag's rotation is ambiguous (a small far tag can be 4 to 15 degrees off) |
+| `<prefix>/<pipeline>/weak_source` | `string` | Why the tag is weak (`lone small tag, not mapped`, `lone ambiguous tag, not mapped` or `small tags, not mapped`). Empty when there is no candidate |
+
+The candidate's robot pose is read from its `rig`, the same as the map's. Eidos's weak candidate
+at the pinned revision (`676cbf20`) has no rig, so `weak_robot_pose_valid` is `false` until it
+does; `weak_source` and `weak_robot_pose_std_devs` follow the same rules.
+
+Their `kind` properties are the topic names, without the pipeline (`robot_pose`, `map_state`,
+`weak_source`, and so on).
