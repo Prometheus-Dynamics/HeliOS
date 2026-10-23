@@ -78,6 +78,10 @@ pub(crate) struct ResolvedBindings {
 pub(crate) fn resolve_bindings(workload: &ExecutionWorkload, resources: &BTreeMap<ResourceId, ResourceRecord>) -> Result<ResolvedBindings, ExecutionError> {
     let mut resolved = ResolvedBindings::default();
     for binding in &workload.bindings {
+        // Another pipeline's output: fed on the bus by the driver, not from Orion.
+        if binding.pipeline.is_some() {
+            continue;
+        }
         let resource = resources.get(binding.resource_id.as_str()).ok_or_else(|| ExecutionError::MissingResource(binding.resource_id.clone()))?;
         if let Some(socket_path) = frame_socket_path(&resource.endpoints) {
             resolved.frames.push(FrameSourceSpec { input: binding.input.clone(), resource_id: binding.resource_id.clone(), socket_path, request: binding.frame_request.clone(), sliced: false });

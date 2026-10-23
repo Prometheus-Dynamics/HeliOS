@@ -377,6 +377,20 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
   or neither) and `pyramid` shape the frames the engine asks the camera service for. A camera
   binding also carries the camera's context (calibration and mount, see
   [Calibration and camera context](#calibration-and-camera-context)).
+- A binding can instead take another pipeline's host output: `"source": "pipeline"`, with
+  `pipeline` (the producer's id) and `port` (its output, such as `pose`), and optionally
+  `max_wait_ms` (0 to 1000, default 50). The consumer ticks on its own camera frames and takes the
+  producer's value for the same frame (paired by the frame's timestamp). A frame waits at most
+  `max_wait_ms` for a producer that is still on an older frame, then ticks with the producer's
+  latest value, reported as `lagged` in the telemetry (`pipeline_inputs`: `aligned`, `lagged` or
+  `missing`, with `lag_ms`). A producer that is not running is `missing`; its last value stays
+  in the graph until it runs again. A pipeline input needs a camera binding, and a pipeline cannot
+  take its own output. Templates list their pipeline inputs (`pipeline_inputs`): the dense map
+  takes `pose` from a live-map pipeline.
+- `nice` (0 to 19) lowers the graph thread's scheduling priority (unset keeps the default). The
+  dense map is meant to run on its own `cpu`, at a `nice` of 10 or more, so it never delays the
+  live mapper, which runs at the default priority on another core. The engine reports `nice` and
+  `nice_error` in the telemetry.
 - `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 8) set how the
   graph's Eidos detector groups (`eidos:detectors.apriltag`, `eidos:detectors.aruco` and their
   `_tracked` versions) search: `tracked` searches the whole frame every `full_search_every`

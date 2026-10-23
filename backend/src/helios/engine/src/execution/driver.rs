@@ -61,6 +61,8 @@ use super::{
     frame_source::{FrameReceive, FrameSource, FrameSourceStatus},
     graph::{CompiledWorkloadGraph, ResidentHostGraph},
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
+    pipeline_bus::{PipelineBus, next_run_id},
+    pipeline_inputs::PipelineFeeds,
     stats::{DriverStats, FpsWindow, GraphMetrics},
 };
 use crate::{
@@ -76,6 +78,9 @@ const SECONDARY_FRAME_MAX_AGE: Duration = Duration::from_millis(500);
 const FRAME_OVERHEAD_INTERVAL: Duration = Duration::from_secs(1);
 /// The metrics artifact is rendered at most this often.
 const METRICS_RENDER_INTERVAL: Duration = Duration::from_secs(1);
+/// While a frame waits for pipeline inputs, the poll wakes this often to look at the bus again (a
+/// producer's publication does not wake the consumer's descriptors).
+const PIPELINE_WAIT_POLL_MS: u16 = 1;
 
 /// State the graph thread shares with the engine's publishing loop.
 struct DriverShared {
@@ -123,6 +128,10 @@ enum Trigger {
 pub(crate) struct WorkloadDriver {
     pub workload: ExecutionWorkload,
     pub sources: Vec<FrameSourceSpec>,
+    /// The pipeline's id on the bus, and this driver's run there (withdrawn when it stops).
+    pipeline: String,
+    run: u64,
+    bus: PipelineBus,
     shared: Arc<DriverShared>,
     host: HostBridgeHandle,
     stop: HostGraphStopHandle,
@@ -151,6 +160,7 @@ impl WorkloadDriver {
         frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>,
         outputs_ready: Arc<Notify>,
         sinks: impl Into<OutputSinks>,
+        bus: PipelineBus,
     ) -> Result<Self, ExecutionError> {
         let OutputSinks { nt4, live } = sinks.into();
         let (sources, frame_sources): (Vec<_>, Vec<_>) = frames.into_iter().unzip();
@@ -189,15 +199,26 @@ impl WorkloadDriver {
         let planning_ms = graph.planning_ms;
         // Made here, before the thread runs, so a stop at any point makes it readable.
         let inbound = graph.host_graph.inbound_fd().map_err(|error| ExecutionError::Execute(format!("graph inbound fd: {error}")))?;
-        let nt4 = Nt4Output { sink: nt4, live, pipeline: pipeline_name(&workload.workload_id), serializers: serializers.clone() };
-        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone(), nt4), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone(), cpu: workload.cpu };
-        let thread = std::thread::Builder::new()
-            .name(format!("helios-graph-{}", workload.workload_id))
-            .spawn(move || graph_loop.run(trigger))
-            .map_err(|error| ExecutionError::Execute(format!("failed to start workload driver thread: {error}")))?;
+        let pipeline = pipeline_name(&workload.workload_id);
+        let run = next_run_id();
+        let publisher = Publisher { bus: bus.clone(), pipeline: pipeline.clone(), run };
+        let feeds = PipelineFeeds::new(bus.clone(), &workload.bindings);
+        let nt4 = Nt4Output { sink: nt4, live, pipeline: pipeline.clone(), serializers: serializers.clone() };
+        let recorder = TickRecorder::new(&graph, shared.clone(), nt4, publisher);
+        let graph_loop = GraphLoop { recorder, graph, inbound, frame_inputs, feeds, shared: shared.clone(), stop: stop.clone(), cpu: workload.cpu, nice: workload.nice };
+        // Registered before the thread runs: a consumer that starts with this pipeline waits for its
+        // first tick (`PipelineFeeds::ready`), instead of taking it as absent.
+        bus.register(&pipeline, run);
+        let thread = std::thread::Builder::new().name(format!("helios-graph-{}", workload.workload_id)).spawn(move || graph_loop.run(trigger)).map_err(|error| {
+            bus.withdraw(&pipeline, run);
+            ExecutionError::Execute(format!("failed to start workload driver thread: {error}"))
+        })?;
         Ok(Self {
             workload,
             sources,
+            pipeline,
+            run,
+            bus,
             shared,
             host,
             stop,
@@ -385,6 +406,8 @@ impl Drop for WorkloadDriver {
         {
             tracing::warn!(workload_id = %self.workload.workload_id, "workload driver thread panicked");
         }
+        // After the join: no tick publishes once this pipeline's values are withdrawn.
+        self.bus.withdraw(&self.pipeline, self.run);
     }
 }
 
@@ -397,14 +420,15 @@ struct TickRecorder {
     output_ports: Vec<String>,
     shared: Arc<DriverShared>,
     nt4: Nt4Output,
+    publisher: Publisher,
     /// When to read Daedalus's frame-overhead report next (`None`: not recorded).
     next_overhead: Option<Instant>,
 }
 
 impl TickRecorder {
-    fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>, nt4: Nt4Output) -> Self {
+    fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>, nt4: Nt4Output, publisher: Publisher) -> Self {
         let next_overhead = graph.host_graph.frame_overhead_enabled().then(Instant::now);
-        Self { output_ports: graph.output_ports.clone(), shared, nt4, next_overhead }
+        Self { output_ports: graph.output_ports.clone(), shared, nt4, publisher, next_overhead }
     }
 
     fn record(&mut self, graph: &ResidentHostGraph, result: Result<&ExecutionTelemetry, String>) {
@@ -426,15 +450,15 @@ impl TickRecorder {
         }
         // NetworkTables and the live socket get every tick's outputs (frames are not sent); only
         // while connected (the payloads are shared, not copied).
-        let nt4_outputs: Option<Vec<(String, Payload)>> = (self.nt4.sink.active() || self.nt4.live.active()).then(|| {
-            outputs
-                .iter()
-                .filter_map(|(port, value)| match value {
-                    OutputValue::Payload(payload) => Some((port.clone(), payload.clone())),
-                    OutputValue::Message(_) => None,
-                })
-                .collect()
-        });
+        // The payload outputs, shared: for NetworkTables, the live socket and the pipeline bus.
+        let payload_outputs: Vec<(String, Payload)> = outputs
+            .iter()
+            .filter_map(|(port, value)| match value {
+                OutputValue::Payload(payload) => Some((port.clone(), payload.clone())),
+                OutputValue::Message(_) => None,
+            })
+            .collect();
+        let nt4_outputs = (self.nt4.sink.active() || self.nt4.live.active()).then(|| payload_outputs.clone());
         let frame_overhead = match self.next_overhead {
             Some(due) if now >= due => {
                 self.next_overhead = Some(now + FRAME_OVERHEAD_INTERVAL);
@@ -448,6 +472,8 @@ impl TickRecorder {
             let state = &mut *state;
             state.sequence += 1;
             let sequence = state.sequence;
+            // Every tick is progress, whatever outputs it had: a consumer waits on the tick.
+            self.publisher.publish(state.stats.last_frame_timestamp, payload_outputs);
             state.outputs.extend(outputs.into_iter().map(|(port, value)| (port, LatestOutput { sequence, updated_at_ms, value })));
             state.fps.record_frame(now);
             state.stats.fps = state.fps.fps();
@@ -479,6 +505,19 @@ impl TickRecorder {
             }
         }
         self.shared.outputs_ready.notify_one();
+    }
+}
+
+/// Publishes a producer's ticks on the pipeline bus (`pipeline_bus`).
+struct Publisher {
+    bus: PipelineBus,
+    pipeline: String,
+    run: u64,
+}
+
+impl Publisher {
+    fn publish(&self, frame_ts_ns: Option<u64>, outputs: Vec<(String, Payload)>) {
+        self.bus.publish_tick(&self.pipeline, self.run, frame_ts_ns, outputs);
     }
 }
 
@@ -528,15 +567,19 @@ struct GraphLoop {
     inbound: InboundFd,
     /// Frame inputs, the primary (pacing) one first.
     frame_inputs: Vec<String>,
+    /// The graph's inputs from other pipelines, synced before each frame's tick.
+    feeds: PipelineFeeds,
     shared: Arc<DriverShared>,
     stop: HostGraphStopHandle,
     /// The core to pin this thread to (the workload's `cpu`), before anything runs on it.
     cpu: Option<u32>,
+    /// The thread's nice value (the workload's `nice`), set before anything runs on it.
+    nice: Option<u32>,
 }
 
 impl GraphLoop {
     fn run(self, trigger: Trigger) {
-        self.pin_to_cpu();
+        self.place_thread();
         match trigger {
             Trigger::Once => self.run_once(),
             Trigger::Resources => self.run_polled(Vec::new()),
@@ -544,21 +587,36 @@ impl GraphLoop {
         }
     }
 
-    /// Pin this thread to `cpu` and report what was applied (`cpu` or `cpu_error` in the stats).
-    /// A thread that could not be pinned runs anyway, where the scheduler puts it.
-    fn pin_to_cpu(&self) {
-        let Some(cpu) = self.cpu else { return };
-        let outcome = super::affinity::pin_current_thread(cpu);
-        if let Err(error) = &outcome {
+    /// Place this thread before anything runs on it: pin it to its core (`cpu`) and set its nice
+    /// value (`nice`), and report what was applied (`cpu`, `cpu_error`, `nice`, `nice_error` in the
+    /// stats). A thread that could not be placed runs anyway, where the scheduler puts it.
+    fn place_thread(&self) {
+        if self.cpu.is_none() && self.nice.is_none() {
+            return;
+        }
+        let pinned = self.cpu.map(|cpu| (cpu, super::affinity::pin_current_thread(cpu)));
+        let niced = self.nice.map(|nice| (nice, super::affinity::set_current_thread_nice(nice)));
+        if let Some((cpu, Err(error))) = &pinned {
             tracing::warn!(pipeline = %self.recorder.nt4.pipeline, cpu, %error, "graph thread not pinned");
+        }
+        if let Some((nice, Err(error))) = &niced {
+            tracing::warn!(pipeline = %self.recorder.nt4.pipeline, nice, %error, "graph thread priority not set");
         }
         {
             let mut state = lock(&self.shared.state);
             let stats = &mut state.stats;
-            (stats.cpu, stats.cpu_error) = match outcome {
-                Ok(()) => (Some(cpu), None),
-                Err(error) => (None, Some(error)),
-            };
+            if let Some((cpu, outcome)) = pinned {
+                (stats.cpu, stats.cpu_error) = match outcome {
+                    Ok(()) => (Some(cpu), None),
+                    Err(error) => (None, Some(error)),
+                };
+            }
+            if let Some((nice, outcome)) = niced {
+                (stats.nice, stats.nice_error) = match outcome {
+                    Ok(()) => (Some(nice), None),
+                    Err(error) => (None, Some(error)),
+                };
+            }
             stats.updated_at_ms = now_ms();
         }
         self.shared.outputs_ready.notify_one();
@@ -589,6 +647,10 @@ impl GraphLoop {
     /// loop at once. Resource-driven graphs run the same loop with no cameras.
     fn run_polled(mut self, mut sources: Vec<Box<dyn FrameSource>>) {
         let mut secondary: Vec<Option<(Payload, Instant)>> = vec![None; sources.len().saturating_sub(1)];
+        // The primary camera's newest frame, held while the pipeline inputs are not aligned to it.
+        let mut waiting: Option<WaitingFrame> = None;
+        // The loop owns the feeds, so a push can sync them while the poll borrows the graph and the inbound fd.
+        let mut feeds = std::mem::take(&mut self.feeds);
         if let Some(primary) = sources.first() {
             record_source_status(&self.shared, primary.status(), None);
         }
@@ -602,7 +664,8 @@ impl GraphLoop {
                     if self.stop.is_stopped() {
                         return;
                     }
-                    match poll(&mut fds, PollTimeout::NONE) {
+                    let timeout = if waiting.is_some() { PollTimeout::from(PIPELINE_WAIT_POLL_MS) } else { PollTimeout::NONE };
+                    match poll(&mut fds, timeout) {
                         Ok(_) | Err(Errno::EINTR) => {}
                         Err(error) => {
                             self.recorder.record(&self.graph.host_graph, Err(format!("poll: {error}")));
@@ -628,12 +691,12 @@ impl GraphLoop {
                             }
                         }
                     }
-                    let mut pushed = false;
                     if !sources.is_empty() && readable(0) {
                         match drain(&*sources[0]) {
                             Ok(Some(frame)) => {
-                                self.push(frame, &sources, &mut secondary);
-                                pushed = true;
+                                // A newer frame replaces the waiting one, and keeps its wait.
+                                let since = waiting.as_ref().map_or_else(Instant::now, |held| held.since);
+                                waiting = Some(WaitingFrame { timestamp: frame.meta().timestamp, frame, since });
                             }
                             Ok(None) => record_source_status(&self.shared, sources[0].status(), None),
                             Err(reason) => {
@@ -641,6 +704,14 @@ impl GraphLoop {
                                 break 'poll Some(0);
                             }
                         }
+                    }
+                    // The waiting frame goes in once the pipeline inputs are aligned to it, or once it has
+                    // waited as long as they may take. Without pipeline inputs that is at once.
+                    let max_wait = feeds.max_wait();
+                    let mut pushed = false;
+                    if let Some(held) = waiting.take_if(|held| feeds.ready(held.timestamp, held.since.elapsed() >= max_wait)) {
+                        self.push(held.frame, &sources, &mut secondary, &mut feeds);
+                        pushed = true;
                     }
                     if pushed || readable(inbound_index) {
                         match self.graph.host_graph.tick_ready() {
@@ -662,8 +733,8 @@ impl GraphLoop {
     }
 
     /// Push the primary camera's `frame`, with the secondary cameras' latest frames in the same
-    /// batch.
-    fn push(&self, frame: FrameLease, sources: &[Box<dyn FrameSource>], secondary: &mut [Option<(Payload, Instant)>]) {
+    /// batch. The pipeline inputs are synced first: they are held, so pushing them does not tick.
+    fn push(&self, frame: FrameLease, sources: &[Box<dyn FrameSource>], secondary: &mut [Option<(Payload, Instant)>], feeds: &mut PipelineFeeds) {
         let timestamp = frame.meta().timestamp;
         let size = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
         let status = sources[0].status();
@@ -675,6 +746,12 @@ impl GraphLoop {
             stats.last_frame_timestamp = Some(timestamp);
             stats.last_frame_size = Some(size);
             stats.source = status;
+        }
+        if !feeds.is_empty() {
+            for reason in feeds.sync(self.graph.host_graph.host(), timestamp) {
+                record_source_status(&self.shared, sources[0].status(), Some(reason));
+            }
+            lock(&self.shared.state).stats.pipeline_inputs = feeds.stats();
         }
         let host = self.graph.host_graph.host();
         let payload = stream_io::framelease_payload(frame);
@@ -696,6 +773,14 @@ impl GraphLoop {
             record_source_status(&self.shared, sources[0].status(), Some(format!("frames rejected: {rejected}")));
         }
     }
+}
+
+/// The primary camera's frame waiting for the pipeline inputs (`GraphLoop::run_polled`).
+struct WaitingFrame {
+    frame: FrameLease,
+    timestamp: u64,
+    /// When the wait began (kept while a newer frame replaces this one).
+    since: Instant,
 }
 
 /// Everything `source` has now, down to the newest frame (older ones are released at once).

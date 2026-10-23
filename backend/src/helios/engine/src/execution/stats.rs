@@ -10,7 +10,7 @@ use daedalus::{
     runtime::{ExecutionTelemetry, FrameOverheadReport, RuntimePlanExplanation},
 };
 
-use super::frame_source::FrameSourceStatus;
+use super::{frame_source::FrameSourceStatus, pipeline_inputs::PipelineInputStats};
 
 /// Window over which the frame rate is measured.
 const FPS_WINDOW: Duration = Duration::from_secs(1);
@@ -39,6 +39,12 @@ pub(crate) struct DriverStats {
     pub cpu: Option<u32>,
     /// Why the graph thread could not be pinned to its core (`cpu` is then unset).
     pub cpu_error: Option<String>,
+    /// The graph thread's nice value, when it was set (`nice` in the workload config).
+    pub nice: Option<u32>,
+    /// Why the graph thread's nice value could not be set (`nice` is then unset).
+    pub nice_error: Option<String>,
+    /// The state of each pipeline input (other pipelines' outputs), at the latest frame.
+    pub pipeline_inputs: Vec<PipelineInputStats>,
     /// Wall-clock time of the last change, used as the published records' observed time so
     /// unchanged stats do not churn Orion state.
     pub updated_at_ms: u64,
@@ -62,6 +68,9 @@ impl DriverStats {
             "last_failure": self.last_failure,
             "cpu": self.cpu,
             "cpu_error": self.cpu_error,
+            "nice": self.nice,
+            "nice_error": self.nice_error,
+            "pipeline_inputs": self.pipeline_inputs.iter().map(PipelineInputStats::to_json).collect::<Vec<_>>(),
         })
     }
 }

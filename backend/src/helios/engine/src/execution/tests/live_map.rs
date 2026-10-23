@@ -80,7 +80,7 @@ fn detector_settings(builder: GraphBuilder) -> GraphBuilder {
 }
 
 /// Camera of the synthetic scenes: 640 x 480, 500 px focal, the principal point at the centre.
-const SCENE_FOCAL_PX: f64 = 500.0;
+pub(super) const SCENE_FOCAL_PX: f64 = 500.0;
 /// Side of the synthetic marker, metres.
 const SCENE_TAG_SIDE_M: f64 = 0.2;
 
@@ -137,7 +137,7 @@ fn tag_homography(pose_index: u64) -> [[f64; 3]; 3] {
 /// A GREY frame of 640 x 480 with the AprilTag 36h11 marker `id`, seen through `tag_homography`
 /// of `pose_index`, over a flat grey background with a little hashed texture for the tracker to
 /// follow.
-fn live_map_scene(id: u32, pose_index: u64, timestamp: u64) -> FrameLease {
+pub(super) fn live_map_scene(id: u32, pose_index: u64, timestamp: u64) -> FrameLease {
     let (width, height) = (640_usize, 480_usize);
     let mut pixels = vec![0_u8; width * height];
     for y in 0..height {
@@ -176,7 +176,7 @@ fn live_map_scene(id: u32, pose_index: u64, timestamp: u64) -> FrameLease {
 }
 
 /// Parses the host output `kind` as JSON and checks the documented top-level keys.
-fn json_with_keys(artifacts: &[ExecutionArtifactRecord], kind: &str, keys: &[&str]) -> serde_json::Value {
+pub(super) fn json_with_keys(artifacts: &[ExecutionArtifactRecord], kind: &str, keys: &[&str]) -> serde_json::Value {
     let value = artifact_json(artifacts, kind);
     for key in keys {
         assert!(value.get(*key).is_some(), "{kind} has `{key}`: {value}");
@@ -252,7 +252,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
 }
 
 /// The byte length a standard, padded base64 string decodes to.
-fn base64_decoded_len(text: &str) -> usize {
+pub(super) fn base64_decoded_len(text: &str) -> usize {
     let padding = text.bytes().rev().take_while(|b| *b == b'=').count();
     text.len() / 4 * 3 - padding
 }

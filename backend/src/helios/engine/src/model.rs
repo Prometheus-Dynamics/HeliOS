@@ -41,6 +41,24 @@ pub struct ExecutionBinding {
     /// the graph's held structured host inputs (`camera`, `extrinsics`; see
     /// `execution::camera_context`). Frame bindings only.
     pub context: BTreeMap<String, ContextValue>,
+    /// Set when the input is another pipeline's output (`source: "pipeline"`) instead of a
+    /// resource; `resource_id` is then empty. See `execution::pipeline_inputs`.
+    pub pipeline: Option<PipelineInputSource>,
+}
+
+/// Default for [`PipelineInputSource::max_wait_ms`].
+pub const DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS: u32 = 50;
+
+/// A graph input fed with the latest output of another pipeline (on the in-process pipeline bus).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipelineInputSource {
+    /// The producing pipeline's id (its workload id without the `pipeline.` prefix).
+    pub pipeline: String,
+    /// The producer's host output port.
+    pub port: String,
+    /// How long a frame waits for the producer to finish the same frame before the graph ticks
+    /// with the producer's latest value anyway (`0` never waits).
+    pub max_wait_ms: u32,
 }
 
 /// A camera context value: a number (`TypedConfigValue::F64`, or an int) or a name (a string,
@@ -102,6 +120,9 @@ pub struct ExecutionWorkload {
     /// The CPU core the graph thread is pinned to (`cpu` in the config); unset leaves it to the
     /// scheduler. A change restarts the graph (it is part of the compiled shape).
     pub cpu: Option<u32>,
+    /// The nice value of the graph thread (`nice` in the config, 0 to 19: a lower priority); unset
+    /// keeps the default. A change restarts the graph.
+    pub nice: Option<u32>,
 }
 
 impl ExecutionWorkload {

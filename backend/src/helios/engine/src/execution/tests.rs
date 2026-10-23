@@ -59,6 +59,8 @@ mod live_map;
 /// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
 #[cfg(test)]
 mod camera_uncertainty;
+mod dense_map;
+mod pipeline_feeds;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
@@ -69,6 +71,8 @@ const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_5
 const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-track.graph.json");
 /// The live map: the tracked detector and Eidos's live mapper (`eidos:mapping.live_map`).
 const LIVE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/live-map.graph.json");
+/// The dense mapper (`eidos:dense.map`) with its pose from the live mapper pipeline.
+const DENSE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/dense-map.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -254,11 +258,12 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
         bindings,
         plugin_requirements: Vec::new(),
         cpu: None,
+        nice: None,
     }
 }
 
 fn binding(input: &str, resource_id: &str) -> ExecutionBinding {
-    ExecutionBinding { input: input.into(), resource_id: resource_id.into(), node_id: "node-local".into(), frame_request: FrameRequestOptions::default(), context: Default::default() }
+    ExecutionBinding { input: input.into(), resource_id: resource_id.into(), node_id: "node-local".into(), frame_request: FrameRequestOptions::default(), context: Default::default(), pipeline: None }
 }
 
 fn state_with(resources: Vec<ResourceRecord>) -> StateSnapshot {
@@ -362,7 +367,7 @@ fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, inpu
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[input.to_string()], settings).expect("compile graph");
     let (sender, receiver) = test_camera();
     let driver =
-        WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
+        WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
     (driver, sender)
 }
 
@@ -392,6 +397,7 @@ fn graph_documents_are_eidos_templates() {
         ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
         ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
+        ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), &[]), DENSE_MAP_GRAPH_DOCUMENT),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");
@@ -434,6 +440,7 @@ fn graph_thread_is_pinned_to_its_core_and_reports_it() {
     // An engine core: the thread runs there, and the telemetry says so.
     let mut pinned = workload("workload.pinned", document.clone(), Vec::new());
     pinned.cpu = Some(core);
+    pinned.nice = Some(5);
     let mut resident = ResidentExecutionSet::default();
     let snapshot = sync_until(&mut resident, &plugins.execution(), &[pinned.clone()], None, "the pinned graph to start", |snapshot| {
         artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1
@@ -441,6 +448,8 @@ fn graph_thread_is_pinned_to_its_core_and_reports_it() {
     let telemetry = artifact_json(&snapshot.artifacts, "execution.telemetry");
     assert_eq!(telemetry["cpu"], core, "{telemetry}");
     assert!(telemetry["cpu_error"].is_null(), "{telemetry}");
+    assert_eq!(telemetry["nice"], 5, "{telemetry}");
+    assert!(telemetry["nice_error"].is_null(), "{telemetry}");
 
     // Not a core: the graph still runs, unpinned, and the error is in the telemetry.
     let mut missing = workload("workload.missing-core", document, Vec::new());
@@ -621,7 +630,7 @@ fn secondary_camera_frames_pair_with_the_primary_frame() {
     let (front, front_frames) = test_camera();
     let (side, side_frames) = test_camera();
     let sources = vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), (frame_spec("side"), Box::new(side_frames) as Box<dyn FrameSource>)];
-    let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
+    let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
     let result = |driver: &mut WorkloadDriver| artifact_json(&driver.snapshot().1, "host_output:result");
 
     // A side frame alone does not tick the graph; the next front frame carries it.
@@ -863,6 +872,7 @@ fn missing_secondary_camera_does_not_block_the_graph() {
         vec![(frame_spec("front"), Box::new(front_frames) as Box<dyn FrameSource>), missing_camera(&dir, "side")],
         Arc::new(Notify::new()),
         crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
     )
     .expect("start driver");
     for timestamp in 1..=3 {
@@ -883,7 +893,7 @@ fn stop_ends_the_poll_loop_promptly() {
     let frames = workload("workload.stop-frames", passthrough_document(&plugins), Vec::new());
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &frames, &["camera".to_string()], GraphSettings::default()).expect("compile graph");
     let started = Instant::now();
-    let driver = WorkloadDriver::start(frames, compiled, vec![missing_camera(&dir, "camera")], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
+    let driver = WorkloadDriver::start(frames, compiled, vec![missing_camera(&dir, "camera")], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
     assert!(started.elapsed() < Duration::from_millis(500), "starting waited for the camera: {:?}", started.elapsed());
     std::thread::sleep(Duration::from_millis(300));
     assert!(!driver.stats().source.connected);
@@ -904,7 +914,7 @@ fn stop_ends_the_poll_loop_promptly() {
     let document = plugins.registry().graph_document(graph).to_json().expect("document json");
     let resources = workload("workload.stop-resources", document, vec![binding("sensor", "gpio_line.node-local.0")]);
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &resources, &[], GraphSettings::default()).expect("compile graph");
-    let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("start driver");
+    let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
     driver.update_context(vec![ResourceInput { input: "sensor".into(), revision: "1".into(), payload: "on".into() }]);
     wait_for("the resource tick", || driver.stats().ticks_processed == 1);
     std::thread::sleep(Duration::from_millis(50));
@@ -984,7 +994,7 @@ fn camera_context_feeds_pose_and_multi_tag_pose() {
         assert!(graph.input_ports.contains(&port.to_string()), "{port}: {:?}", graph.input_ports);
     }
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default())
+    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
         .expect("driver");
     driver.update_camera_context(&apriltag);
 
@@ -1030,7 +1040,7 @@ fn multi_tag_pose_gives_the_camera_and_robot_in_the_reference_frame() {
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &pose, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
     let mut driver =
-        WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default()).expect("driver");
+        WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("driver");
     driver.update_camera_context(&pose);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);
@@ -1069,7 +1079,7 @@ fn multi_tag_pose_runs_without_a_mount() {
     apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &apriltag, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default())
+    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
         .expect("driver");
     driver.update_camera_context(&apriltag);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");

@@ -6,6 +6,7 @@ pub mod field_layouts;
 pub mod leds;
 pub mod logs;
 pub mod nt4;
+pub mod pipeline_bindings;
 pub mod pipelines;
 pub mod playback;
 pub mod recordings;
