@@ -129,8 +129,10 @@ impl Builder {
         }
     }
 
-    /// An unlit-looking material: the texture as base colour, double-sided (a tag is seen from
-    /// the front, but a floor's back can be in view too).
+    /// An unlit material (`KHR_materials_unlit`): the texture as base colour, double-sided (a tag
+    /// is seen from the front, but a floor's back can be in view too). Styx's CPU renderer ignores
+    /// lights anyway; the extension makes the Bevy backend show the same base colour, so the two
+    /// renders of one scene can be compared.
     pub fn material(&mut self, texture: usize) -> usize {
         self.materials.push(json!({
             "name": format!("material-{texture}"),
@@ -141,6 +143,7 @@ impl Builder {
                 "roughnessFactor": 1.0,
             },
             "doubleSided": true,
+            "extensions": { "KHR_materials_unlit": {} },
         }));
         self.materials.len() - 1
     }
@@ -221,6 +224,9 @@ impl Builder {
         });
         if !self.animations.is_empty() {
             document["animations"] = json!(self.animations);
+        }
+        if !self.materials.is_empty() {
+            document["extensionsUsed"] = json!(["KHR_materials_unlit"]);
         }
         let mut json_bytes = serde_json::to_vec(&document).expect("the document is JSON");
         while !json_bytes.len().is_multiple_of(4) {
