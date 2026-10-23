@@ -83,14 +83,16 @@ console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_I
 // --- Record -----------------------------------------------------------------------------------
 
 const lines: string[] = [];
+const timingLines: string[] = [];
 await new Promise<void>((resolve, reject) => {
-  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=pose`);
+  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=pose,timing`);
   const timer = setTimeout(() => {
     socket.close();
     resolve();
   }, SECONDS * 1000);
   socket.onmessage = (event) => {
-    if (typeof event.data === "string") lines.push(...event.data.split("\n").filter(Boolean));
+    if (typeof event.data !== "string") return;
+    for (const line of event.data.split("\n").filter(Boolean)) (line.includes('"port":"timing"') ? timingLines : lines).push(line);
   };
   socket.onerror = () => {
     clearTimeout(timer);
@@ -99,6 +101,7 @@ await new Promise<void>((resolve, reject) => {
 });
 const telemetry = (await api("GET", `/v1/pipelines/${PIPELINE_ID}`)).telemetry ?? {};
 await Bun.write(`${OUT}/poses.jsonl`, lines.join("\n") + "\n");
+await Bun.write(`${OUT}/timing.jsonl`, timingLines.join("\n") + "\n");
 
 // --- Truth ------------------------------------------------------------------------------------
 
@@ -287,3 +290,18 @@ for (const [bucket, values] of [...errorsBySize].sort()) {
 console.log(`[scenario] jumps over ${JUMP_CM} cm: ${jumps}, worst ${worstJump.toFixed(1)} cm`);
 console.log(`[scenario] pipeline: ${telemetry.ticks_processed ?? "?"} ticks, ${telemetry.ticks_failed ?? "?"} failed, last tick ${telemetry.last_tick_ms ?? "?"} ms (x86, not a board timing)`);
 console.log(`[scenario] wrote ${OUT}/report.csv and ${OUT}/poses.jsonl`);
+
+// The mapper's own timing per stage (its `timing` output), milliseconds: `stages` as an object of
+// numbers or a list of {name, ms}.
+const stageTimes = new Map<string, number[]>();
+for (const line of timingLines) {
+  const stages = JSON.parse(line).value?.stages;
+  const entries: [string, unknown][] = Array.isArray(stages) ? stages.map((stage: any) => [stage.name, stage.ms ?? stage.ms_p50 ?? stage.value]) : stages && typeof stages === "object" ? Object.entries(stages) : [];
+  for (const [name, ms] of entries) if (typeof ms === "number") stageTimes.set(name, [...(stageTimes.get(name) ?? []), ms]);
+}
+if (stageTimes.size) {
+  const summary = [...stageTimes].map(([name, values]) => `${name} ${percentile(values, 0.5).toFixed(2)}/${percentile(values, 0.95).toFixed(2)}`).join(", ");
+  console.log(`[scenario] mapper stages ms p50/p95 (x86): ${summary}`);
+} else if (timingLines.length) {
+  console.log(`[scenario] mapper timing: ${timingLines.length} lines without numeric stages (see ${OUT}/timing.jsonl)`);
+}

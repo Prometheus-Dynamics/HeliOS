@@ -50,6 +50,9 @@ imports = [
   { source = "atlas", path = "devices/raze/gaia/slots-layered.toml", when = { profile = "full", target = "raze" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
+  # A registry build cache (OCI checkpoints): pull what another machine built, push what this
+  # one builds. Off unless asked for (`--set input.cache=local`): ops/registry-local.toml.
+  { path = "../ops/registry-local.toml", when = { input = { cache = "local" } } },
 ]
 
 # Raze board package (Atlas dev e8b2833: A/B updater fixes from hardware, the Lemnos pin
@@ -179,6 +182,13 @@ default = "console=serial0,115200 console=tty1 rootwait log_buf_len=8M printk.de
 kind = "enum"
 default = "release"
 choices = ["release", "dev-image"]
+
+# The registry build cache: "off" (default) or "local", the test registry on 127.0.0.1:5000
+# (gaia/configs/ops/registry-local.toml).
+[inputs.cache]
+kind = "enum"
+default = "off"
+choices = ["off", "local"]
 
 [inputs.profile]
 description = "Build profile"

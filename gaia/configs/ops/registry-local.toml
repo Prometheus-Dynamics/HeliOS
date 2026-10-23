@@ -1,0 +1,30 @@
+# A registry build cache on the local test registry (Gaia's registry:2 on 127.0.0.1:5000, plain
+# HTTP for localhost), imported by builds/raze.toml with `--set input.cache=local`. Build products
+# (Buildroot packages, artifacts, image layers) are pulled on a miss and pushed after a build,
+# signed with gpg; a clean checkout or a second machine then skips what was already built.
+#
+# Nothing secret is in this file: the token and the keys come from [secrets] entries, read when
+# used and never stored (Gaia docs/configuration.md, Secrets). The files are the test registry's:
+#   ~/.cache/gaia-registry-test/auth/password   the registry password for user "gaia" (0600)
+#   ~/.cache/gaia-registry-test/gpg-fpr         the signing key's fingerprint (0600)
+# and gpg must find that key: run with GNUPGHOME=~/.cache/gaia-registry-test/gnupg.
+# A shared registry (GHCR) later is the same table with another registry, repository and token.
+
+[secrets.registry_token]
+file = "~/.cache/gaia-registry-test/auth/password"
+
+[secrets.registry_signing_key]
+file = "~/.cache/gaia-registry-test/gpg-fpr"
+
+[[checkpoints]]
+id = "registry"
+backend = "oci"
+registry = "127.0.0.1:5000"
+repository = "helios/gaia-cache"
+token = "secret:registry_token"
+username = "gaia"
+sign_kind = "gpg"
+sign_key = "secret:registry_signing_key"
+verify_key = "secret:registry_signing_key"
+use_policy = "auto"
+upload_policy = "auto"
