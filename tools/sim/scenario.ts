@@ -361,11 +361,16 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
   const position = solved?.sigma?.position_m;
   const sigmaT = Array.isArray(position) ? Math.max(...position) * 100 : typeof position === "number" ? position * 100 : Number.NaN;
   const f = (v: number, digits = 3) => (Number.isFinite(v) ? v.toFixed(digits) : "");
+  // CSV text field: quoted when it holds a comma, quote or newline (sources such as "lone small tag, not mapped").
+  const text = (v: unknown) => {
+    const t = String(v ?? "");
+    return /[",\n]/.test(t) ? `"${t.replaceAll('"', '""')}"` : t;
+  };
   rows.push(
     [
       parsed.frame_ts_ns,
-      pose.state ?? "",
-      solved?.source ?? "",
+      text(pose.state),
+      text(solved?.source),
       pose.alignment?.aligned ? "yes" : "no",
       frame.tags.map((t) => t.id).join(" "),
       f(side, 1),
@@ -383,7 +388,7 @@ for (const { parsed, pose, frame, estimate: raw } of samples) {
       calibrationReport.model ?? "",
       ...["fx", "fy", "cx", "cy"].map((k) => f(Number(calibrationReport[k] ?? Number.NaN), 2)),
       f(nees, 2),
-      weak?.source ?? "",
+      text(weak?.source),
       ...(weakAt ?? [Number.NaN, Number.NaN, Number.NaN]).map((v) => f(v)),
       f(weakError, 1),
       f(weakNeesValue, 2),
