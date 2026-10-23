@@ -5,6 +5,8 @@ order = ["base", "platform", "app"]
 default = "base"
 erofs = true
 verity = true
+# LZMA 6 with 1 MiB clusters for the layers that rarely change (smallest; Gaia's erofs grid).
+erofs_options = ["-zlzma,level=6", "-C1048576", "-Eall-fragments,dedupe,ztailpacking"]
 
 # The board's: kernel, modules (Styx's out-of-tree drivers in updates/ included) and firmware.
 [image.layers.platform]
@@ -13,6 +15,8 @@ paths = ["/lib/modules", "/lib/firmware"]
 
 # HeliOS: its binaries and plugin, the UI, its runtime config and units.
 [image.layers.app]
+# 256 KiB clusters: an app update is read fresh every time, so less read amplification.
+erofs_options = ["-zlzma,level=6", "-C262144", "-Eall-fragments,dedupe,ztailpacking"]
 installs = ["install-helios-*"]
 stage = ["ui-static-build", "runtime-helios-*", "runtime-api-startup", "runtime-lemnos-helios-looks"]
 services = ["helios-*"]
