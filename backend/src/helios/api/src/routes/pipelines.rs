@@ -126,8 +126,7 @@ pub struct PipelineSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<u32>,
     /// The nice value of the graph thread (`0` to `MAX_PIPELINE_NICE`): a lower scheduling priority
-    /// than the default, so a heavy pipeline (dense mapping) yields to a live one on the same
-    /// machine. Unset keeps the default. The engine reports what it applied (`nice`, `nice_error`).
+    /// than the default, so a background pipeline yields to a live one on the same machine. Unset keeps the default. The engine reports what it applied (`nice`, `nice_error`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nice: Option<u32>,
 }

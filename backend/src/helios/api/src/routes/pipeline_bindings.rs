@@ -52,14 +52,11 @@ pub struct PipelineInputHint {
     pub producer_template: &'static str,
 }
 
-/// The pipeline inputs of the golden graph `template` (none for the others).
-pub fn template_pipeline_inputs(template: &str) -> Vec<PipelineInputHint> {
-    match template {
-        // The dense mapper takes the live mapper's pose of each frame (`pose`), with the frames of
-        // the camera it maps.
-        "dense-map" => vec![PipelineInputHint { input: "pose", port: "pose", producer_template: "live-map" }],
-        _ => Vec::new(),
-    }
+/// The pipeline inputs of the golden graph `template`. None takes one today: the dense mapper
+/// runs in the live map's pipeline (all of a camera's Eidos work shares one core), not on a
+/// second pipeline fed the live map's pose.
+pub fn template_pipeline_inputs(_template: &str) -> Vec<PipelineInputHint> {
+    Vec::new()
 }
 
 /// Check one binding of a spec. `resource_exists` says whether a resource id is known.
@@ -178,9 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn the_dense_template_takes_the_live_mapper_pose() {
-        let hints = template_pipeline_inputs("dense-map");
-        assert_eq!(hints, vec![PipelineInputHint { input: "pose", port: "pose", producer_template: "live-map" }]);
-        assert!(template_pipeline_inputs("live-map").is_empty());
+    fn the_dense_template_needs_no_other_pipeline() {
+        assert!(template_pipeline_inputs("dense-map").is_empty(), "the dense mapper is in the live map's pipeline");
     }
 }

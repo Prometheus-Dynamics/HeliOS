@@ -71,7 +71,7 @@ const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_5
 const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-track.graph.json");
 /// The live map: the tracked detector and Eidos's live mapper (`eidos:mapping.live_map`).
 const LIVE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/live-map.graph.json");
-/// The dense mapper (`eidos:dense.map`) with its pose from the live mapper pipeline.
+/// The live map with the dense mapper (`eidos:dense.map`) on its pose, one pipeline.
 const DENSE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/dense-map.graph.json");
 
 #[node(id = "test.source", outputs("out"))]

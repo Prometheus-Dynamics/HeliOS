@@ -23,6 +23,14 @@ const LIVE_MAP_NODE: &str = "eidos:mapping.live_map";
 /// a known tag, and without one it starts on the first clear tag (the map's reference frame).
 /// Host outputs: `pose`, `snapshot`, `timing` and the detector's `detections`.
 pub(super) fn live_map_template(registry: &PluginRegistry) -> String {
+    let mut document = registry.graph_document(live_map_builder(registry).build());
+    document.metadata.insert("title".into(), "HeliOS live map".into());
+    stored_form(&document)
+}
+
+/// The live map graph before it is built: the detector (`detector`) and the mapper (`mapper`)
+/// with their host inputs and outputs, for templates that add to it (the dense map).
+pub(super) fn live_map_builder(registry: &PluginRegistry) -> GraphBuilder {
     let detector = PortHandle::new("detector", "frame");
     let mapper = |port: &str| PortHandle::new("mapper", port);
     let builder = registry
@@ -62,10 +70,7 @@ pub(super) fn live_map_template(registry: &PluginRegistry) -> String {
         .expect("snapshot output")
         .try_connect(&mapper("timing"), "timing")
         .expect("timing output");
-    let builder = detector_settings(builder);
-    let mut document = registry.graph_document(builder.build());
-    document.metadata.insert("title".into(), "HeliOS live map".into());
-    stored_form(&document)
+    detector_settings(builder)
 }
 
 /// The detector's settings: the AprilTag 36h11 family with HeliOS's tracking (full search every

@@ -41,9 +41,9 @@ pub const GRAPHS: &[(&str, &str)] = &[
     // Eidos's live mapper (`eidos:mapping.live_map`) behind the tracked AprilTag detector: the
     // camera pose, the map snapshot and the timing, for the UI's Map pane.
     ("live-map", include_str!("../../engine/graphs/live-map.graph.json")),
-    // Eidos's dense mapper (`eidos:dense.map`): the keyframe TSDF and mesh from the live mapper's
-    // poses, which it takes as a pipeline input (`source: "pipeline"`, port `pose`, of a live-map
-    // pipeline). Deploy it with its own `cpu` and a `nice` of 10 or more (docs/api/http.md).
+    // The live map with Eidos's dense mapper (`eidos:dense.map`) on its pose: the keyframe TSDF
+    // and mesh too, in the same pipeline on the same core (the dense mapper keeps to a time budget
+    // per tick, so it never delays the tags or the live map).
     ("dense-map", include_str!("../../engine/graphs/dense-map.graph.json")),
 ];
 
