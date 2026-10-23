@@ -390,8 +390,8 @@ Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
 - `nice` (0 to 19) lowers the graph thread's scheduling priority (unset keeps the default). The
   engine reports `nice` and `nice_error` in the telemetry. All of a camera's Eidos work (tags,
   pose, live map and dense map) runs in one pipeline on one core: the `dense-map` template is the
-  live map with the dense mapper in it, keeping to a time budget per tick (`budget_ms`, 4 ms) so it
-  never delays the tags or the live map.
+  live map with the dense mapper in it, keeping to a time budget per tick (`budget_ms`, Eidos's
+  default) so it never delays the tags or the live map.
 - `search_mode` (`tracked` or `full`) and `full_search_every` (1 to 100000, default 8) set how the
   graph's Eidos detector groups (`eidos:detectors.apriltag`, `eidos:detectors.aruco` and their
   `_tracked` versions) search: `tracked` searches the whole frame every `full_search_every`

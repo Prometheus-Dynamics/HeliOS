@@ -1,7 +1,7 @@
 //! The dense mapper template (`eidos:dense.map`): the live map graph with the dense mapper on the
 //! live mapper's pose, in one pipeline. Everything Eidos does for a camera shares one core, so the
-//! dense mapper runs in budget mode (a time budget per tick, keyframe spacing adapted to what the
-//! budget sustains) instead of on a core of its own.
+//! dense mapper runs in budget mode (its default: a time budget per tick, keyframe spacing adapted
+//! to what the budget sustains) instead of on a core of its own.
 
 use daedalus::{
     data::model::Value,
@@ -15,14 +15,11 @@ use super::{
 
 /// The dense mapper node (`eidos:dense.map`).
 const DENSE_MAP_NODE: &str = "eidos:dense.map";
-/// The dense mapper's time budget per tick, milliseconds: what it may take of the shared core
-/// next to the detector and the live mapper.
-const DENSE_BUDGET_MS: f64 = 4.0;
 
 /// The dense graph as a stored document: the live map graph (`live_map_builder`), whose mapper's
 /// `pose` and the host's `frame` and `camera` feed the dense mapper. Host outputs: the live map's
 /// (`detections`, `pose`, `snapshot`, `timing`) and the dense mapper's `mesh` and `dense_timing`.
-/// `tuning` sets the dense mapper's constants over the template's.
+/// `tuning` sets the dense mapper's constants (empty for its defaults, budget mode included).
 pub(super) fn dense_map_document(registry: &PluginRegistry, tuning: &[(&str, Value)]) -> String {
     let dense = |port: &str| PortHandle::new("dense", port);
     let mut builder = live_map_builder(registry)
@@ -38,7 +35,6 @@ pub(super) fn dense_map_document(registry: &PluginRegistry, tuning: &[(&str, Val
         .expect("mesh output")
         .try_connect(&dense("timing"), "dense_timing")
         .expect("dense timing output");
-    builder = set_const(builder, "budget_ms", Value::Float(DENSE_BUDGET_MS));
     for (port, value) in tuning {
         builder = set_const(builder, port, value.clone());
     }
@@ -105,7 +101,7 @@ fn start_pipeline(plugins: &TestPlugins, bus: &PipelineBus, workload: ExecutionW
 }
 
 #[test]
-fn dense_map_template_is_the_live_map_with_a_budgeted_dense_mapper() {
+fn dense_map_template_is_the_live_map_with_the_dense_mapper() {
     let plugins = TestPlugins::load();
     let document = dense_map_document(plugins.registry(), &[]);
     let graph: serde_json::Value = serde_json::from_str(&document).expect("json");
@@ -114,7 +110,4 @@ fn dense_map_template_is_the_live_map_with_a_budgeted_dense_mapper() {
     for node in [DENSE_MAP_NODE, "eidos:mapping.live_map", "eidos:detectors.tracked_detect"] {
         assert!(document.contains(node), "{node} in the one pipeline");
     }
-    let dense = graph["graph"]["nodes"].as_array().expect("nodes").iter().find(|node| node["bundle"] == DENSE_MAP_NODE).expect("dense node");
-    let budget = dense["const_inputs"].as_array().expect("consts").iter().find(|c| c[0] == "budget_ms").expect("budget_ms set");
-    assert_eq!(budget[1]["value"], DENSE_BUDGET_MS, "{budget}");
 }
