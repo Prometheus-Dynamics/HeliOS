@@ -1,7 +1,10 @@
 //! Graph host outputs and engine stats as Orion artifact records.
 
 use daedalus::{
-    data::{json::to_plain_json, model::Value},
+    data::{
+        json::{BytesEncoding, PlainJsonOptions, to_plain_json_with},
+        model::Value,
+    },
     runtime::host_bridge::{ValueSerializerMap, inspect_payload},
     transport::Payload,
 };
@@ -41,7 +44,8 @@ pub(crate) fn payload_message(payload: &Payload, serializers: &ValueSerializerMa
     let inspection = inspect_payload(payload, serializers);
     match inspection.value() {
         Some(Value::String(text)) => text.to_string(),
-        Some(value) => match to_plain_json(value) {
+        // Byte buffers (map points, meshes) as base64 strings: a third of the size of byte arrays.
+        Some(value) => match to_plain_json_with(value, PlainJsonOptions { bytes: BytesEncoding::Base64 }) {
             object @ serde_json::Value::Object(_) => object.to_string(),
             other => serde_json::json!({ "value": other }).to_string(),
         },

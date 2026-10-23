@@ -88,7 +88,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "ab044e5b59103600a81cbd64e37300b45c927d7d"
+rev = "b9ae2f55dc5622bbd3806d7286a61503866f08d0"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe

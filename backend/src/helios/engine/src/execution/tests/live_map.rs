@@ -239,13 +239,20 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     for key in ["min_xyz", "max_xyz"] {
         assert_eq!(points[key].as_array().map(Vec::len), Some(3), "{points}");
     }
-    // Byte buffers come out of the host as arrays of byte values (`to_plain_json`): ids u32 LE,
-    // xyz three f32 LE, observations u16 LE, grey one byte.
-    assert_eq!(points["ids"].as_array().map(Vec::len), Some(count * 4), "{points}");
-    assert_eq!(points["xyz"].as_array().map(Vec::len), Some(count * 12), "{points}");
-    assert_eq!(points["observations"].as_array().map(Vec::len), Some(count * 2), "{points}");
-    assert_eq!(points["grey"].as_array().map(Vec::len), Some(count), "{points}");
+    // Byte buffers come out of the host as base64 strings (`to_plain_json_with`, Base64): ids u32
+    // LE, xyz three f32 LE, observations u16 LE, grey one byte.
+    let bytes = |key: &str| points[key].as_str().map(base64_decoded_len);
+    assert_eq!(bytes("ids"), Some(count * 4), "{points}");
+    assert_eq!(bytes("xyz"), Some(count * 12), "{points}");
+    assert_eq!(bytes("observations"), Some(count * 2), "{points}");
+    assert_eq!(bytes("grey"), Some(count), "{points}");
 
     // The delta is not a host output.
     assert!(!artifacts.iter().any(|artifact| artifact.kind == "host_output:delta"));
+}
+
+/// The byte length a standard, padded base64 string decodes to.
+fn base64_decoded_len(text: &str) -> usize {
+    let padding = text.bytes().rev().take_while(|b| *b == b'=').count();
+    text.len() / 4 * 3 - padding
 }
