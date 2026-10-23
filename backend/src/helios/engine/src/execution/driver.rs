@@ -150,8 +150,9 @@ impl WorkloadDriver {
         graph: CompiledWorkloadGraph,
         frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>,
         outputs_ready: Arc<Notify>,
-        nt4: Nt4Sink,
+        sinks: impl Into<OutputSinks>,
     ) -> Result<Self, ExecutionError> {
+        let OutputSinks { nt4, live } = sinks.into();
         let (sources, frame_sources): (Vec<_>, Vec<_>) = frames.into_iter().unzip();
         let frame_inputs = sources.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
         let latest = |port: &String| graph.host_graph.set_latest_input(port.clone()).map_err(|error| ExecutionError::Plan(format!("host input '{port}': {error}")));
@@ -188,7 +189,7 @@ impl WorkloadDriver {
         let planning_ms = graph.planning_ms;
         // Made here, before the thread runs, so a stop at any point makes it readable.
         let inbound = graph.host_graph.inbound_fd().map_err(|error| ExecutionError::Execute(format!("graph inbound fd: {error}")))?;
-        let nt4 = Nt4Output { sink: nt4, pipeline: pipeline_name(&workload.workload_id), serializers: serializers.clone() };
+        let nt4 = Nt4Output { sink: nt4, live, pipeline: pipeline_name(&workload.workload_id), serializers: serializers.clone() };
         let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone(), nt4), graph, inbound, frame_inputs, shared: shared.clone(), stop: stop.clone(), cpu: workload.cpu };
         let thread = std::thread::Builder::new()
             .name(format!("helios-graph-{}", workload.workload_id))
@@ -423,8 +424,9 @@ impl TickRecorder {
                 outputs.push((port.clone(), value));
             }
         }
-        // NetworkTables gets every tick's outputs (frames are not sent); only while connected.
-        let nt4_outputs: Option<Vec<(String, Payload)>> = self.nt4.sink.active().then(|| {
+        // NetworkTables and the live socket get every tick's outputs (frames are not sent); only
+        // while connected (the payloads are shared, not copied).
+        let nt4_outputs: Option<Vec<(String, Payload)>> = (self.nt4.sink.active() || self.nt4.live.active()).then(|| {
             outputs
                 .iter()
                 .filter_map(|(port, value)| match value {
@@ -480,16 +482,36 @@ impl TickRecorder {
     }
 }
 
-/// A workload's outputs on NetworkTables (`crate::nt4`).
+/// Where a workload's ticks go besides Orion: NetworkTables (`crate::nt4`) and the live socket
+/// (`crate::live`).
+#[derive(Clone, Default)]
+pub struct OutputSinks {
+    pub nt4: Nt4Sink,
+    pub live: crate::live::LiveSink,
+}
+
+impl From<Nt4Sink> for OutputSinks {
+    fn from(nt4: Nt4Sink) -> Self {
+        Self { nt4, live: crate::live::LiveSink::default() }
+    }
+}
+
+/// A workload's outputs on NetworkTables (`crate::nt4`) and the live socket (`crate::live`).
 struct Nt4Output {
     sink: Nt4Sink,
+    live: crate::live::LiveSink,
     pipeline: String,
     serializers: ValueSerializerMap,
 }
 
 impl Nt4Output {
     fn offer(&self, outputs: Vec<(String, Payload)>, latency_ms: f64, fps: f64) {
-        self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps });
+        if self.live.active() {
+            self.live.offer(crate::live::LiveTick { pipeline: self.pipeline.clone(), outputs: outputs.clone(), serializers: self.serializers.clone() });
+        }
+        if self.sink.active() {
+            self.sink.offer(Nt4Tick { pipeline: self.pipeline.clone(), outputs, serializers: self.serializers.clone(), latency_ms, fps });
+        }
     }
 }
 

@@ -8,6 +8,7 @@ import { MOCK } from "#lib/api/mode.js";
 import type * as W from "#lib/api/types.js";
 import { cluster } from "./cluster.svelte";
 import { toasts } from "./toasts.svelte";
+import { onPeripheral, type PeripheralEvent } from "./peripheral-events";
 
 export interface Proc {
   pid: number;
@@ -211,33 +212,62 @@ class SystemStore {
 
   /** Panes watching peripherals (the IMU compass wants more than the 2 s device tick). */
   private watchers = 0;
-  private fastTimer = 0;
+  private slowTimer = 0;
+  private stopEvents: (() => void) | null = null;
+  /** The peripherals as last read, with the pushed readings folded in. */
+  private peripherals: W.Resource[] = [];
+  private frame = 0;
 
-  /** Read peripherals four times a second while something shows them; returns the stop. */
+  /**
+   * Follow peripherals while something shows them: one read, then the readings helios-api pushes
+   * as lemnosd publishes them (`peripheral` events, 50 ms batches), drawn at most once a frame. A
+   * slow re-read (5 s) picks up devices coming and going. Returns the stop.
+   */
   watchPeripherals(): () => void {
     if (MOCK || typeof window === "undefined") return () => {};
     this.watchers += 1;
-    if (!this.fastTimer) this.fastTimer = window.setInterval(() => void this.peripheralsTick(), 250);
+    if (this.watchers === 1) {
+      void this.readPeripherals();
+      this.slowTimer = window.setInterval(() => void this.readPeripherals(), 5000);
+      this.stopEvents = onPeripheral((event) => this.applyPeripheral(event));
+    }
     return () => {
       this.watchers -= 1;
-      if (this.watchers <= 0 && this.fastTimer) {
-        clearInterval(this.fastTimer);
-        this.fastTimer = 0;
+      if (this.watchers <= 0) {
+        clearInterval(this.slowTimer);
+        this.slowTimer = 0;
+        this.stopEvents?.();
+        this.stopEvents = null;
       }
     };
   }
 
-  private async peripheralsTick() {
-    const node = cluster.nodes[0];
-    const hw = node ? this.hw[node.id] : undefined;
-    if (!node || !hw || (typeof document !== "undefined" && document.hidden)) return;
-    let peripherals: W.Resource[];
+  private async readPeripherals() {
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
-      peripherals = await api.peripherals();
+      this.peripherals = await api.peripherals();
     } catch {
       return;
     }
-    const devices = livePeripherals(peripherals);
+    this.drawPeripherals();
+  }
+
+  /** Fold one device's pushed readings into its state; redraw on the next frame. */
+  private applyPeripheral(event: PeripheralEvent) {
+    const resource = this.peripherals.find((r) => r.id === event.id);
+    if (!resource) return;
+    const state = { ...((resource.state ?? {}) as Record<string, unknown>), ...event.values };
+    for (const key of event.expired) delete state[key];
+    resource.state = state as W.Resource["state"];
+    if (!this.frame) this.frame = requestAnimationFrame(() => this.drawPeripherals());
+  }
+
+  private drawPeripherals() {
+    this.frame = 0;
+    const node = cluster.nodes[0];
+    const hw = node ? this.hw[node.id] : undefined;
+    if (!node || !hw) return;
+    const devices = livePeripherals(this.peripherals);
     this.hw[node.id] = { ...hw, fan: devices.fan, leds: devices.leds, imu: devices.imu, power: devices.power, switches: devices.switches, fanResource: devices.fanResource };
   }
 

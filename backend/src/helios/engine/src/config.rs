@@ -20,6 +20,8 @@ pub struct EngineConfig {
     pub catalog_path: PathBuf,
     /// helios-api's NetworkTables settings (`HELIOS_NT4_SETTINGS`), read when they change.
     pub nt4_settings_path: PathBuf,
+    /// Where helios-api reads every tick's outputs live (`HELIOS_ENGINE_LIVE_SOCKET`).
+    pub live_socket_path: PathBuf,
     pub plugin_dirs: Vec<PathBuf>,
     pub orion_ipc_socket_path: PathBuf,
     pub orion_ipc_stream_socket_path: PathBuf,
@@ -41,6 +43,7 @@ impl Default for EngineConfig {
             journal_path: None,
             catalog_path: PathBuf::from(DEFAULT_CATALOG_PATH),
             nt4_settings_path: PathBuf::from(crate::nt4::DEFAULT_SETTINGS_PATH),
+            live_socket_path: PathBuf::from(crate::live::DEFAULT_SOCKET),
             plugin_dirs: DEFAULT_PLUGIN_DIRS.iter().map(PathBuf::from).collect(),
             orion_ipc_socket_path: PathBuf::from(DEFAULT_ORION_IPC_SOCKET_PATH),
             orion_ipc_stream_socket_path: PathBuf::from(DEFAULT_ORION_IPC_STREAM_SOCKET_PATH),
@@ -75,6 +78,9 @@ impl EngineConfig {
         }
         if let Some(value) = env.get("HELIOS_NT4_SETTINGS") {
             config.nt4_settings_path = PathBuf::from(value);
+        }
+        if let Some(value) = env.get("HELIOS_ENGINE_LIVE_SOCKET") {
+            config.live_socket_path = PathBuf::from(value);
         }
         if let Some(value) = env.get("HELIOS_ENGINE_CATALOG_PATH") {
             config.catalog_path = PathBuf::from(value);

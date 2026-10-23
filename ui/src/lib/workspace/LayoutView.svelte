@@ -9,7 +9,9 @@
   let { node, ws }: { node: LayoutNode; ws: string } = $props();
 
   let host = $state<HTMLDivElement>();
-  const MIN = 0.06;
+  /** The narrowest a pane may be dragged (px): wide enough for its bar and a table's columns. */
+  const MIN_WIDTH_PX = 220;
+  const MIN_HEIGHT_PX = 120;
 
   function startResize(event: PointerEvent, index: number) {
     if (node.kind !== "split" || !host) return;
@@ -20,12 +22,15 @@
     const start = split.dir === "row" ? event.clientX : event.clientY;
     const a = split.sizes[index];
     const b = split.sizes[index + 1];
+    // Sizes are flex weights summing to the split; the pixel minimum as a share of it.
+    const sum = split.sizes.reduce((total, size) => total + size, 0) || 1;
+    const min = Math.min(((split.dir === "row" ? MIN_WIDTH_PX : MIN_HEIGHT_PX) / total) * sum, (a + b) / 2);
     const el = event.currentTarget as HTMLElement;
     el.setPointerCapture(event.pointerId);
     document.body.classList.add(split.dir === "row" ? "resizing-x" : "resizing-y");
     const move = (e: PointerEvent) => {
       const delta = ((split.dir === "row" ? e.clientX : e.clientY) - start) / total;
-      const next = Math.min(a + b - MIN, Math.max(MIN, a + delta));
+      const next = Math.min(a + b - min, Math.max(min, a + (delta * sum)));
       split.sizes[index] = next;
       split.sizes[index + 1] = a + b - next;
     };

@@ -9,7 +9,7 @@ use orion::{
     client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
     control_plane::{
         ActionRequest, ActionResult, ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusEntry, StatusQuery,
-        StatusSubject, WorkloadObservedState, WorkloadRecord,
+        WorkloadObservedState, WorkloadRecord,
     },
 };
 use orion_client::ActionCaller;
@@ -87,8 +87,9 @@ impl Orion {
 
     /// An event stream on the node's stream socket, subscribed to desired and observed state
     /// changes (`subscribe_state_and_observed`: a full snapshot each, starting with a bootstrap
-    /// snapshot) and to this node's `host.*` metrics (Orion `docs/host-facts.md`, "Following
-    /// host metrics without polling").
+    /// snapshot) and to the node's whole status lane: this node's `host.*` metrics (Orion
+    /// `docs/host-facts.md`, "Following host metrics without polling") and the Lemnos bridge's
+    /// device readings (`resource/lemnos.*`, pushed in 50 ms batches), so neither is polled.
     ///
     /// The local address is fixed: reconnecting under it (or after a helios-api restart) resumes
     /// the node's session for this client, which first delivers the events queued while it was
@@ -97,8 +98,7 @@ impl Orion {
         let fail = |error| unreachable(&self.stream_socket, error);
         let mut events = ControlPlaneEventStream::connect_at(&self.stream_socket, EVENTS_CLIENT_NAME).await.map_err(fail)?;
         events.subscribe_state_and_observed(Revision::ZERO).await.map_err(fail)?;
-        let node = events.node_id().clone();
-        events.subscribe_status(StatusQuery::subject(StatusSubject::Node(node)).with_key_prefix("host.")).await.map_err(fail)?;
+        events.subscribe_status(StatusQuery::all()).await.map_err(fail)?;
         Ok(events)
     }
 

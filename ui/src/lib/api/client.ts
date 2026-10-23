@@ -161,7 +161,7 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
   return () => source.close();
 }
 
-export const EVENT_TYPES = ["hello", "output", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
+export const EVENT_TYPES = ["hello", "output", "peripheral", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
 
 export const api = {
   // Device security

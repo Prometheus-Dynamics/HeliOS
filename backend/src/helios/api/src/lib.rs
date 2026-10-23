@@ -19,6 +19,7 @@ pub mod events;
 pub mod field_layouts;
 pub mod host;
 pub mod leds;
+pub mod live_outputs;
 pub mod orion;
 pub mod playback;
 pub mod recording_nt;

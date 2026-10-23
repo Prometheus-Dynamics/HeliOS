@@ -1,5 +1,6 @@
 pub mod config;
 pub mod execution;
+pub mod live;
 pub mod model;
 pub mod nt4;
 pub mod plugins;

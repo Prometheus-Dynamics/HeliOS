@@ -53,11 +53,14 @@ pub struct ApiEvent {
 pub struct EventHub {
     tx: broadcast::Sender<ApiEvent>,
     subscribed: Notify,
+    /// The engine's live outputs are connected (`live_outputs`): `output` updates come from
+    /// there, every tick, instead of from Orion's publish interval.
+    pub live_outputs: std::sync::atomic::AtomicBool,
 }
 
 impl EventHub {
     pub fn new(capacity: usize) -> Self {
-        Self { tx: broadcast::channel(capacity).0, subscribed: Notify::new() }
+        Self { tx: broadcast::channel(capacity).0, subscribed: Notify::new(), live_outputs: std::sync::atomic::AtomicBool::new(false) }
     }
 
     pub fn publish(&self, kind: &str, data: serde_json::Value) {
@@ -234,13 +237,24 @@ impl Watch {
                     outputs: routes::pipelines::outputs_digest(&view),
                 };
                 if let Some(before) = &self.seen.last {
+                    let live = state.events.live_outputs.load(std::sync::atomic::Ordering::Acquire);
                     for (kind, data) in diff(before, &digest) {
+                        // With the live outputs connected, Orion's (older) output values would
+                        // only make the UI step back; removals still come from here.
+                        if live && kind == "output" && data["change"] != "removed" {
+                            continue;
+                        }
                         state.events.publish(kind, data);
                     }
                 }
                 self.seen.last = Some(digest);
             }
             OrionFeed::Host(change) => {
+                if active {
+                    for event in peripheral_events(&change) {
+                        state.events.publish("peripheral", event);
+                    }
+                }
                 // Folded in while idle too: the bootstrap comes once per connection.
                 if !apply_host_change(&mut self.host, change) || !active {
                     return;
@@ -285,19 +299,49 @@ impl Watch {
 
 /// Folds a `host.*` status change into `host`; `false` when nothing changed.
 pub fn apply_host_change(host: &mut BTreeMap<String, TypedConfigValue>, change: StatusChange) -> bool {
-    if change.is_empty() && !change.bootstrap {
-        return false;
-    }
+    // The status lane also carries device readings; only the node's `host.*` keys are metrics.
+    let mut changed = change.bootstrap;
     if change.bootstrap {
         host.clear();
     }
-    for entry in change.updated.into_iter().filter(|entry| entry.key.starts_with("host.")) {
+    for entry in change.updated.into_iter().filter(|entry| is_host(&entry.subject, &entry.key)) {
         host.insert(entry.key, entry.value);
+        changed = true;
     }
-    for key in change.expired {
+    for key in change.expired.into_iter().filter(|key| is_host(&key.subject, &key.key)) {
         host.remove(&key.key);
+        changed = true;
     }
-    true
+    changed
+}
+
+fn is_host(subject: &orion::control_plane::StatusSubject, key: &str) -> bool {
+    matches!(subject, orion::control_plane::StatusSubject::Node(_)) && key.starts_with("host.")
+}
+
+/// The Lemnos bridge's device readings in a status change, one `peripheral` event per device:
+/// `{id, values: {key: value}, expired: [key]}` (the entries `GET /v1/peripherals` merges into
+/// each device's state), so the UI follows readings as lemnosd publishes them.
+pub fn peripheral_events(change: &StatusChange) -> Vec<serde_json::Value> {
+    let mut by_device: BTreeMap<&str, (serde_json::Map<String, serde_json::Value>, Vec<&str>)> = BTreeMap::new();
+    for entry in &change.updated {
+        if let Some(id) = lemnos_device(&entry.subject) {
+            by_device.entry(id).or_default().0.insert(entry.key.clone(), crate::orion::config_value_json(&entry.value));
+        }
+    }
+    for key in &change.expired {
+        if let Some(id) = lemnos_device(&key.subject) {
+            by_device.entry(id).or_default().1.push(&key.key);
+        }
+    }
+    by_device.into_iter().map(|(id, (values, expired))| serde_json::json!({ "id": id, "values": values, "expired": expired })).collect()
+}
+
+fn lemnos_device(subject: &orion::control_plane::StatusSubject) -> Option<&str> {
+    match subject {
+        orion::control_plane::StatusSubject::Resource(id) if id.as_str().starts_with("lemnos.") => Some(id.as_str()),
+        _ => None,
+    }
 }
 
 /// Follow Orion and the device package updater's state and publish the changes while there are
@@ -441,6 +485,28 @@ mod tests {
         assert_eq!(metrics.cpu, Some(0.9));
         assert_eq!(metrics.temperature_c, Some(48.0));
         assert!(!apply_host_change(&mut host, StatusChange { bootstrap: false, updated: Vec::new(), expired: Vec::new() }));
+    }
+
+    #[test]
+    fn device_readings_become_peripheral_events_not_metrics() {
+        use orion::control_plane::{StatusEntry, StatusKey, StatusSubject};
+        let imu = StatusSubject::Resource("lemnos.raze.imu".into());
+        let change = StatusChange {
+            bootstrap: false,
+            updated: vec![
+                StatusEntry::new(imu.clone(), "accel.x", TypedConfigValue::F64(0.25)),
+                StatusEntry::new(imu.clone(), "gyro.z", TypedConfigValue::F64(-1.5)),
+                StatusEntry::new(StatusSubject::Resource("camera.front".into()), "x", TypedConfigValue::F64(1.0)),
+            ],
+            expired: vec![StatusKey { subject: imu, key: "temp".into() }],
+        };
+        let events = peripheral_events(&change);
+        assert_eq!(events.len(), 1, "only lemnos devices: {events:?}");
+        assert_eq!(events[0]["id"], "lemnos.raze.imu");
+        assert_eq!(events[0]["values"]["accel.x"], 0.25);
+        assert_eq!(events[0]["expired"], serde_json::json!(["temp"]));
+        let mut host = BTreeMap::new();
+        assert!(!apply_host_change(&mut host, change), "device readings are not host metrics");
     }
 
     #[test]

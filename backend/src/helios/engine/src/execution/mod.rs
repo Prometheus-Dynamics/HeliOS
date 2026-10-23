@@ -76,7 +76,7 @@ pub struct ResidentExecutionSet {
     settings: GraphSettings,
     outputs_ready: Arc<Notify>,
     /// Where graph threads hand each tick's outputs to NetworkTables.
-    nt4: crate::nt4::Nt4Sink,
+    sinks: driver::OutputSinks,
     /// Where each workload's full plan is written (published as a summary and this path).
     plan_dir: Option<std::path::PathBuf>,
 }
@@ -89,12 +89,18 @@ impl Default for ResidentExecutionSet {
 
 impl ResidentExecutionSet {
     pub fn new(settings: GraphSettings) -> Self {
-        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), nt4: crate::nt4::Nt4Sink::default(), plan_dir: None }
+        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), sinks: driver::OutputSinks::default(), plan_dir: None }
     }
 
     /// Publish every workload's outputs to NetworkTables through `sink` (drivers started after).
     pub fn with_nt4(mut self, sink: crate::nt4::Nt4Sink) -> Self {
-        self.nt4 = sink;
+        self.sinks.nt4 = sink;
+        self
+    }
+
+    /// Where every tick's outputs go live (`crate::live`), for helios-api.
+    pub fn with_live(mut self, sink: crate::live::LiveSink) -> Self {
+        self.sinks.live = sink;
         self
     }
 
@@ -162,7 +168,7 @@ impl ResidentExecutionSet {
                 .iter()
                 .map(|spec| StyxFrameSource::open(spec.clone()).map(|source| (spec.clone(), Box::new(source) as Box<dyn FrameSource>)).map_err(ExecutionError::Execute))
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.nt4.clone())?;
+            let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.sinks.clone())?;
             if let Some(dir) = &self.plan_dir {
                 driver.externalize_plan(dir);
             }

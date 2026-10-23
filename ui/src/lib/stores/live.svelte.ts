@@ -16,6 +16,7 @@ import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
 import { recordings } from "./recordings.svelte";
+import { emitPeripheral, type PeripheralEvent } from "./peripheral-events";
 import type { RecorderSettings, RecordingStatus } from "#lib/api/recording-types.js";
 
 /** The parts of the cluster store the live backend fills in. */
@@ -453,6 +454,9 @@ export class LiveCluster {
         break;
       case "output":
         this.applyOutput(event.data as { id: string; change: string; value?: W.PipelineOutput });
+        break;
+      case "peripheral":
+        emitPeripheral(event.data as PeripheralEvent);
         break;
       case "metrics":
         this.snapshot.metrics = event.data as W.Metrics;
