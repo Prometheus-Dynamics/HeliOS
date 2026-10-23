@@ -50,6 +50,12 @@ helios-field = { path = "../field" }
 # same crate and features the plugin library is built with, in the same cargo build.
 eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+eidos-daedalus = { workspace = true, features = ["dylib", "simd", "neon"] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+eidos-daedalus = { workspace = true, features = ["dylib", "simd", "x86"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # Playback e2e: the test writes a recording (StreamRecorder) and replays it as a camera.
