@@ -440,7 +440,8 @@ fn graph_thread_is_pinned_to_its_core_and_reports_it() {
     // An engine core: the thread runs there, and the telemetry says so.
     let mut pinned = workload("workload.pinned", document.clone(), Vec::new());
     pinned.cpu = Some(core);
-    pinned.nice = Some(5);
+    let nice = super::affinity::a_lower_priority();
+    pinned.nice = Some(nice);
     let mut resident = ResidentExecutionSet::default();
     let snapshot = sync_until(&mut resident, &plugins.execution(), &[pinned.clone()], None, "the pinned graph to start", |snapshot| {
         artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1
@@ -448,7 +449,7 @@ fn graph_thread_is_pinned_to_its_core_and_reports_it() {
     let telemetry = artifact_json(&snapshot.artifacts, "execution.telemetry");
     assert_eq!(telemetry["cpu"], core, "{telemetry}");
     assert!(telemetry["cpu_error"].is_null(), "{telemetry}");
-    assert_eq!(telemetry["nice"], 5, "{telemetry}");
+    assert_eq!(telemetry["nice"], nice, "{telemetry}");
     assert!(telemetry["nice_error"].is_null(), "{telemetry}");
 
     // Not a core: the graph still runs, unpinned, and the error is in the telemetry.

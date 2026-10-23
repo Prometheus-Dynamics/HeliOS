@@ -60,27 +60,37 @@ pub(crate) fn set_current_thread_nice(nice: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// The calling thread's nice value.
+#[cfg(test)]
+#[allow(unsafe_code)]
+pub(crate) fn current_nice() -> i32 {
+    // SAFETY: pid 0 is the calling thread on Linux.
+    unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) }
+}
+
+/// A nice value above the calling thread's (lowering a priority needs no privilege, raising it
+/// does), so the tests pass under `nice` too.
+#[cfg(test)]
+pub(crate) fn a_lower_priority() -> u32 {
+    (current_nice() + 2).clamp(1, 19) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn nice_applies_to_the_calling_thread_only() {
+        let nice = a_lower_priority();
         let (own, other) = std::thread::scope(|scope| {
             let worker = scope.spawn(|| {
-                set_current_thread_nice(7).expect("nice");
+                set_current_thread_nice(nice).expect("nice");
                 current_nice()
             });
             (current_nice(), worker.join().expect("worker"))
         });
-        assert_eq!(other, 7);
-        assert_ne!(own, 7, "the test thread keeps its own priority");
-    }
-
-    #[allow(unsafe_code)]
-    fn current_nice() -> i32 {
-        // SAFETY: pid 0 is the calling thread on Linux.
-        unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) }
+        assert_eq!(other, nice as i32);
+        assert_ne!(own, nice as i32, "the test thread keeps its own priority");
     }
 
     #[test]
