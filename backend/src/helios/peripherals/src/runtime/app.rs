@@ -105,6 +105,8 @@ enum RuntimeEvent {
     },
     ProviderWatchStopped(ClientError),
     RefreshWatchStopped(String),
+    /// Publish the current snapshot again: the last publish failed (Orion slow or away).
+    Republish,
 }
 
 const ORION_IPC_RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -149,6 +151,13 @@ impl PeripheralRuntime {
     }
 
     async fn refresh_inventory_with_state(&self, leases: &[LeaseRecord], state: &RuntimeState) -> Result<DiscoverySnapshot, PeripheralRuntimeError> {
+        let snapshot = self.probe_inventory();
+        self.publish_snapshot(&snapshot, leases, state).await?;
+        Ok(snapshot)
+    }
+
+    /// Probe the inventory (cameras, lemnosd), reporting each probe's failure.
+    fn probe_inventory(&self) -> DiscoverySnapshot {
         let observed_at_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
         let report = self.inventory.refresh_report(observed_at_ms);
         for probe in &report.probe_reports {
@@ -157,8 +166,7 @@ impl PeripheralRuntime {
                 None => tracing::debug!(probe = %probe.probe, discovered_resources = probe.discovered_resources, "peripheral inventory probe completed"),
             }
         }
-        self.publish_snapshot(&report.snapshot, leases, state).await?;
-        Ok(report.snapshot)
+        report.snapshot
     }
 
     /// `snapshot` with its lemnosd resources rebuilt from the bridge's state (no camera probe).
@@ -177,6 +185,25 @@ impl PeripheralRuntime {
     async fn publish_snapshot(&self, snapshot: &DiscoverySnapshot, leases: &[LeaseRecord], state: &RuntimeState) -> Result<(), PeripheralRuntimeError> {
         self.publisher.publish_snapshot_with_feedback(snapshot, leases, &state.resource_action_feedback).await?;
         Ok(())
+    }
+
+    /// Publish from the event loop. A failed publish (Orion slow to answer, or restarting) never
+    /// ends the runtime: it is reported, the provider shows degraded, and the snapshot is
+    /// published again after `ORION_IPC_RETRY_DELAY` (the latest one then, not this one).
+    async fn publish_or_retry(&self, snapshot: &DiscoverySnapshot, leases: &[LeaseRecord], state: &RuntimeState, retry: &mpsc::UnboundedSender<RuntimeEvent>) -> bool {
+        match self.publish_snapshot(snapshot, leases, state).await {
+            Ok(()) => true,
+            Err(error) => {
+                warn!(node_id = %self.config.node_id, error = %error, retry_delay_secs = ORION_IPC_RETRY_DELAY.as_secs(), "snapshot publish failed; retrying");
+                self.set_health(ProviderHealth::Degraded);
+                let retry = retry.clone();
+                tokio::spawn(async move {
+                    sleep(ORION_IPC_RETRY_DELAY).await;
+                    let _ = retry.send(RuntimeEvent::Republish);
+                });
+                false
+            }
+        }
     }
 
     fn set_health(&self, health: ProviderHealth) {
@@ -281,6 +308,7 @@ impl PeripheralRuntime {
         });
 
         let provider_watch_error_tx = event_tx.clone();
+        let retry_tx = event_tx.clone();
         tokio::spawn(async move {
             if let Err(error) = watch_provider_updates(provider_subscription, event_tx).await {
                 let _ = provider_watch_error_tx.send(RuntimeEvent::ProviderWatchStopped(error));
@@ -293,24 +321,29 @@ impl PeripheralRuntime {
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::RefreshRequested) => {
-                            current_snapshot = self.refresh_inventory_with_state(&current_leases, &state).await?;
+                            current_snapshot = self.probe_inventory();
                             state.camera_services.sync(&self.config, &current_snapshot.resources);
-                            self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
+                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::LemnosdChanged) => {
                             current_snapshot = self.with_lemnosd_resources(current_snapshot);
-                            self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
+                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::LeaseUpdate(leases)) => {
                             current_leases = leases;
-                            self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
+                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
+                        }
+                        Some(RuntimeEvent::Republish) => {
+                            if self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await {
+                                self.set_health(ProviderHealth::Ready);
+                            }
                         }
                         Some(RuntimeEvent::Action { request, reporter }) => {
                             self.dispatch_action(*request, reporter, &current_snapshot, feedback_tx.clone());
                         }
                         Some(RuntimeEvent::ActionFinished { resource_id, feedback }) => {
                             state.resource_action_feedback.insert(resource_id, feedback);
-                            self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
+                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::ProviderWatchStopped(error)) => {
                             warn!(node_id = %self.config.node_id, error = %error, "provider watch stopped");
