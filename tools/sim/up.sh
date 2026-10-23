@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs the HeliOS services on this x86 machine against Styx's simulated cameras: orion-node,
-# helios-peripherals (sim cameras from STYX_SIM_CAMERAS), helios-engine and helios-api, on a temp
-# runtime directory. The UI is served by helios-api on the same port, as on the board.
+# Runs the HeliOS services on this x86 machine against Styx's simulated cameras and Lemnos's
+# simulated board: orion-node, lemnosd --sim (the Raze board definition over simulated buses) and
+# its Orion bridge lemnos-orion, helios-peripherals (sim cameras from STYX_SIM_CAMERAS),
+# helios-engine and helios-api, on a temp runtime directory. The UI is served by helios-api on the same port, as on the board.
 #
 # Tier 1 of docs/docs/fast-test-pipeline-plan.md: the first step of the Docker sim (`sim-x86_64`),
 # so every path and variable here is one a container can set too:
@@ -14,6 +15,11 @@
 #   STYX_SIM_CAMERAS=SPEC     simulated cameras (default: an OV9782 seeing AprilTags through a real
 #                             Raze lens, tools/sim/ov9782-calibration.json, with ground truth in
 #                             <run dir>/truth.jsonl; see docs/simulation.md in Styx)
+#   LEMNOSD_BIN_DIR=DIR       lemnosd and lemnos-orion built with `sim,orion` (default: built from
+#                             Lemnos at the commit backend/Cargo.lock pins)
+#   SIM_LEMNOS=0              run without lemnosd (the services' no-hardware paths)
+#   SIM_LEMNOS_BOARD=PATH     lemnosd's board (default tools/sim/raze-board.toml, Atlas's Raze file)
+#   SIM_LEMNOS_SCRIPT=PATH    the simulated board's script (default tools/sim/lemnos-sim.toml)
 #   SIM_JOBS=N                cargo jobs (default 8)
 #
 # Ctrl-C (or a service exiting) stops the services this script started, by PID, and nothing else.
@@ -58,6 +64,29 @@ if [[ -z "${ORION_NODE_BIN:-}" ]]; then
 fi
 [[ -x "$ORION_NODE_BIN" ]] || die "orion-node not executable: $ORION_NODE_BIN"
 
+# lemnosd with its simulated board and the Orion bridge, from the Lemnos commit backend/Cargo.lock
+# pins for lemnos-ipc (the same IPC the HeliOS services speak). `sim` is never in a board build.
+SIM_LEMNOS="${SIM_LEMNOS:-1}"
+if [[ "$SIM_LEMNOS" != 0 && -z "${LEMNOSD_BIN_DIR:-}" ]]; then
+  LEMNOS_REV="$(grep -A2 '^name = "lemnos-ipc"' "$BACKEND/Cargo.lock" | sed -n 's/.*#\([0-9a-f]*\)"$/\1/p' | head -n1)"
+  [[ -n "$LEMNOS_REV" ]] || die "no lemnos-ipc commit in backend/Cargo.lock"
+  LEMNOSD_BIN_DIR="$ROOT/backend/target/sim/lemnos/bin"
+  if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
+    command -v cargo >/dev/null || die "cargo not found"
+    log "installing lemnosd and lemnos-orion $LEMNOS_REV (dev profile, sim and orion) to backend/target/sim/lemnos"
+    nice -n 10 cargo install --locked --debug --git https://github.com/Prometheus-Dynamics/Lemnos.git \
+      --rev "$LEMNOS_REV" --features sim,orion --root "$ROOT/backend/target/sim/lemnos" \
+      --target-dir "$ROOT/backend/target/sim/lemnos-build" -j "$SIM_JOBS" lemnosd
+  fi
+fi
+if [[ "$SIM_LEMNOS" != 0 ]]; then
+  for bin in lemnosd lemnos-orion; do
+    [[ -x "$LEMNOSD_BIN_DIR/$bin" ]] || die "missing $LEMNOSD_BIN_DIR/$bin (build without SIM_SKIP_BUILD, set LEMNOSD_BIN_DIR, or SIM_LEMNOS=0)"
+  done
+fi
+SIM_LEMNOS_BOARD="${SIM_LEMNOS_BOARD:-$ROOT/tools/sim/raze-board.toml}"
+SIM_LEMNOS_SCRIPT="${SIM_LEMNOS_SCRIPT:-$ROOT/tools/sim/lemnos-sim.toml}"
+
 for bin in helios-peripherals helios-engine helios-api libhelios_eidos_plugin.so; do
   [[ -e "$SIM_BIN_DIR/$bin" ]] || die "missing $SIM_BIN_DIR/$bin (build without SIM_SKIP_BUILD, or set SIM_BIN_DIR)"
 done
@@ -95,7 +124,7 @@ ORION_SOCKET="$RUN/orion/control.sock"
 ORION_STREAM_SOCKET="$RUN/orion/control-stream.sock"
 ENGINE_SOCKET="$RUN/engine/engine.sock"
 ENGINE_LIVE_SOCKET="$RUN/engine/engine-live.sock"
-LEMNOSD_SOCKET="$RUN/lemnos/lemnosd.sock"   # absent on purpose: the services run without lemnosd
+LEMNOSD_SOCKET="$RUN/lemnos/lemnosd.sock"   # absent with SIM_LEMNOS=0: the services run without it
 PIDS=()
 NAMES=()
 
@@ -152,6 +181,22 @@ start orion-node \
   RUST_LOG="$SIM_RUST_LOG" \
   "$ORION_NODE_BIN"
 wait_for_file "$ORION_SOCKET" orion-node
+
+if [[ "$SIM_LEMNOS" != 0 ]]; then
+  start lemnosd \
+    RUST_LOG="$SIM_RUST_LOG" \
+    "$LEMNOSD_BIN_DIR/lemnosd" --sim --board "$SIM_LEMNOS_BOARD" --sim-script "$SIM_LEMNOS_SCRIPT" \
+    --sim-root "$RUN/lemnos/sim" --socket "$LEMNOSD_SOCKET" --update-status off
+  wait_for_file "$LEMNOSD_SOCKET" lemnosd
+  # lemnosd's devices as Orion resources (resource/lemnos.*), as on the board.
+  start lemnos-orion \
+    LEMNOSD_SOCKET="$LEMNOSD_SOCKET" \
+    ORION_NODE_ID="$NODE_ID" \
+    ORION_NODE_IPC_SOCKET="$ORION_SOCKET" \
+    ORION_NODE_IPC_STREAM_SOCKET="$ORION_STREAM_SOCKET" \
+    RUST_LOG="$SIM_RUST_LOG" \
+    "$LEMNOSD_BIN_DIR/lemnos-orion"
+fi
 
 start helios-peripherals \
   HELIOS_NODE_ID="$NODE_ID" \
@@ -216,6 +261,7 @@ printf '\n'
 printf '  HeliOS sim is up.\n'
 printf '  UI and API:  %s/\n' "$URL"
 printf '  Cameras:     %s\n' "$STYX_SIM_CAMERAS"
+if [[ "$SIM_LEMNOS" != 0 ]]; then printf '  Board:       lemnosd --sim %s (%s)\n' "$SIM_LEMNOS_BOARD" "$LEMNOSD_SOCKET"; fi
 printf '  Smoke test:  SIM_TRUTH=%s tools/sim/smoke.sh (SIM_URL=%s)\n' "$RUN/truth.jsonl" "$URL"
 printf '  Logs:        %s/logs\n' "$RUN"
 printf '  Ctrl-C to stop.\n\n'
