@@ -7,7 +7,9 @@
 # Tier 1 of docs/docs/fast-test-pipeline-plan.md: the first step of the Docker sim (`sim-x86_64`),
 # so every path and variable here is one a container can set too:
 #   SIM_SKIP_BUILD=1          run prebuilt binaries (no cargo, no bun)
-#   SIM_BIN_DIR=DIR           the HeliOS binaries and libhelios_eidos_plugin.so (default: backend/target/debug)
+#   SIM_PROFILE=NAME          the cargo profile (default dev; dev-release for timings and long runs)
+#   SIM_BIN_DIR=DIR           the HeliOS binaries and libhelios_eidos_plugin.so (default: that
+#                             profile's backend/target directory)
 #   ORION_NODE_BIN=PATH       an orion-node binary (default: built from Orion at the rev in backend/Cargo.toml)
 #   SIM_UI_DIR=DIR            the UI's static build (default: ui/build, built with bun when missing)
 #   SIM_RUN_DIR=DIR           runtime dir (default: a fresh mktemp dir; kept after exit for its logs)
@@ -37,12 +39,14 @@ die() { printf '[sim] error: %s\n' "$*" >&2; exit 1; }
 
 # --- Build -------------------------------------------------------------------------------------
 
-SIM_BIN_DIR="${SIM_BIN_DIR:-$BACKEND/target/debug}"
+SIM_PROFILE="${SIM_PROFILE:-dev}"
+if [[ "$SIM_PROFILE" == dev ]]; then PROFILE_DIR=debug; else PROFILE_DIR="$SIM_PROFILE"; fi
+SIM_BIN_DIR="${SIM_BIN_DIR:-$BACKEND/target/$PROFILE_DIR}"
 if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
   command -v cargo >/dev/null || die "cargo not found"
-  log "building HeliOS services (dev profile, Styx sim feature)"
+  log "building HeliOS services ($SIM_PROFILE profile, Styx sim feature)"
   # Board builds never set `sim`: only this script's build enables helios-peripherals/sim.
-  nice -n 10 cargo build --manifest-path "$BACKEND/Cargo.toml" -j "$SIM_JOBS" \
+  nice -n 10 cargo build --manifest-path "$BACKEND/Cargo.toml" -j "$SIM_JOBS" --profile "$SIM_PROFILE" \
     -p helios-peripherals -p helios-engine -p helios-api -p helios-eidos-plugin \
     --features helios-peripherals/sim
 fi

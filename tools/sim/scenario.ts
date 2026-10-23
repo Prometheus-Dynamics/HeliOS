@@ -158,9 +158,65 @@ function translationOf(transform: any): Vec3 | undefined {
   return undefined;
 }
 
+// --- Fit ----------------------------------------------------------------------------------------
+
+// A mapper that never aligned to the layout (`alignment.aligned` false) reports poses in its own
+// map frame. Then the estimates are compared after the rigid transform (no scale) that best fits
+// them to the truth (Horn's quaternion method), and the report says so. Jumps need no fit.
+interface Sample {
+  parsed: any;
+  pose: any;
+  frame?: TruthFrame;
+  estimate?: Vec3;
+}
+const samples: Sample[] = lines.map((line) => {
+  const parsed = JSON.parse(line);
+  const pose = parsed.value ?? {};
+  const frame = nearestTruth(Number(parsed.frame_ts_ns));
+  return { parsed, pose, frame, estimate: translationOf((pose.pose ?? pose.estimate)?.reference_from_camera) };
+});
+const aligned = samples.some((sample) => sample.pose.alignment?.aligned);
+const fitted = samples.filter((sample) => sample.frame && sample.estimate) as Required<Sample>[];
+type Mat3 = [Vec3, Vec3, Vec3];
+function rigidFit(from: Vec3[], to: Vec3[]): (p: Vec3) => Vec3 {
+  const mean = (points: Vec3[]) => points.reduce((m, p) => [m[0] + p[0] / points.length, m[1] + p[1] / points.length, m[2] + p[2] / points.length] as Vec3, [0, 0, 0] as Vec3);
+  const [mf, mt] = [mean(from), mean(to)];
+  const S: number[][] = [0, 1, 2].map(() => [0, 0, 0]);
+  from.forEach((p, i) => {
+    const [a, b] = [sub(p, mf), sub(to[i], mt)];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[r][c] += a[r] * b[c];
+  });
+  const [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]] = S;
+  const N = [
+    [xx + yy + zz, yz - zy, zx - xz, xy - yx],
+    [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+    [zx - xz, xy + yx, -xx + yy - zz, yz + zy],
+    [xy - yx, zx + xz, yz + zy, -xx - yy + zz],
+  ];
+  // The largest eigenvector of N, by power iteration on N shifted to positive definite.
+  const shift = N.reduce((m, row) => m + row.reduce((n, v) => n + Math.abs(v), 0), 0);
+  let q = [1, 0, 0, 0];
+  for (let i = 0; i < 200; i++) {
+    const next = N.map((row, r) => row.reduce((sum, v, c) => sum + v * q[c], 0) + shift * q[r]);
+    const length = Math.hypot(...next);
+    q = next.map((v) => v / length);
+  }
+  const [w, x, y, z] = q;
+  const R: Mat3 = [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+    [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+    [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+  ];
+  return (p: Vec3) => {
+    const d = sub(p, mf);
+    return [0, 1, 2].map((r) => R[r][0] * d[0] + R[r][1] * d[1] + R[r][2] * d[2] + mt[r]) as Vec3;
+  };
+}
+const toLayout = aligned || fitted.length < 3 ? (p: Vec3) => p : rigidFit(fitted.map((s) => s.estimate), fitted.map((s) => s.frame.position));
+
 // --- Report -----------------------------------------------------------------------------------
 
-const rows: string[] = ["frame_ts_ns,state,source,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm"];
+const rows: string[] = ["frame_ts_ns,state,source,aligned,tags,side_px,view_deg,true_x,true_y,true_z,est_x,est_y,est_z,error_cm,jump_cm,sigma_t_cm"];
 const errors: number[] = [];
 let jumps = 0;
 let worstJump = 0;
@@ -168,47 +224,49 @@ let unmatched = 0;
 let posed = 0;
 const states = new Map<string, number>();
 const errorsBySize = new Map<string, number[]>();
+const jumpsBySize = new Map<string, number>();
 let previous: { truth: Vec3; estimate: Vec3 } | undefined;
-for (const line of lines) {
-  const parsed = JSON.parse(line);
-  const pose = parsed.value ?? {};
-  const ts = Number(parsed.frame_ts_ns);
-  const frame = nearestTruth(ts);
+for (const { parsed, pose, frame, estimate: raw } of samples) {
   states.set(pose.state, (states.get(pose.state) ?? 0) + 1);
   if (!frame) {
     unmatched += 1;
     continue;
   }
-  const estimate = translationOf(pose.estimate?.reference_from_camera);
+  const solved = pose.pose ?? pose.estimate;
+  const estimate = raw && toLayout(raw);
   const sizes = frame.tags.map((t) => sidePx(t.corners));
   const angles = frame.tags.map((t) => viewingAngleDeg(t.id, frame.position)).filter((a): a is number => a !== undefined);
   const side = sizes.length ? Math.min(...sizes) : Number.NaN;
   const view = angles.length ? Math.max(...angles) : Number.NaN;
+  const bucket = Number.isNaN(side) ? "no tag" : side < 30 ? "<30 px" : side < 45 ? "30-45 px" : ">=45 px";
   let error = Number.NaN;
   let jump = Number.NaN;
   if (estimate) {
     posed += 1;
     error = norm(sub(estimate, frame.position)) * 100;
     errors.push(error);
-    const bucket = Number.isNaN(side) ? "no tag" : side < 30 ? "<30 px" : side < 45 ? "30-45 px" : ">=45 px";
     errorsBySize.set(bucket, [...(errorsBySize.get(bucket) ?? []), error]);
     if (previous) {
       jump = norm(sub(sub(estimate, previous.estimate), sub(frame.position, previous.truth))) * 100;
-      if (jump > JUMP_CM) jumps += 1;
+      if (jump > JUMP_CM) {
+        jumps += 1;
+        jumpsBySize.set(bucket, (jumpsBySize.get(bucket) ?? 0) + 1);
+      }
       worstJump = Math.max(worstJump, jump);
     }
     previous = { truth: frame.position, estimate };
   } else {
     previous = undefined;
   }
-  const sigma = pose.estimate?.sigma;
-  const sigmaT = sigma && typeof sigma.position_m === "number" ? sigma.position_m * 100 : Number.NaN;
+  const position = solved?.sigma?.position_m;
+  const sigmaT = Array.isArray(position) ? Math.max(...position) * 100 : typeof position === "number" ? position * 100 : Number.NaN;
   const f = (v: number, digits = 3) => (Number.isFinite(v) ? v.toFixed(digits) : "");
   rows.push(
     [
       parsed.frame_ts_ns,
       pose.state ?? "",
-      pose.estimate?.source ?? "",
+      solved?.source ?? "",
+      pose.alignment?.aligned ? "yes" : "no",
       frame.tags.map((t) => t.id).join(" "),
       f(side, 1),
       f(view, 1),
@@ -228,9 +286,10 @@ const percentile = (values: number[], p: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 };
 console.log(`[scenario] ${lines.length} pose outputs, ${unmatched} without a truth frame, ${posed} posed; states ${JSON.stringify(Object.fromEntries(states))}`);
+console.log(aligned ? "[scenario] the map aligned to the layout: errors in the layout frame" : `[scenario] the map never aligned to the layout: errors after a rigid fit of ${fitted.length} poses to the truth`);
 console.log(`[scenario] error cm: p50 ${percentile(errors, 0.5).toFixed(1)}, p95 ${percentile(errors, 0.95).toFixed(1)}, max ${percentile(errors, 1).toFixed(1)}`);
 for (const [bucket, values] of [...errorsBySize].sort()) {
-  console.log(`[scenario]   tag ${bucket}: ${values.length} frames, error p50 ${percentile(values, 0.5).toFixed(1)} cm, max ${percentile(values, 1).toFixed(1)} cm`);
+  console.log(`[scenario]   tag ${bucket}: ${values.length} frames, error p50 ${percentile(values, 0.5).toFixed(1)} cm, max ${percentile(values, 1).toFixed(1)} cm, jumps ${jumpsBySize.get(bucket) ?? 0}`);
 }
 console.log(`[scenario] jumps over ${JUMP_CM} cm: ${jumps}, worst ${worstJump.toFixed(1)} cm`);
 console.log(`[scenario] pipeline: ${telemetry.ticks_processed ?? "?"} ticks, ${telemetry.ticks_failed ?? "?"} failed, last tick ${telemetry.last_tick_ms ?? "?"} ms (x86, not a board timing)`);

@@ -4,6 +4,7 @@
 # live-map template with the layout, each pose against Styx's truth), then stops the sim.
 #   tools/sim/scenario.sh far-lone-tag
 #   SIM_SCENARIO_S=64   how long poses are recorded
+#   SIM_PROFILE=dev-release (default here): the cargo profile up.sh builds
 #   SIM_BIND, SIM_RUN_DIR, SIM_SKIP_BUILD, ...: as for up.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -13,7 +14,10 @@ DIR="$ROOT/tools/sim/scenarios/$NAME"
 command -v bun >/dev/null || { echo "scenario.sh needs bun" >&2; exit 2; }
 
 export SIM_RUN_DIR="${SIM_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/helios-scenario.XXXXXX")}"
+mkdir -p "$SIM_RUN_DIR"
 export SIM_BIND="${SIM_BIND:-127.0.0.1:5800}"
+# Poses are only worth judging at speed: an optimized build (release settings without LTO) unless told otherwise.
+export SIM_PROFILE="${SIM_PROFILE:-dev-release}"
 CALIBRATION="$ROOT/tools/sim/ov9782-calibration.json"
 export STYX_SIM_CAMERAS="ov9782,scene=tags,layout=$DIR/layout.json,camera=$DIR/camera.json,calibration=$CALIBRATION,truth=$SIM_RUN_DIR/truth.jsonl"
 
