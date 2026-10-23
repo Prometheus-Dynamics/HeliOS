@@ -46,6 +46,10 @@ config_overrides = [
   # copy: two copies make mkusers fail), and in the full profile Orion's
   # (runtime-services/backend-core.toml).
   ["BR2_PACKAGE_SYSTEMD_SYSUSERS", "y"],
+  # Headless: no console keymaps or fonts (systemd-vconsole selects kbd, 2.4 MB).
+  ["BR2_PACKAGE_SYSTEMD_VCONSOLE", "n"],
+  # Clocks run in UTC: only the Etc zones (UTC and fixed offsets), not every region (3 MB).
+  ["BR2_TARGET_TZ_ZONELIST", "\"etcetera\""],
   # No Buildroot login banner: post-build.sh links /etc/issue to /run/helios/issue
   # (helios-update-issue writes it at boot), and target-finalize writing the
   # banner through that link (dangling at build time) failed every Buildroot

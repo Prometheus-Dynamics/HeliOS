@@ -64,7 +64,11 @@ config_overrides = [
   # (an unused `lzma -9` copy of the image, about 36 s per build).
   ["BR2_TARGET_ROOTFS_EROFS_CUSTOM_COMPRESSION", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS", "\"lzma,6\""],
-  ["BR2_TARGET_ROOTFS_EROFS_PCLUSTERSIZE", "262144"],
+  # 1 MiB physical clusters: 3.1 MB (6.5%) smaller than 256 KiB on Raze's root, with no slower
+  # sequential read on the host (Gaia's erofs grid, 2026-10-23); boot-time small random reads are
+  # checked on the CM5. LZMA 9 and extreme gain nothing over 6.
+  ["BR2_TARGET_ROOTFS_EROFS_PCLUSTERSIZE", "1048576"],
+  ["BR2_TARGET_ROOTFS_EROFS_ALL_FRAGMENTS", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_ZTAILPACKING", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_FRAGMENTS", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_DEDUPE", "y"],
