@@ -600,6 +600,13 @@ export class LiveCluster {
   /** Deploy the device's own template for `family` on `cameraId`: its camera input bound (with the
    * ISP's half level attached, much cheaper than the detector building it) and its tag family set. */
   async createJob(name: string, cameraId: string, family: "apriltag" | "aruco", dictionary?: string): Promise<string> {
+    // All of a camera's Eidos work shares one core: a second Eidos pipeline on the camera would
+    // take another. Change the existing one (its tag family) instead.
+    const running = this.eidosPipelineOn(cameraId);
+    if (running) {
+      toasts.warning(`${running.name} already runs Eidos on this camera. Change its tag family instead of adding a second pipeline (each takes a core).`);
+      return "";
+    }
     const templates = await this.guard("templates", () => api.pipelineTemplates());
     const template = templates?.find((t) => t.family === family && (t.variant ?? "default") === "default");
     if (!template) {
@@ -613,6 +620,14 @@ export class LiveCluster {
     );
     await this.refreshPipelines();
     return created?.id ?? "";
+  }
+
+  /** The enabled pipeline that runs Eidos (its graph requires `eidos`) on `cameraId`, if any. */
+  eidosPipelineOn(cameraId: string): W.Pipeline | undefined {
+    for (const p of this.pipelines.values()) {
+      if (p.enabled && p.graph?.requires.some((r) => r.id === "eidos") && Object.values(p.bindings).some((b) => b.resource_id === cameraId)) return p;
+    }
+    return undefined;
   }
 
   /** Redeploy a pipeline with another tag family (the same graph, bindings and settings). */
