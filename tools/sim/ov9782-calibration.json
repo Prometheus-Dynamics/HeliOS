@@ -1,0 +1,12 @@
+{
+  "width": 1280,
+  "height": 800,
+  "model": "fisheye",
+  "fx": 566.5078783501799,
+  "fy": 565.3751796431187,
+  "cx": 627.2902753035058,
+  "cy": 351.8073574981584,
+  "distortion": { "k1": -0.015614839262790642, "k2": 0.028081537411168825, "k3": -0.013378485952884722, "k4": 0.00147002514114804 },
+  "rms_px": 0.11,
+  "source": "Eidos offline tag-map self-calibration of a Raze OV9782 (2042-frame robot recording, video_map_v3): a realistic lens for the simulator, not a board calibration"
+}

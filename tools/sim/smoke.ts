@@ -7,7 +7,9 @@
 //   4. the pipeline ticks, with no failed ticks;
 //   5. GET /v1/live/ws delivers the pipeline's outputs, each with frame_ts_ns;
 //   6. the camera's preview WebSocket (SPV1 frames) carries capture times that match live outputs,
-//      which is what lets a viewer draw each frame's overlays with that frame.
+//      which is what lets a viewer draw each frame's overlays with that frame;
+//   7. with SIM_TRUTH (Styx's tag scene ground truth, which up.sh writes): the detections of each
+//      frame match the frame's true tags, ids and corners (mean corner error under 2 px).
 //
 // Checks 5 and 6 record both streams in one window, so the capture times can meet.
 // Prints a pass/fail line per check with its time, then the timings and a summary.
@@ -22,6 +24,11 @@ const TIMEOUT_MS = Number(process.env.SIM_SMOKE_TIMEOUT_S ?? 60) * 1000;
 const WINDOW_MS = Number(process.env.SIM_SMOKE_WINDOW_MS ?? 4000);
 /** Ticks the pipeline must run before it counts as ticking. */
 const MIN_TICKS = Number(process.env.SIM_SMOKE_MIN_TICKS ?? 20);
+/** Styx's ground truth (one JSON line per frame) and the calibration the sim renders with. */
+const TRUTH = process.env.SIM_TRUTH ?? "";
+const CALIBRATION = process.env.SIM_CALIBRATION ?? new URL("./ov9782-calibration.json", import.meta.url).pathname;
+/** The mean corner error a detection may have against the truth, pixels. */
+const MAX_CORNER_ERROR_PX = Number(process.env.SIM_SMOKE_MAX_CORNER_PX ?? 2);
 
 const started = performance.now();
 const since = () => Math.round(performance.now() - started);
@@ -110,6 +117,16 @@ const cameraOk = await check("sim camera appears", async () => {
   return `${camera.name} (${camera.id}), health ${camera.health}`;
 });
 
+// The camera gets the calibration the sim renders with, so the pipeline's poses are calibrated.
+if (cameraOk) {
+  await check("camera calibrated like the sim's lens", async () => {
+    const calibration = await Bun.file(CALIBRATION).json();
+    const response = await fetch(`${BASE}/v1/cameras/${encodeURIComponent(cameraId)}/calibration`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(calibration) });
+    if (!response.ok) throw new Error(`PUT calibration: HTTP ${response.status} ${await response.text()}`);
+    return `${calibration.model} ${calibration.width}x${calibration.height}, f ${calibration.fx.toFixed(1)} px`;
+  });
+}
+
 // 3. The AprilTag pipeline, from the template, on the camera.
 let pipelineOk = false;
 if (cameraOk) {
@@ -153,6 +170,7 @@ if (pipelineOk) {
   const decoder = new TextDecoder();
   const liveTimestamps = new Set<string>();
   const previewTimestamps: string[] = [];
+  const detectionsByFrame = new Map<number, { id: number; corners: { x: number; y: number }[] }[]>();
   let liveLines = 0;
   let previewFirstMs: number | undefined;
   const live = record(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}`, WINDOW_MS, (data) => {
@@ -160,6 +178,14 @@ if (pipelineOk) {
     for (const line of data.split("\n").filter(Boolean)) {
       liveLines += 1;
       for (const ts of frameTimestampsOf(line)) liveTimestamps.add(ts);
+      if (line.includes('"port":"detections"')) {
+        try {
+          const parsed = JSON.parse(line);
+          if (typeof parsed.frame_ts_ns === "number") detectionsByFrame.set(parsed.frame_ts_ns, parsed.value?.detections ?? []);
+        } catch {
+          // A line that does not parse is counted above and left out here.
+        }
+      }
     }
   });
   const preview = record(`${WS_BASE}/v1/cameras/${encodeURIComponent(cameraId)}/preview/ws`, WINDOW_MS, (data) => {
@@ -186,6 +212,46 @@ if (pipelineOk) {
     timings.first_preview_ms = previewFirstMs ?? 0;
     return `${matches} of ${previewTimestamps.length} preview frames match a live output (${new Set(previewTimestamps).size} distinct capture times)`;
   });
+
+  if (TRUTH) {
+    await check("detections match the ground truth", async () => {
+      // Styx's truth: {timestamp_ns, tags: [{id, corners: [[x, y] x4]}]} per frame, frame start on
+      // the same clock as the outputs' frame_ts_ns.
+      const truth = new Map<number, { id: number; corners: [number, number][] }[]>();
+      for (const line of (await Bun.file(TRUTH).text()).split("\n").filter(Boolean)) {
+        const frame = JSON.parse(line);
+        truth.set(frame.timestamp_ns, frame.tags ?? []);
+      }
+      let frames = 0;
+      let tags = 0;
+      let missed = 0;
+      let errorSum = 0;
+      let corners = 0;
+      for (const [ts, detections] of detectionsByFrame) {
+        const expected = truth.get(ts);
+        if (!expected) continue;
+        frames += 1;
+        for (const tag of expected) {
+          tags += 1;
+          const found = detections.find((d) => d.id === tag.id);
+          if (!found) {
+            missed += 1;
+            continue;
+          }
+          // Corner order may differ: each true corner against its nearest detected one.
+          for (const [x, y] of tag.corners) {
+            errorSum += Math.min(...found.corners.map((c) => Math.hypot(c.x - x, c.y - y)));
+            corners += 1;
+          }
+        }
+      }
+      if (frames === 0) throw new Error(`no detection frame matched a truth frame (${detectionsByFrame.size} detection frames, ${truth.size} truth frames)`);
+      const mean = corners ? errorSum / corners : Number.NaN;
+      if (missed > 0) throw new Error(`${missed} of ${tags} true tags not detected over ${frames} frames`);
+      if (!(mean <= MAX_CORNER_ERROR_PX)) throw new Error(`mean corner error ${mean.toFixed(2)} px over ${corners} corners (max ${MAX_CORNER_ERROR_PX})`);
+      return `${frames} frames, ${tags} tags all detected, mean corner error ${mean.toFixed(2)} px`;
+    });
+  }
 }
 
 // Summary.

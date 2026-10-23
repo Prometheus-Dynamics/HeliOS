@@ -11,7 +11,9 @@
 #   SIM_UI_DIR=DIR            the UI's static build (default: ui/build, built with bun when missing)
 #   SIM_RUN_DIR=DIR           runtime dir (default: a fresh mktemp dir; kept after exit for its logs)
 #   SIM_BIND=ADDR:PORT        helios-api's address (default 127.0.0.1:5800)
-#   STYX_SIM_CAMERAS=SPEC     simulated cameras (default "ov9782,scene=chart"; see docs/simulation.md in Styx)
+#   STYX_SIM_CAMERAS=SPEC     simulated cameras (default: an OV9782 seeing AprilTags through a real
+#                             Raze lens, tools/sim/ov9782-calibration.json, with ground truth in
+#                             <run dir>/truth.jsonl; see docs/simulation.md in Styx)
 #   SIM_JOBS=N                cargo jobs (default 8)
 #
 # Ctrl-C (or a service exiting) stops the services this script started, by PID, and nothing else.
@@ -21,9 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND="$ROOT/backend"
 SIM_JOBS="${SIM_JOBS:-8}"
 SIM_BIND="${SIM_BIND:-127.0.0.1:5800}"
-STYX_SIM_CAMERAS="${STYX_SIM_CAMERAS:-ov9782,scene=chart}"
+STYX_SIM_CAMERAS="${STYX_SIM_CAMERAS:-}"
 SIM_RUST_LOG="${SIM_RUST_LOG:-info}"
-export STYX_SIM_CAMERAS
 
 log() { printf '[sim] %s\n' "$*"; }
 die() { printf '[sim] error: %s\n' "$*" >&2; exit 1; }
@@ -82,6 +83,10 @@ RUN="${SIM_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/helios-sim.XXXXXX")}"
 mkdir -p "$RUN"/{orion,orion-state,ipc/streams,engine,plugins,state,api/state,api/uploads,streams,logs,lemnos,board}
 # Only the Eidos plugin library: the engine loads every .so in its plugin directories.
 ln -sf "$SIM_BIN_DIR/libhelios_eidos_plugin.so" "$RUN/plugins/libhelios_eidos_plugin.so"
+# The default camera: AprilTags (Styx's tag scene) through a real Raze OV9782 lens, each frame's
+# true camera pose and tag corners in truth.jsonl, which the smoke test scores detections against.
+[[ -n "$STYX_SIM_CAMERAS" ]] || STYX_SIM_CAMERAS="ov9782,scene=tags,calibration=$ROOT/tools/sim/ov9782-calibration.json,truth=$RUN/truth.jsonl"
+export STYX_SIM_CAMERAS
 # An empty startup file: no default pipeline (smoke.sh creates its own).
 : > "$RUN/startup.toml"
 
@@ -211,7 +216,7 @@ printf '\n'
 printf '  HeliOS sim is up.\n'
 printf '  UI and API:  %s/\n' "$URL"
 printf '  Cameras:     %s\n' "$STYX_SIM_CAMERAS"
-printf '  Smoke test:  tools/sim/smoke.sh (SIM_URL=%s)\n' "$URL"
+printf '  Smoke test:  SIM_TRUTH=%s tools/sim/smoke.sh (SIM_URL=%s)\n' "$RUN/truth.jsonl" "$URL"
 printf '  Logs:        %s/logs\n' "$RUN"
 printf '  Ctrl-C to stop.\n\n'
 
