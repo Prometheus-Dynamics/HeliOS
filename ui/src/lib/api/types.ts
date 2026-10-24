@@ -403,6 +403,8 @@ export interface CameraCalibration {
     covariance: number[];
   };
   source?: string;
+  /** Set when a live mapper fitted it (`self-calibration`) rather than a user; absent for a user's calibration. */
+  provenance?: { method: "self-calibration"; views: number; frames?: number; revision?: number; pipeline?: string };
   /** The sensor orientation it was taken in (unflipped when absent); the API turns it into the camera's current one. */
   orientation?: { hflip?: boolean; vflip?: boolean };
   saved_at_ms?: number;

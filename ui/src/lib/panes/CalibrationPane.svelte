@@ -12,6 +12,8 @@
   import Picker from "#lib/kit/Picker.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Switch from "#lib/kit/Switch.svelte";
+  import { api } from "#lib/api/client.js";
+  import type * as W from "#lib/api/types.js";
   import { calibration as cal, COVER_COLS, COVER_ROWS } from "#lib/stores/calibration.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import Feed from "#lib/vision/Feed.svelte";
@@ -25,6 +27,15 @@
   const target = follow(() => pane, () => ws, "camera", () => cluster.cameras[0]?.resourceId);
   const camera = $derived(target.id ? cluster.camera(target.id) : undefined);
   const existing = $derived(camera ? cal.saved[cal.key(camera)] : undefined);
+  // The API's stored calibrations: a live mapper's self-calibration of this camera, read when the
+  // setup step opens (a fit that lands during capture shows the next time).
+  let served = $state<W.CameraCalibration[]>([]);
+  $effect(() => {
+    const id = camera?.resourceId;
+    if (!id || cal.step !== "setup") return;
+    api.calibrations(id).then((r) => (served = r.calibrations)).catch(() => (served = []));
+  });
+  const selfCal = $derived(camera ? served.find((c) => c.provenance?.method === "self-calibration" && c.width === camera.settings.width && c.height === camera.settings.height) : undefined);
   const cover = $derived(cal.coverage());
   const inView = $derived(camera ? cal.boardIn(camera) : null);
   const ready = $derived(cal.captures.length >= 12 && cal.coveredFraction >= 0.6);
@@ -84,6 +95,9 @@
         <p class="lead">Calibration measures the lens so tag distances and angles come out right. It takes about two minutes.</p>
         {#if existing}
           <div class="have"><Icon name="circle-check" size={14} /> Calibrated at {existing.width}×{existing.height}, {existing.rms.toFixed(2)} px RMS, {existing.views} views.</div>
+        {/if}
+        {#if selfCal?.provenance}
+          <div class="have"><Icon name="circle-check" size={14} /> Self-calibrated (rms {(selfCal.rms_px ?? 0).toFixed(2)} px, {selfCal.provenance.views} views).</div>
         {/if}
         <Prop label="Resolution"><span class="mono">{camera.settings.width}×{camera.settings.height}</span></Prop>
         <Prop label="Board"><span class="small">{boardLabel}</span></Prop>
