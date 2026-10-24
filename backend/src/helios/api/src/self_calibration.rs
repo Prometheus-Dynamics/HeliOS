@@ -135,8 +135,9 @@ pub enum Decision {
     Keep(String),
 }
 
-/// Store `fit` unless the camera has a calibration of its own at that size, or the stored one is a
-/// self-calibration with at least as many views and a rms no higher.
+/// Store `fit` unless the camera has a calibration of its own at that size (which always wins), or
+/// the stored self-calibration is at least as good: a fit replaces it only with a rms no higher and
+/// either more views or a lower rms, so more views never buy a worse fit.
 pub fn decide(stored: Option<&CameraCalibration>, fit: &CameraCalibration) -> Decision {
     let Some(stored) = stored else { return Decision::Store };
     let Some(old) = &stored.provenance else {
@@ -150,10 +151,10 @@ pub fn decide(stored: Option<&CameraCalibration>, fit: &CameraCalibration) -> De
     };
     let old_rms = stored.rms_px.unwrap_or(f64::INFINITY);
     let new_rms = fit.rms_px.unwrap_or(f64::INFINITY);
-    if old.views < new.views || old_rms > new_rms {
+    if new_rms <= old_rms && (new.views > old.views || new_rms < old_rms) {
         Decision::Store
     } else {
-        Decision::Keep(format!("the stored self-calibration has {} views at {old_rms:.3} px, not fewer views or a higher rms", old.views))
+        Decision::Keep(format!("the stored self-calibration ({} views at {old_rms:.3} px) is at least as good as the fit ({} views at {new_rms:.3} px)", old.views, new.views))
     }
 }
 
@@ -360,12 +361,14 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_self_calibration_is_replaced_only_by_more_views_or_a_lower_rms() {
+    fn a_stored_self_calibration_is_replaced_only_by_a_fit_no_worse_and_better_on_one_count() {
         let fit_now = calibration_of(&fit("pinhole"), 1280, 800, Orientation::default(), "p").expect("valid"); // 24 views, 0.31 px
         assert_eq!(decide(Some(&stored(12, 0.40)), &fit_now), Decision::Store, "fewer views");
         assert_eq!(decide(Some(&stored(30, 0.50)), &fit_now), Decision::Store, "a higher rms (the fit is better)");
         assert!(matches!(decide(Some(&stored(24, 0.31)), &fit_now), Decision::Keep(_)), "the same fit: no store, no loop");
         assert!(matches!(decide(Some(&stored(30, 0.20)), &fit_now), Decision::Keep(_)), "more views and a lower rms already stored");
+        assert!(matches!(decide(Some(&stored(12, 0.25)), &fit_now), Decision::Keep(_)), "more views never buy a worse rms");
+        assert_eq!(decide(Some(&stored(24, 0.40)), &fit_now), Decision::Store, "the same views at a lower rms");
     }
 
     #[test]
