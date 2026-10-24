@@ -62,6 +62,24 @@ const CAMERA_SIZES: [(&str, &str); 2] = [("width_px", "width"), ("height_px", "h
 const LENSES: [&str; 3] = ["pinhole", "fisheye", "unknown"];
 /// The calibration's uncertainty fields (`camera.uncertainty.*`, Eidos's `uncertainty`).
 const UNCERTAINTY_PREFIX: &str = "camera.uncertainty.";
+/// A self-calibration prior of an uncalibrated camera (Eidos's `prior`: one module's fit, never
+/// applied as a calibration): `camera.prior.<field>` and the `prior` field each one fills.
+const PRIOR_PREFIX: &str = "camera.prior.";
+const PRIOR_FIELDS: [(&str, &str); 13] = [
+    ("fx_px", "fx"),
+    ("fy_px", "fy"),
+    ("cx_px", "cx"),
+    ("cy_px", "cy"),
+    ("k1", "k1"),
+    ("k2", "k2"),
+    ("k3", "k3"),
+    ("k4", "k4"),
+    ("width_px", "width"),
+    ("height_px", "height"),
+    ("sigma", "sigma"),
+    ("sigma_principal", "sigma_principal"),
+    ("sigma_distortion", "sigma_distortion"),
+];
 const UNCERTAINTY_KINDS: [&str; 3] = ["estimated", "known", "solved"];
 const UNCERTAINTY_FIELDS: [&str; 9] = ["kind", "rms_px", "views", "sigma.fx", "sigma.fy", "sigma.cx", "sigma.cy", "sigma.distortion", "covariance"];
 
@@ -150,12 +168,15 @@ pub(crate) fn camera_value(context: &BTreeMap<String, ContextValue>) -> Result<O
     if let Some(unknown) = context
         .keys()
         .filter_map(|key| key.strip_prefix(CAMERA_PREFIX))
-        .find(|key| *key != "lens" && !key.starts_with("uncertainty.") && !CAMERA_NUMBERS.iter().chain(&CAMERA_SIZES).any(|(name, _)| name == key))
+        .find(|key| *key != "lens" && !key.starts_with("uncertainty.") && !key.starts_with("prior.") && !CAMERA_NUMBERS.iter().chain(&CAMERA_SIZES).any(|(name, _)| name == key))
     {
         return Err(format!("unknown context field camera.{unknown}"));
     }
     if let Some(uncertainty) = uncertainty_value(context)? {
         value.insert("uncertainty".into(), uncertainty);
+    }
+    if let Some(prior) = prior_value(context)? {
+        value.insert("prior".into(), prior);
     }
     Ok(Some(serde_json::Value::Object(value)))
 }
@@ -191,6 +212,31 @@ fn uncertainty_value(context: &BTreeMap<String, ContextValue>) -> Result<Option<
         "sigma": sigma,
         "covariance": json_list(context, "camera.uncertainty.covariance")?,
     })))
+}
+
+/// The `prior` of `eidos:camera_calibration` from the `camera.prior.*` fields; `None` without
+/// any. Absent numbers are left out (Eidos's defaults: the sigmas, no scaling without a size).
+fn prior_value(context: &BTreeMap<String, ContextValue>) -> Result<Option<serde_json::Value>, String> {
+    if !context.keys().any(|key| key.starts_with(PRIOR_PREFIX)) {
+        return Ok(None);
+    }
+    if let Some(unknown) = context.keys().filter_map(|key| key.strip_prefix(PRIOR_PREFIX)).find(|key| !PRIOR_FIELDS.iter().any(|(name, _)| name == key)) {
+        return Err(format!("unknown context field camera.prior.{unknown}"));
+    }
+    let mut prior = serde_json::Map::new();
+    for (key, field) in PRIOR_FIELDS {
+        if let Some(value) = number(context, &format!("{PRIOR_PREFIX}{key}"))? {
+            if field == "width" || field == "height" {
+                if !(0.0..=f64::from(u32::MAX)).contains(&value) || value.fract() != 0.0 {
+                    return Err(format!("context camera.prior.{key} must be a whole number of pixels, not {value}"));
+                }
+                prior.insert(field.into(), (value as u32).into());
+            } else {
+                prior.insert(field.into(), value.into());
+            }
+        }
+    }
+    Ok(Some(serde_json::Value::Object(prior)))
 }
 
 /// A JSON list of numbers held in a context string; absent is an empty list.
@@ -249,6 +295,32 @@ mod tests {
         assert_eq!(camera["height"], 0);
         // A secondary camera feeds only its own port.
         assert_eq!(context_pushes(&b, false).expect("pushes").iter().map(|p| p.port.as_str()).collect::<Vec<_>>(), ["frame_camera"]);
+    }
+
+    #[test]
+    fn a_prior_context_becomes_the_calibration_prior() {
+        let b = binding(&[
+            ("camera.lens", ContextValue::Name("fisheye".into())),
+            ("camera.fx_px", ContextValue::Number(0.0)),
+            ("camera.prior.fx_px", ContextValue::Number(566.5)),
+            ("camera.prior.fy_px", ContextValue::Number(565.4)),
+            ("camera.prior.cx_px", ContextValue::Number(627.3)),
+            ("camera.prior.cy_px", ContextValue::Number(351.8)),
+            ("camera.prior.k1", ContextValue::Number(-0.0156)),
+            ("camera.prior.width_px", ContextValue::Number(1280.0)),
+            ("camera.prior.height_px", ContextValue::Number(800.0)),
+            ("camera.prior.sigma", ContextValue::Number(0.05)),
+        ]);
+        let camera = &context_pushes(&b, true).expect("pushes")[0].value;
+        assert_eq!(camera["prior"]["fx"], 566.5);
+        assert_eq!(camera["prior"]["width"], 1280);
+        assert_eq!(camera["prior"]["sigma"], 0.05);
+        assert!(camera["prior"].get("sigma_principal").is_none(), "absent: Eidos's default");
+        // Eidos's own type reads it, and an uncalibrated camera stays uncalibrated.
+        let typed: eidos_daedalus::types::CameraCalibration = serde_json::from_value(camera.clone()).expect("eidos camera with a prior");
+        assert!(!typed.is_calibrated());
+        let unknown = binding(&[("camera.prior.fov", ContextValue::Number(1.0))]);
+        assert!(context_pushes(&unknown, true).is_err(), "an unknown prior field is refused");
     }
 
     #[test]

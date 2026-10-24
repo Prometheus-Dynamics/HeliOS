@@ -248,6 +248,11 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
     };
     let lens = if calibrated { lens.name() } else { board_lens_hint().map_or(UNKNOWN_LENS, LensModel::name) };
     fields.insert("camera.lens".to_string(), TypedConfigValue::String(lens.into()));
+    if !calibrated && let Some(prior) = board_lens().and_then(|board| board.prior.as_ref()) {
+        for (key, value) in prior.oriented(orientation).fields() {
+            fields.insert(format!("camera.prior.{key}"), value);
+        }
+    }
     for (name, value) in ["fx_px", "fy_px", "cx_px", "cy_px"].into_iter().zip(intrinsics) {
         fields.insert(format!("camera.{name}"), TypedConfigValue::F64(value));
     }
@@ -274,24 +279,106 @@ pub const UNKNOWN_LENS: &str = "unknown";
 /// lens), unless `HELIOS_BOARD_CAMERA_FILE` names another.
 pub const DEFAULT_BOARD_CAMERA_FILE: &str = "/usr/share/board/raze/camera.toml";
 
-/// The board's camera module lens (`[camera.lens] model`), read once; `None` without the file
-/// or a model this crate knows.
-pub fn board_lens_hint() -> Option<LensModel> {
-    static HINT: OnceLock<Option<LensModel>> = OnceLock::new();
-    *HINT.get_or_init(|| {
+/// The board's camera module lens: its model, and one module's fit as a self-calibration prior
+/// (`[camera.lens.hint]`), never applied as a calibration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardLens {
+    pub model: LensModel,
+    pub prior: Option<LensPrior>,
+}
+
+/// One module's fit (Eidos's `prior`): focal lengths, principal point and distortion at
+/// `width` x `height`, with how far a unit may be from it (`sigma` relative, for the focal length).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LensPrior {
+    pub width: u32,
+    pub height: u32,
+    pub fx: f64,
+    pub fy: f64,
+    pub cx: f64,
+    pub cy: f64,
+    /// `k1` to `k4` (the fisheye's coefficients; a pinhole's first four radial ones).
+    pub distortion: [f64; 4],
+    pub sigma: Option<f64>,
+}
+
+impl LensPrior {
+    /// The prior for a camera read out flipped (the module's fit is of the unflipped array):
+    /// the principal point mirrors, as a calibration's does. The fisheye's radial coefficients
+    /// don't change.
+    pub fn oriented(&self, orientation: Orientation) -> Self {
+        let mut out = self.clone();
+        if orientation.hflip {
+            out.cx = f64::from(self.width) - 1.0 - self.cx;
+        }
+        if orientation.vflip {
+            out.cy = f64::from(self.height) - 1.0 - self.cy;
+        }
+        out
+    }
+
+    /// The `camera.prior.*` context fields (without the prefix).
+    fn fields(&self) -> Vec<(&'static str, TypedConfigValue)> {
+        let mut fields = vec![
+            ("fx_px", TypedConfigValue::F64(self.fx)),
+            ("fy_px", TypedConfigValue::F64(self.fy)),
+            ("cx_px", TypedConfigValue::F64(self.cx)),
+            ("cy_px", TypedConfigValue::F64(self.cy)),
+            ("width_px", TypedConfigValue::Int(i64::from(self.width))),
+            ("height_px", TypedConfigValue::Int(i64::from(self.height))),
+        ];
+        fields.extend(["k1", "k2", "k3", "k4"].into_iter().zip(self.distortion).map(|(name, value)| (name, TypedConfigValue::F64(value))));
+        if let Some(sigma) = self.sigma {
+            fields.push(("sigma", TypedConfigValue::F64(sigma)));
+        }
+        fields
+    }
+}
+
+/// The board's camera module lens, read once from `HELIOS_BOARD_CAMERA_FILE` or
+/// [`DEFAULT_BOARD_CAMERA_FILE`]; `None` without the file or a model this crate knows.
+pub fn board_lens() -> Option<&'static BoardLens> {
+    static LENS: OnceLock<Option<BoardLens>> = OnceLock::new();
+    LENS.get_or_init(|| {
         let path = std::env::var_os("HELIOS_BOARD_CAMERA_FILE").map_or_else(|| PathBuf::from(DEFAULT_BOARD_CAMERA_FILE), PathBuf::from);
         std::fs::read_to_string(path).ok().and_then(|text| lens_of_camera_toml(&text))
     })
+    .as_ref()
 }
 
-/// `[camera.lens] model` of a board camera description (`pinhole` or `fisheye`).
-fn lens_of_camera_toml(text: &str) -> Option<LensModel> {
+/// The board's camera module lens model, the hint an uncalibrated camera carries.
+pub fn board_lens_hint() -> Option<LensModel> {
+    board_lens().map(|lens| lens.model)
+}
+
+/// `[camera.lens]` of a board camera description: `model` (`pinhole` or `fisheye`) and, when
+/// complete, the `[camera.lens.hint]` prior (`width`, `height`, `fx_px`, `fy_px`, `cx_px`,
+/// `cy_px`, `sigma`, `[camera.lens.hint.distortion] k1`..`k4`).
+fn lens_of_camera_toml(text: &str) -> Option<BoardLens> {
     let value: toml::Value = toml::from_str(text).ok()?;
-    match value.get("camera")?.get("lens")?.get("model")?.as_str()? {
-        "pinhole" => Some(LensModel::Pinhole),
-        "fisheye" => Some(LensModel::Fisheye),
-        _ => None,
-    }
+    let lens = value.get("camera")?.get("lens")?;
+    let model = match lens.get("model")?.as_str()? {
+        "pinhole" => LensModel::Pinhole,
+        "fisheye" => LensModel::Fisheye,
+        _ => return None,
+    };
+    let prior = lens.get("hint").and_then(|hint| {
+        let number = |table: &toml::Value, key: &str| table.get(key).and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)));
+        let size = |key: &str| hint.get(key).and_then(toml::Value::as_integer).and_then(|v| u32::try_from(v).ok());
+        let distortion = hint.get("distortion");
+        let k = |key: &str| distortion.and_then(|d| number(d, key)).unwrap_or(0.0);
+        Some(LensPrior {
+            width: size("width")?,
+            height: size("height")?,
+            fx: number(hint, "fx_px")?,
+            fy: number(hint, "fy_px")?,
+            cx: number(hint, "cx_px")?,
+            cy: number(hint, "cy_px")?,
+            distortion: [k("k1"), k("k2"), k("k3"), k("k4")],
+            sigma: number(hint, "sigma"),
+        })
+    });
+    Some(BoardLens { model, prior })
 }
 
 /// The `camera.uncertainty.*` fields of a calibration that has an uncertainty (none otherwise:
@@ -394,10 +481,22 @@ mod tests {
     }
 
     #[test]
-    fn the_board_camera_file_names_the_lens() {
-        let raze = "schema_version = 1\n[camera]\nsensor = \"ov9782\"\nport = \"cam0\"\n[camera.lens]\nmodel = \"fisheye\"\nprojection = \"equidistant\"\n[camera.lens.hint]\nwidth = 1280\nheight = 800\nfx_px = 566.0\n";
-        assert_eq!(lens_of_camera_toml(raze), Some(LensModel::Fisheye));
-        assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"pinhole\"\n"), Some(LensModel::Pinhole));
+    fn the_board_camera_file_names_the_lens_and_its_prior() {
+        let raze = include_str!("../../../../../tools/sim/raze-camera.toml");
+        let lens = lens_of_camera_toml(raze).expect("the Raze's camera.toml");
+        assert_eq!(lens.model, LensModel::Fisheye);
+        let prior = lens.prior.expect("its prior");
+        assert_eq!((prior.width, prior.height, prior.fx, prior.cy), (1280, 800, 566.508, 351.807));
+        assert_eq!(prior.distortion[0], -0.0156148);
+        assert_eq!(prior.sigma, Some(0.05));
+        let turned = prior.oriented(Orientation { hflip: true, vflip: true });
+        assert_eq!((turned.cx, turned.cy), (1279.0 - 627.29, 799.0 - 351.807), "a turned camera's prior mirrors its principal point");
+        let fields: BTreeMap<_, _> = prior.fields().into_iter().collect();
+        assert_eq!(fields["width_px"], TypedConfigValue::Int(1280));
+        assert_eq!(fields["k4"], TypedConfigValue::F64(0.00147003));
+        // A model alone, or an incomplete hint: no prior.
+        assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"pinhole\"\n"), Some(BoardLens { model: LensModel::Pinhole, prior: None }));
+        assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"fisheye\"\n[camera.lens.hint]\nfx_px = 566.0\n").and_then(|l| l.prior), None);
         assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"catadioptric\"\n"), None);
         assert_eq!(lens_of_camera_toml("[camera]\nsensor = \"ov9782\"\n"), None);
     }
