@@ -55,7 +55,7 @@ imports = [
   { path = "../ops/registry-local.toml", when = { input = { cache = "local" } } },
 ]
 
-# Raze board package (Atlas dev 18a5f6a: /usr/share/board/raze/camera.toml says the camera module's lens (fisheye, equidistant) and one module's full fit as a self-calibration prior; e058d25: the boot FAT gets every overlay and the slot README in both the root and slots/<id>/overlays/ (e058d25; c405cbb had put the README only in the bundle), the slots writer refuses a bundle missing an overlay (862c414), and every build runs check-boot-overlays.sh as a Gaia assembly check (needs Gaia f5aa011+). Earlier, e8b2833: A/B updater fixes from hardware, the Lemnos pin
+# Raze board package (Atlas dev af8ea62: installer LED states on the ring (a90012a), a 2 minute USB lease so the robot-network route arrives within a minute (af8ea62), failed downloads name the URL and answer (8de79b5); 18a5f6a: /usr/share/board/raze/camera.toml says the camera module's lens (fisheye, equidistant) and one module's full fit as a self-calibration prior; e058d25: the boot FAT gets every overlay and the slot README in both the root and slots/<id>/overlays/ (e058d25; c405cbb had put the README only in the bundle), the slots writer refuses a bundle missing an overlay (862c414), and every build runs check-boot-overlays.sh as a Gaia assembly check (needs Gaia f5aa011+). Earlier, e8b2833: A/B updater fixes from hardware, the Lemnos pin
 # (8e59039 in the device package), board events numbered by seq (continuing after a torn log
 # line), board-stream (the push channel on TCP 5898 with the hardware
 # topic; device.toml imports it, and expect-full.toml lists its artifact and install), the
@@ -91,7 +91,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "18a5f6ae7b3e9828c185c96055187397f04fe01e"
+rev = "af8ea623500090d5e9078a482cfa783a482777ce"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -110,7 +110,7 @@ rev = "18a5f6ae7b3e9828c185c96055187397f04fe01e"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "f3c022beca6f1429505be37d26b9b32a3dcd1d59"
+rev = "1ce2a2b9fbf7a0a6f83ce0ea6063a2e4ea29b18c"
 
 # Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
@@ -133,7 +133,7 @@ rev = "f3c022beca6f1429505be37d26b9b32a3dcd1d59"
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "ab05a576d8c9ee4cc5fedfee91edd16f3a7288d1"
+rev = "60772f0dc29f3770363ae375d9ad746628f90b88"
 
 [[sources]]
 id = "orion"

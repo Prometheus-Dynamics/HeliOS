@@ -35,7 +35,8 @@ const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The `calibration` block of Eidos's map pose (`eidos:map_pose`): the lens the mapper fitted.
 /// Eidos's `distortion` is OpenCV's eight terms (`k1` to `k6`, `p1`, `p2`); a fisheye uses `k1`
-/// to `k4`. `revision` and `converged` may be absent from older Eidos.
+/// to `k4`. `revision`, `converged`, `width` and `height` may be absent from older Eidos; `width`
+/// and `height` are the frame size the fit is at (0 before the mapper has seen a frame).
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
 pub struct Fit {
     #[serde(default)]
@@ -62,6 +63,10 @@ pub struct Fit {
     pub views: Option<u32>,
     #[serde(default)]
     pub frames: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
 }
 
 /// One pose line of the live relay (`{pipeline, port, observed_at_ms, frame_ts_ns, value}`).
@@ -75,6 +80,14 @@ struct PoseLine {
 #[derive(Deserialize)]
 struct PoseValue {
     calibration: Option<Fit>,
+}
+
+/// The frame size a fit says it is at, when it says one.
+fn fit_size(fit: &Fit) -> Option<(u32, u32)> {
+    match (fit.width?, fit.height?) {
+        (0, _) | (_, 0) => None,
+        size => Some(size),
+    }
 }
 
 /// The calibration a converged fit is, at `width` x `height` in the camera's current `orientation`
@@ -236,11 +249,11 @@ pub async fn handle_chunk(state: &SharedState, mappers: &BTreeMap<String, LiveMa
     }
 }
 
-/// Stores one fit for the mapper's camera at its binding's size, if the rules allow it, and hands
-/// the camera's inputs to its pipelines.
+/// Stores one fit for the mapper's camera at the fit's own frame size (the binding's size from an
+/// older Eidos), if the rules allow it, and hands the camera's inputs to its pipelines.
 async fn store(state: &SharedState, pipeline: &str, mapper: &LiveMapper, fit: &Fit) -> crate::error::ApiResult<()> {
-    let Some((width, height)) = mapper.size else {
-        tracing::info!(pipeline, camera = %mapper.camera, "self-calibration not stored: the mapper's input has no output size, so its frame size is unknown");
+    let Some((width, height)) = fit_size(fit).or(mapper.size) else {
+        tracing::info!(pipeline, camera = %mapper.camera, "self-calibration not stored: neither the fit nor the mapper's input says the frame size");
         return Ok(());
     };
     let orientation = Orientation::from_settings(&state.store.camera_settings(&mapper.camera).await?);
@@ -289,7 +302,22 @@ mod tests {
             rms_px: Some(0.31),
             views: Some(24),
             frames: Some(180),
+            width: Some(1280),
+            height: Some(800),
         }
+    }
+
+    #[test]
+    fn a_fit_is_stored_at_its_own_frame_size() {
+        assert_eq!(fit_size(&fit("pinhole")), Some((1280, 800)));
+        assert_eq!(fit_size(&Fit { width: Some(0), height: Some(0), ..fit("pinhole") }), None, "no frame seen yet");
+        assert_eq!(fit_size(&Fit { width: None, height: None, ..fit("pinhole") }), None, "an older Eidos");
+        let line: PoseLine = serde_json::from_value(serde_json::json!({
+            "pipeline": "p", "port": "pose",
+            "value": { "calibration": { "estimated": true, "converged": true, "width": 640, "height": 400, "model": "pinhole" } }
+        }))
+        .expect("pose line");
+        assert_eq!(line.value.calibration.as_ref().and_then(fit_size), Some((640, 400)));
     }
 
     fn stored(views: u32, rms: f64) -> CameraCalibration {
@@ -431,11 +459,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_mapper_without_an_output_size_stores_nothing() {
+    async fn a_fit_and_mapper_without_a_frame_size_store_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = test_state(dir.path());
         let sizeless = BTreeMap::from([("live-map".to_string(), LiveMapper { camera: "camera.front".into(), size: None })]);
-        handle_chunk(&state, &sizeless, &mut Handled::default(), &pose_line("live-map", &fit("pinhole"))).await;
+        let older_eidos = Fit { width: None, height: None, ..fit("pinhole") };
+        handle_chunk(&state, &sizeless, &mut Handled::default(), &pose_line("live-map", &older_eidos)).await;
         assert!(state.store.calibrations().await.expect("read").is_empty());
+        handle_chunk(&state, &sizeless, &mut Handled::default(), &pose_line("live-map", &fit("pinhole"))).await;
+        let stored = state.store.calibrations().await.expect("read").remove("camera.front").unwrap_or_default();
+        assert_eq!(stored.iter().map(|c| (c.width, c.height)).collect::<Vec<_>>(), vec![(1280, 800)], "the fit's own size");
     }
 }
