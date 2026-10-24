@@ -197,17 +197,18 @@ pub(super) fn json_with_keys(artifacts: &[ExecutionArtifactRecord], kind: &str, 
 fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() {
     let plugins = TestPlugins::load();
     let document = live_map_template(plugins.registry());
-    // An uncalibrated camera (fx 0) whose lens is known to be a pinhole, as the synthetic scene
-    // is: the mapper self-calibrates with that model (Eidos's `auto` takes the hint).
-    let uncalibrated = calibration_context(0.0, "pinhole");
-    let mut workload_spec = workload("workload.live-map", document, vec![camera_binding(&uncalibrated)]);
+    // The scene's own calibration (a 500 px pinhole): the mapper tracks from the first clear tag.
+    // Its self-calibration needs views over most of the image, which one marker in this short clip
+    // doesn't give; Eidos's tests and the sim's selfcal scenario cover it.
+    let calibrated = calibration_context(SCENE_FOCAL_PX, "pinhole");
+    let mut workload_spec = workload("workload.live-map", document, vec![camera_binding(&calibrated)]);
     workload_spec.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let spec = workload_spec.clone();
     let (mut driver, frames) = spawn_channel_driver(&plugins, workload_spec, "frame", GraphSettings::default());
     driver.update_camera_context(&spec);
 
-    // The default calibration window is 150 frames; the mapper then starts on the first clear tag
-    // (the tilted marker, which pins its pose). Timestamps are nanoseconds, 100 ms apart.
+    // The mapper starts on the first clear tag (the tilted marker, which pins its pose).
+    // Timestamps are nanoseconds, 100 ms apart.
     let frame_count = 160_u64;
     for index in 0..frame_count {
         frames.send(live_map_scene(586, index, (index + 1) * 100_000_000)).expect("send frame");
@@ -220,7 +221,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     assert_eq!(pose["frame"].as_u64(), Some(frame_count - 1), "{pose}");
     assert_eq!(pose["state"], "tracking", "{pose}");
     assert_eq!(pose["valid"], true, "{pose}");
-    assert_eq!(pose["calibration"]["estimated"], true, "{pose}");
+    assert_eq!(pose["calibration"]["estimated"], false, "the given calibration, not an estimate: {pose}");
     assert!(pose["alignment"]["aligned"].is_boolean(), "{pose}");
     let estimate = &pose["pose"];
     for key in ["reference_from_camera", "covariance", "sigma", "source", "rms_px", "points", "hypotheses", "rig"] {
@@ -241,7 +242,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     // The snapshot is due on the first mapping tick and then at most twice a second: it exists
     // with the tag and the trajectory, and its point buffers are packed as documented.
     let snapshot = json_with_keys(&artifacts, "host_output:snapshot", &["seq", "run_id", "tag_size_m", "aligned", "estimated", "trajectory", "keyframes", "points", "tags"]);
-    assert_eq!(snapshot["estimated"], true, "{snapshot}");
+    assert_eq!(snapshot["estimated"], false, "the given calibration: {snapshot}");
     assert!(snapshot["trajectory"].as_array().is_some_and(|trajectory| !trajectory.is_empty()), "{snapshot}");
     assert!(snapshot["tags"].as_array().is_some_and(|tags| tags.iter().any(|tag| tag["id"] == 586)), "{snapshot}");
     let points = &snapshot["points"];

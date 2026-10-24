@@ -6,10 +6,12 @@
 //! (`mount.*`). Numbers are Orion `TypedConfigValue::F64`, with the unit in the key.
 //!
 //! Without a matching calibration the context says `fx = fy = 0`, which Eidos reports as
-//! `status: "uncalibrated"` with no poses (it never assumes a camera). Without a mount there are
-//! no `mount.*` fields, and the multi-tag pose has no robot pose.
+//! `status: "uncalibrated"` with no poses (it never assumes a camera), and the lens is the board's
+//! camera module lens ([`board_lens_hint`]) or `unknown`: the live mapper's self-calibration then
+//! fits that model, or chooses one from the tag views. Without a mount there are no `mount.*`
+//! fields, and the multi-tag pose has no robot pose.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf, sync::OnceLock};
 
 use orion::control_plane::TypedConfigValue;
 use serde::{Deserialize, Serialize};
@@ -239,11 +241,13 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
     let mut fields = BTreeMap::new();
     let calibration = calibration.map(|c| c.oriented(orientation));
     let uncertainty = calibration.as_ref().map(|c| uncertainty_fields(c.uncertainty.as_ref())).unwrap_or_default();
+    let calibrated = calibration.is_some();
     let (lens, intrinsics, distortion, size) = match calibration {
         Some(c) => (c.model, [c.fx, c.fy, c.cx, c.cy], c.distortion, (c.width, c.height)),
         None => (LensModel::Pinhole, [0.0; 4], Distortion::default(), (0, 0)),
     };
-    fields.insert("camera.lens".to_string(), TypedConfigValue::String(lens.name().into()));
+    let lens = if calibrated { lens.name() } else { board_lens_hint().map_or(UNKNOWN_LENS, LensModel::name) };
+    fields.insert("camera.lens".to_string(), TypedConfigValue::String(lens.into()));
     for (name, value) in ["fx_px", "fy_px", "cx_px", "cy_px"].into_iter().zip(intrinsics) {
         fields.insert(format!("camera.{name}"), TypedConfigValue::F64(value));
     }
@@ -261,6 +265,33 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
         }
     }
     fields
+}
+
+/// The `camera.lens` of an uncalibrated camera whose lens the board doesn't say: Eidos's
+/// self-calibration then chooses the model from the tag views.
+pub const UNKNOWN_LENS: &str = "unknown";
+/// The board's camera description (Atlas's device package; the Raze's names its camera module's
+/// lens), unless `HELIOS_BOARD_CAMERA_FILE` names another.
+pub const DEFAULT_BOARD_CAMERA_FILE: &str = "/usr/share/board/raze/camera.toml";
+
+/// The board's camera module lens (`[camera.lens] model`), read once; `None` without the file
+/// or a model this crate knows.
+pub fn board_lens_hint() -> Option<LensModel> {
+    static HINT: OnceLock<Option<LensModel>> = OnceLock::new();
+    *HINT.get_or_init(|| {
+        let path = std::env::var_os("HELIOS_BOARD_CAMERA_FILE").map_or_else(|| PathBuf::from(DEFAULT_BOARD_CAMERA_FILE), PathBuf::from);
+        std::fs::read_to_string(path).ok().and_then(|text| lens_of_camera_toml(&text))
+    })
+}
+
+/// `[camera.lens] model` of a board camera description (`pinhole` or `fisheye`).
+fn lens_of_camera_toml(text: &str) -> Option<LensModel> {
+    let value: toml::Value = toml::from_str(text).ok()?;
+    match value.get("camera")?.get("lens")?.get("model")?.as_str()? {
+        "pinhole" => Some(LensModel::Pinhole),
+        "fisheye" => Some(LensModel::Fisheye),
+        _ => None,
+    }
 }
 
 /// The `camera.uncertainty.*` fields of a calibration that has an uncertainty (none otherwise:
@@ -355,9 +386,20 @@ mod tests {
         assert_eq!(fields.len(), 21);
         let uncalibrated = context_fields(None, None, Orientation::default());
         assert_eq!(uncalibrated["camera.fx_px"], TypedConfigValue::F64(0.0));
+        let hint = board_lens_hint().map_or(UNKNOWN_LENS, LensModel::name);
+        assert_eq!(uncalibrated["camera.lens"], TypedConfigValue::String(hint.into()), "the board's lens, or unknown");
         assert_eq!(uncalibrated["camera.width_px"], TypedConfigValue::Int(0));
         assert!(!uncalibrated.keys().any(|key| key.starts_with("mount.")), "no mount, no mount fields");
         assert_eq!(uncalibrated.len(), 15);
+    }
+
+    #[test]
+    fn the_board_camera_file_names_the_lens() {
+        let raze = "schema_version = 1\n[camera]\nsensor = \"ov9782\"\nport = \"cam0\"\n[camera.lens]\nmodel = \"fisheye\"\nprojection = \"equidistant\"\n[camera.lens.hint]\nwidth = 1280\nheight = 800\nfx_px = 566.0\n";
+        assert_eq!(lens_of_camera_toml(raze), Some(LensModel::Fisheye));
+        assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"pinhole\"\n"), Some(LensModel::Pinhole));
+        assert_eq!(lens_of_camera_toml("[camera.lens]\nmodel = \"catadioptric\"\n"), None);
+        assert_eq!(lens_of_camera_toml("[camera]\nsensor = \"ov9782\"\n"), None);
     }
 
     fn solved_uncertainty() -> CalibrationUncertainty {

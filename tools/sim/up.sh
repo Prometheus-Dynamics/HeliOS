@@ -33,6 +33,9 @@
 #   SIM_LEMNOS=0              run without lemnosd (the services' no-hardware paths)
 #   SIM_LEMNOS_BOARD=PATH     lemnosd's board (default tools/sim/raze-board.toml, Atlas's Raze file)
 #   SIM_LEMNOS_SCRIPT=PATH    the simulated board's script (default tools/sim/lemnos-sim.toml)
+#   SIM_BOARD_CAMERA_FILE=PATH  the board's camera description helios-api reads for an
+#                             uncalibrated camera's lens hint (default: none, so the lens is
+#                             "unknown"; tools/sim/raze-camera.toml is the Raze's: fisheye)
 #   SIM_JOBS=N                cargo jobs (default 8)
 #
 # Ctrl-C (or a service exiting) stops the services this script started, by PID, and nothing else.
@@ -276,6 +279,7 @@ start helios-api \
   HELIOS_BOARD_IDENTITY_PATH="$RUN/board/identity.json" \
   HELIOS_LEMNOSD_SOCKET="$LEMNOSD_SOCKET" \
   HELIOS_ENGINE_LIVE_SOCKET="$ENGINE_LIVE_SOCKET" \
+  HELIOS_BOARD_CAMERA_FILE="${SIM_BOARD_CAMERA_FILE:-$RUN/board/no-camera.toml}" \
   RUST_LOG="$SIM_RUST_LOG" \
   "$SIM_BIN_DIR/helios-api"
 

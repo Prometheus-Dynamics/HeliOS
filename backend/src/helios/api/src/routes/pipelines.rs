@@ -1278,7 +1278,8 @@ mod tests {
         assert_eq!(pipelines_using(&view, "camera.front"), vec!["tags-front".to_string()]);
         let config = workload.config.as_ref().expect("config");
         assert_eq!(config.payload.get("binding.camera.context.camera.fx_px"), Some(&TypedConfigValue::F64(0.0)), "uncalibrated context");
-        assert_eq!(config.payload.get("binding.camera.context.camera.lens"), Some(&TypedConfigValue::String("pinhole".into())));
+        let lens = camera_context::board_lens_hint().map_or(camera_context::UNKNOWN_LENS, camera_context::LensModel::name);
+        assert_eq!(config.payload.get("binding.camera.context.camera.lens"), Some(&TypedConfigValue::String(lens.into())), "the board's lens, or unknown");
         assert!(!config.payload.keys().any(|key| key.starts_with("binding.camera.context.mount.")), "no mount");
     }
 

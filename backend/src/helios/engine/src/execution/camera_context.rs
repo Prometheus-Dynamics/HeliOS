@@ -58,7 +58,8 @@ const CAMERA_NUMBERS: [(&str, &str); 13] = [
     ("p2", "p2"),
 ];
 const CAMERA_SIZES: [(&str, &str); 2] = [("width_px", "width"), ("height_px", "height")];
-const LENSES: [&str; 2] = ["pinhole", "fisheye"];
+/// Eidos's lens names; `unknown` is an uncalibrated camera whose lens the board doesn't say.
+const LENSES: [&str; 3] = ["pinhole", "fisheye", "unknown"];
 /// The calibration's uncertainty fields (`camera.uncertainty.*`, Eidos's `uncertainty`).
 const UNCERTAINTY_PREFIX: &str = "camera.uncertainty.";
 const UNCERTAINTY_KINDS: [&str; 3] = ["estimated", "known", "solved"];
