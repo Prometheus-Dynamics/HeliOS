@@ -56,7 +56,7 @@ type Phase = "tags" | "tag-free" | "tags again";
 const LENS = await Bun.file(CALIBRATION).json();
 const SCENARIO_CONFIG_PATH = `${DIR}scenario.json`;
 const scenarioConfig = (await Bun.file(SCENARIO_CONFIG_PATH).exists()) ? await Bun.file(SCENARIO_CONFIG_PATH).json() : {};
-const CALIBRATION_MODE: string = scenarioConfig.calibration ?? "file";
+const CALIBRATION_MODE: string = process.env.SIM_SCENARIO_CALIBRATION ?? scenarioConfig.calibration ?? "file";
 if (CALIBRATION_MODE !== "file" && CALIBRATION_MODE !== "none") {
   console.error(`${SCENARIO_CONFIG_PATH}: calibration must be "file" or "none", not ${JSON.stringify(CALIBRATION_MODE)}`);
   process.exit(2);
