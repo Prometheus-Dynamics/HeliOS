@@ -27,6 +27,7 @@ pub mod recording_nt;
 pub mod recording_rings;
 pub mod recordings;
 pub mod routes;
+pub mod self_calibration;
 pub mod startup;
 pub mod store;
 pub mod ui;

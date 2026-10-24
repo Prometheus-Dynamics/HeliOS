@@ -48,7 +48,7 @@ impl LiveRelay {
         Arc::new(Self { lines: broadcast::channel(FANOUT).0, wanted: tokio::sync::Notify::new() })
     }
 
-    fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Arc<str>> {
         let rx = self.lines.subscribe();
         self.wanted.notify_one();
         rx

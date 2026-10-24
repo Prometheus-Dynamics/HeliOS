@@ -178,6 +178,7 @@ impl CalibrationSessions {
             orientation,
             source: Some(format!("helios charuco {}x{} {} mm {}, {} views", board.squares_x, board.squares_y, board.square_mm, board.dictionary, fit.view_rms.len())),
             saved_at_ms: 0,
+            provenance: None,
         };
         calibration.validate()?;
         Ok(SolveResult { calibration, views: fit.view_rms.len(), view_rms: fit.view_rms, converged: fit.converged })

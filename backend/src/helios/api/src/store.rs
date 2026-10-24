@@ -472,6 +472,7 @@ mod tests {
             source: None,
             orientation: Default::default(),
             saved_at_ms: 1,
+            provenance: None,
         };
         store.put_calibration("camera.a", full.clone()).await.expect("put");
         store.put_calibration("camera.a", CameraCalibration { width: 640, height: 400, ..full.clone() }).await.expect("put");

@@ -89,6 +89,7 @@ mod tests {
             source: None,
             orientation: Default::default(),
             saved_at_ms: 0,
+            provenance: None,
         }
     }
 

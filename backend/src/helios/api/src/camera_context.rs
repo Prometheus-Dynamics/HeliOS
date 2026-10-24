@@ -88,6 +88,27 @@ impl Orientation {
     }
 }
 
+/// Where a calibration came from when it was not given by a user: a live mapper's
+/// self-calibration (`method: "self-calibration"`, Eidos's fit of its views). Absent on a
+/// calibration a user made, and on any stored before this existed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Provenance {
+    /// How it was made: `self-calibration`.
+    pub method: String,
+    /// The views the fit used (Eidos's count).
+    pub views: u32,
+    /// The frames the mapper saw while fitting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frames: Option<u32>,
+    /// Eidos's revision of the fit (each accepted refit increments it), when it reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    /// The pipeline whose mapper made the fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+}
+
 /// One camera calibration: intrinsics in pixels of a `width` x `height` image.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +139,9 @@ pub struct CameraCalibration {
     /// Set by the API when stored.
     #[serde(default)]
     pub saved_at_ms: u64,
+    /// Set when the calibration was fitted by a live mapper rather than given (`None`: a user's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
 }
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
@@ -418,6 +442,7 @@ mod tests {
             source: None,
             orientation: Orientation::default(),
             saved_at_ms: 0,
+            provenance: None,
         }
     }
 

@@ -577,6 +577,29 @@ pub fn pipeline_id(workload_id: &str) -> String {
     workload_id.strip_prefix(WORKLOAD_PREFIX).unwrap_or(workload_id).to_string()
 }
 
+/// A live mapper pipeline (its graph has `eidos:mapping.live_map`): the camera its `camera` input
+/// takes, and that input's output size (`None`: the camera's own size, which the API does not
+/// know).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveMapper {
+    pub camera: String,
+    pub size: Option<(u32, u32)>,
+}
+
+/// The live mappers among the engine pipelines, by pipeline id (`self_calibration` watches their
+/// poses).
+pub fn live_mappers(view: &StateView) -> BTreeMap<String, LiveMapper> {
+    engine_workloads(view)
+        .filter(|w| config_string(w, "graph.inline").is_some_and(|graph| graph.contains(crate::field_layouts::LIVE_MAP_NODE)))
+        .filter_map(|w| {
+            let bindings = decode_bindings(w);
+            let binding = bindings.get("camera").filter(|b| !b.resource_id.is_empty())?;
+            let size = binding.output_width.zip(binding.output_height);
+            Some((pipeline_id(w.workload_id.as_str()), LiveMapper { camera: binding.resource_id.clone(), size }))
+        })
+        .collect()
+}
+
 fn engine_workloads(view: &StateView) -> impl Iterator<Item = &WorkloadRecord> {
     view.workloads.values().filter(|w| w.runtime_type.as_str() == ENGINE_RUNTIME)
 }
