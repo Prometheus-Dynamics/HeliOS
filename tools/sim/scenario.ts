@@ -62,6 +62,13 @@ if (CALIBRATION_MODE !== "file" && CALIBRATION_MODE !== "none") {
   process.exit(2);
 }
 const CALIBRATED = CALIBRATION_MODE === "file";
+// The live mapper's lens model for self-calibration (`lens_model`: auto, pinhole or fisheye), from
+// SIM_SCENARIO_LENS_MODEL or scenario.json's "lens_model"; unset keeps the node's default (auto).
+const LENS_MODEL: string | undefined = process.env.SIM_SCENARIO_LENS_MODEL ?? scenarioConfig.lens_model;
+if (LENS_MODEL !== undefined && !["auto", "pinhole", "fisheye"].includes(LENS_MODEL)) {
+  console.error(`lens_model must be auto, pinhole or fisheye, not ${JSON.stringify(LENS_MODEL)}`);
+  process.exit(2);
+}
 
 type Vec3 = [number, number, number];
 
@@ -106,6 +113,12 @@ await api("POST", `/v1/field-layouts?id=${LAYOUT_ID}&name=${encodeURIComponent(`
 const templates: any[] = await api("GET", "/v1/pipelines/templates");
 const template = templates.find((t) => t.id === "live-map");
 if (!template) throw new Error("no live-map template");
+if (LENS_MODEL) {
+  const mapper = template.graph.graph.nodes.find((n: any) => n.bundle === "eidos:mapping.live_map");
+  if (!mapper) throw new Error("the live-map template has no eidos:mapping.live_map node");
+  mapper.const_inputs = (mapper.const_inputs ?? []).filter((c: any) => c[0] !== "lens_model");
+  mapper.const_inputs.push(["lens_model", { type: "Enum", value: { name: LENS_MODEL, value: null } }]);
+}
 await fetch(`${BASE}/v1/pipelines/${PIPELINE_ID}`, { method: "DELETE" });
 await api("POST", "/v1/pipelines", {
   id: PIPELINE_ID,
@@ -115,7 +128,7 @@ await api("POST", "/v1/pipelines", {
   field_layout: LAYOUT_ID,
   enabled: true,
 });
-console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}, recording ${SECONDS} s`);
+console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}${LENS_MODEL ? `, lens_model ${LENS_MODEL}` : ""}, recording ${SECONDS} s`);
 
 // --- Record -----------------------------------------------------------------------------------
 

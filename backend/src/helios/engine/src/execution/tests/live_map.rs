@@ -197,9 +197,14 @@ pub(super) fn json_with_keys(artifacts: &[ExecutionArtifactRecord], kind: &str, 
 fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() {
     let plugins = TestPlugins::load();
     let document = live_map_template(plugins.registry());
-    let mut workload_spec = workload("workload.live-map", document, Vec::new());
+    // An uncalibrated camera (fx 0) whose lens is known to be a pinhole, as the synthetic scene
+    // is: the mapper self-calibrates with that model (Eidos's `auto` takes the hint).
+    let uncalibrated = calibration_context(0.0, "pinhole");
+    let mut workload_spec = workload("workload.live-map", document, vec![camera_binding(&uncalibrated)]);
     workload_spec.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
+    let spec = workload_spec.clone();
     let (mut driver, frames) = spawn_channel_driver(&plugins, workload_spec, "frame", GraphSettings::default());
+    driver.update_camera_context(&spec);
 
     // The default calibration window is 150 frames; the mapper then starts on the first clear tag
     // (the tilted marker, which pins its pose). Timestamps are nanoseconds, 100 ms apart.
