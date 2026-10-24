@@ -113,11 +113,30 @@ await api("POST", `/v1/field-layouts?id=${LAYOUT_ID}&name=${encodeURIComponent(`
 const templates: any[] = await api("GET", "/v1/pipelines/templates");
 const template = templates.find((t) => t.id === "live-map");
 if (!template) throw new Error("no live-map template");
-if (LENS_MODEL) {
+// The live mapper's settings: scenario.json's "live_map" object (e.g. {"calibration_frames": 2400})
+// plus SIM_SCENARIO_LIVE_MAP ("calibration_frames=2400,..."), and lens_model above. Integers are
+// Int, other numbers Float, lens_model an enum, other text String.
+const liveMapConfig: Record<string, unknown> = { ...(scenarioConfig.live_map ?? {}) };
+for (const pair of (process.env.SIM_SCENARIO_LIVE_MAP ?? "").split(",").filter(Boolean)) {
+  const [key, value] = pair.split("=");
+  liveMapConfig[key.trim()] = Number.isFinite(Number(value)) ? Number(value) : value.trim();
+}
+if (LENS_MODEL) liveMapConfig.lens_model = LENS_MODEL;
+if (Object.keys(liveMapConfig).length) {
   const mapper = template.graph.graph.nodes.find((n: any) => n.bundle === "eidos:mapping.live_map");
   if (!mapper) throw new Error("the live-map template has no eidos:mapping.live_map node");
-  mapper.const_inputs = (mapper.const_inputs ?? []).filter((c: any) => c[0] !== "lens_model");
-  mapper.const_inputs.push(["lens_model", { type: "Enum", value: { name: LENS_MODEL, value: null } }]);
+  for (const [key, value] of Object.entries(liveMapConfig)) {
+    const typed =
+      key === "lens_model"
+        ? { type: "Enum", value: { name: value, value: null } }
+        : typeof value === "number"
+          ? Number.isInteger(value)
+            ? { type: "Int", value }
+            : { type: "Float", value }
+          : { type: "String", value: String(value) };
+    mapper.const_inputs = (mapper.const_inputs ?? []).filter((c: any) => c[0] !== key);
+    mapper.const_inputs.push([key, typed]);
+  }
 }
 await fetch(`${BASE}/v1/pipelines/${PIPELINE_ID}`, { method: "DELETE" });
 await api("POST", "/v1/pipelines", {
@@ -128,7 +147,7 @@ await api("POST", "/v1/pipelines", {
   field_layout: LAYOUT_ID,
   enabled: true,
 });
-console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}${LENS_MODEL ? `, lens_model ${LENS_MODEL}` : ""}, recording ${SECONDS} s`);
+console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}${Object.keys(liveMapConfig).length ? `, live_map ${JSON.stringify(liveMapConfig)}` : ""}, recording ${SECONDS} s`);
 
 // --- Record -----------------------------------------------------------------------------------
 
