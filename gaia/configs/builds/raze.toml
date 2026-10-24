@@ -55,7 +55,7 @@ imports = [
   { path = "../ops/registry-local.toml", when = { input = { cache = "local" } } },
 ]
 
-# Raze board package (Atlas dev e8b2833: A/B updater fixes from hardware, the Lemnos pin
+# Raze board package (Atlas dev 862c414: every slot carries overlays/README so the firmware loads its own overlays (c405cbb), and the slots writer refuses a bundle missing an overlay (862c414); edc998c's assembly check needs a newer gaia than the installed 2.0.0. Earlier, e8b2833: A/B updater fixes from hardware, the Lemnos pin
 # (8e59039 in the device package), board events numbered by seq (continuing after a torn log
 # line), board-stream (the push channel on TCP 5898 with the hardware
 # topic; device.toml imports it, and expect-full.toml lists its artifact and install), the
@@ -91,7 +91,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "b9ae2f55dc5622bbd3806d7286a61503866f08d0"
+rev = "862c4147e8c866d6e8f71ca189cadfe37f015996"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
