@@ -3,7 +3,7 @@
 // functions; the editor owns the reactive state.
 
 import type { Connection, Edge, Node } from "@xyflow/svelte";
-import { CATALOG_BY_ID, PORT_COLORS, defaults, type NodeType, type Param, type PortType } from "#lib/api/catalog.js";
+import { CATALOG_BY_ID, PORT_COLORS, UI_PLUGINS, defaults, type NodeType, type Param, type PortType } from "#lib/api/catalog.js";
 import type { GraphDocument, GraphEdge, GraphNode } from "#lib/api/model.js";
 import { tagGraph } from "#lib/api/mock.js";
 import type { IconName } from "#lib/ui/icons.js";
@@ -14,6 +14,9 @@ export interface PipelineNodeData extends Record<string, unknown> {
   type: string;
   label: string;
   params: Record<string, ParamValue>;
+  /** The Daedalus node this came from (see `GraphNode.raw`): carried through the editor so a
+   * deploy re-encodes only the edited parameters, in their original types. */
+  raw?: unknown;
 }
 
 export type FlowNode = Node<PipelineNodeData, "pipeline">;
@@ -99,7 +102,7 @@ export function toFlow(graph: GraphDocument): { nodes: FlowNode[]; edges: FlowEd
     id: n.id,
     type: "pipeline",
     position: { ...n.position },
-    data: { type: n.type, label: n.label, params: { ...n.params } },
+    data: { type: n.type, label: n.label, params: { ...n.params }, ...(n.raw !== undefined ? { raw: n.raw } : {}) },
   }));
   const edges = graph.edges.map((e) => makeEdge(nodes, e.id, e.from.node, e.from.port, e.to.node, e.to.port));
   return { nodes, edges };
@@ -115,26 +118,49 @@ export function requiresFor(nodes: { type: string }[]): { id: string }[] {
   return seen.map((id) => ({ id }));
 }
 
-export function toGraphDocument(nodes: FlowNode[], edges: FlowEdge[]): GraphDocument {
+/**
+ * The editor's nodes and edges as a GraphDocument. `base` is the document the draft was loaded
+ * from: its metadata, graph metadata and pinned plugin versions carry over, and each node's
+ * Daedalus original rides along (`raw`), so deploying from the editor changes only what was edited.
+ */
+export function toGraphDocument(nodes: FlowNode[], edges: FlowEdge[], base?: GraphDocument): GraphDocument {
   const graphNodes: GraphNode[] = nodes.map((n) => ({
     id: n.id,
     type: n.data.type,
     label: n.data.label,
     params: { ...n.data.params },
     position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+    ...(n.data.raw !== undefined ? { raw: n.data.raw } : {}),
   }));
   const graphEdges: GraphEdge[] = edges.map((e) => ({
     id: e.id,
     from: { node: e.source, port: e.sourceHandle ?? "" },
     to: { node: e.target, port: e.targetHandle ?? "" },
   }));
-  return { format: "daedalus.graph", schema_version: 1, requires: requiresFor(graphNodes), nodes: graphNodes, edges: graphEdges };
+  // The loaded document's requires as they were (a node the catalog does not list still needs
+  // its plugin, and versions stay pinned), plus the plugins of nodes added since. The UI's own
+  // pseudo-plugins (camera bindings, host outputs) are never a device requirement.
+  const versions = new Map((base?.requires ?? []).map((r) => [r.id, r.version ?? null]));
+  const added = requiresFor(graphNodes).map((r) => r.id).filter((id) => !versions.has(id) && !(base && UI_PLUGINS.has(id)));
+  const ids = [...versions.keys(), ...added];
+  const requires = ids.map((id) => (versions.get(id) ? { id, version: versions.get(id) } : { id }));
+  return {
+    format: "daedalus.graph",
+    schema_version: 1,
+    requires,
+    nodes: graphNodes,
+    edges: graphEdges,
+    ...(base?.metadata ? { metadata: base.metadata } : {}),
+    ...(base?.graphMetadata ? { graphMetadata: base.graphMetadata } : {}),
+  };
 }
 
-/** Comparable fingerprint (requires is derived, so it is left out). */
+/** Comparable fingerprint of what a deploy would change on the device: nodes, their parameters
+ * and labels, and edges. Positions are editor metadata and ride along with the next deploy, so
+ * moving or arranging nodes does not by itself ask for one (requires is derived, so left out). */
 export function fingerprint(graph: GraphDocument): string {
   return JSON.stringify({
-    nodes: graph.nodes.map((n) => [n.id, n.type, n.label, n.params, Math.round(n.position.x), Math.round(n.position.y)]),
+    nodes: graph.nodes.map((n) => [n.id, n.type, n.label, n.params]),
     edges: graph.edges.map((e) => [e.id, e.from.node, e.from.port, e.to.node, e.to.port]),
   });
 }

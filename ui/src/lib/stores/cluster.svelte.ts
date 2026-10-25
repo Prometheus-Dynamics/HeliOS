@@ -264,10 +264,11 @@ class ClusterStore {
     toasts.info(`${w.name} stopped`);
   }
 
-  async saveGraph(id: string, graph: GraphDocument) {
+  /** Deploy `graph` as the pipeline's next revision; true when the device took it. */
+  async saveGraph(id: string, graph: GraphDocument): Promise<boolean> {
     if (this.live) return this.live.saveGraph(id, graph);
     const w = this.workload(id);
-    if (!w) return;
+    if (!w) return false;
     await this.later(500);
     this.revisions.set(id, [...(this.revisions.get(id) ?? []), { revision: w.revision, graph: clone(w.graph) }]);
     w.graph = clone(graph);
@@ -275,6 +276,7 @@ class ClusterStore {
     w.state = "running";
     this.log(w.nodeId, "helios-runner", "info", `${w.name} revision ${w.revision} deployed; previous revision kept for rollback`);
     toasts.success(`Deployed revision ${w.revision} to ${this.node(w.nodeId)?.name}`);
+    return true;
   }
 
   /** Whether an earlier revision is available to roll back to. */

@@ -258,12 +258,24 @@ export class LiveCluster {
 
   /** The nodes helios-engine's plugins declare, as the palette's catalog. */
   async refreshCatalog() {
+    // New plugins may ship new templates: read them again next time.
+    this.templates = undefined;
     try {
       mergeDeviceCatalog(await api.catalog());
       liveState.catalogVersion++;
     } catch {
       // Not written yet (engine starting) or an older device: the UI's own list stays.
     }
+  }
+
+  /** The device's pipeline templates, read once (`GET /v1/pipelines/templates`); undefined while
+   * the device cannot answer (the error is in `liveState.error`), and asked again next time. */
+  private templates?: W.PipelineTemplate[];
+  private async loadTemplates(): Promise<W.PipelineTemplate[] | undefined> {
+    if (this.templates) return this.templates;
+    const templates = await this.guard("templates", () => api.pipelineTemplates());
+    if (templates) this.templates = templates;
+    return templates;
   }
 
   /** Detections for each camera with a running pipeline (one small request for all of them). */
@@ -582,9 +594,10 @@ export class LiveCluster {
     await this.refreshPipelines();
   }
 
-  async saveGraph(id: string, graph: GraphDocument) {
-    await this.act("Deploy", () => api.putPipeline(id, this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
+  async saveGraph(id: string, graph: GraphDocument): Promise<boolean> {
+    const deployed = await this.act("Deploy", () => api.putPipeline(id, this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
     await this.refreshPipelines();
+    return Boolean(deployed);
   }
 
   canRollBack(id: string): boolean {
@@ -613,7 +626,7 @@ export class LiveCluster {
       toasts.warning(`${running.name} already runs Eidos on this camera. Change its tag family instead of adding a second pipeline (each takes a core).`);
       return "";
     }
-    const templates = await this.guard("templates", () => api.pipelineTemplates());
+    const templates = await this.loadTemplates();
     const template = templates?.find((t) => t.family === family && (t.variant ?? "default") === "default");
     if (!template) {
       toasts.error(`This device has no ${family} template`);
@@ -629,7 +642,7 @@ export class LiveCluster {
   }
 
   async defaultTemplates(): Promise<DefaultTemplate[]> {
-    return defaultsFrom(await this.guard("templates", () => api.pipelineTemplates()));
+    return defaultsFrom(await this.loadTemplates());
   }
 
   /** Deploy a default template as the camera's one pipeline: in place of its Eidos pipeline (same
@@ -646,10 +659,10 @@ export class LiveCluster {
       toasts.info(`${name}: video only`);
       return;
     }
-    const templates = await this.guard("templates", () => api.pipelineTemplates());
+    const templates = await this.loadTemplates();
     const t = templates?.find((x) => x.id === template.id);
     if (!t) {
-      toasts.error(`This device has no ${template.title} template`);
+      toasts.error(templates ? `This device has no ${template.title} template` : `Cannot read the device's templates: ${liveState.error ?? "no answer"}`);
       return;
     }
     const previous = keep ? Object.values(keep.bindings).find((b) => b.resource_id === cameraId) : undefined;

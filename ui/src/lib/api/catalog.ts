@@ -518,7 +518,7 @@ const CATEGORY_BY_SECTION: Record<string, NodeType["category"]> = {
 };
 
 /** UI-level nodes the engine has no declaration for (camera bindings, host outputs). */
-const UI_PLUGINS = new Set(["styx.frames", "helios"]);
+export const UI_PLUGINS = new Set(["styx.frames", "helios"]);
 
 function humanize(id: string): string {
   const last = id.split(/[:.]/).at(-1) ?? id;

@@ -1,6 +1,11 @@
 // Pipeline drafts: the edited, not-yet-deployed graph per workload. The canvas,
 // inspector, catalog and profiler panes all work on the same draft, so a
 // change in one shows in the others. Deploy turns the draft into a revision.
+//
+// A draft follows the device: when the deployed graph changes under an unedited
+// draft (a default pipeline applied, a tag family or search change, another
+// browser's deploy), the draft reloads from it. Edits are kept until deployed
+// or discarded.
 
 import { CATALOG_BY_ID, type NodeType } from "#lib/api/catalog.js";
 import type { GraphDocument } from "#lib/api/model.js";
@@ -19,24 +24,46 @@ export class Draft {
   fitSignal = $state(0);
   /** A node the canvas should centre on (set by the find box). A new object each time, so repeats still move. */
   focus = $state<{ id: string } | null>(null);
+  /** The document the draft was loaded from: its metadata and pinned versions carry into deploys. */
+  #base = $state.raw<GraphDocument | null>(null);
+  /** The fingerprint of the deployed graph the draft was loaded from (what "edited" is measured against). */
+  #loaded = $state("");
+  #stop: (() => void) | null = null;
 
   constructor(public workloadId: string) {
     const w = cluster.workload(workloadId);
     if (w) this.#load(w.graph);
+    // Follow the device: a new deployed graph replaces an unedited draft.
+    this.#stop = $effect.root(() => {
+      $effect(() => {
+        const w = this.workload;
+        if (!w) return;
+        const now = fingerprint(w.graph);
+        // Never loaded (the workload arrived after the draft was made), or loaded and unedited.
+        if (now !== this.#loaded && (!this.#loaded || !this.edited)) this.#load(w.graph);
+      });
+    });
   }
 
   #load(graph: GraphDocument) {
     const f = toFlow(graph);
     this.nodes = f.nodes;
     this.edges = f.edges;
+    this.#base = graph;
+    this.#loaded = fingerprint(graph);
   }
 
   get workload() {
     return cluster.workload(this.workloadId);
   }
   get document(): GraphDocument {
-    return toGraphDocument(this.nodes, this.edges);
+    return toGraphDocument(this.nodes, this.edges, this.#base ?? undefined);
   }
+  /** The draft differs from the graph it was loaded from. */
+  get edited(): boolean {
+    return fingerprint(this.document) !== this.#loaded;
+  }
+  /** The draft differs from what the device runs now: a deploy would change it. */
   get dirty(): boolean {
     const w = this.workload;
     return Boolean(w && fingerprint(this.document) !== fingerprint(w.graph));
@@ -114,9 +141,13 @@ export class Draft {
   focusNode(id: string) {
     this.focus = { id };
   }
+  /** Another graph in place of the draft (a template, an import): the loaded document's
+   * metadata is kept, the deployed graph stays what "edited" is measured against. */
   replace(graph: GraphDocument) {
     this.snapshot();
-    this.#load(graph);
+    const f = toFlow(graph);
+    this.nodes = f.nodes;
+    this.edges = f.edges;
     this.fitSignal++;
   }
   discard() {
@@ -126,10 +157,15 @@ export class Draft {
     this.#load(w.graph);
     toasts.info("Changes discarded");
   }
-  /** Picks up a new deployed graph (deploy, rollback). */
+  /** Picks up a new deployed graph (deploy, rollback), dropping any edits. */
   reload() {
     const w = this.workload;
     if (w) this.#load(w.graph);
+  }
+  /** Stops following the device (tests). */
+  destroy() {
+    this.#stop?.();
+    this.#stop = null;
   }
 
   async deploy() {
@@ -137,7 +173,7 @@ export class Draft {
       toasts.error(`Remove ${this.unknown.map((n) => n.id).join(", ")}: not in the device catalog`);
       return;
     }
-    await cluster.saveGraph(this.workloadId, this.document);
+    if (await cluster.saveGraph(this.workloadId, this.document)) this.reload();
   }
   async rollBack() {
     await cluster.rollBackWorkload(this.workloadId);
