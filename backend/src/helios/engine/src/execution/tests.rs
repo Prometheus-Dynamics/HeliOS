@@ -403,7 +403,7 @@ fn graph_documents_are_eidos_templates() {
         ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
         ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
-        ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), &[]), DENSE_MAP_GRAPH_DOCUMENT),
+        ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), eidos_daedalus::dense::DenseConfig::default()), DENSE_MAP_GRAPH_DOCUMENT),
         (
             "graphs/apriltag-36h11-map.graph.json",
             localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), false),

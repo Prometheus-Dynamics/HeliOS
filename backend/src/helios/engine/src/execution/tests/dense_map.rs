@@ -3,61 +3,27 @@
 //! dense mapper runs in budget mode (its default: a time budget per tick, keyframe spacing adapted
 //! to what the budget sustains) instead of on a core of its own.
 
-use daedalus::{
-    data::model::Value,
-    runtime::{graph_builder::GraphBuilder, handles::PortHandle, plugins::PluginRegistry},
-};
+use daedalus::runtime::plugins::PluginRegistry;
+use eidos_daedalus::dense::DenseConfig;
 
 use super::{
-    live_map::{SCENE_FOCAL_PX, base64_decoded_len, json_with_keys, live_map_builder, live_map_scene},
+    live_map::{SCENE_FOCAL_PX, base64_decoded_len, json_with_keys, live_map_scene},
     *,
 };
 
-/// The dense mapper node (`eidos:dense.map`).
-const DENSE_MAP_NODE: &str = "eidos:dense.map";
-
-/// The dense graph as a stored document: the live map graph (`live_map_builder`), whose mapper's
-/// `pose` and the host's `frame` and `camera` feed the dense mapper. Host outputs: the live map's
-/// (`detections`, `pose`, `snapshot`, `timing`) and the dense mapper's `mesh` and `dense_timing`.
-/// `tuning` sets the dense mapper's constants (empty for its defaults, budget mode included).
-pub(super) fn dense_map_document(registry: &PluginRegistry, tuning: &[(&str, Value)]) -> String {
-    let mut builder = with_dense_map(live_map_builder(registry));
-    for (port, value) in tuning {
-        builder = set_const(builder, port, value.clone());
-    }
-    let mut document = registry.graph_document(builder.build());
-    document.metadata.insert("title".into(), "HeliOS dense map".into());
-    stored_form(&document)
-}
-
-/// `builder` (a live map graph: its `mapper` and the host's `frame` and `camera`) with the dense
-/// mapper on the mapper's pose and its `mesh` and `dense_timing` host outputs.
-pub(super) fn with_dense_map(builder: GraphBuilder) -> GraphBuilder {
-    let dense = |port: &str| PortHandle::new("dense", port);
-    builder
-        .try_node_id(DENSE_MAP_NODE, "dense")
-        .expect("dense map node")
-        .try_connect("frame", &dense("frame"))
-        .expect("frame into the dense map")
-        .try_connect(&PortHandle::new("mapper", "pose"), &dense("pose"))
-        .expect("pose into the dense map")
-        .try_connect("camera", &dense("calibration"))
-        .expect("camera into the dense map")
-        .try_connect(&dense("mesh"), "mesh")
-        .expect("mesh output")
-        .try_connect(&dense("timing"), "dense_timing")
-        .expect("dense timing output")
-}
-
-fn set_const(builder: GraphBuilder, port: &str, value: Value) -> GraphBuilder {
-    builder.const_input(&PortHandle::new("dense", port), Some(value))
+/// The dense graph as a stored document (`localization_map::map_document`): the live map graph
+/// with the dense mapper on the mapper's pose. Host outputs: the live map's and the dense mapper's
+/// `dense_mesh` and `dense_timing` (its depth preview is not wired). `config` is the dense
+/// mapper's settings (`DenseConfig::default()` for its defaults, budget mode included).
+pub(super) fn dense_map_document(registry: &PluginRegistry, config: DenseConfig) -> String {
+    super::localization_map::map_document(registry, None, Some(config))
 }
 
 /// The dense mapper's settings for a short test clip: a keyframe every second posed frame, from
 /// the frames before it (causal: no wait for later neighbours), whole keyframes per tick (no
 /// budget, so the clip's keyframes all land), and the default rest.
-fn short_clip_tuning() -> Vec<(&'static str, Value)> {
-    vec![("key_every", Value::Int(2)), ("window", Value::Int(40)), ("causal", Value::Bool(true)), ("budget_ms", Value::Float(0.0))]
+fn short_clip_tuning() -> DenseConfig {
+    DenseConfig { key_every: 2, window: 40, causal: true, budget_ms: 0.0, ..DenseConfig::default() }
 }
 
 /// The dense template through the frame driver, one pipeline: the live mapper poses each frame and
@@ -67,7 +33,7 @@ fn short_clip_tuning() -> Vec<(&'static str, Value)> {
 fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     let plugins = TestPlugins::load();
     let calibration = calibration_context(SCENE_FOCAL_PX, "pinhole");
-    let mut dense = workload("pipeline.dense-map", dense_map_document(plugins.registry(), &short_clip_tuning()), vec![camera_binding(&calibration)]);
+    let mut dense = workload("pipeline.dense-map", dense_map_document(plugins.registry(), short_clip_tuning()), vec![camera_binding(&calibration)]);
     dense.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let spec = dense.clone();
     let (mut driver, frames) = start_pipeline(&plugins, &PipelineBus::default(), dense, "frame");
@@ -86,7 +52,7 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     assert_eq!(timing["state"], "running", "the live mapper posed the frames: {timing}");
     assert!(timing["keyframes"].as_u64().is_some_and(|keyframes| keyframes >= 1), "keyframes were integrated: {timing}");
 
-    let mesh = json_with_keys(&artifacts, "host_output:mesh", &["seq", "frame", "t_ns", "keyframes", "submaps", "voxel_m", "vertices", "triangles", "positions", "normals", "grey", "indices"]);
+    let mesh = json_with_keys(&artifacts, "host_output:dense_mesh", &["seq", "frame", "t_ns", "keyframes", "submaps", "voxel_m", "vertices", "triangles", "positions", "normals", "grey", "indices"]);
     let vertices = mesh["vertices"].as_u64().expect("vertex count") as usize;
     let triangles = mesh["triangles"].as_u64().expect("triangle count") as usize;
     assert!(vertices > 0 && triangles > 0, "the mesh has surface: {mesh}");
@@ -109,11 +75,11 @@ fn start_pipeline(plugins: &TestPlugins, bus: &PipelineBus, workload: ExecutionW
 #[test]
 fn dense_map_template_is_the_live_map_with_the_dense_mapper() {
     let plugins = TestPlugins::load();
-    let document = dense_map_document(plugins.registry(), &[]);
+    let document = dense_map_document(plugins.registry(), DenseConfig::default());
     let graph: serde_json::Value = serde_json::from_str(&document).expect("json");
     let requires = graph["requires"].as_array().expect("requires");
     assert!(requires.iter().any(|requirement| requirement["id"] == "eidos"), "{requires:?}");
-    for node in [DENSE_MAP_NODE, "eidos:mapping.live_map", "eidos:detectors.tracked_detect"] {
+    for node in ["eidos:dense.map", "eidos:mapping.live_map", "eidos:detectors.tracked_detect"] {
         assert!(document.contains(node), "{node} in the one pipeline");
     }
 }

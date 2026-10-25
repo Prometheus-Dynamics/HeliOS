@@ -3,85 +3,16 @@
 //! per-tick map delta is not a host output (the host keeps only the latest value per port, so
 //! the deltas of a tick the host did not read would be lost).
 
-use daedalus::{
-    data::{model::Value, to_value::ToValue},
-    runtime::{graph_builder::GraphBuilder, handles::PortHandle, plugins::PluginRegistry},
-};
-use eidos_daedalus::types::{CameraCalibration, CameraExtrinsics};
+use daedalus::runtime::plugins::PluginRegistry;
 
 use super::*;
 
-/// The tracked detector node (`eidos:detectors.tracked_detect`).
-const TRACKED_DETECT_NODE: &str = "eidos:detectors.tracked_detect";
-/// The live mapper node (`eidos:mapping.live_map`).
-const LIVE_MAP_NODE: &str = "eidos:mapping.live_map";
-
-/// The live-map graph as a stored document: the host's `frame` feeds the detector and the
-/// mapper; the detector's `detections`, `rejected` and `refined_corners` feed the mapper. The
-/// camera calibration and the extrinsics are held host inputs (the camera's context), as in the
-/// AprilTag templates. The field `layout` is left unconnected: a layout makes the mapper wait for
-/// a known tag, and without one it starts on the first clear tag (the map's reference frame).
-/// Host outputs: `pose`, `snapshot`, `timing` and the detector's `detections`.
+/// The live-map graph as a stored document (`localization_map::map_document`): the tracked
+/// detector feeds Eidos's live mapper. Host outputs: `detections`, `map_pose`, `map_snapshot`,
+/// `map_timing`. The per-tick map delta is not wired (the host keeps only the latest value per
+/// port, so the deltas of a tick the host did not read would be lost).
 pub(super) fn live_map_template(registry: &PluginRegistry) -> String {
-    let mut document = registry.graph_document(live_map_builder(registry).build());
-    document.metadata.insert("title".into(), "HeliOS live map".into());
-    stored_form(&document)
-}
-
-/// The live map graph before it is built: the detector (`detector`) and the mapper (`mapper`)
-/// with their host inputs and outputs, for templates that add to it (the dense map).
-pub(super) fn live_map_builder(registry: &PluginRegistry) -> GraphBuilder {
-    let detector = PortHandle::new("detector", "frame");
-    let mapper = |port: &str| PortHandle::new("mapper", port);
-    let builder = registry
-        .graph_builder()
-        .expect("graph builder")
-        .input_typed::<FrameLease>("frame")
-        .expect("frame input")
-        .input_typed::<CameraCalibration>("camera")
-        .expect("camera input")
-        .held_input("camera")
-        .input_typed::<CameraExtrinsics>("extrinsics")
-        .expect("extrinsics input")
-        .held_input("extrinsics")
-        .try_node_id(TRACKED_DETECT_NODE, "detector")
-        .expect("tracked detector node")
-        .try_node_id(LIVE_MAP_NODE, "mapper")
-        .expect("live map node")
-        .try_connect("frame", &detector)
-        .expect("frame into the detector")
-        .try_connect("frame", &mapper("frame"))
-        .expect("frame into the mapper")
-        .try_connect(&PortHandle::new("detector", "detections"), &mapper("detections"))
-        .expect("detections into the mapper")
-        .try_connect(&PortHandle::new("detector", "rejected"), &mapper("rejected"))
-        .expect("rejected into the mapper")
-        .try_connect(&PortHandle::new("detector", "refined_corners"), &mapper("refined_corners"))
-        .expect("refined corners into the mapper")
-        .try_connect("camera", &mapper("calibration"))
-        .expect("camera into the mapper")
-        .try_connect("extrinsics", &mapper("extrinsics"))
-        .expect("extrinsics into the mapper")
-        .try_connect(&PortHandle::new("detector", "detections"), "detections")
-        .expect("detections output")
-        .try_connect(&mapper("pose"), "pose")
-        .expect("pose output")
-        .try_connect(&mapper("snapshot"), "snapshot")
-        .expect("snapshot output")
-        .try_connect(&mapper("timing"), "timing")
-        .expect("timing output");
-    detector_settings(builder)
-}
-
-/// The detector's settings: the AprilTag 36h11 family with HeliOS's tracking (full search every
-/// 8th frame, no escalation of a missed track, window growth over 6 misses: the same as the
-/// AprilTag templates). The mapper's own settings are the node defaults, with the FRC tag size.
-fn detector_settings(builder: GraphBuilder) -> GraphBuilder {
-    let set = |builder: GraphBuilder, port: &str, value: Value| builder.const_input(&PortHandle::new("detector", port), Some(value));
-    let builder = set(builder, "dictionary", Dictionary::AprilTag36h11.to_value());
-    let builder = set(builder, "full_search_every", Value::Int(8));
-    let builder = set(builder, "loss_full_search_after", Value::Int(0));
-    set(builder, "margin_growth_misses", Value::Int(6))
+    super::localization_map::map_document(registry, None, None)
 }
 
 /// Camera of the synthetic scenes: 640 x 480, 500 px focal, the principal point at the centre.
@@ -217,7 +148,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     let (session, artifacts) = driver.snapshot();
     assert_eq!(session.status, ExecutionSessionStatus::Running, "{:?}", session.message);
 
-    let pose = json_with_keys(&artifacts, "host_output:pose", &["frame", "t_ns", "state", "reason", "valid", "pose", "calibration", "alignment"]);
+    let pose = json_with_keys(&artifacts, "host_output:map_pose", &["frame", "t_ns", "state", "reason", "valid", "pose", "calibration", "alignment"]);
     assert_eq!(pose["frame"].as_u64(), Some(frame_count - 1), "{pose}");
     assert_eq!(pose["state"], "tracking", "{pose}");
     assert_eq!(pose["valid"], true, "{pose}");
@@ -232,7 +163,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     assert_eq!(estimate["sigma"]["rotation_deg"].as_array().map(Vec::len), Some(3), "{pose}");
     assert!(estimate["reference_from_camera"]["rotation"]["w"].is_number(), "{pose}");
 
-    let timing = json_with_keys(&artifacts, "host_output:timing", &["frame", "t_ns", "frame_ms", "map_ms", "stages"]);
+    let timing = json_with_keys(&artifacts, "host_output:map_timing", &["frame", "t_ns", "frame_ms", "map_ms", "stages"]);
     assert!(timing["frame_ms"].as_f64().is_some_and(|ms| ms >= 0.0), "{timing}");
     assert!(timing["stages"].as_array().is_some_and(|stages| !stages.is_empty() && stages.iter().all(|stage| stage["name"].is_string() && stage["ms"].is_number())), "{timing}");
 
@@ -241,7 +172,7 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
 
     // The snapshot is due on the first mapping tick and then at most twice a second: it exists
     // with the tag and the trajectory, and its point buffers are packed as documented.
-    let snapshot = json_with_keys(&artifacts, "host_output:snapshot", &["seq", "run_id", "tag_size_m", "aligned", "estimated", "trajectory", "keyframes", "points", "tags"]);
+    let snapshot = json_with_keys(&artifacts, "host_output:map_snapshot", &["seq", "run_id", "tag_size_m", "aligned", "estimated", "trajectory", "keyframes", "points", "tags"]);
     assert_eq!(snapshot["estimated"], false, "the given calibration: {snapshot}");
     assert!(snapshot["trajectory"].as_array().is_some_and(|trajectory| !trajectory.is_empty()), "{snapshot}");
     assert!(snapshot["tags"].as_array().is_some_and(|tags| tags.iter().any(|tag| tag["id"] == 586)), "{snapshot}");
