@@ -17,6 +17,8 @@ export class Draft {
   history = $state(0);
   /** Bumped when the canvas should fit the view (load, layout, template). */
   fitSignal = $state(0);
+  /** A node the canvas should centre on (set by the find box). A new object each time, so repeats still move. */
+  focus = $state<{ id: string } | null>(null);
 
   constructor(public workloadId: string) {
     const w = cluster.workload(workloadId);
@@ -105,6 +107,12 @@ export class Draft {
     this.snapshot();
     this.nodes = autoLayout(this.nodes, this.edges);
     this.fitSignal++;
+  }
+  fit() {
+    this.fitSignal++;
+  }
+  focusNode(id: string) {
+    this.focus = { id };
   }
   replace(graph: GraphDocument) {
     this.snapshot();

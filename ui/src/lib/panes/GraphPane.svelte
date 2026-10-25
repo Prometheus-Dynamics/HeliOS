@@ -5,7 +5,8 @@
   import { selection } from "#lib/core/selection.svelte.js";
   import { drafts } from "#lib/graph/drafts.svelte.js";
   import GraphCanvas from "#lib/graph/GraphCanvas.svelte";
-  import { TEMPLATES, tableFor, templateGraph } from "#lib/graph/graph.js";
+  import { TEMPLATES, matchNodes, tableFor, templateGraph } from "#lib/graph/graph.js";
+  import Icon from "#lib/components/common/Icon.svelte";
   import Badge from "#lib/kit/Badge.svelte";
   import IconButton from "#lib/kit/IconButton.svelte";
   import Picker from "#lib/kit/Picker.svelte";
@@ -23,6 +24,28 @@
   const workload = $derived(target.id ? cluster.workload(target.id) : undefined);
   const draft = $derived(workload ? drafts.get(workload.id) : undefined);
   const STATE_TONE = { running: "ok", starting: "info", quarantined: "err", stopped: "neutral" } as const;
+
+  // Find box: Enter steps through the matches, each one centred and selected.
+  let query = $state("");
+  let at = $state(-1);
+  const matches = $derived(draft && query.trim() ? matchNodes(draft.nodes, query) : []);
+
+  function jump() {
+    if (!draft || !workload || !matches.length) return;
+    at = (at + 1) % matches.length;
+    const node = matches[at];
+    draft.focusNode(node.id);
+    selection.select({ kind: "graph-node", id: node.id, parent: workload.id });
+  }
+  function findKey(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      jump();
+    } else if (event.key === "Escape") {
+      query = "";
+      at = -1;
+    }
+  }
 
   function templates(e: MouseEvent) {
     if (!draft || !workload) return;
@@ -62,9 +85,23 @@
     <Badge tone={STATE_TONE[workload.state]} text="{workload.state} · r{workload.revision}" />
     {#if draft.dirty}<Badge tone="accent" text="draft" />{/if}
     <span class="sep"></span>
+    <label class="find">
+      <Icon name="search" size={12} />
+      <input
+        type="search"
+        placeholder="Find a node"
+        aria-label="Find a node by label or type"
+        bind:value={query}
+        oninput={() => (at = -1)}
+        onkeydown={findKey}
+      />
+      {#if query.trim()}<span class="count mono">{matches.length ? `${at + 1}/${matches.length}` : "0"}</span>{/if}
+    </label>
+    <IconButton icon="maximize" label="Fit to view" size={24} disabled={!draft.nodes.length} onclick={() => draft.fit()} />
+    <IconButton icon="layout-distribute-horizontal" label="Auto-arrange" shortcut="Ctrl L" size={24} onclick={() => draft.layout()} />
+    <span class="sep"></span>
     <IconButton icon="arrow-back-up" label="Undo" shortcut="Ctrl Z" size={24} disabled={!draft.canUndo} onclick={() => draft.undo()} />
     <IconButton icon="arrow-forward-up" label="Redo" shortcut="Ctrl Shift Z" size={24} disabled={!draft.canRedo} onclick={() => draft.redo()} />
-    <IconButton icon="layout-distribute-horizontal" label="Tidy layout" shortcut="Ctrl L" size={24} onclick={() => draft.layout()} />
     <IconButton icon="stack-2" label="Templates" size={24} onclick={templates} />
     <IconButton icon="file-import" label="Import graph" size={24} onclick={importGraph} />
     <IconButton icon="file-export" label="Export graph" size={24} onclick={exportGraph} />
@@ -96,6 +133,41 @@
 {/if}
 
 <style>
+  .find {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: 168px;
+    height: 24px;
+    box-sizing: border-box;
+    padding: 0 7px;
+    color: var(--fg-3);
+    background: var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-1);
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .find:focus-within {
+    border-color: var(--accent-ring);
+  }
+  .find input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    font: inherit;
+    font-size: 12px;
+    color: var(--fg);
+  }
+  .find input::placeholder {
+    color: var(--fg-faint);
+  }
+  .count {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+  }
   .banner {
     display: flex;
     align-items: center;

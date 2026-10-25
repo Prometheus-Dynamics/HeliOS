@@ -9,7 +9,7 @@
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import { setEditorLive } from "./context";
   import type { Draft } from "./drafts.svelte";
-  import { CATEGORY_COLORS, DRAG_MIME, checkConnection, edgeId, makeEdge, type FlowEdge, type FlowNode } from "./graph";
+  import { CATEGORY_COLORS, DRAG_MIME, NODE_WIDTH, checkConnection, edgeId, makeEdge, type FlowEdge, type FlowNode } from "./graph";
   import PipelineNode from "./PipelineNode.svelte";
 
   let { draft, minimap = true }: { draft: Draft; minimap?: boolean } = $props();
@@ -34,6 +34,21 @@
 
   $effect(() => {
     if (draft.fitSignal) untrack(() => setTimeout(() => fit(200), 30));
+  });
+
+  // A find-box hit centres on the node and selects it.
+  $effect(() => {
+    const f = draft.focus;
+    if (!f) return;
+    untrack(() => {
+      const n = flow.getNode(f.id);
+      if (!n) return;
+      flow.setCenter(n.position.x + (n.measured?.width ?? NODE_WIDTH) / 2, n.position.y + (n.measured?.height ?? 120) / 2, {
+        zoom: Math.max(flow.getZoom(), 1),
+        duration: 250,
+      });
+      draft.select(f.id);
+    });
   });
 
   // Keep the app selection and the canvas selection in step.
@@ -71,7 +86,7 @@
     if (!type) return;
     event.preventDefault();
     const p = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    draft.add(type, { x: Math.round(p.x - 95), y: Math.round(p.y - 20) });
+    draft.add(type, { x: Math.round(p.x - NODE_WIDTH / 2), y: Math.round(p.y - 20) });
     const added = draft.nodes.at(-1);
     if (added) selection.select({ kind: "graph-node", id: added.id, parent: draft.workloadId });
   }

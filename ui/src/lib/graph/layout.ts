@@ -3,17 +3,17 @@
 // of the barycentre heuristic), stacked by estimated node height.
 
 import { CATALOG_BY_ID } from "#lib/api/catalog.js";
-import type { FlowEdge, FlowNode } from "./graph";
+import { NODE_FOOTER_HEIGHT, NODE_HEADER_HEIGHT, NODE_ROW_HEIGHT, NODE_WIDTH, type FlowEdge, type FlowNode } from "./graph";
 
-const COL = 260;
-const GAP = 26;
+const COL = NODE_WIDTH + 72;
+const GAP = 24;
 
+/** Height of a node face: header, one row per port pair, footer. */
 export function estimateHeight(n: FlowNode): number {
   const t = CATALOG_BY_ID[n.data.type];
-  if (!t) return 80;
-  const ports = Math.max(t.inputs.length, t.outputs.length);
-  const params = Math.min(3, t.params.length);
-  return 38 + (ports ? ports * 18 + 10 : 0) + (params ? params * 15 + 10 : 0) + 26;
+  if (!t) return NODE_HEADER_HEIGHT + NODE_FOOTER_HEIGHT;
+  const rows = Math.max(t.inputs.length, t.outputs.length);
+  return NODE_HEADER_HEIGHT + (rows ? rows * NODE_ROW_HEIGHT + 10 : 0) + NODE_FOOTER_HEIGHT;
 }
 
 export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {

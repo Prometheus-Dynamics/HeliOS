@@ -47,6 +47,13 @@ export const CATEGORY_ICONS: Record<NodeType["category"], IconName> = {
   Output: "broadcast",
 };
 
+// Node geometry, shared by the node face and the auto-layout.
+// Keep in step with the sizes in PipelineNode.svelte.
+export const NODE_WIDTH = 216;
+export const NODE_HEADER_HEIGHT = 44;
+export const NODE_ROW_HEIGHT = 22;
+export const NODE_FOOTER_HEIGHT = 28;
+
 export function portColor(type: PortType | undefined): string {
   if (!type) return PORT_COLORS.any;
   const known = (PORT_COLORS as Record<string, string>)[type];
@@ -158,11 +165,22 @@ export function checkConnection(nodes: FlowNode[], edges: FlowEdge[], c: Connect
   return { ok: true, type: from };
 }
 
-/** The params worth showing on the node face: changed ones first, up to `max`. */
-export function keyParams(type: NodeType | undefined, params: Record<string, ParamValue>, max = 3): { param: Param; value: ParamValue; changed: boolean }[] {
+/** Parameters whose value differs from the catalog default. Shown as a count on the node; values live in the inspector. */
+export function changedParams(type: NodeType | undefined, params: Record<string, ParamValue>): Param[] {
   if (!type) return [];
-  const rows = type.params.map((p) => ({ param: p, value: params[p.name] ?? p.default, changed: (params[p.name] ?? p.default) !== p.default }));
-  return [...rows.filter((r) => r.changed), ...rows.filter((r) => !r.changed)].slice(0, max);
+  return type.params.filter((p) => (params[p.name] ?? p.default) !== p.default);
+}
+
+/** Nodes whose label, type id or catalog title contains `query`, left to right then top to bottom. */
+export function matchNodes(nodes: FlowNode[], query: string): FlowNode[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return nodes
+    .filter((n) => {
+      const t = CATALOG_BY_ID[n.data.type];
+      return [n.data.label, n.data.type, t?.id, t?.title].some((s) => s?.toLowerCase().includes(q));
+    })
+    .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
 }
 
 export function formatParam(value: ParamValue): string {
