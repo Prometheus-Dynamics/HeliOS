@@ -2,7 +2,7 @@
 // stores; in live mode the stores call this client, in mock mode
 // (`?mock=1`) they run the simulated robot in mock.ts instead.
 
-import { API_BASE } from "./mode";
+import { API_BASE, MOCK } from "./mode";
 import type {
   ApiErrorBody,
   ApiErrorCode,
@@ -122,6 +122,10 @@ export const session = {
 };
 
 async function request<T>(method: string, path: string, options: { query?: Query; body?: unknown; raw?: BodyInit; headers?: Record<string, string> } = {}): Promise<T> {
+  // The simulated robot (`?mock=1`) has no device. A call that reaches the API directly (the LEDs,
+  // a camera's calibrations) is "not available" there, without a request to a dev server that has no
+  // device behind it (each one a failed-request error in the console).
+  if (MOCK) throw new ApiError(501, "not_available", `${method} ${path} is not on the simulated robot`);
   const headers: Record<string, string> = { Accept: "application/json", ...(options.headers ?? {}) };
   if (csrfToken && method !== "GET" && method !== "HEAD") headers["X-Helios-CSRF"] = csrfToken;
   let body: BodyInit | undefined = options.raw;

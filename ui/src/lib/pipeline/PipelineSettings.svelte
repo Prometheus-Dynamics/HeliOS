@@ -85,10 +85,11 @@
   {#each Object.entries(w.inputs) as [name, input] (name)}
     {#if input.source === "camera"}
       <Prop label="{name} · camera" help="The camera this input reads. Its exposure, gain and other controls are the camera's own (Camera controls).">
-        <Choice value={input.resourceId ?? ""} options={cluster.cameras.map((c) => ({ value: c.resourceId, label: identity.name(c.resourceId, c.name) }))} onchange={(v) => cluster.setInput(w.id, name, { resourceId: v })} />
+        <Choice label="{name} camera" value={input.resourceId ?? ""} options={cluster.cameras.map((c) => ({ value: c.resourceId, label: identity.name(c.resourceId, c.name) }))} onchange={(v) => cluster.setInput(w.id, name, { resourceId: v })} />
       </Prop>
       <Prop label="Resolution" help="The size this pipeline asks of the camera. Smaller is faster; the camera keeps its own mode for other pipelines.">
         <Choice
+          label="Resolution"
           value={input.outputWidth && input.outputHeight ? `${input.outputWidth}x${input.outputHeight}` : ""}
           options={sizes(input.resourceId)}
           onchange={(v) => {
@@ -102,10 +103,10 @@
       </Prop>
     {:else}
       <Prop label="{name} · pipeline" help="Another pipeline's output this input takes, by frame.">
-        <Choice value={input.pipeline ?? ""} options={producers.map((p) => ({ value: p.id, label: identity.name(p.id, p.name) }))} onchange={(v) => cluster.setInput(w.id, name, { source: "pipeline", pipeline: v })} />
+        <Choice label="{name} pipeline" value={input.pipeline ?? ""} options={producers.map((p) => ({ value: p.id, label: identity.name(p.id, p.name) }))} onchange={(v) => cluster.setInput(w.id, name, { source: "pipeline", pipeline: v })} />
       </Prop>
       <Prop label="Output" help="Which of the producer's outputs.">
-        <Choice value={input.port ?? ""} options={portsOf(input.pipeline).map((p) => ({ value: p, label: p }))} onchange={(v) => cluster.setInput(w.id, name, { source: "pipeline", port: v })} />
+        <Choice label="{name} output" value={input.port ?? ""} options={portsOf(input.pipeline).map((p) => ({ value: p, label: p }))} onchange={(v) => cluster.setInput(w.id, name, { source: "pipeline", port: v })} />
       </Prop>
       <Prop label="Max wait (ms)" help="How long a frame waits for the producer's value of the same frame before using its latest.">
         <Num value={input.maxWaitMs ?? 50} min={0} max={1000} step={5} width={64} label="Max wait" onchange={(v) => cluster.setInput(w.id, name, { source: "pipeline", maxWaitMs: v })} />
@@ -119,7 +120,7 @@
 {#if caps.includes("tags")}
   <Section title="Detection" key="pipe-detect">
     <Prop label="Tag family" help="The kind of tags to look for. A family other than the tags' own finds nothing at all.">
-      <Choice value={dictionary} options={DICTIONARIES[family]} onchange={(v) => cluster.setDictionary(w.id, v)} />
+      <Choice label="Tag family" value={dictionary} options={DICTIONARIES[family]} onchange={(v) => cluster.setDictionary(w.id, v)} />
     </Prop>
     <Prop label="Search" help="Tracked: windows around known tags each frame, a full search every few frames (fast). Full: the whole frame every frame.">
       <Seg label="Search" value={w.searchMode ?? "tracked"} options={[{ value: "tracked", label: "Tracked" }, { value: "full", label: "Every frame" }]} onchange={(v) => cluster.setSearch(w.id, v as "tracked" | "full", w.fullSearchEvery)} />
@@ -181,11 +182,11 @@
   </Prop>
   {#if hosts.length > 1}
     <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
-      <Choice value={w.nodeId} options={hosts.map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
+      <Choice label="Runs on" value={w.nodeId} options={hosts.map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
     </Prop>
   {/if}
   <Prop label="CPU core" help="All of a camera's work runs on one core; pin it so nothing else slows it.">
-    <Choice value={w.cpu === null ? "auto" : String(w.cpu)} options={[{ value: "auto", label: "Auto" }, ...ENGINE_CPU_CORES.map((core) => ({ value: String(core), label: `Core ${core}` }))]} onchange={(v) => cluster.setCpu(w.id, v === "auto" ? null : Number(v))} />
+    <Choice label="CPU core" value={w.cpu === null ? "auto" : String(w.cpu)} options={[{ value: "auto", label: "Auto" }, ...ENGINE_CPU_CORES.map((core) => ({ value: String(core), label: `Core ${core}` }))]} onchange={(v) => cluster.setCpu(w.id, v === "auto" ? null : Number(v))} />
     {#if w.cpuError}<Badge tone="warn" text={w.cpuError} />{:else if w.cpuApplied !== null}<span class="mono">on core {w.cpuApplied}</span>{/if}
   </Prop>
 </Section>

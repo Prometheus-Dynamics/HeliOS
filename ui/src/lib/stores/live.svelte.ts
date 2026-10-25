@@ -103,6 +103,15 @@ function toDetections(value: unknown): Detection[] {
 
 export class LiveCluster {
   private pipelines = new Map<string, W.Pipeline>();
+  /** Pipeline writes run one after another. Each reads the pipelines the one before it left, so a
+   * second click never sends the graph the first one replaced (a search change after a tag-family
+   * change would otherwise send the old family back). */
+  private writes: Promise<unknown> = Promise.resolve();
+  private serial<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.writes.then(run, run);
+    this.writes = next.catch(() => undefined);
+    return next;
+  }
   /** The latest detections per camera resource, from its running pipeline's `detections` output. */
   private detections = $state<Record<string, Detection[]>>({});
   /** The latest feature tracks per camera resource, from its running pipeline's `tracks` output. */
@@ -751,10 +760,12 @@ export class LiveCluster {
     await this.refreshPipelines();
   }
 
-  async saveGraph(id: string, graph: GraphDocument): Promise<boolean> {
-    const deployed = await this.act("Deploy", () => api.putPipeline(id, this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
-    await this.refreshPipelines();
-    return Boolean(deployed);
+  saveGraph(id: string, graph: GraphDocument): Promise<boolean> {
+    return this.serial(async () => {
+      const deployed = await this.act("Deploy", () => api.putPipeline(id, this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
+      await this.refreshPipelines();
+      return Boolean(deployed);
+    });
   }
 
   canRollBack(id: string): boolean {
@@ -767,10 +778,12 @@ export class LiveCluster {
     await this.refreshPipelines();
   }
 
-  async bindInput(id: string, input: string, resourceId: string) {
-    const existing = this.pipelines.get(id)?.bindings[input];
-    await this.act("Bind input", () => api.bindInput(id, input, { ...(existing ?? {}), resource_id: resourceId }), () => `${this.name(id)}: ${input} bound to ${resourceId}`);
-    await this.refreshPipelines();
+  bindInput(id: string, input: string, resourceId: string) {
+    return this.serial(async () => {
+      const existing = this.pipelines.get(id)?.bindings[input];
+      await this.act("Bind input", () => api.bindInput(id, input, { ...(existing ?? {}), resource_id: resourceId }), () => `${this.name(id)}: ${input} bound to ${resourceId}`);
+      await this.refreshPipelines();
+    });
   }
 
   async defaultTemplates(): Promise<DefaultTemplate[]> {
@@ -780,7 +793,11 @@ export class LiveCluster {
   /** Deploy a default template as the camera's one pipeline: in place of its Eidos pipeline (same
    * id, so robot code keeps its NetworkTables path), any other Eidos pipeline on it disabled;
    * `null` disables them all (video only). */
-  async applyDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
+  applyDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
+    return this.serial(() => this.writeDefault(cameraId, template, name));
+  }
+
+  private async writeDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
     const mine = [...this.pipelines.values()].filter((p) => p.graph?.requires.some((r) => r.id === "eidos") && Object.values(p.bindings).some((b) => b.resource_id === cameraId));
     const keep = mine.find((p) => p.enabled) ?? mine[0];
     for (const p of mine) {
@@ -812,7 +829,11 @@ export class LiveCluster {
   }
 
   /** Change one input's binding: only the given fields, the rest as deployed. */
-  async setInput(id: string, input: string, change: Partial<PipelineInput>) {
+  setInput(id: string, input: string, change: Partial<PipelineInput>) {
+    return this.serial(() => this.writeInput(id, input, change));
+  }
+
+  private async writeInput(id: string, input: string, change: Partial<PipelineInput>) {
     const existing = this.pipelines.get(id)?.bindings[input];
     const binding: W.Binding =
       (change.source ?? (existing?.source === "pipeline" ? "pipeline" : "camera")) === "pipeline"
@@ -830,29 +851,35 @@ export class LiveCluster {
 
   /** Redeploy a pipeline with another detector search (the same graph, bindings and settings). */
   async setSearch(id: string, mode: "tracked" | "full", every: number | null) {
-    const p = this.pipelines.get(id);
-    if (!p?.graph) return;
-    const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
-    await this.act("Search", () => api.putPipeline(id, spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
-    await this.refreshPipelines();
+    return this.serial(async () => {
+      const p = this.pipelines.get(id);
+      if (!p?.graph) return;
+      const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
+      await this.act("Search", () => api.putPipeline(id, spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
+      await this.refreshPipelines();
+    });
   }
 
   /** Redeploy a pipeline with another tag family (the same graph, bindings and settings). */
   async setDictionary(id: string, dictionary: string) {
-    const p = this.pipelines.get(id);
-    if (!p?.graph) return;
-    await this.act("Tag family", () => api.putPipeline(id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
-    await this.refreshPipelines();
+    return this.serial(async () => {
+      const p = this.pipelines.get(id);
+      if (!p?.graph) return;
+      await this.act("Tag family", () => api.putPipeline(id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
+      await this.refreshPipelines();
+    });
   }
 
   /** Pin a pipeline's graph thread to a core (`null`: the scheduler's choice). The spec is the
    * pipeline's own graph, bindings and settings, so only the core changes. */
   async setCpu(id: string, cpu: number | null) {
-    const p = this.pipelines.get(id);
-    if (!p?.graph) return;
-    const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: cpu ?? undefined };
-    await this.act("CPU core", () => api.putPipeline(id, spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
-    await this.refreshPipelines();
+    return this.serial(async () => {
+      const p = this.pipelines.get(id);
+      if (!p?.graph) return;
+      const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: cpu ?? undefined };
+      await this.act("CPU core", () => api.putPipeline(id, spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
+      await this.refreshPipelines();
+    });
   }
 
   async createWorkload(name: string, _nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {

@@ -34,10 +34,12 @@
   }
 
   async function apply() {
+    const applied = draft;
     busy = true;
     try {
       await cluster.applyDefault(camera.resourceId, template, identity.name(camera.resourceId, camera.name));
-      draft = null;
+      // Only the choice that was applied is cleared: a choice made while it applied stays.
+      if (draft === applied) draft = null;
     } finally {
       busy = false;
     }
