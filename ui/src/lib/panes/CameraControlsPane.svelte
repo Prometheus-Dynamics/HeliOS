@@ -59,6 +59,17 @@
   const advanced = $derived(inGroup("advanced"));
   const runs = $derived(active ? capabilitiesOf(active.graph) : []);
   const filtering = $derived(Boolean(q) || changedOnly);
+  /** A composite section (exposure, white balance) has a changed control behind it. */
+  const changedIn = (group: ReturnType<typeof groupOf>) => controls.some((c) => groupOf(c) === group && isChanged(c));
+  // Which sections the filters leave: unfiltered, everything; a search, the sections it names or
+  // whose controls match; changed only, the sections with a changed control.
+  const showSensor = $derived(!filtering || capture.length > 0 || (!changedOnly && named("sensor", "mode", "frame rate", "fps", "capture")));
+  const showExposure = $derived((!changedOnly || changedIn("exposure")) && named("exposure", "gain", "auto exposure", "ae", "brightness", "apriltag"));
+  const showWhite = $derived((!changedOnly || changedIn("white")) && named("white balance", "awb", "colour", "color", "temperature"));
+  const showFlicker = $derived(!filtering || flicker.length > 0);
+  const showLens = $derived(!filtering || (!changedOnly && named("calibration", "lens", "position", "rotation", "mount", "placement")));
+  const showAdvanced = $derived(!filtering || advanced.length > 0);
+  const nothing = $derived(filtering && !showSensor && !showExposure && !showWhite && !showFlicker && !showLens && !showAdvanced);
 
   function openJobs() {
     shell.go("cameras");
@@ -138,14 +149,14 @@
       <button type="button" class="filter" class:on={changedOnly} aria-pressed={changedOnly} onclick={() => (changedOnly = !changedOnly)}>Changed only</button>
     </div>
 
-    {#if !filtering || capture.length > 0 || named("sensor", "mode", "frame rate", "fps", "capture")}
+    {#if showSensor}
     <Section title="Sensor" key="cam-capture">
-      {#if !filtering || named("sensor", "mode")}
+      {#if !filtering || (!changedOnly && named("sensor", "mode"))}
         <Prop label="Sensor mode" help="The sensor mode the camera streams. Read-only until the device lists modes to choose from. Each pipeline asks for its own size in its settings.">
           <span class="mono">{camera.mode ?? `${camera.settings.width}×${camera.settings.height} ${camera.settings.format}`}</span>
         </Prop>
       {/if}
-      {#if !filtering || named("frame rate", "fps")}<FrameRateField {camera} />{/if}
+      {#if !filtering || (!changedOnly && named("frame rate", "fps"))}<FrameRateField {camera} />{/if}
       {#each capture as c (c.id)}
         <ControlRow {camera} control={c} />
       {/each}
@@ -157,20 +168,20 @@
     </Section>
     {/if}
 
-    {#if !changedOnly && named("exposure", "gain", "auto exposure", "ae", "brightness", "apriltag")}
+    {#if showExposure}
       <Section title="Exposure" key="cam-exposure">
         <ExposureFields {camera} />
         <AprilTagPreset {camera} />
       </Section>
     {/if}
 
-    {#if !changedOnly && named("white balance", "awb", "colour", "color", "temperature")}
+    {#if showWhite}
       <Section title="White balance" key="cam-white">
         <WhiteBalanceFields {camera} />
       </Section>
     {/if}
 
-    {#if !filtering || flicker.length > 0}
+    {#if showFlicker}
       <Section title="Flicker" key="cam-flicker" open={flicker.length > 0}>
         {#each flicker as c (c.id)}
           <ControlRow {camera} control={c} />
@@ -180,7 +191,7 @@
       </Section>
     {/if}
 
-    {#if !filtering || named("calibration", "lens", "position", "rotation", "mount", "placement")}
+    {#if showLens}
       <Section title="Lens and placement" key="cam-lens">
         <Prop label="Calibration" help="Lens intrinsics at the current resolution.">
           {#if cal}
@@ -205,7 +216,7 @@
       </Section>
     {/if}
 
-    {#if !filtering || advanced.length > 0}
+    {#if showAdvanced}
       <Section title="Advanced" key="cam-advanced" open={filtering} count={advanced.length}>
         {#each advanced as c (c.id)}
           <ControlRow {camera} control={c} />
@@ -213,6 +224,10 @@
           <Prop label="Controls"><span class="muted">No other controls.</span></Prop>
         {/each}
       </Section>
+    {/if}
+
+    {#if nothing}
+      <div class="none">{changedOnly ? (q ? "No changed control matches." : "Every control is at its default.") : "No control matches."}</div>
     {/if}
 
     <Section title="Device" key="cam-device" open={false}>
@@ -314,6 +329,12 @@
   .muted {
     font-size: 11.5px;
     color: var(--fg-3);
+  }
+  .none {
+    padding: 8px 10px;
+    font-size: 11.5px;
+    color: var(--fg-3);
+    border-bottom: 1px solid var(--line);
   }
   .mono {
     font-family: var(--font-code);
