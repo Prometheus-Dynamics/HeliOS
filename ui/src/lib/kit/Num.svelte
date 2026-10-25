@@ -24,30 +24,45 @@
   } = $props();
 
   const decimals = $derived(step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step))));
+  /** Digits shown for a value: the step's, and more for a fraction the step would hide (a 0.1651 m
+   * tag edge shows as 0.1651, not as 0 when the device declares a step of 1). */
+  function shownText(v: number): string {
+    if (!Number.isFinite(v) || Number.isInteger(v)) return v.toFixed(decimals);
+    return v.toFixed(Math.max(decimals, Math.min(4, Math.ceil(-Math.log10(Math.abs(v))) + 3)));
+  }
   let text = $state("");
   let editing = $state(false);
+  /** The user typed into the field since it was last shown: only then does leaving it change the value. */
+  let typed = false;
   $effect(() => {
-    if (!editing) text = Number(value).toFixed(decimals);
+    if (!editing) text = shownText(Number(value));
   });
 
-  function commit(next: number) {
-    const snapped = Math.round(next / step) * step;
-    const clamped = Math.min(max, Math.max(min, Number(snapped.toFixed(decimals))));
+  /** A whole-number field (a count or an index): its step and value are whole. Typed text rounds to
+   * the step there; in any other field typed text is taken as typed. */
+  const whole = $derived(Number.isInteger(step) && Number.isInteger(value));
+
+  /** A chosen value. Arrow keys, the wheel and a drag step it (`stepped`). */
+  function commit(next: number, stepped = true) {
+    const snapped = stepped || whole ? Number((Math.round(next / step) * step).toFixed(decimals)) : next;
+    const clamped = Math.min(max, Math.max(min, snapped));
     if (clamped !== value) {
       value = clamped;
       onchange?.(clamped);
     }
-    text = clamped.toFixed(decimals);
+    text = shownText(clamped);
   }
 
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
+      typed = false;
       commit(value + (event.key === "ArrowUp" ? 1 : -1) * step * (event.shiftKey ? 10 : 1));
     } else if (event.key === "Enter") {
       (event.target as HTMLInputElement).blur();
     } else if (event.key === "Escape") {
-      text = Number(value).toFixed(decimals);
+      typed = false;
+      text = shownText(Number(value));
       (event.target as HTMLInputElement).blur();
     }
   }
@@ -78,11 +93,18 @@
     {disabled}
     aria-label={label}
     onfocus={() => (editing = true)}
+    oninput={() => (typed = true)}
     onblur={() => {
       editing = false;
+      // Tabbing through a field without typing changes nothing.
+      if (!typed) {
+        text = shownText(Number(value));
+        return;
+      }
+      typed = false;
       const parsed = Number(text);
-      if (Number.isFinite(parsed)) commit(parsed);
-      else text = Number(value).toFixed(decimals);
+      if (Number.isFinite(parsed)) commit(parsed, false);
+      else text = shownText(Number(value));
     }}
     {onkeydown}
     onwheel={(e) => {

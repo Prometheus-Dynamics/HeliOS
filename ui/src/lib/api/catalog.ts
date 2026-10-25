@@ -544,13 +544,14 @@ function typedParam(port: DeviceCatalogPort, known: Param | undefined): Param {
   const scalar = scalarOf(port);
   if (port.options?.length) return { name: port.name, kind: "enum", default: String(port.default ?? port.options[0]), options: port.options.map(String), help };
   if (typeof port.default === "boolean" || scalar === "Bool") return { name: port.name, kind: "bool", default: Boolean(port.default), help };
+  // A named variant ("from_calibration") is an enum, not a number: checked before Number() makes it NaN.
+  if (typeof port.default === "string") return { name: port.name, kind: "enum", default: port.default, options: [port.default], help };
   const value = Number(port.default ?? 0);
   if (scalar === "Float" || scalar === "F32" || scalar === "F64" || (scalar === undefined && !Number.isInteger(value))) {
     const min = port.min ?? (known?.kind === "float" ? known.min : Math.min(0, value));
     const max = port.max ?? (known?.kind === "float" ? known.max : Math.max(1, value * 4));
     return { name: port.name, kind: "float", default: value, min, max, step: port.step ?? (known?.kind === "float" ? known.step : (max - min) / 100 || 0.01), help };
   }
-  if (typeof port.default === "string") return { name: port.name, kind: "enum", default: port.default, options: [port.default], help };
   const unsigned = scalar?.startsWith("U") ?? false;
   const min = port.min ?? (known?.kind === "int" ? known.min : unsigned ? 0 : Math.min(0, value));
   const max = port.max ?? (known?.kind === "int" ? known.max : Math.max(16, value * 4));

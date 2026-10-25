@@ -1,0 +1,4 @@
+# `bun test` runs the unit tests in tests/. The Playwright specs in e2e/ run under `bun run e2e:mock`
+# and `bun run e2e:sim`, and bun would otherwise try to run them too (they match *.spec.ts).
+[test]
+root = "./tests"

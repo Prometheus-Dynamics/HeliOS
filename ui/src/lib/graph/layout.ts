@@ -34,8 +34,11 @@ export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
   };
   ids.forEach(depth);
 
-  const layers: string[][] = [];
-  for (const id of ids) (layers[layer.get(id)!] ??= []).push(id);
+  const built: string[][] = [];
+  for (const id of ids) (built[layer.get(id)!] ??= []).push(id);
+  // A cycle (a host bridge that takes what the nodes it feeds make) can leave layer 0 empty: the gap
+  // closes, or the columns' heights are missing and every position becomes NaN.
+  const layers = built.filter((l) => l.length > 0);
 
   const order = new Map<string, number>();
   layers.forEach((l) => l.forEach((id, i) => order.set(id, i)));
