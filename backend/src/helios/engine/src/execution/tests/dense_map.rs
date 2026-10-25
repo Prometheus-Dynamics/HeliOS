@@ -13,7 +13,7 @@ use super::{
 
 /// The dense graph as a stored document (`localization_map::map_document`): the live map graph
 /// with the dense mapper on the mapper's pose. Host outputs: the live map's and the dense mapper's
-/// `dense_mesh` and `dense_timing` (its depth preview is not wired). `config` is the dense
+/// `dense_mesh`, `dense_timing` and `dense_depth` (its inverse-depth preview). `config` is the dense
 /// mapper's settings (`DenseConfig::default()` for its defaults, budget mode included).
 pub(super) fn dense_map_document(registry: &PluginRegistry, config: DenseConfig) -> String {
     super::localization_map::map_document(registry, None, Some(config))

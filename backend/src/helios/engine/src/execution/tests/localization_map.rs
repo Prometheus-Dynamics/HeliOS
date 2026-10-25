@@ -4,7 +4,8 @@
 //! pose on the same detector (localization) and the dense mapper on the mapper's pose. Everything
 //! Eidos does for a camera stays in one pipeline on one core. Host outputs are Eidos's names:
 //! `detections`, `map_pose`, `map_snapshot`, `map_timing`, with localization `poses`,
-//! `pose_solutions` and `multi_tag_pose`, with the dense mapper `dense_mesh` and `dense_timing`.
+//! `pose_solutions` and `multi_tag_pose`, with the dense mapper `dense_mesh`, `dense_timing` and
+//! `dense_depth` (its inverse-depth preview).
 
 use eidos_daedalus::{dense::DenseConfig, mapping::MappingConfig};
 
@@ -40,6 +41,11 @@ pub(super) fn map_document(registry: &PluginRegistry, localization: Option<&Fiel
     };
     if let Some(config) = dense {
         template = template.with_dense_map(config);
+        // The depth preview, for the UI: the node emits it at most `depth_hz` (0.5) times a
+        // second, after a keyframe, and nothing between, so it costs next to nothing.
+        if let Some(dense) = template.dense_map.as_mut() {
+            dense.depth_output = true;
+        }
     }
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("map template graph"));
     document.metadata.insert("title".into(), title.into());
