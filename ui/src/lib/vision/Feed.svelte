@@ -253,7 +253,8 @@
           <circle cx={t.x} cy={t.y} r={(t.status === "new" ? 3.2 : 2.6) * k} class="track" stroke-width={1 * k} style:fill={trackFill(t)} />
         {/each}
       {/if}
-      {#each axes as tag (tag.id)}
+      <!-- Keyed by position too: a scene can show the same tag id twice (a test field, a duplicate print). -->
+      {#each axes as tag, i (`${tag.id}:${i}`)}
         {#each tag.segments as s (s.axis)}
           <line x1={s.x0} y1={s.y0} x2={s.x1} y2={s.y1} class="axis {s.axis}" stroke-width={3.4 * k} />
         {/each}

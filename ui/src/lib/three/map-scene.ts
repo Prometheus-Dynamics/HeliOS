@@ -381,7 +381,6 @@ export class MapScene {
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: colour }));
     const group = new THREE.Group();
     group.add(new THREE.Mesh(geometry, material), edges);
-    this.disposables.push(geometry, material, edges.geometry, edges.material as THREE.Material);
     const span = document.createElement("span");
     span.className = className;
     span.textContent = label;
@@ -389,6 +388,24 @@ export class MapScene {
     object.position.set(0, size * 0.75, 0);
     group.add(object);
     return group;
+  }
+
+  /**
+   * Empties a group of tag squares, freeing their GPU resources and label elements. The map's tags
+   * are rebuilt with each snapshot (their poses refine), so what a rebuild replaces must go at once,
+   * not when the pane closes.
+   */
+  private clearTags(group: THREE.Group, labels: CSS2DObject[]) {
+    for (const label of labels) label.removeFromParent();
+    for (const tag of [...group.children]) {
+      group.remove(tag);
+      tag.traverse((object) => {
+        if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+          object.geometry.dispose();
+          (object.material as THREE.Material).dispose();
+        }
+      });
+    }
   }
 
   /** The map's own tags (where the mapper put them), without the field's ones when the layout draws them. */
@@ -399,8 +416,7 @@ export class MapScene {
     const key = `${size}:${tags.map((t) => t.id).join(",")}:${snapshot?.run_id ?? 0}:${snapshot?.seq ?? 0}`;
     if (key === this.mapTagKey) return;
     this.mapTagKey = key;
-    for (const child of [...this.mapTags.children]) this.mapTags.remove(child);
-    for (const label of this.mapTagLabels) label.removeFromParent();
+    this.clearTags(this.mapTags, this.mapTagLabels);
     this.mapTagLabels = [];
     for (const tag of tags) {
       const group = this.tagSquare(size, this.colours.placed, 0.28, `#${tag.id}`, "map-tag", false);
@@ -419,8 +435,7 @@ export class MapScene {
     const key = `${size}:${tags.map((t) => `${t.id}:${t.x}:${t.y}:${t.z}:${t.yaw}:${t.pitch}`).join("|")}`;
     if (key === this.fieldTagKey) return;
     this.fieldTagKey = key;
-    for (const child of [...this.fieldTags.children]) this.fieldTags.remove(child);
-    for (const label of this.fieldTagLabels) label.removeFromParent();
+    this.clearTags(this.fieldTags, this.fieldTagLabels);
     this.fieldTagLabels = [];
     for (const tag of tags) {
       const group = this.tagSquare(size, this.colours.field, 0.5, `#${tag.id}`, "map-tag field", true);
@@ -546,6 +561,8 @@ export class MapScene {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.mesh.geometry.dispose();
+    this.clearTags(this.mapTags, this.mapTagLabels);
+    this.clearTags(this.fieldTags, this.fieldTagLabels);
     for (const d of this.disposables) d.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
