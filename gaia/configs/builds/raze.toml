@@ -55,7 +55,7 @@ imports = [
   { path = "../ops/registry-local.toml", when = { input = { cache = "local" } } },
 ]
 
-# Raze board package (Atlas dev 53b45c4: keyless Orion enrollment while security is off (53b45c4), slots-tryboot pull installs; af8ea62: installer LED states on the ring (a90012a), a 2 minute USB lease so the robot-network route arrives within a minute (af8ea62), failed downloads name the URL and answer (8de79b5); 18a5f6a: /usr/share/board/raze/camera.toml says the camera module's lens (fisheye, equidistant) and one module's full fit as a self-calibration prior; e058d25: the boot FAT gets every overlay and the slot README in both the root and slots/<id>/overlays/ (e058d25; c405cbb had put the README only in the bundle), the slots writer refuses a bundle missing an overlay (862c414), and every build runs check-boot-overlays.sh as a Gaia assembly check (needs Gaia f5aa011+). Earlier, e8b2833: A/B updater fixes from hardware, the Lemnos pin
+# Raze board package (Atlas dev eadcf7c: every Atlas Settings action enrolled keyless while security is off (72b998b); 53b45c4: keyless Orion enrollment while security is off (53b45c4), slots-tryboot pull installs; af8ea62: installer LED states on the ring (a90012a), a 2 minute USB lease so the robot-network route arrives within a minute (af8ea62), failed downloads name the URL and answer (8de79b5); 18a5f6a: /usr/share/board/raze/camera.toml says the camera module's lens (fisheye, equidistant) and one module's full fit as a self-calibration prior; e058d25: the boot FAT gets every overlay and the slot README in both the root and slots/<id>/overlays/ (e058d25; c405cbb had put the README only in the bundle), the slots writer refuses a bundle missing an overlay (862c414), and every build runs check-boot-overlays.sh as a Gaia assembly check (needs Gaia f5aa011+). Earlier, e8b2833: A/B updater fixes from hardware, the Lemnos pin
 # (8e59039 in the device package), board events numbered by seq (continuing after a torn log
 # line), board-stream (the push channel on TCP 5898 with the hardware
 # topic; device.toml imports it, and expect-full.toml lists its artifact and install), the
@@ -91,7 +91,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "53b45c44c4f24a8ad413692da349de352dfea387"
+rev = "eadcf7cd15b4079f409a0a5fcb6875831c332a79"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
