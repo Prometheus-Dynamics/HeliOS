@@ -159,17 +159,30 @@ impl Store {
         read_json(&self.pipeline_path(id)).await.map(Option::unwrap_or_default)
     }
 
-    /// Append a revision (trimming old ones) and return its number.
-    pub async fn push_revision(&self, id: &str, spec: serde_json::Value, saved_at_ms: u64) -> ApiResult<u64> {
+    /// Append revision `revision` (trimming old ones) and return its number. The number is the one
+    /// the caller wrote to Orion, so the history and the device agree; it is never below the
+    /// history's own next number, so the history stays strictly increasing.
+    pub async fn push_revision(&self, id: &str, revision: u64, spec: serde_json::Value, saved_at_ms: u64) -> ApiResult<u64> {
         let _guard = self.lock.lock().await;
         let path = self.pipeline_path(id);
         let mut history: PipelineHistory = read_json(&path).await?.unwrap_or_default();
-        let revision = history.next_revision();
+        let revision = revision.max(history.next_revision());
         history.revisions.push(PipelineRevision { revision, saved_at_ms, spec });
         let excess = history.revisions.len().saturating_sub(MAX_REVISIONS);
         history.revisions.drain(..excess);
         write_json(&path, &history).await?;
         Ok(revision)
+    }
+
+    /// The revision before the newest one (what a rollback restores), without changing the history.
+    pub async fn previous_revision(&self, id: &str) -> ApiResult<PipelineRevision> {
+        let _guard = self.lock.lock().await;
+        let history: PipelineHistory = read_json(&self.pipeline_path(id)).await?.unwrap_or_default();
+        let count = history.revisions.len();
+        if count < 2 {
+            return Err(ApiError::conflict(format!("pipeline {id} has no earlier revision to roll back to")));
+        }
+        Ok(history.revisions[count - 2].clone())
     }
 
     /// Drop the newest revision and return the one before it (now the newest).
@@ -418,13 +431,20 @@ mod tests {
     async fn revisions_push_pop_and_trim() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::new(dir.path());
-        assert_eq!(store.push_revision("tags/front", serde_json::json!({"n": 1}), 1).await.expect("push"), 1);
-        assert_eq!(store.push_revision("tags/front", serde_json::json!({"n": 2}), 2).await.expect("push"), 2);
+        assert_eq!(store.push_revision("tags/front", 1, serde_json::json!({"n": 1}), 1).await.expect("push"), 1);
+        assert_eq!(store.push_revision("tags/front", 2, serde_json::json!({"n": 2}), 2).await.expect("push"), 2);
+        assert_eq!(store.previous_revision("tags/front").await.expect("previous").revision, 1);
         let previous = store.pop_revision("tags/front").await.expect("pop");
         assert_eq!(previous.revision, 1);
         assert!(store.pop_revision("tags/front").await.is_err(), "nothing before revision 1");
+        assert!(store.previous_revision("tags/front").await.is_err(), "nothing before revision 1");
+        // The number Orion was given wins when it is ahead of the history (a deploy whose record was
+        // cut short); a stale number never takes the history backwards.
+        assert_eq!(store.push_revision("tags/front", 5, serde_json::json!({"n": 5}), 3).await.expect("push"), 5);
+        assert_eq!(store.push_revision("tags/front", 2, serde_json::json!({"n": 6}), 4).await.expect("push"), 6);
         for n in 0..(MAX_REVISIONS + 5) {
-            store.push_revision("x", serde_json::json!(n), 0).await.expect("push");
+            let next = store.history("x").await.expect("history").next_revision();
+            store.push_revision("x", next, serde_json::json!(n), 0).await.expect("push");
         }
         let history = store.history("x").await.expect("history");
         assert_eq!(history.revisions.len(), MAX_REVISIONS);

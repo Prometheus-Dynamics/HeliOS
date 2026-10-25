@@ -908,15 +908,40 @@ async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &Pipe
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await
 }
 
+/// The revision label Orion holds for pipeline `id` (what the device reports), if any.
+fn deployed_revision(view: &StateView, id: &str) -> Option<u64> {
+    let workload = find_workload(view, id)?;
+    let artifact = view.artifacts.get(workload.artifact_id.as_str())?;
+    label_map(&artifact.labels).get(REVISION_LABEL).and_then(|r| r.parse().ok())
+}
+
+/// The number the next deploy writes: past the history's latest and past the label Orion holds.
+/// The two can disagree by one when an earlier deploy wrote Orion and was cut short before its
+/// record (see `deploy`); taking the larger one means a deploy always shows as a new revision.
+fn next_revision(history: &crate::store::PipelineHistory, deployed: Option<u64>) -> u64 {
+    history.next_revision().max(deployed.map_or(1, |r| r + 1))
+}
+
 /// Write `spec` as pipeline `id` (a new revision, kept for rollback) and return the pipeline.
+///
+/// The Orion write and the history record are one unit: they run in a task of their own, so a
+/// client that goes away mid-request (a closed tab, a page reload) cannot cancel the handler
+/// between the two and leave Orion at a revision the history has no record of. Deploys and
+/// rollbacks run one at a time (`deploys`), so two never pick the same number.
 pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiResult<Pipeline> {
     pipeline_bindings::check_not_self(id, &spec)?;
-    let view = state.orion.view().await?;
-    let revision = state.store.history(id).await?.next_revision();
-    apply_spec(state, &view, id, &spec, revision).await?;
-    let spec_json = serde_json::to_value(&spec).map_err(|error| ApiError::internal(error.to_string()))?;
-    state.store.push_revision(id, spec_json, now_ms()).await?;
-    fetch(state, id).await
+    let state = state.clone();
+    let id = id.to_string();
+    let task = tokio::spawn(async move {
+        let _deploying = state.deploys.lock().await;
+        let view = state.orion.view().await?;
+        let revision = next_revision(&state.store.history(&id).await?, deployed_revision(&view, &id));
+        apply_spec(&state, &view, &id, &spec, revision).await?;
+        let spec_json = serde_json::to_value(&spec).map_err(|error| ApiError::internal(error.to_string()))?;
+        state.store.push_revision(&id, revision, spec_json, now_ms()).await?;
+        fetch(&state, &id).await
+    });
+    task.await.map_err(|error| ApiError::internal(format!("the deploy did not finish: {error}")))?
 }
 
 /// Redeploy, at their current revision, the managed pipelines whose multi-tag pose uses a layout
@@ -1027,13 +1052,20 @@ pub async fn restart(State(state): State<SharedState>, Path(id): Path<String>) -
     set_desired(&state, &id, DesiredState::Running).await.map(Json)
 }
 
+/// Back to the revision before the newest. Orion is written first and the history trimmed after,
+/// as one unit (see `deploy`): a rollback that fails to apply leaves the history as it was.
 pub async fn rollback(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Pipeline>> {
     check_id(&id)?;
-    let previous = state.store.pop_revision(&id).await?;
-    let spec: PipelineSpec = serde_json::from_value(previous.spec).map_err(|error| ApiError::internal(format!("stored revision {} is unreadable: {error}", previous.revision)))?;
-    let view = state.orion.view().await?;
-    apply_spec(&state, &view, &id, &spec, previous.revision).await?;
-    fetch(&state, &id).await.map(Json)
+    let task = tokio::spawn(async move {
+        let _deploying = state.deploys.lock().await;
+        let previous = state.store.previous_revision(&id).await?;
+        let spec: PipelineSpec = serde_json::from_value(previous.spec).map_err(|error| ApiError::internal(format!("stored revision {} is unreadable: {error}", previous.revision)))?;
+        let view = state.orion.view().await?;
+        apply_spec(&state, &view, &id, &spec, previous.revision).await?;
+        state.store.pop_revision(&id).await?;
+        fetch(&state, &id).await
+    });
+    task.await.map_err(|error| ApiError::internal(format!("the rollback did not finish: {error}")))?.map(Json)
 }
 
 #[derive(Debug, Serialize)]
@@ -1261,6 +1293,22 @@ mod tests {
         let camera = ResourceRecord::builder("camera.front", cameras::CAMERA_RESOURCE_TYPE, "provider.peripherals.node-local").build();
         view.resources.insert("camera.front".into(), camera);
         view
+    }
+
+    #[test]
+    fn the_next_revision_is_past_the_history_and_past_the_label_orion_holds() {
+        use crate::store::{PipelineHistory, PipelineRevision};
+        let history = |revisions: &[u64]| PipelineHistory { revisions: revisions.iter().map(|&revision| PipelineRevision { revision, saved_at_ms: 0, spec: serde_json::json!({}) }).collect() };
+        // A pipeline never deployed, and one Orion has that the history does not know.
+        assert_eq!(next_revision(&history(&[]), None), 1);
+        assert_eq!(next_revision(&history(&[]), Some(4)), 5);
+        // In step: the history's next.
+        assert_eq!(next_revision(&history(&[1, 2, 3]), Some(3)), 4);
+        // A deploy that wrote Orion (label 10) and was cut short before its record (history at 9):
+        // the next deploy is 11, never 10 again.
+        assert_eq!(next_revision(&history(&[8, 9]), Some(10)), 11);
+        // A history ahead of the label (a rollback's record, or an older device): the history wins.
+        assert_eq!(next_revision(&history(&[8, 9, 10]), Some(9)), 11);
     }
 
     #[test]

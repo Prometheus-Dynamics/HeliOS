@@ -63,6 +63,9 @@ pub struct AppState {
     /// instead of meeting each other's resource leases.
     /// Held while helios-api has the device package's writer stage an image.
     pub update_lock: Arc<Mutex<()>>,
+    /// Held while a pipeline is deployed or rolled back: the Orion write and the revision history
+    /// are one unit, and two deploys never pick the same revision number.
+    pub deploys: Mutex<()>,
     /// The last stage/apply helios-api started, for `/v1/update/status`.
     pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
     /// The LED director: HeliOS's state on the status ring (`leds`, started by `leds::start`).
@@ -94,6 +97,7 @@ impl AppState {
             events,
             auth: auth::Auth::new(config.auth_file.clone()),
             update_lock: routes::update::new_update_lock(),
+            deploys: Mutex::new(()),
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
             live: live_outputs::LiveRelay::new(),
