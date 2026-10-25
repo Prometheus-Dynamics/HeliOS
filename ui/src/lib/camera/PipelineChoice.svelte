@@ -8,6 +8,7 @@
   import { identity } from "#lib/core/identity.svelte.js";
   import Seg from "#lib/kit/Seg.svelte";
   import Switch from "#lib/kit/Switch.svelte";
+  import { drafts } from "#lib/graph/drafts.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
 
   let { camera, offered }: { camera: Camera; offered: DefaultTemplate[] } = $props();
@@ -32,6 +33,8 @@
     busy = true;
     try {
       await cluster.applyDefault(camera.resourceId, template, identity.name(camera.resourceId, camera.name));
+      // The camera's pipeline has a new graph: its editor drafts start from it.
+      for (const w of guide.workloadsFor(camera)) drafts.get(w.id).reload();
       draft = null;
     } finally {
       busy = false;

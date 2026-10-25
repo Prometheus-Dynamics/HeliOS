@@ -2,7 +2,6 @@
   // Whatever is selected, anywhere: its identity, live facts, settings and
   // actions. Everyday things first; deeper sections are closed below.
   import { CATALOG_BY_ID } from "#lib/api/catalog.js";
-  import { ENGINE_CPU_CORES } from "#lib/api/model.js";
   import Icon from "#lib/components/common/Icon.svelte";
   import { duration } from "#lib/format.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
@@ -15,11 +14,11 @@
   import IconButton from "#lib/kit/IconButton.svelte";
   import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
   import Meter from "#lib/kit/Meter.svelte";
-  import ParamControl from "#lib/kit/ParamControl.svelte";
+  import ParamRow from "#lib/pipeline/ParamRow.svelte";
+  import PipelineSettings from "#lib/pipeline/PipelineSettings.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Section from "#lib/kit/Section.svelte";
   import Slider from "#lib/kit/Slider.svelte";
-  import Spark from "#lib/kit/Spark.svelte";
   import ExposureFields from "#lib/camera/ExposureFields.svelte";
   import FrameRateField from "#lib/camera/FrameRateField.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
@@ -68,46 +67,7 @@
   {:else if s?.kind === "workload"}
     {@const w = cluster.workload(s.id)}
     {#if w}
-      <IdentityEditor id={w.id} fallbackName={w.name} fallbackIcon="schema" sub="revision {w.revision} · {cluster.node(w.nodeId)?.name}" />
-      <div class="actions">
-        <Badge tone={STATE_TONE[w.state]} text={w.state} />
-        <span class="grow"></span>
-        {#if w.state === "running"}
-          <IconButton icon="player-stop" label="Stop" text="Stop" size={24} onclick={() => cluster.stopWorkload(w.id)} />
-        {:else}
-          <IconButton icon="player-play" label="Start" text="Start" size={24} tone="ok" onclick={() => cluster.restartWorkload(w.id)} />
-        {/if}
-        <IconButton icon="refresh" label="Restart" size={24} onclick={() => cluster.restartWorkload(w.id)} />
-        <IconButton icon="history" label="Roll back" size={24} disabled={!cluster.canRollBack(w.id)} onclick={() => drafts.get(w.id).rollBack()} />
-      </div>
-      <Section title="Inputs and placement" key="insp-wl-bind">
-        <Prop label="Camera">
-          <Choice value={cluster.cameraOf(w)?.resourceId ?? ""} options={cluster.cameras.map((c) => ({ value: c.resourceId, label: identity.name(c.resourceId, c.name) }))} onchange={(v) => cluster.bindInput(w.id, cluster.cameraInput(w) ?? "frame", v)} />
-        </Prop>
-        <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
-          <Choice value={w.nodeId} options={cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId).map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
-        </Prop>
-        <Prop label="CPU core" help="Pin a heavy pipeline to its own core so it never slows the tag pipeline.">
-          <Choice value={w.cpu === null ? "auto" : String(w.cpu)} options={[{ value: "auto", label: "Auto" }, ...ENGINE_CPU_CORES.map((core) => ({ value: String(core), label: `Core ${core}` }))]} onchange={(v) => cluster.setCpu(w.id, v === "auto" ? null : Number(v))} />
-          {#if w.cpuError}
-            <Badge tone="warn" text={w.cpuError} />
-          {:else if w.cpuApplied !== null}
-            <span class="mono">on core {w.cpuApplied}</span>
-          {:else if w.cpu !== null}
-            <span class="mono">waiting for core {w.cpu}</span>
-          {/if}
-        </Prop>
-      </Section>
-      <Section title="Performance" key="insp-wl-perf">
-        <Prop label="Tick p50 / p99"><span class="mono">{w.perf.tickP50Ms.toFixed(2)} / {w.perf.tickP99Ms.toFixed(2)} ms</span></Prop>
-        <Prop label="Trend"><Spark values={w.perf.tickHistory} width={120} height={18} max={1.2} color={colorVar(identity.get(w.id).color)} /></Prop>
-        <Prop label="Memory"><span class="mono">{w.perf.memMiB.toFixed(1)} MiB</span></Prop>
-        <Prop label="Restarts"><span class="mono">{w.restarts}</span></Prop>
-      </Section>
-      <Section title="Outputs" key="insp-wl-out" count={w.outputs.length} advanced>
-        {#each w.outputs as o (o)}<Prop label="Stream"><span class="mono">{o}</span></Prop>{/each}
-        <Prop label="Plugins"><span class="mono">{w.graph.requires.map((r) => r.id).join(", ")}</span></Prop>
-      </Section>
+      <PipelineSettings workload={w} />
     {/if}
   {:else if s?.kind === "graph-node" && s.parent}
     {@const d = drafts.get(s.parent)}
@@ -133,15 +93,16 @@
         </div>
       {/if}
       {#if t}
-        <Section title="Parameters" key="insp-node-params" count={t.params.length}>
+        <Section title="Settings" key="insp-node-params" count={t.params.length}>
           {#each t.params as p (p.name)}
-            {@const v = n.data.params[p.name] ?? p.default}
-            <Prop label={p.name} help={p.help} changed={v !== p.default} onreset={() => d.setParam(n.id, p.name, p.default)}>
-              <ParamControl param={p} value={v} onchange={(nv) => d.setParam(n.id, p.name, nv)} />
-            </Prop>
+            <ParamRow param={p} value={n.data.params[p.name]} onchange={(nv) => d.setParam(n.id, p.name, nv)} />
           {:else}
-            <div class="none">No parameters.</div>
+            <div class="none">No settings.</div>
           {/each}
+          {#if d.dirty}
+            <div class="link"><button type="button" onclick={() => d.deploy()}>Deploy the change <Icon name="arrow-right" size={12} /></button></div>
+          {/if}
+          <div class="link"><button type="button" onclick={() => selection.select({ kind: "workload", id: d.workloadId })}>All of this pipeline's settings <Icon name="arrow-right" size={12} /></button></div>
         </Section>
         <Section title="Ports" key="insp-node-ports" advanced>
           {#each t.inputs as p (p.name)}
