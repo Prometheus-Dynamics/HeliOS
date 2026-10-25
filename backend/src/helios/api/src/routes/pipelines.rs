@@ -948,6 +948,9 @@ pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiRes
 /// that changed: those naming `changed` (an uploaded layout replaced), or, with `selection`, those
 /// following the selected layout. Returns the pipelines updated.
 pub async fn refresh_field_layouts(state: &SharedState, changed: Option<&str>, selection: bool) -> ApiResult<Vec<String>> {
+    // Writes whole workload records from this view: one writer at a time, so a deploy cannot land
+    // between the read and the write and be put back.
+    let _writing = state.deploys.lock().await;
     let view = state.orion.view().await?;
     let selected = field_layouts::selected_id(state).await?;
     let mut updated = Vec::new();
@@ -1016,6 +1019,8 @@ pub async fn put(State(state): State<SharedState>, Path(id): Path<String>, Json(
 
 pub async fn remove(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
     check_id(&id)?;
+    // One pipeline writer at a time (see `deploy`).
+    let _writing = state.deploys.lock().await;
     let view = state.orion.view().await?;
     let workload = find_workload(&view, &id).ok_or_else(|| ApiError::not_found(format!("no pipeline {id}")))?;
     let mut mutations = vec![DesiredStateMutation::RemoveWorkload(workload.workload_id.clone())];
@@ -1029,6 +1034,8 @@ pub async fn remove(State(state): State<SharedState>, Path(id): Path<String>) ->
 
 async fn set_desired(state: &SharedState, id: &str, desired: DesiredState) -> ApiResult<Pipeline> {
     check_id(id)?;
+    // Writes the whole workload record from this view: one pipeline writer at a time (see `deploy`).
+    let _writing = state.deploys.lock().await;
     let view = state.orion.view().await?;
     let mut workload = find_workload(&view, id).cloned().ok_or_else(|| ApiError::not_found(format!("no pipeline {id}")))?;
     workload.desired_state = desired;
@@ -1117,6 +1124,9 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
 /// context into the running graph (adding or removing a mount recompiles it), and a new frame
 /// rate restarts the camera's frame source at that rate. Returns the pipelines updated.
 pub async fn refresh_camera_inputs(state: &SharedState, camera: &str) -> ApiResult<Vec<String>> {
+    // Writes whole workload records from this view: one writer at a time, so a deploy cannot land
+    // between the read and the write and be put back by this periodic sync.
+    let _writing = state.deploys.lock().await;
     let view = state.orion.view().await?;
     let mut mutations = Vec::new();
     let mut updated = Vec::new();

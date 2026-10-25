@@ -63,8 +63,10 @@ pub struct AppState {
     /// instead of meeting each other's resource leases.
     /// Held while helios-api has the device package's writer stage an image.
     pub update_lock: Arc<Mutex<()>>,
-    /// Held while a pipeline is deployed or rolled back: the Orion write and the revision history
-    /// are one unit, and two deploys never pick the same revision number.
+    /// Held by every pipeline write: a deploy or rollback (the Orion write and the revision history
+    /// are one unit, and two never pick the same revision number), and every write that rebuilds
+    /// workload records from a view it read (start/stop, remove, the camera-input and field-layout
+    /// syncs), so no write lands between another's read and its write and is put back.
     pub deploys: Mutex<()>,
     /// The last stage/apply helios-api started, for `/v1/update/status`.
     pub update_task: std::sync::Mutex<Option<routes::update::UpdateTask>>,
