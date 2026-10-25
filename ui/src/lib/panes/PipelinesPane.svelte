@@ -5,6 +5,8 @@
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
+  import { shell } from "#lib/core/shell.svelte.js";
+  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
   import { drafts } from "#lib/graph/drafts.svelte.js";
   import { tableFor, templateGraph, TEMPLATES } from "#lib/graph/graph.js";
   import IconButton from "#lib/kit/IconButton.svelte";
@@ -30,9 +32,17 @@
     ];
   }
 
+  /** The default pipelines, picked per camera (What cameras run). */
+  function openDefaults() {
+    shell.go("cameras");
+    workspaces.open("cameras", pane("camera-jobs"));
+  }
+
   async function create(e: MouseEvent) {
     menu.below(e.currentTarget as Element, [
-      { heading: "New pipeline from" },
+      { label: "Default pipeline for a camera…", icon: "list-check", hint: "Localization, 3D map, depth, markers or feature tracks: one pipeline per camera", run: openDefaults },
+      { separator: true as const },
+      { heading: "Custom pipeline from" },
       ...TEMPLATES.map((t) => ({
         label: t.title,
         icon: t.icon,
@@ -48,6 +58,7 @@
 </script>
 
 <PaneBar>
+  <IconButton icon="list-check" label="Each camera's default pipeline" text="Defaults" size={24} onclick={openDefaults} />
   <IconButton icon="plus" label="New pipeline" text="New" size={24} onclick={create} />
 </PaneBar>
 
