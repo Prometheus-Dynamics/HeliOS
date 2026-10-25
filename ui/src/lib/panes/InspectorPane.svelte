@@ -21,6 +21,7 @@
   import Slider from "#lib/kit/Slider.svelte";
   import ExposureFields from "#lib/camera/ExposureFields.svelte";
   import FrameRateField from "#lib/camera/FrameRateField.svelte";
+  import PipelineChoice from "#lib/camera/PipelineChoice.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { system } from "#lib/stores/system.svelte.js";
   import { field } from "#lib/stores/field.svelte.js";
@@ -49,6 +50,9 @@
     {#if c}
       {@const uses = cluster.workloads.filter((w) => Object.values(w.bindings).includes(c.resourceId))}
       <IdentityEditor id={c.resourceId} fallbackName={c.name} fallbackIcon="camera" sub="{c.sensor} · {cluster.node(c.nodeId)?.name}" />
+      <Section title="What it runs" key="insp-cam-pipeline">
+        <PipelineChoice camera={c} />
+      </Section>
       <Section title="Quick controls" key="insp-cam">
         <ExposureFields camera={c} compact />
         <FrameRateField camera={c} help="The same control as the camera's settings." />

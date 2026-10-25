@@ -61,6 +61,8 @@
   }
 
   const producers = $derived(cluster.workloads.filter((x) => x.id !== w.id));
+  /** Devices a pipeline can run on; with one device there is nothing to choose. */
+  const hosts = $derived(cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId));
   const portsOf = (id: string | undefined) => (cluster.workload(id ?? "")?.outputs ?? []).map((o) => o.split(".").at(-1) ?? o);
 </script>
 
@@ -177,9 +179,11 @@
   <Prop label="NetworkTables" help="Where robot code reads this pipeline's results.">
     <span class="mono">{camera ? (guide.table(camera) ?? "—") : "—"}</span>
   </Prop>
-  <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
-    <Choice value={w.nodeId} options={cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId).map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
-  </Prop>
+  {#if hosts.length > 1}
+    <Prop label="Runs on" help="Moving a pipeline keeps its camera: frames travel over the network if the camera is elsewhere.">
+      <Choice value={w.nodeId} options={hosts.map((n) => ({ value: n.id, label: identity.name(n.id, n.name) }))} onchange={(v) => (w.nodeId = v)} />
+    </Prop>
+  {/if}
   <Prop label="CPU core" help="All of a camera's work runs on one core; pin it so nothing else slows it.">
     <Choice value={w.cpu === null ? "auto" : String(w.cpu)} options={[{ value: "auto", label: "Auto" }, ...ENGINE_CPU_CORES.map((core) => ({ value: String(core), label: `Core ${core}` }))]} onchange={(v) => cluster.setCpu(w.id, v === "auto" ? null : Number(v))} />
     {#if w.cpuError}<Badge tone="warn" text={w.cpuError} />{:else if w.cpuApplied !== null}<span class="mono">on core {w.cpuApplied}</span>{/if}
@@ -221,12 +225,13 @@
   }
   .tools {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 2px 10px 6px;
   }
   .search {
     flex: 1;
-    min-width: 0;
+    min-width: 120px;
     height: 24px;
     padding: 0 8px;
     font: inherit;

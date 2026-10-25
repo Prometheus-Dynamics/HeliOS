@@ -2,7 +2,6 @@
   // What each camera runs, all cameras at once: the setup step's screen. Each camera picks from
   // the default pipelines; tuning a pipeline afterwards is the pipeline's own settings.
   import Icon from "#lib/components/common/Icon.svelte";
-  import type { DefaultTemplate } from "#lib/core/defaults.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
   import { guide } from "#lib/core/guide.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
@@ -13,11 +12,6 @@
   import Empty from "./Empty.svelte";
 
   let {}: PaneProps = $props();
-
-  let offered = $state<DefaultTemplate[]>([]);
-  $effect(() => {
-    void cluster.defaultTemplates().then((list) => (offered = list));
-  });
 </script>
 
 <div class="scroll">
@@ -34,7 +28,7 @@
           </button>
         {/if}
       </header>
-      <PipelineChoice {camera} {offered} />
+      <PipelineChoice {camera} />
     </section>
   {:else}
     <Empty icon="camera" text="No cameras yet. Plug one in and it appears here." />

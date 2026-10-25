@@ -3,7 +3,7 @@
 // With `?mock=1` (or VITE_HELIOS_MOCK=1) it runs the simulated robot from
 // mock.ts instead, for UI work without a device.
 
-import { tableFor, templateGraph } from "#lib/graph/graph.js";
+import { tableFor } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
@@ -306,12 +306,6 @@ class ClusterStore {
     if (!w) return;
     w.bindings = { ...w.bindings, [input]: resourceId };
     this.log(w.nodeId, "helios-runner", "info", `${w.name}: ${input} bound to ${resourceId}`);
-  }
-
-  /** A detection job on a camera, from the device's own template (mock: the demo graph). */
-  async createJob(name: string, nodeId: string, cameraId: string, family: "apriltag" | "aruco", dictionary: string): Promise<string> {
-    if (this.live) return this.live.createJob(name, cameraId, family, dictionary);
-    return this.createWorkload(name, nodeId, cameraId, templateGraph(family, tableFor(nodeId)));
   }
 
   /** The default pipelines this device offers a camera (`core/defaults.ts`). */

@@ -3,16 +3,20 @@
   // live 3D map and its depth on the same detector), ArUco markers, feature tracks or video only.
   // The choices become the one template that does them all, deployed as the camera's pipeline.
   import type { Camera } from "#lib/api/model.js";
-  import { choiceOf, normalized, templateFor, type Choice, type DefaultTemplate, type TagKind } from "#lib/core/defaults.js";
+  import { choiceOf, normalized, templateFor, type Choice, type TagKind } from "#lib/core/defaults.js";
   import { guide } from "#lib/core/guide.svelte.js";
   import { identity } from "#lib/core/identity.svelte.js";
+  import { offeredTemplates } from "#lib/core/templates.svelte.js";
   import Seg from "#lib/kit/Seg.svelte";
   import Switch from "#lib/kit/Switch.svelte";
-  import { drafts } from "#lib/graph/drafts.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
 
-  let { camera, offered }: { camera: Camera; offered: DefaultTemplate[] } = $props();
+  let { camera }: { camera: Camera } = $props();
 
+  $effect(() => {
+    void offeredTemplates.load();
+  });
+  const offered = $derived(offeredTemplates.list);
   const running = $derived(guide.active(camera));
   const current = $derived(choiceOf(running?.graph, guide.dictionary(camera)));
   let draft = $state<Choice | null>(null);
@@ -33,8 +37,6 @@
     busy = true;
     try {
       await cluster.applyDefault(camera.resourceId, template, identity.name(camera.resourceId, camera.name));
-      // The camera's pipeline has a new graph: its editor drafts start from it.
-      for (const w of guide.workloadsFor(camera)) drafts.get(w.id).reload();
       draft = null;
     } finally {
       busy = false;
@@ -59,26 +61,27 @@
         onchange={(v) => set({ tags: v === "none" ? null : (v as TagKind) })}
       />
     </div>
+    <!-- Not <label>s: a label forwards its click to the switch (a button), which would toggle it back. -->
     {#if choice.tags === "apriltag"}
-      <label class="opt">
+      <div class="opt">
         <Switch checked label="Field position" disabled />
-        <span><b>Field position</b><i>Where the robot is on the field, from the tags. Always on with AprilTag.</i></span>
-      </label>
-      <label class="opt">
+        <span class="txt"><b>Field position</b><i>Where the robot is on the field, from the tags. Always on with AprilTag.</i></span>
+      </div>
+      <div class="opt">
         <Switch checked={choice.map} label="3D map" onchange={(v) => set({ map: v })} />
-        <span><b>3D map</b><i>A live map of the surroundings and the camera's pose in it.</i></span>
-      </label>
-      <label class="opt">
+        <button type="button" class="txt" onclick={() => set({ map: !choice.map })}><b>3D map</b><i>A live map of the surroundings and the camera's pose in it.</i></button>
+      </div>
+      <div class="opt">
         <Switch checked={choice.depth} label="Depth" onchange={(v) => set({ depth: v })} />
-        <span><b>Depth</b><i>A dense depth mesh of what the camera sees. Needs the 3D map.</i></span>
-      </label>
+        <button type="button" class="txt" onclick={() => set({ depth: !choice.depth })}><b>Depth</b><i>A dense depth mesh of what the camera sees. Needs the 3D map.</i></button>
+      </div>
     {:else if choice.tags === "aruco"}
       <p class="note">ArUco markers give each marker's pose. The 3D map and depth need AprilTags.</p>
     {:else}
-      <label class="opt">
+      <div class="opt">
         <Switch checked={choice.features} label="Feature tracks" onchange={(v) => set({ features: v })} />
-        <span><b>Feature tracks</b><i>Image features followed from frame to frame. Off: video only.</i></span>
-      </label>
+        <button type="button" class="txt" onclick={() => set({ features: !choice.features })}><b>Feature tracks</b><i>Image features followed from frame to frame. Off: video only.</i></button>
+      </div>
     {/if}
     <div class="foot">
       <span class="runs">
@@ -91,8 +94,10 @@
         {/if}
       </span>
       {#if changed}
-        <button type="button" class="ghost" onclick={() => (draft = null)}>Cancel</button>
-        <button type="button" class="apply" disabled={busy || (!template && !wantedNothing(choice))} onclick={apply}>{busy ? "Applying…" : "Apply"}</button>
+        <span class="btns">
+          <button type="button" class="ghost" onclick={() => (draft = null)}>Cancel</button>
+          <button type="button" class="apply" disabled={busy || (!template && !wantedNothing(choice))} onclick={apply}>{busy ? "Applying…" : "Apply"}</button>
+        </span>
       {/if}
     </div>
   {/if}
@@ -114,8 +119,9 @@
   }
   .row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 6px 10px;
   }
   .k {
     width: 44px;
@@ -126,15 +132,29 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
+  }
+  .opt > :global(.sw) {
+    margin-top: 2px;
+  }
+  .txt {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    text-align: left;
+    color: inherit;
+  }
+  button.txt {
     cursor: pointer;
   }
-  .opt span {
-    display: flex;
-    flex-direction: column;
+  .opt b,
+  .opt i {
+    display: block;
   }
   .opt b {
     font-size: 12px;
     font-weight: 600;
+    line-height: 1.3;
   }
   .opt i {
     font-style: normal;
@@ -150,6 +170,7 @@
   }
   .foot {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
     padding-top: 6px;
@@ -157,7 +178,7 @@
   }
   .runs {
     flex: 1;
-    min-width: 0;
+    min-width: 140px;
     font-size: 11.5px;
     color: var(--fg-2);
   }
@@ -168,12 +189,18 @@
   .warn {
     color: var(--warn);
   }
+  .btns {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
   button {
     height: 24px;
     padding: 0 10px;
     font-size: 11.5px;
     font-weight: 600;
     border-radius: var(--r-1);
+    white-space: nowrap;
   }
   .ghost {
     color: var(--fg-2);

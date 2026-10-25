@@ -3,8 +3,10 @@
   // how much of HeliOS to show to begin with. Takes under a minute; everything
   // can be changed later.
   import Icon from "#lib/components/common/Icon.svelte";
-  import { guide, type Job } from "#lib/core/guide.svelte.js";
+  import { choiceOf, templateFor } from "#lib/core/defaults.js";
+  import { guide } from "#lib/core/guide.svelte.js";
   import { colorVar, ID_COLORS, identity } from "#lib/core/identity.svelte.js";
+  import { offeredTemplates } from "#lib/core/templates.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { team } from "#lib/core/team.svelte.js";
   import { workspaces } from "#lib/core/workspace.svelte.js";
@@ -27,6 +29,9 @@
   const choice = $derived(secureChoice ?? (Number(teamText) > 0 ? "open" : "secure"));
   const blocked = $derived(step === SECURITY && choice === "secure" && auth.open);
   const overlays = { ...DEFAULT_OVERLAYS, histogram: false, hud: false };
+  $effect(() => {
+    if (help.onboarding) void offeredTemplates.load();
+  });
 
   /** The screens "Start simple" keeps in the rail: what a new team needs first. */
   const SIMPLE_SCREENS = ["start", "cameras", "calibration", "settings"];
@@ -82,7 +87,7 @@
         </div>
       {:else if step === 1}
         <h2>Your cameras</h2>
-        <p>Name each one so you can tell them apart, and choose what it does. The colour follows it everywhere.</p>
+        <p>Name each one so you can tell them apart, and choose what it does: all of a camera's work runs as one pipeline on one core. The colour follows it everywhere.</p>
         <div class="cams">
           {#each cluster.cameras as c (c.resourceId)}
             <div class="cam" style:--c={colorVar(identity.get(c.resourceId).color)}>
@@ -93,10 +98,21 @@
               {#if c.foreign}
                 <span class="job ro">Run by {c.foreign}</span>
               {:else}
-                <select class="job" value={guide.job(c)} aria-label="What this camera does" onchange={(e) => guide.setJob(c, (e.currentTarget as HTMLSelectElement).value as Job)}>
-                  <option value="apriltag">Find AprilTags</option>
-                  <option value="aruco">Find ArUco markers</option>
-                  <option value="view">Video only</option>
+                {@const running = templateFor(choiceOf(guide.active(c)?.graph, guide.dictionary(c)), offeredTemplates.list)}
+                <select
+                  class="job"
+                  value={running?.id ?? ""}
+                  aria-label="What this camera does"
+                  title={running?.summary ?? "No pipeline: the camera only shows video."}
+                  onchange={(e) => {
+                    const id = (e.currentTarget as HTMLSelectElement).value;
+                    void cluster.applyDefault(c.resourceId, offeredTemplates.list.find((t) => t.id === id) ?? null, identity.name(c.resourceId, c.name));
+                  }}
+                >
+                  {#each offeredTemplates.list as t (t.id)}
+                    <option value={t.id}>{t.title}</option>
+                  {/each}
+                  <option value="">Video only</option>
                 </select>
               {/if}
             </div>

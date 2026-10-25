@@ -10,15 +10,10 @@ import { cluster } from "#lib/stores/cluster.svelte.js";
 import { liveState } from "#lib/stores/live.svelte.js";
 import { field } from "#lib/stores/field.svelte.js";
 import { robot } from "#lib/stores/robot.svelte.js";
-import { toasts } from "#lib/stores/toasts.svelte.js";
 
+/** The kind of job a camera's pipeline does, coarsely (what a camera runs is chosen in
+ * `camera/PipelineChoice.svelte`, from the default templates in `core/defaults.ts`). */
 export type Job = "apriltag" | "aruco" | "view";
-
-export const JOBS: { id: Job; title: string; detail: string; icon: IconName }[] = [
-  { id: "apriltag", title: "Find AprilTags", detail: "Works out where the robot is on the field from the tags on the walls.", icon: "target" },
-  { id: "aruco", title: "Find ArUco markers", detail: "Spots small printed markers, for game pieces or practice targets.", icon: "tag" },
-  { id: "view", title: "Just show video", detail: "No detection. Use it as a driver camera.", icon: "eye" },
-];
 
 /** The tag families a job can use, most common first (FRC uses 36h11 since 2024, 16h5 before). */
 export const DICTIONARIES: Record<"apriltag" | "aruco", { value: string; label: string }[]> = {
@@ -72,24 +67,6 @@ class GuideStore {
     if (cluster.node(c.nodeId)?.health === "offline") return "Its device is offline";
     if (c.stats.fps < c.settings.fps * 0.8) return "Running slower than it should";
     return null;
-  }
-
-  async setJob(c: Camera, job: Job) {
-    if (c.foreign) {
-      toasts.info(`${c.name} is run by ${c.foreign}; change its job there`);
-      return;
-    }
-    const mine = this.workloadsFor(c);
-    for (const w of mine) if (w.state === "running" || w.state === "starting") await cluster.stopWorkload(w.id);
-    if (job === "view") return;
-    const family = job === "apriltag" ? "apriltag" : "aruco";
-    const existing = mine.find((w) => w.state !== "quarantined" && dictionaryOf(w).startsWith(family));
-    if (existing) {
-      await cluster.restartWorkload(existing.id);
-      return;
-    }
-    const name = `${job === "apriltag" ? "AprilTags" : "ArUco"} · ${identity.name(c.resourceId, c.name)}`;
-    await cluster.createJob(name, c.nodeId, c.resourceId, family, DICTIONARIES[family][0].value);
   }
 
   /** Where this camera's results go for robot code. */

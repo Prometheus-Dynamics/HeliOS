@@ -31,11 +31,11 @@ export function registerScreens() {
   );
   workspaces.registerPreset(
     "cameras",
-    ws("cameras", "Cameras", "camera", 4, "Tune one camera: live view with ROI and histogram, and every setting.",
+    ws("cameras", "Cameras", "camera", 4, "Tune one camera: live view with ROI and histogram, every setting, and what each camera runs.",
       row([0.17, 0.55, 0.28],
         stack(pane("cameras")),
         col([0.72, 0.28], stack(pane("camera")), stack(pane("logs"))),
-        stack(pane("camera-controls")),
+        stack(pane("camera-controls"), pane("camera-jobs")),
       ),
     ),
   );
@@ -51,10 +51,10 @@ export function registerScreens() {
   );
   workspaces.registerPreset(
     "pipelines",
-    ws("pipelines", "Pipelines", "schema", 10, "Edit pipeline graphs: node catalog, canvas, inspector, profiler.",
+    ws("pipelines", "Pipelines", "schema", 10, "Each camera's default pipeline, and the graph editor: node catalog, canvas, inspector, profiler.",
       row([0.15, 0.6, 0.25],
         stack(pane("catalog")),
-        col([0.68, 0.32], stack(pane("graph")), stack(pane("pipelines"), pane("profiler"))),
+        col([0.68, 0.32], stack(pane("graph")), stack(pane("pipelines"), pane("camera-jobs"), pane("profiler"))),
         col([0.6, 0.4], stack(pane("inspector")), stack(pane("camera"))),
       ),
     ),

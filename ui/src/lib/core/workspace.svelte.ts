@@ -51,8 +51,17 @@ function findStack(node: LayoutNode, id: string): Extract<LayoutNode, { kind: "s
   return null;
 }
 
-function firstStack(node: LayoutNode): Extract<LayoutNode, { kind: "stack" }> {
-  return node.kind === "stack" ? node : firstStack(node.children[0]);
+type Stack = Extract<LayoutNode, { kind: "stack" }>;
+
+/** Every stack with the share of the screen it covers (the product of its splits' sizes). */
+function stacksOf(node: LayoutNode, area = 1): { stack: Stack; area: number }[] {
+  if (node.kind === "stack") return [{ stack: node, area }];
+  return node.children.flatMap((child, i) => stacksOf(child, area * (node.sizes[i] ?? 1 / node.children.length)));
+}
+
+/** The stack with the most room (the first of equals). */
+function largestStack(node: LayoutNode): Stack {
+  return stacksOf(node).reduce((best, s) => (s.area > best.area ? s : best)).stack;
 }
 
 /** Removes empty stacks and single-child splits, keeping sizes summing to 1. */
@@ -296,17 +305,27 @@ class WorkspaceStore {
     } else this.open(wsId, ref);
   }
 
-  /** Adds a pane to the focused stack (or the first one). */
+  /**
+   * Shows a pane: the same pane already open anywhere on the screen comes to the front where it
+   * is; otherwise it joins the focused stack, or, when nothing is focused (a jump from another
+   * screen), the largest stack, so it gets room rather than the narrowest column.
+   */
   open(wsId: string, ref: PaneRef) {
     const ws = this.get(wsId);
     if (!ws) return;
-    const target = (this.focusedStack && findStack(ws.root, this.focusedStack)) || firstStack(ws.root);
-    const existing = target.tabs.findIndex((t) => t.type === ref.type && JSON.stringify(t.props ?? {}) === JSON.stringify(ref.props ?? {}));
-    if (existing >= 0) target.active = existing;
-    else {
-      target.tabs.push(ref);
-      target.active = target.tabs.length - 1;
+    const same = (t: PaneRef) => t.type === ref.type && JSON.stringify(t.props ?? {}) === JSON.stringify(ref.props ?? {});
+    const home = stacksOf(ws.root).find((s) => s.stack.tabs.some(same));
+    if (home) {
+      // Bringing a tab to the front is not a layout change (as `activate`).
+      home.stack.active = home.stack.tabs.findIndex(same);
+      this.focusedStack = home.stack.id;
+      save("workspaces", this.#saved);
+      return;
     }
+    const target = (this.focusedStack && findStack(ws.root, this.focusedStack)) || largestStack(ws.root);
+    target.tabs.push(ref);
+    target.active = target.tabs.length - 1;
+    this.focusedStack = target.id;
     this.#touch(wsId);
   }
 

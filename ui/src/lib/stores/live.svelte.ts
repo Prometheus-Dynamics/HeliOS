@@ -271,6 +271,10 @@ export class LiveCluster {
   /** The device's pipeline templates, read once (`GET /v1/pipelines/templates`); undefined while
    * the device cannot answer (the error is in `liveState.error`), and asked again next time. */
   private templates?: W.PipelineTemplate[];
+  /** The device's templates have been read (and offered lists are its own). */
+  get templatesKnown(): boolean {
+    return this.templates !== undefined;
+  }
   private async loadTemplates(): Promise<W.PipelineTemplate[] | undefined> {
     if (this.templates) return this.templates;
     const templates = await this.guard("templates", () => api.pipelineTemplates());
@@ -616,31 +620,6 @@ export class LiveCluster {
     await this.refreshPipelines();
   }
 
-  /** Deploy the device's own template for `family` on `cameraId`: its camera input bound (with the
-   * ISP's half level attached, much cheaper than the detector building it) and its tag family set. */
-  async createJob(name: string, cameraId: string, family: "apriltag" | "aruco", dictionary?: string): Promise<string> {
-    // All of a camera's Eidos work shares one core: a second Eidos pipeline on the camera would
-    // take another. Change the existing one (its tag family) instead.
-    const running = this.eidosPipelineOn(cameraId);
-    if (running) {
-      toasts.warning(`${running.name} already runs Eidos on this camera. Change its tag family instead of adding a second pipeline (each takes a core).`);
-      return "";
-    }
-    const templates = await this.loadTemplates();
-    const template = templates?.find((t) => t.family === family && (t.variant ?? "default") === "default");
-    if (!template) {
-      toasts.error(`This device has no ${family} template`);
-      return "";
-    }
-    const created = await this.act(
-      "Create pipeline",
-      () => api.createPipeline({ name, graph: template.graph, bindings: { [template.camera_input]: { resource_id: cameraId, pyramid: template.pyramid ?? 1 } }, dictionary: dictionary ?? template.dictionary ?? undefined }),
-      (p) => `${p.name} deployed`,
-    );
-    await this.refreshPipelines();
-    return created?.id ?? "";
-  }
-
   async defaultTemplates(): Promise<DefaultTemplate[]> {
     return defaultsFrom(await this.loadTemplates());
   }
@@ -703,14 +682,6 @@ export class LiveCluster {
     const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
     await this.act("Search", () => api.putPipeline(id, spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
     await this.refreshPipelines();
-  }
-
-  /** The enabled pipeline that runs Eidos (its graph requires `eidos`) on `cameraId`, if any. */
-  eidosPipelineOn(cameraId: string): W.Pipeline | undefined {
-    for (const p of this.pipelines.values()) {
-      if (p.enabled && p.graph?.requires.some((r) => r.id === "eidos") && Object.values(p.bindings).some((b) => b.resource_id === cameraId)) return p;
-    }
-    return undefined;
   }
 
   /** Redeploy a pipeline with another tag family (the same graph, bindings and settings). */

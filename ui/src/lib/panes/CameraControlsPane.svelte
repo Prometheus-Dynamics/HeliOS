@@ -250,8 +250,9 @@
   }
   .runs {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
     padding: 6px 10px;
     font-size: 11.5px;
     border-bottom: 1px solid var(--line);
@@ -264,12 +265,13 @@
   }
   .tools {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 6px 10px;
   }
   .search {
     flex: 1;
-    min-width: 0;
+    min-width: 120px;
     height: 24px;
     padding: 0 8px;
     font: inherit;
