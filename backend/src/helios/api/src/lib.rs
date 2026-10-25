@@ -13,6 +13,7 @@ pub mod camera_context;
 pub mod camera_uncertainty;
 pub mod camera_controls;
 pub mod camera_preview;
+pub mod camera_streams;
 pub mod config;
 pub mod error;
 pub mod events;

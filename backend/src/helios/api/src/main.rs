@@ -87,6 +87,8 @@ async fn serve() -> anyhow::Result<()> {
     helios_api::leds::start(&state, PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
     // Stored camera settings are applied whenever a camera service appears.
     let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
+    // Each camera's preview in the board's stream list, for Atlas.
+    let _camera_streams = helios_api::camera_streams::spawn(state.clone(), helios_api::camera_streams::path());
     // A live mapper's converged self-calibration of an uncalibrated camera is kept as its calibration.
     let _self_calibration = helios_api::self_calibration::spawn(state.clone());
     // Playback players left by an earlier helios-api are gone: their resources are cleared.

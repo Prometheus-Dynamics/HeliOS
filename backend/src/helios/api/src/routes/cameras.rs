@@ -108,6 +108,18 @@ pub fn camera_records(view: &StateView) -> impl Iterator<Item = &orion::control_
     view.resources.values().filter(|r| r.resource_type.as_str() == CAMERA_RESOURCE_TYPE)
 }
 
+/// Each camera that serves frames, as `(id, display name)`: the cameras with a preview.
+pub fn streaming_cameras(view: &StateView) -> Vec<(String, String)> {
+    camera_records(view)
+        .filter(|record| frames_socket(&record.endpoints).is_some())
+        .map(|record| {
+            let id = record.resource_id.to_string();
+            let name = label_map(&record.labels).get("helios.display_name").cloned().unwrap_or_else(|| id.clone());
+            (id, name)
+        })
+        .collect()
+}
+
 fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, node_id: &str, mounts: &BTreeMap<String, CameraMount>) -> Camera {
     let labels = label_map(&record.labels);
     let id = record.resource_id.to_string();
