@@ -50,6 +50,16 @@ export function registerScreens() {
     ),
   );
   workspaces.registerPreset(
+    "perception",
+    ws("perception", "Perception", "eye", 12, "What the camera sees, what it would look like on the field, and the depth the mapper measures, side by side.",
+      row([0.36, 0.38, 0.26],
+        stack(pane("camera", { overlays: { depth: true } })),
+        stack(pane("map")),
+        stack(pane("depth")),
+      ),
+    ),
+  );
+  workspaces.registerPreset(
     "pipelines",
     ws("pipelines", "Pipelines", "schema", 10, "Each camera's default pipeline, and the graph editor: node catalog, canvas, inspector, profiler.",
       row([0.15, 0.6, 0.25],
@@ -100,6 +110,7 @@ export function registerScreens() {
 
 /** Prebuilt groups of panes you can drop into any screen. */
 export const KITS: { id: string; title: string; summary: string; icon: IconName; make: () => LayoutNode }[] = [
+  { id: "perception", title: "Perception", summary: "The camera view with its depth, the 3D scene of the field and the map, and the depth.", icon: "eye", make: () => row([0.36, 0.38, 0.26], stack(pane("camera", { overlays: { depth: true } })), stack(pane("map")), stack(pane("depth"))) },
   { id: "tune-camera", title: "Tune a camera", summary: "Live view with ROI and histogram, next to every camera setting.", icon: "camera", make: () => row([0.6, 0.4], stack(pane("camera")), stack(pane("camera-controls"))) },
   { id: "edit-pipeline", title: "Edit a pipeline", summary: "Node catalog, graph canvas and inspector.", icon: "schema", make: () => row([0.2, 0.55, 0.25], stack(pane("catalog")), stack(pane("graph")), stack(pane("inspector"))) },
   { id: "performance", title: "Performance", summary: "Per-node timings and the processes and cores behind them.", icon: "stopwatch", make: () => col([0.5, 0.5], stack(pane("profiler")), stack(pane("processes"))) },

@@ -13,10 +13,18 @@ import { defaultsFrom, type DefaultTemplate } from "#lib/core/defaults.js";
 
 /** The live mapper's outputs: Eidos's template names and the older ones. */
 const MAP_PORTS = new Set(["map_pose", "map_snapshot", "map_timing", "pose", "snapshot", "timing"]);
+/** The dense mapper's outputs (`eidos:dense.map`). */
+const DENSE_PORTS = new Set(["dense_mesh", "dense_depth", "dense_timing"]);
+/** The tag poses and the field pose of a pose graph. */
+const POSE_PORTS = new Set(["pose_solutions", "multi_tag_pose"]);
+/** A camera's intrinsics are read again after this long (a recalibration shows within a minute). */
+const INTRINSICS_TTL_MS = 60_000;
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
 import { parseMapPose, parseMapSnapshot, parseMapTiming, TimingWindow, type MapView } from "#lib/vision/map.js";
+import { parseDenseDepth, parseDenseMesh, parseDenseTiming, type DenseView } from "#lib/vision/dense.js";
+import { parseFieldPose, parseTagPoses, type Intrinsics, type PoseView } from "#lib/vision/pose.js";
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
@@ -105,6 +113,15 @@ export class LiveCluster {
   private maps = $state<Record<string, MapView>>({});
   /** The frame timings of each live-map pipeline over the last second, for the Map pane's p50s. */
   private mapTimings = new Map<string, TimingWindow>();
+  /** The dense mapper's latest mesh, depth and timing per pipeline (`dense_*`). */
+  private dense = $state<Record<string, DenseView>>({});
+  /** The latest tag poses and field pose per pipeline (`pose_solutions`, `multi_tag_pose`). */
+  private poses = $state<Record<string, PoseView>>({});
+  /** Each camera's intrinsics from its calibration (null: none yet); read again after INTRINSICS_TTL_MS. */
+  private intrinsics = $state<Record<string, Intrinsics | null>>({});
+  private intrinsicsAt = new Map<string, number>();
+  /** The observed time of each dense or pose output last applied, so the same one is not applied twice. */
+  private seenAt = new Map<string, number>();
   private snapshot: Partial<DeviceSnapshot> = {};
   private timers: number[] = [];
   private unsubscribers: (() => void)[] = [];
@@ -291,6 +308,9 @@ export class LiveCluster {
       this.features = {};
       this.trailBooks.clear();
       this.maps = {};
+      this.dense = {};
+      this.poses = {};
+      this.seenAt.clear();
       return;
     }
     let outputs: W.PipelineOutput[];
@@ -318,6 +338,18 @@ export class LiveCluster {
       if (view) nextMaps[p.id] = view;
     }
     this.maps = nextMaps;
+    // The dense and pose outputs from the same list. A null value (nothing new this tick) keeps the latest.
+    for (const p of running) {
+      for (const port of [...DENSE_PORTS, ...POSE_PORTS]) {
+        const out = outputs.find((o) => o.pipeline === p.id && o.port === port);
+        if (!out || out.value === null || out.value === undefined) continue;
+        if (DENSE_PORTS.has(port)) this.applyDense(p.id, port, { change: "updated", value: out });
+        else this.applyPose(p.id, port, { change: "updated", value: out });
+      }
+    }
+    const runningIds = new Set(running.map((p) => p.id));
+    if (Object.keys(this.dense).some((id) => !runningIds.has(id))) this.dense = Object.fromEntries(Object.entries(this.dense).filter(([id]) => runningIds.has(id)));
+    if (Object.keys(this.poses).some((id) => !runningIds.has(id))) this.poses = Object.fromEntries(Object.entries(this.poses).filter(([id]) => runningIds.has(id)));
   }
 
   /** The live-map view of a pipeline from a list of its outputs (null when it has none of them). */
@@ -367,6 +399,125 @@ export class LiveCluster {
   /** The live-map view of a pipeline: its latest pose, snapshot and timing. */
   mapFor(pipelineId: string): MapView | null {
     return this.maps[pipelineId] ?? null;
+  }
+
+  /** Whether an output with this observed time is one already applied (and so is not applied again). */
+  private seen(key: string, observed: number): boolean {
+    if (!observed) return false;
+    if (this.seenAt.get(key) === observed) return true;
+    this.seenAt.set(key, observed);
+    return false;
+  }
+
+  /** Drops a pipeline's dense and pose state (it stopped, or its output went). */
+  private forgetDense(pipelineId: string) {
+    if (pipelineId in this.dense) {
+      const { [pipelineId]: _, ...rest } = this.dense;
+      this.dense = rest;
+    }
+    if (pipelineId in this.poses) {
+      const { [pipelineId]: _, ...rest } = this.poses;
+      this.poses = rest;
+    }
+    for (const key of [...this.seenAt.keys()]) if (key.startsWith(`${pipelineId}/`)) this.seenAt.delete(key);
+  }
+
+  /**
+   * A `dense_mesh`, `dense_depth` or `dense_timing` event. The mesh comes at most once a second and
+   * the depth at most twice a second, so a null value (nothing new this tick) keeps the latest of each.
+   */
+  private applyDense(pipelineId: string, port: string, data: { change: string; value?: W.PipelineOutput }) {
+    const pipeline = this.pipelines.get(pipelineId);
+    if (data.change === "removed" || !pipeline || pipeline.state !== "running") return this.forgetDense(pipelineId);
+    const raw = data.value?.value;
+    if (raw === null || raw === undefined) return;
+    if (this.seen(`${pipelineId}/${port}`, data.value?.observed_at_ms ?? 0)) return;
+    const now = performance.now();
+    const current: DenseView = this.dense[pipelineId] ?? { mesh: null, depth: null, timing: null, depthAt: 0, meshAt: 0 };
+    let next: DenseView = current;
+    if (port === "dense_mesh") {
+      const mesh = parseDenseMesh(raw);
+      if (mesh) next = { ...current, mesh, meshAt: now };
+    } else if (port === "dense_depth") {
+      const depth = parseDenseDepth(raw);
+      if (depth) next = { ...current, depth, depthAt: now };
+    } else {
+      next = { ...current, timing: parseDenseTiming(raw) };
+    }
+    if (next !== current) this.dense = { ...this.dense, [pipelineId]: next };
+  }
+
+  /** A `pose_solutions` (tag poses) or `multi_tag_pose` (the camera in the field) event: that output alone changes. */
+  private applyPose(pipelineId: string, port: string, data: { change: string; value?: W.PipelineOutput }) {
+    const pipeline = this.pipelines.get(pipelineId);
+    if (data.change === "removed" || !pipeline || pipeline.state !== "running") {
+      if (pipelineId in this.poses) {
+        const { [pipelineId]: _, ...rest } = this.poses;
+        this.poses = rest;
+      }
+      return;
+    }
+    const raw = data.value?.value;
+    if (raw === null || raw === undefined) return;
+    if (this.seen(`${pipelineId}/${port}`, data.value?.observed_at_ms ?? 0)) return;
+    const current: PoseView = this.poses[pipelineId] ?? { tags: null, field: null };
+    const next: PoseView = port === "pose_solutions" ? { ...current, tags: parseTagPoses(raw) } : { ...current, field: parseFieldPose(raw) };
+    this.poses = { ...this.poses, [pipelineId]: next };
+  }
+
+  /** A pipeline's dense mapper outputs (null before its first one). */
+  denseFor(pipelineId: string): DenseView | null {
+    return this.dense[pipelineId] ?? null;
+  }
+
+  /** A pipeline's tag and field poses (null before its first output). */
+  posesFor(pipelineId: string): PoseView | null {
+    return this.poses[pipelineId] ?? null;
+  }
+
+  /** The running pipeline feeding a camera that has `wanted` (the first one that does), with its id. */
+  private pipelineWith(cameraId: string, wanted: (pipelineId: string) => boolean): string | undefined {
+    for (const p of this.pipelines.values()) {
+      if (p.state !== "running" || this.cameraOfPipeline(p) !== cameraId) continue;
+      if (wanted(p.id)) return p.id;
+    }
+    return undefined;
+  }
+
+  /** The dense outputs of the pipeline a camera feeds. */
+  denseOfCamera(cameraId: string): DenseView | null {
+    const id = this.pipelineWith(cameraId, (p) => p in this.dense);
+    return id ? this.dense[id] : null;
+  }
+
+  /** The tag and field poses of the pipeline a camera feeds. */
+  posesOfCamera(cameraId: string): PoseView | null {
+    const id = this.pipelineWith(cameraId, (p) => p in this.poses);
+    return id ? this.poses[id] : null;
+  }
+
+  /**
+   * A camera's intrinsics from its calibration, or null when it has none. Read from the device the
+   * first time and again after INTRINSICS_TTL_MS; the value arrives reactively when it is read.
+   */
+  intrinsicsFor(cameraId: string): Intrinsics | null {
+    const at = this.intrinsicsAt.get(cameraId);
+    const now = performance.now();
+    if (at === undefined || now - at > INTRINSICS_TTL_MS) {
+      this.intrinsicsAt.set(cameraId, now);
+      void this.loadIntrinsics(cameraId);
+    }
+    return this.intrinsics[cameraId] ?? null;
+  }
+
+  private async loadIntrinsics(cameraId: string) {
+    try {
+      const { calibrations } = await api.calibrations(cameraId);
+      const k = calibrations.find((c) => c.fx > 0 && c.fy > 0 && c.width > 0 && c.height > 0);
+      this.intrinsics = { ...this.intrinsics, [cameraId]: k ? { fx: k.fx, fy: k.fy, cx: k.cx, cy: k.cy, width: k.width, height: k.height, model: k.model, distortion: k.distortion } : null };
+    } catch {
+      // The device has no answer: keep what was read before.
+    }
   }
 
   /** The p50 frame and map milliseconds of a live-map pipeline over the last second. */
@@ -419,6 +570,8 @@ export class LiveCluster {
     }
     if (port === "tracks") return this.applyTracks(pipelineId, data);
     if (MAP_PORTS.has(port)) return this.applyMap(pipelineId, port, data);
+    if (DENSE_PORTS.has(port)) return this.applyDense(pipelineId, port, data);
+    if (POSE_PORTS.has(port)) return this.applyPose(pipelineId, port, data);
     if (port !== "detections") return;
     const pipeline = this.pipelines.get(pipelineId);
     const camera = pipeline && this.cameraOfPipeline(pipeline);

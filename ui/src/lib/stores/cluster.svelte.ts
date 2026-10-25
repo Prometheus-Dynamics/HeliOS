@@ -7,7 +7,9 @@ import { tableFor } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockMapView } from "#lib/api/mock.js";
+import { CAMERAS, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
+import type { DenseView } from "#lib/vision/dense.js";
+import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
 import { BUILT_IN, type DefaultTemplate } from "#lib/core/defaults.js";
 import type { CameraFeatures } from "#lib/vision/features.js";
 import type { MapView } from "#lib/vision/map.js";
@@ -164,7 +166,7 @@ class ClusterStore {
 
   detectionsFor(camera: Camera): Detection[] {
     if (this.live) return this.live.detectionsFor(camera.resourceId);
-    return this.feed?.frames[this.feedIndex(camera)]?.markers ?? [];
+    return this.feed?.frames?.[this.feedIndex(camera)]?.markers ?? [];
   }
 
   /** Feature tracks of a camera with a running `tracks` pipeline (null without one). */
@@ -191,8 +193,45 @@ class ClusterStore {
     return this.isLiveMap(w) && w.state === "running" ? { frameMs: 3.8 + (this.frame % 7) * 0.05, mapMs: 1.6 + (this.frame % 5) * 0.04 } : null;
   }
 
+  /** The running live-map workload that a camera feeds (the mock robot has one). */
+  private mapOfCamera(camera: Camera): Workload | undefined {
+    return this.workloads.find((w) => w.state === "running" && this.isLiveMap(w) && Object.values(w.bindings).includes(camera.resourceId));
+  }
+
+  /** A live-map workload's dense outputs: the mesh, the depth and the timing (null before the first). */
+  denseFor(w: Workload): DenseView | null {
+    if (this.live) return this.live.denseFor(w.id);
+    return this.isLiveMap(w) && w.state === "running" ? mockDenseView(this.frame) : null;
+  }
+
+  /** The dense outputs of the workload a camera feeds. */
+  denseForCamera(camera: Camera): DenseView | null {
+    if (this.live) return this.live.denseOfCamera(camera.resourceId);
+    const w = this.mapOfCamera(camera);
+    return w ? this.denseFor(w) : null;
+  }
+
+  /** A workload's tag poses (`pose_solutions`) and camera in the field (`multi_tag_pose`). */
+  poseViewFor(w: Workload): PoseView | null {
+    if (this.live) return this.live.posesFor(w.id);
+    return this.isLiveMap(w) && w.state === "running" ? mockPoseView(this.frame) : null;
+  }
+
+  /** The tag and field poses of the workload a camera feeds. */
+  poseViewForCamera(camera: Camera): PoseView | null {
+    if (this.live) return this.live.posesOfCamera(camera.resourceId);
+    const w = this.mapOfCamera(camera);
+    return w ? this.poseViewFor(w) : null;
+  }
+
+  /** A camera's intrinsics from its calibration (null without one, or until it is read). */
+  intrinsicsFor(camera: Camera): Intrinsics | null {
+    if (this.live) return this.live.intrinsicsFor(camera.resourceId);
+    return MOCK_INTRINSICS;
+  }
+
   posesFor(camera: Camera): TagPose[] {
-    return this.poses?.frames[this.feedIndex(camera)] ?? [];
+    return this.poses?.frames?.[this.feedIndex(camera)] ?? [];
   }
 
   node(id: string) {

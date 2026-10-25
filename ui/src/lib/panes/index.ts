@@ -12,6 +12,7 @@ import CameraListPane from "./CameraListPane.svelte";
 import CameraMosaicPane from "./CameraMosaicPane.svelte";
 import CameraViewPane from "./CameraViewPane.svelte";
 import CatalogPane from "./CatalogPane.svelte";
+import DepthPane from "./DepthPane.svelte";
 import DevicesPane from "./DevicesPane.svelte";
 import FieldPane from "./FieldPane.svelte";
 import GraphPane from "./GraphPane.svelte";
@@ -53,7 +54,8 @@ definePane({ type: "board", title: "Board maker", icon: "printer", group: "Visio
 definePane({ type: "pipelines", title: "Pipelines", icon: "list-details", group: "Pipelines", summary: "Every pipeline with its state and speed", component: PipelinesPane });
 definePane({ type: "graph", title: "Graph", icon: "schema", group: "Pipelines", summary: "Edit a pipeline's node graph", component: GraphPane, label: pinnedWorkload, identityOf: id("workload") });
 definePane({ type: "catalog", title: "Nodes", icon: "box-multiple", group: "Pipelines", summary: "Node types from the installed plugins", component: CatalogPane });
-definePane({ type: "map", title: "Map", icon: "route", group: "Pipelines", summary: "A live map: point cloud, camera path, keyframes and tags in 3D, with the mapper's state and timings", component: MapPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "map", title: "3D scene", icon: "route", group: "Vision", summary: "The live map in 3D from the field or the camera: points, path, keyframes, dense mesh, field tags and robot", component: MapPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "depth", title: "Depth", icon: "scan", group: "Vision", summary: "The dense mapper's depth of the camera, colour-mapped, with its frame, age and work per keyframe", component: DepthPane, label: pinnedWorkload, identityOf: id("workload") });
 definePane({ type: "profiler",title: "Profiler", icon: "stopwatch", group: "Pipelines", summary: "Per-node timing against the frame budget", component: ProfilerPane, label: pinnedWorkload, identityOf: id("workload") });
 definePane({ type: "streams", title: "Streams", icon: "broadcast", group: "Pipelines", summary: "What pipelines publish and where it goes", component: StreamsPane });
 definePane({ type: "robot3d", title: "Robot 3D", icon: "cube", group: "Robot", summary: "Cameras, fields of view, tags and your CAD", component: Robot3DPane });

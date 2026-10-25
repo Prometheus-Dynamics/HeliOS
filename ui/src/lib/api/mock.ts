@@ -7,6 +7,9 @@ import { CATALOG_BY_ID, defaults } from "./catalog";
 import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
 import type { MapPoints, MapPosedFrame, MapSnapshot, MapTag, MapTransform, MapView } from "../vision/map";
+import { encodeBase64, type DenseMeshView, type DenseView } from "../vision/dense";
+import { parseDenseDepth, parseDenseMesh, parseDenseTiming } from "../vision/dense";
+import { scaleIntrinsics, type Intrinsics, type PoseView, type TagPose, type TagPoses } from "../vision/pose";
 
 const now = Date.now();
 
@@ -539,6 +542,8 @@ export const LOGS: LogLine[] = Array.from({ length: 40 }, (_, i) => {
 // walls. The points are built once; `mockMapView` moves the camera and the keyframes.
 
 const MOCK_ROOM = { halfX: 2.5, halfZ: 1.8, height: 2.4 };
+/** Where the mock room sits in the field (its centre, metres): the mock map is aligned to the field layout. */
+const MOCK_ORIGIN: [number, number, number] = [8.27, 0, 4.03];
 /** The mock map's ticks per second (the pane's frame rate). */
 const MOCK_MAP_HZ = 16;
 
@@ -585,7 +590,7 @@ function buildMockPoints(): MapPoints {
         x = wall === 2 ? -halfX : halfX;
       }
     }
-    const p = [x, y, z];
+    const p = [x + MOCK_ORIGIN[0], y + MOCK_ORIGIN[1], z + MOCK_ORIGIN[2]];
     xyz.set(p, i * 3);
     p.forEach((v, axis) => {
       min[axis] = Math.min(min[axis], v);
@@ -600,31 +605,94 @@ function buildMockPoints(): MapPoints {
 
 let mockPoints: MapPoints | null = null;
 
-/** A camera at `position`, turned to face the room's centre (yaw only; it stays level). */
+/** A rotation quaternion (w, x, y, z) and a vector. */
+type Quat = { w: number; x: number; y: number; z: number };
+type Vec = [number, number, number];
+
+const sub = (a: Vec, b: Vec): Vec => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross = (a: Vec, b: Vec): Vec => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (a: Vec): Vec => {
+  const n = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / n, a[1] / n, a[2] / n];
+};
+
+function qmul(a: Quat, b: Quat): Quat {
+  return {
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+  };
+}
+
+function qconj(q: Quat): Quat {
+  return { w: q.w, x: -q.x, y: -q.y, z: -q.z };
+}
+
+/** `v` rotated by the unit quaternion `q`. */
+function qrot(q: Quat, v: Vec): Vec {
+  const tx = 2 * (q.y * v[2] - q.z * v[1]);
+  const ty = 2 * (q.z * v[0] - q.x * v[2]);
+  const tz = 2 * (q.x * v[1] - q.y * v[0]);
+  return [v[0] + q.w * tx + (q.y * tz - q.z * ty), v[1] + q.w * ty + (q.z * tx - q.x * tz), v[2] + q.w * tz + (q.x * ty - q.y * tx)];
+}
+
+/**
+ * The optical frame (x right, y down, z forward) of a camera at `position` looking at `target`,
+ * with the world's y up: the camera stays level.
+ */
+function opticalLookAt(position: Vec, target: Vec): Quat {
+  const z = unit(sub(target, position));
+  const x = unit(cross(z, [0, 1, 0]));
+  const y = cross(z, x);
+  const [m00, m01, m02] = [x[0], y[0], z[0]];
+  const [m10, m11, m12] = [x[1], y[1], z[1]];
+  const [m20, m21, m22] = [x[2], y[2], z[2]];
+  const trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const s = Math.sqrt(trace + 1) * 2;
+    return { w: 0.25 * s, x: (m21 - m12) / s, y: (m02 - m20) / s, z: (m10 - m01) / s };
+  }
+  if (m00 > m11 && m00 > m22) {
+    const s = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    return { w: (m21 - m12) / s, x: 0.25 * s, y: (m01 + m10) / s, z: (m02 + m20) / s };
+  }
+  if (m11 > m22) {
+    const s = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    return { w: (m02 - m20) / s, x: (m01 + m10) / s, y: 0.25 * s, z: (m12 + m21) / s };
+  }
+  const s = Math.sqrt(1 + m22 - m00 - m11) * 2;
+  return { w: (m10 - m01) / s, x: (m02 + m20) / s, y: (m12 + m21) / s, z: 0.25 * s };
+}
+
+/** The room's centre, where the camera looks (a point at the height of its view). */
+const MOCK_TARGET: Vec = [MOCK_ORIGIN[0], 1.0, MOCK_ORIGIN[2]];
+
+/** A camera at `position`, turned to look at the room's centre. */
 function lookAtCentre(position: [number, number, number]): MapTransform {
   const [px, py, pz] = position;
-  const yaw = Math.atan2(-px, -pz);
-  return { translation: { x: px, y: py, z: pz }, rotation: { w: Math.cos(yaw / 2), x: 0, y: Math.sin(yaw / 2), z: 0 } };
+  const q = opticalLookAt([px, py, pz], MOCK_TARGET);
+  return { translation: { x: px, y: py, z: pz }, rotation: q };
 }
 
 /** The camera's path: an ellipse through the room, one lap every ~210 ticks. */
 function mockCameraAt(tick: number): [number, number, number] {
   const phase = tick * 0.03;
-  return [1.6 * Math.cos(phase), 1.1 + 0.04 * Math.sin(2 * phase), 1.0 * Math.sin(phase)];
+  return [MOCK_ORIGIN[0] + 1.6 * Math.cos(phase), 1.1 + 0.04 * Math.sin(2 * phase), MOCK_ORIGIN[2] + 1.0 * Math.sin(phase)];
 }
 
 /** The six mock tags on the walls. `placed` is the frame the map placed it at (0: the first tag). */
 const MOCK_TAGS: { id: number; position: [number, number, number]; yaw: number; placed: number }[] = [
-  { id: 1, position: [-MOCK_ROOM.halfX, 1.2, -0.9], yaw: Math.PI / 2, placed: 0 },
-  { id: 2, position: [-MOCK_ROOM.halfX, 1.2, 0.9], yaw: Math.PI / 2, placed: 0 },
-  { id: 3, position: [MOCK_ROOM.halfX, 1.2, -0.6], yaw: -Math.PI / 2, placed: 0 },
-  { id: 4, position: [0.6, 1.2, -MOCK_ROOM.halfZ], yaw: 0, placed: 0 },
-  { id: 41, position: [-0.6, 1.2, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 14 },
-  { id: 42, position: [1.2, 0.9, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 37 },
+  { id: 101, position: [-MOCK_ROOM.halfX, 1.2, -0.9], yaw: Math.PI / 2, placed: 0 },
+  { id: 102, position: [-MOCK_ROOM.halfX, 1.2, 0.9], yaw: Math.PI / 2, placed: 0 },
+  { id: 103, position: [MOCK_ROOM.halfX, 1.2, -0.6], yaw: -Math.PI / 2, placed: 0 },
+  { id: 104, position: [0.6, 1.2, -MOCK_ROOM.halfZ], yaw: 0, placed: 0 },
+  { id: 141, position: [-0.6, 1.2, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 14 },
+  { id: 142, position: [1.2, 0.9, MOCK_ROOM.halfZ], yaw: Math.PI, placed: 37 },
 ];
 
 function mockTagPose(tag: (typeof MOCK_TAGS)[number]): MapTransform {
-  const [x, y, z] = tag.position;
+  const [x, y, z] = [tag.position[0] + MOCK_ORIGIN[0], tag.position[1] + MOCK_ORIGIN[1], tag.position[2] + MOCK_ORIGIN[2]];
   return { translation: { x, y, z }, rotation: { w: Math.cos(tag.yaw / 2), x: 0, y: Math.sin(tag.yaw / 2), z: 0 } };
 }
 
@@ -646,7 +714,7 @@ export function mockMapView(tick: number): MapView {
     seq: Math.floor(tick / (MOCK_MAP_HZ / 2)),
     run_id: 7,
     tag_size_m: 0.1651,
-    aligned: false,
+    aligned: true,
     estimated: true,
     trajectory,
     keyframes: trajectory.filter((f) => f.keyframe).map((f) => f.frame),
@@ -671,7 +739,7 @@ export function mockMapView(tick: number): MapView {
         points: 0,
       },
       calibration: { estimated: true, rms_px: 0.4, views: 107, frames: 150 },
-      alignment: { aligned: false, matched_tags: 0, residual_m: 0 },
+      alignment: { aligned: true, matched_tags: 6, residual_m: 0.012 },
     },
     snapshot,
     timing: {
@@ -686,5 +754,200 @@ export function mockMapView(tick: number): MapView {
         { name: "map", ms: map_ms },
       ],
     },
+  };
+}
+
+// --- The dense mapper and the tag poses (`?mock=1`) -----------------------------------------
+// The simulated robot's dense mapper: a mesh of the room (each second) and the depth the camera
+// sees of it (every two seconds), each in the device's wire format, so the same parsers read the
+// mock as the device. The tag poses are the room's tags as the camera sees them.
+
+/** The simulated camera's intrinsics: 1280 x 800, about 64 degrees across. */
+export const MOCK_INTRINSICS: Intrinsics = { fx: 1020, fy: 1020, cx: 640, cy: 400, width: 1280, height: 800 };
+/** The depth preview: half the sweep, 0.6 to 4 m (the room's range, so its gradient reads). */
+const MOCK_DEPTH = { width: 128, height: 80, near: 0.6, far: 4 };
+const MOCK_MESH_EVERY = MOCK_MAP_HZ;
+const MOCK_DEPTH_EVERY = MOCK_MAP_HZ * 2;
+
+/** Accumulates a mesh: whole grids of quads, two triangles each, with one normal and grey per grid. */
+class MockMesh {
+  readonly positions: number[] = [];
+  readonly normals: number[] = [];
+  readonly grey: number[] = [];
+  readonly indices: number[] = [];
+
+  /** A grid of `nu` x `nv` quads over `at(s, t)` for s, t in [0, 1]. */
+  grid(at: (s: number, t: number) => Vec, normal: Vec, nu: number, nv: number, grey: number) {
+    const base = this.grey.length;
+    for (let j = 0; j <= nv; j++)
+      for (let i = 0; i <= nu; i++) {
+        const p = at(i / nu, j / nv);
+        this.positions.push(p[0], p[1], p[2]);
+        this.normals.push(normal[0], normal[1], normal[2]);
+        this.grey.push(grey);
+      }
+    for (let j = 0; j < nv; j++)
+      for (let i = 0; i < nu; i++) {
+        const a = base + j * (nu + 1) + i;
+        const d = a + nu + 1;
+        this.indices.push(a, d, a + 1, a + 1, d, d + 1);
+      }
+  }
+}
+
+/** The room's surfaces the camera has mapped: the floor, the four walls and a table. */
+function mockRoomMesh(): MockMesh {
+  const { halfX: hx, halfZ: hz, height: h } = MOCK_ROOM;
+  const mesh = new MockMesh();
+  mesh.grid((s, t) => [-hx + 2 * hx * s, 0, -hz + 2 * hz * t], [0, 1, 0], 24, 18, 96);
+  mesh.grid((s, t) => [-hx + 2 * hx * s, h * t, -hz], [0, 0, 1], 24, 8, 170);
+  mesh.grid((s, t) => [-hx + 2 * hx * s, h * t, hz], [0, 0, -1], 24, 8, 150);
+  mesh.grid((s, t) => [-hx, h * t, -hz + 2 * hz * s], [1, 0, 0], 18, 8, 176);
+  mesh.grid((s, t) => [hx, h * t, -hz + 2 * hz * s], [-1, 0, 0], 18, 8, 160);
+  // A table: 1.0 x 0.75 m, 0.75 m high, at the room's middle.
+  const [tx0, tx1, tz0, tz1, th] = [-1.3, -0.3, 0.225, 0.975, 0.75];
+  mesh.grid((s, t) => [tx0 + (tx1 - tx0) * s, th, tz0 + (tz1 - tz0) * t], [0, 1, 0], 6, 4, 224);
+  mesh.grid((s, t) => [tx1, th * t, tz0 + (tz1 - tz0) * s], [1, 0, 0], 4, 3, 184);
+  mesh.grid((s, t) => [tx0, th * t, tz0 + (tz1 - tz0) * s], [-1, 0, 0], 4, 3, 184);
+  mesh.grid((s, t) => [tx0 + (tx1 - tx0) * s, th * t, tz0], [0, 0, -1], 6, 3, 190);
+  mesh.grid((s, t) => [tx0 + (tx1 - tx0) * s, th * t, tz1], [0, 0, 1], 6, 3, 190);
+  return mesh;
+}
+
+/** The mesh at tick `tick`, in the device's wire format (base64 of little-endian values). */
+function mockMeshWire(tick: number): Record<string, unknown> {
+  const mesh = mockRoomMesh();
+  const [ox, oy, oz] = MOCK_ORIGIN;
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    mesh.positions[i] += ox;
+    mesh.positions[i + 1] += oy;
+    mesh.positions[i + 2] += oz;
+  }
+  const vertices = mesh.grey.length;
+  const f32 = (values: number[]) => new Uint8Array(new Float32Array(values).buffer);
+  const u32 = (values: number[]) => new Uint8Array(new Uint32Array(values).buffer);
+  return {
+    seq: Math.floor(tick / MOCK_MESH_EVERY) + 1,
+    frame: tick,
+    t_ns: Math.round((tick * 1e9) / MOCK_MAP_HZ),
+    keyframes: Math.floor(tick / 16) + 1,
+    submaps: 1,
+    voxel_m: 0.05,
+    vertices,
+    triangles: mesh.indices.length / 3,
+    positions: encodeBase64(f32(mesh.positions)),
+    normals: encodeBase64(f32(mesh.normals)),
+    grey: encodeBase64(new Uint8Array(mesh.grey)),
+    indices: encodeBase64(u32(mesh.indices)),
+  };
+}
+
+/** The depth the camera sees of the room at `pose`: each pixel's ray walked to the room's surface. */
+function mockDepthWire(tick: number, pose: MapTransform): Record<string, unknown> {
+  const { width, height, near, far } = MOCK_DEPTH;
+  const k = scaleIntrinsics(MOCK_INTRINSICS, width, height);
+  const { halfX: hx, halfZ: hz, height: h } = MOCK_ROOM;
+  const [ox, oy, oz] = MOCK_ORIGIN;
+  const q = pose.rotation;
+  // The camera in the room's own frame, where the box is.
+  const eye: Vec = [pose.translation.x - ox, pose.translation.y - oy, pose.translation.z - oz];
+  const lo: Vec = [-hx, 0, -hz];
+  const hi: Vec = [hx, h, hz];
+  const bytes = new Uint8Array(width * height);
+  for (let v = 0; v < height; v++)
+    for (let u = 0; u < width; u++) {
+      const dir = unit([(u + 0.5 - k.cx) / k.fx, (v + 0.5 - k.cy) / k.fy, 1]);
+      const world = qrot(q, dir);
+      // The ray leaves the box through its nearest face: the smallest positive exit distance.
+      let t = Infinity;
+      let ceiling = false;
+      for (let axis = 0; axis < 3; axis++) {
+        const d = world[axis];
+        if (Math.abs(d) < 1e-9) continue;
+        const exit = d > 0 ? (hi[axis] - eye[axis]) / d : (lo[axis] - eye[axis]) / d;
+        if (exit > 0 && exit < t) {
+          t = exit;
+          ceiling = axis === 1 && d > 0;
+        }
+      }
+      // The sweep never maps the ceiling, so pixels that see it stay unknown (0).
+      const z = t * dir[2];
+      if (!Number.isFinite(t) || ceiling || z <= 0 || z > far) continue;
+      const scaled = (1 / z - 1 / far) / (1 / near - 1 / far);
+      bytes[v * width + u] = Math.min(255, Math.max(1, Math.round(255 * scaled)));
+    }
+  return { frame: tick, width, height, inverse_depth: encodeBase64(bytes) };
+}
+
+/** Each output is made once per its period; `at` is when it was made (its age starts there). */
+let meshMemo: { key: number; at: number; view: DenseMeshView } | null = null;
+let depthMemo: { key: number; at: number; view: NonNullable<DenseView["depth"]> } | null = null;
+
+/** The mock robot's dense outputs at tick `tick`: a mesh each second, a depth each two seconds. */
+export function mockDenseView(tick: number): DenseView {
+  const meshKey = Math.floor(tick / MOCK_MESH_EVERY);
+  if (!meshMemo || meshMemo.key !== meshKey) {
+    const view = parseDenseMesh(mockMeshWire(meshKey * MOCK_MESH_EVERY));
+    if (view) meshMemo = { key: meshKey, at: performance.now(), view };
+  }
+  const depthKey = Math.floor(tick / MOCK_DEPTH_EVERY);
+  if (!depthMemo || depthMemo.key !== depthKey) {
+    const depthTick = depthKey * MOCK_DEPTH_EVERY;
+    const view = parseDenseDepth(mockDepthWire(depthTick, lookAtCentre(mockCameraAt(depthTick))));
+    if (view) depthMemo = { key: depthKey, at: performance.now(), view };
+  }
+  const timing = parseDenseTiming({
+    frame: tick,
+    t_ns: Math.round((tick * 1e9) / MOCK_MAP_HZ),
+    state: "running",
+    processed: Math.floor(tick / 16),
+    keyframes: Math.floor(tick / 16),
+    dropped_keyframes: 0,
+    pending: 0,
+    keyframe_rate: 0.5,
+    sweep_ms: 3.1 + (tick % 5) * 0.05,
+    fill_ms: 1.2,
+    integrate_ms: 2.4,
+    mesh_ms: 0.8,
+    budget_ms: 2,
+    spacing: 16,
+    cost_ms: 5.2,
+    arrived: Math.floor(tick / 16),
+    dropped_blocks: 0,
+    submaps: 1,
+    blocks: 1200,
+    volume_bytes: 4_200_000,
+  });
+  return { mesh: meshMemo?.view ?? null, depth: depthMemo?.view ?? null, timing, depthAt: depthMemo?.at ?? 0, meshAt: meshMemo?.at ?? 0 };
+}
+
+/** The tag poses at tick `tick`: the tags the camera faces and sees, camera-from-tag, and the camera in the field. */
+export function mockPoseView(tick: number): PoseView {
+  const camera = lookAtCentre(mockCameraAt(tick));
+  const q = camera.rotation;
+  const inv = qconj(q);
+  const eye: Vec = [camera.translation.x, camera.translation.y, camera.translation.z];
+  const tanX = MOCK_INTRINSICS.width / (2 * MOCK_INTRINSICS.fx);
+  const tags: TagPose[] = [];
+  for (const tag of MOCK_TAGS) {
+    const world = mockTagPose(tag);
+    const at: Vec = [world.translation.x, world.translation.y, world.translation.z];
+    const normal = qrot({ w: world.rotation.w, x: world.rotation.x, y: world.rotation.y, z: world.rotation.z }, [0, 0, 1]);
+    const toCamera = sub(eye, at);
+    if (normal[0] * toCamera[0] + normal[1] * toCamera[1] + normal[2] * toCamera[2] <= 0) continue;
+    const inCamera = qrot(inv, sub(at, eye));
+    if (inCamera[2] < 0.2 || Math.abs(inCamera[0] / inCamera[2]) > tanX) continue;
+    const rot = qmul(inv, { w: world.rotation.w, x: world.rotation.x, y: world.rotation.y, z: world.rotation.z });
+    tags.push({
+      id: tag.id,
+      pose: { translation: { x: inCamera[0], y: inCamera[1], z: inCamera[2] }, rotation: rot },
+      errorPx: 0.3,
+      ambiguity: 0.1,
+    });
+  }
+  const solutions: TagPoses = { status: "calibrated", tags };
+  return {
+    tags: solutions,
+    field: { valid: true, status: "calibrated", cameraInField: camera, robotInField: null, rmsPx: 0.4, inliers: tags.length, ambiguity: 0.05 },
   };
 }

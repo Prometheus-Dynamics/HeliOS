@@ -82,10 +82,13 @@ export class LiveOutputs {
         frameTs: typeof parsed.frame_ts_ns === "number" ? parsed.frame_ts_ns : null,
         value: { pipeline: parsed.pipeline, port: parsed.port, value: parsed.value, observed_at_ms: parsed.observed_at_ms ?? 0 } as W.PipelineOutput,
       };
-      let list = this.history.get(output.id);
-      if (!list) this.history.set(output.id, (list = []));
-      list.push(output);
-      if (list.length > HISTORY) list.splice(0, list.length - HISTORY);
+      // The dense mapper's outputs are megabytes each (a mesh per second): only their latest is kept.
+      if (!parsed.port.startsWith("dense_")) {
+        let list = this.history.get(output.id);
+        if (!list) this.history.set(output.id, (list = []));
+        list.push(output);
+        if (list.length > HISTORY) list.splice(0, list.length - HISTORY);
+      }
       this.pending.set(output.id, output);
     }
     if (this.pending.size && !this.frame && typeof requestAnimationFrame !== "undefined") this.frame = requestAnimationFrame(() => this.flush());

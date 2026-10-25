@@ -7,8 +7,11 @@
   import { selection } from "#lib/core/selection.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { Overlays } from "./overlays";
+  import { field } from "#lib/stores/field.svelte.js";
   import { featureSummaryText, toFeedSpace, trackFill } from "./features";
+  import { depthRgba } from "./dense";
   import { openPreview, previewSocketUrl } from "./preview-socket";
+  import { scaleIntrinsics, tagAxes, type AxisSegment } from "./pose";
 
 
   let {
@@ -83,6 +86,30 @@
   // Feature tracks (a `tracks` output) scaled into the feed's pixels the way the corners are.
   const features = $derived(cluster.featureTracksFor(camera));
   const featureView = $derived(features && overlays.features ? toFeedSpace(features, fw, fh) : null);
+  // The dense mapper's depth of this camera, painted over the image (the same field of view: the
+  // sweep covers the whole frame, so scaling it to the feed aligns it with the image).
+  const dense = $derived(overlays.depth ? cluster.denseForCamera(camera) : null);
+  let depthCanvas = $state<HTMLCanvasElement>();
+  $effect(() => {
+    const depth = dense?.depth;
+    const target = depthCanvas;
+    if (!depth || !target) return;
+    target.width = depth.width;
+    target.height = depth.height;
+    target.getContext("2d")?.putImageData(new ImageData(depthRgba(depth), depth.width, depth.height), 0, 0);
+  });
+  // Each tag's axes from its pose (camera-from-tag) and the camera's intrinsics, in the feed's pixels.
+  const poses = $derived(overlays.poseAxes ? cluster.poseViewForCamera(camera) : null);
+  const intrinsics = $derived(overlays.poseAxes ? cluster.intrinsicsFor(camera) : null);
+  const axes = $derived.by(() => {
+    if (!poses?.tags || !intrinsics) return [] as { id: number; segments: AxisSegment[] }[];
+    const k = scaleIntrinsics(intrinsics, fw, fh);
+    const size = field.layout.tagSize;
+    return poses.tags.tags.flatMap((t) => {
+      const segments = tagAxes(t.pose, size, k);
+      return segments ? [{ id: t.id, segments }] : [];
+    });
+  });
   const sx = $derived(camera.settings.width / fw);
   const sy = $derived(camera.settings.height / fh);
   const tint = $derived(colorVar(identity.get(camera.resourceId).color));
@@ -190,6 +217,9 @@
         <span>{live ? "The camera's preview did not load. Is its camera service running?" : "This camera has no camera service to preview."}</span>
       </div>
     {/if}
+    {#if overlays.depth && dense?.depth}
+      <canvas bind:this={depthCanvas} class="depth" aria-label="Depth preview, frame {dense.depth.frame}"></canvas>
+    {/if}
     <svg
       viewBox="0 0 {fw} {fh}"
       class:tool={roiTool}
@@ -223,6 +253,11 @@
           <circle cx={t.x} cy={t.y} r={(t.status === "new" ? 3.2 : 2.6) * k} class="track" stroke-width={1 * k} style:fill={trackFill(t)} />
         {/each}
       {/if}
+      {#each axes as tag (tag.id)}
+        {#each tag.segments as s (s.axis)}
+          <line x1={s.x0} y1={s.y0} x2={s.x1} y2={s.y1} class="axis {s.axis}" stroke-width={3.4 * k} />
+        {/each}
+      {/each}
       {#each markers as m (m.id + ":" + m.corners[0][0])}
         {@const sel = selection.is("tag", String(m.id))}
         {#if overlays.outlines}
@@ -287,6 +322,7 @@
   }
   img,
   .screen,
+  .depth,
   svg:not(.hist) {
     position: absolute;
     inset: 0;
@@ -371,6 +407,23 @@
   }
   .track {
     stroke: rgba(0, 0, 0, 0.7);
+  }
+  .depth {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .axis {
+    stroke-linecap: round;
+    pointer-events: none;
+  }
+  .axis.x {
+    stroke: #ff5f5f;
+  }
+  .axis.y {
+    stroke: #5fff8a;
+  }
+  .axis.z {
+    stroke: #5fb4ff;
   }
   .hud {
     position: absolute;

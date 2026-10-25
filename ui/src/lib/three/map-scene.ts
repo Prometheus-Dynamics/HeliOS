@@ -1,16 +1,18 @@
-// The live map in 3D: the point cloud (grey per point), the camera's trajectory, the keyframes
-// as small frustums, the tags as squares with their ids, the current camera as a highlighted
-// frustum, and the field's axes once the map is aligned. Orbit controls; the scene draws the
-// map frame as the mapper gives it (the first clear tag, or the field). Aligned, the map is in
-// WPILib's field frame (z up): it is turned into the scene's y-up frame and stands on the floor
-// grid; unaligned, up is unknown, so there is no floor. The view frames the map once per run
-// (and again when it aligns). It owns its GPU
-// resources and frees them in `dispose`.
+// The 3D scene of a live map: the point cloud (grey per point), the camera's path, the keyframes
+// as small frustums, the mapper's tags, the dense mesh (grey or normal shaded), the field's tags and
+// the robot once the map is aligned to the field. Two views: Field (orbit the field, z up as WPILib
+// has it) and Camera (from the camera's own pose, with its lens' field of view). Layers toggle one
+// by one. Aligned, the map is in WPILib's field frame and is turned into the scene's y-up frame; not
+// aligned, up is unknown, so there is no floor and no field. The view frames the content once per
+// run (and again when it aligns), so the user's own orbiting is never undone by a new snapshot.
+// The scene owns its GPU resources and frees them in `dispose`.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import type { MapPose, MapSnapshot, MapTransform } from "#lib/vision/map.js";
+import type { MapSnapshot, MapTransform } from "#lib/vision/map.js";
+import { greyColours, type DenseMeshView } from "#lib/vision/dense.js";
+import type { FieldTag } from "#lib/stores/field.svelte.js";
 import { cssVarColor } from "./colors";
 
 /** Half-angles of the drawn frustums, radians (a 60 x 45 degree view). */
@@ -19,12 +21,50 @@ const HALF_V = THREE.MathUtils.degToRad(22.5);
 /** Depth of a keyframe's frustum, metres, and of the current camera's. */
 const KEYFRAME_DEPTH = 0.09;
 const CURRENT_DEPTH = 0.22;
+/** The field view's lens, degrees, and the camera view's when the lens is not known. */
+const FIELD_FOV = 50;
+const FALLBACK_FOV = 45;
+/** A robot as a box, metres: its footprint and height (its origin is on the floor). */
+const ROBOT_SIZE: [number, number, number] = [0.8, 0.8, 0.5];
+/** The default view's direction, from the content's centre (y up, in the scene). */
+const DEFAULT_DIRECTION = new THREE.Vector3(1, 0.75, 1).normalize();
+/** The camera's optical frame (x right, y down, z forward) as the scene's (x right, y up, z back). */
+const OPTICAL_TO_SCENE = new THREE.Matrix4().makeScale(1, -1, -1);
 
-export interface MapSceneData {
+export type SceneMode = "field" | "camera";
+export type MeshShading = "grey" | "normal";
+
+/** The layers the scene draws. */
+export interface SceneLayers {
+  points: boolean;
+  path: boolean;
+  keyframes: boolean;
+  mesh: boolean;
+  fieldTags: boolean;
+  mapTags: boolean;
+  camera: boolean;
+  robot: boolean;
+  floor: boolean;
+}
+
+export const ALL_LAYERS: SceneLayers = { points: true, path: true, keyframes: true, mesh: true, fieldTags: true, mapTags: true, camera: true, robot: true, floor: true };
+
+export interface SceneData {
   snapshot: MapSnapshot | null;
-  pose: MapPose | null;
-  /** The field layout's tag ids: tags with these ids are drawn as field tags. */
-  fieldIds: ReadonlySet<number>;
+  /** The camera's pose in the scene's frame (the field's once aligned); null without one. */
+  camera: MapTransform | null;
+  /** The robot's pose on the field (`robot_in_field`); null without a mount. */
+  robot: MapTransform | null;
+  /** The field layout's tags, drawn where the field is (aligned). */
+  fieldTags: FieldTag[];
+  /** Whether the map is aligned to the field: the field's tags and the robot are drawn only then. */
+  aligned: boolean;
+  mesh: DenseMeshView | null;
+  /** The camera's lens: vertical field of view (radians) and aspect; null when it is not known. */
+  lens: { fovY: number; aspect: number } | null;
+  mode: SceneMode;
+  shading: MeshShading;
+  layers: SceneLayers;
 }
 
 function quaternionOf(t: MapTransform): THREE.Quaternion {
@@ -63,32 +103,55 @@ function appendFrustum(out: number[], t: MapTransform, depth: number) {
   }
 }
 
+/** The quaternion of a field tag: its yaw (about z) then its pitch (about y), as the field layout writes them. */
+function fieldTagQuaternion(tag: FieldTag): THREE.Quaternion {
+  const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(tag.yaw));
+  const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(tag.pitch));
+  return yaw.multiply(pitch);
+}
+
 export class MapScene {
   private renderer: THREE.WebGLRenderer;
   private labels: CSS2DRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(50, 1, 0.02, 80);
+  private camera = new THREE.PerspectiveCamera(FIELD_FOV, 1, 0.02, 200);
   private controls: OrbitControls;
   private disposables: { dispose(): void }[] = [];
-  private cloud: THREE.Points | null = null;
-  private cloudSource: MapSnapshot["points"] | null = null;
-  private trajectory: THREE.Line | null = null;
-  private keyframes: THREE.LineSegments;
-  private current: THREE.LineSegments;
-  private currentDot: THREE.Mesh;
-  private tags = new THREE.Group();
   /** The map's frame within the scene (turned z-up to y-up once aligned). */
   private world = new THREE.Group();
-  /** The run (and alignment) the view was last framed for. */
-  private framedFor = "";
-  private tagLabels: CSS2DObject[] = [];
+  private cloud: THREE.Points | null = null;
+  private cloudSource: MapSnapshot["points"] | null = null;
+  private path: THREE.Line | null = null;
+  private pathSource: MapSnapshot | null = null;
+  private keyframes: THREE.LineSegments;
+  private keyframesSource: MapSnapshot | null = null;
+  private current: THREE.LineSegments;
+  private currentDot: THREE.Mesh;
+  private robot: THREE.Group;
+  private robotEdges: THREE.LineSegments;
+  private mapTags = new THREE.Group();
+  private mapTagKey = "";
+  private fieldTags = new THREE.Group();
+  private fieldTagKey = "";
+  private mapTagLabels: CSS2DObject[] = [];
+  private fieldTagLabels: CSS2DObject[] = [];
+  private mesh: THREE.Mesh;
+  private meshSource: DenseMeshView | null = null;
+  private meshGrey: THREE.MeshStandardMaterial;
+  private meshNormal: THREE.MeshNormalMaterial;
   private axes = new THREE.AxesHelper(0.5);
   private floor: THREE.GridHelper;
-  private colours: { accent: THREE.Color; field: THREE.Color; placed: THREE.Color; trail: THREE.Color; keyframe: THREE.Color };
+  /** The run (and alignment) the view was last framed for. */
+  private framedFor = "";
+  private mode: SceneMode = "field";
+  private lens: { fovY: number; aspect: number } | null = null;
+  private size = { w: 1, h: 1 };
   private raf = 0;
   private resizeObserver: ResizeObserver;
   private dirty = true;
-  private lastTagKey = "";
+  /** The camera's pose in the scene's frame (the Camera view stands at it). */
+  private lastPose: MapTransform | null = null;
+  private colours: { accent: THREE.Color; field: THREE.Color; placed: THREE.Color; trail: THREE.Color; keyframe: THREE.Color; robot: THREE.Color };
 
   constructor(private container: HTMLElement) {
     const bg = new THREE.Color(cssVarColor("var(--bg)", "#121419"));
@@ -98,6 +161,7 @@ export class MapScene {
       placed: new THREE.Color(cssVarColor("var(--fg-2)", "#c7cad3")),
       trail: new THREE.Color(cssVarColor("var(--fg-3)", "#8a909c")),
       keyframe: new THREE.Color(cssVarColor("var(--fg-2)", "#c7cad3")),
+      robot: new THREE.Color(cssVarColor("var(--info)", "#60a5fa")),
     };
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "low-power" });
@@ -111,9 +175,13 @@ export class MapScene {
     container.appendChild(this.labels.domElement);
 
     this.scene.background = bg;
-    this.scene.fog = new THREE.Fog(bg, 14, 40);
+    this.scene.fog = new THREE.Fog(bg, 25, 90);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.1));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.3);
+    sun.position.set(3, 6, 2);
+    this.scene.add(sun);
 
-    this.floor = new THREE.GridHelper(20, 40, 0x465062, 0x2a303b);
+    this.floor = new THREE.GridHelper(24, 48, 0x465062, 0x2a303b);
     const floorMaterial = this.floor.material as THREE.Material;
     floorMaterial.transparent = true;
     floorMaterial.opacity = 0.9;
@@ -127,7 +195,22 @@ export class MapScene {
     const dotMaterial = new THREE.MeshBasicMaterial({ color: this.colours.accent });
     this.currentDot = new THREE.Mesh(dotGeometry, dotMaterial);
     this.disposables.push(dotGeometry, dotMaterial);
-    this.world.add(this.keyframes, this.current, this.currentDot, this.tags);
+
+    const robotGeometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(...ROBOT_SIZE));
+    const robotMaterial = new THREE.LineBasicMaterial({ color: this.colours.robot });
+    this.robotEdges = new THREE.LineSegments(robotGeometry, robotMaterial);
+    this.disposables.push(robotGeometry, robotMaterial);
+    this.robot = new THREE.Group();
+    this.robot.add(this.robotEdges);
+    this.robot.visible = false;
+
+    this.meshGrey = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+    this.meshNormal = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.meshGrey);
+    this.mesh.visible = false;
+    this.disposables.push(this.meshGrey, this.meshNormal);
+
+    this.world.add(this.keyframes, this.current, this.currentDot, this.robot, this.mapTags, this.fieldTags, this.mesh);
     this.scene.add(this.world);
 
     this.axes.visible = false;
@@ -139,7 +222,7 @@ export class MapScene {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.12;
     this.controls.minDistance = 0.4;
-    this.controls.maxDistance = 30;
+    this.controls.maxDistance = 80;
     this.controls.addEventListener("change", () => (this.dirty = true));
     this.controls.update();
 
@@ -156,41 +239,78 @@ export class MapScene {
     return new THREE.LineSegments(geometry, material);
   }
 
-  /** Shows the map's latest snapshot and pose. */
-  update(data: MapSceneData) {
-    this.updateCloud(data.snapshot);
-    this.updateTrajectory(data.snapshot);
-    this.updateKeyframes(data.snapshot);
-    this.updateTags(data.snapshot, data.fieldIds);
-    this.updateCurrent(data.pose);
-    const aligned = data.snapshot?.aligned === true;
-    this.axes.visible = aligned;
-    this.floor.visible = aligned;
+  /** Shows the map's snapshot and the layers, in the view the data asks for. */
+  update(data: SceneData) {
+    const { layers, aligned } = data;
+    this.mode = data.mode;
+    this.lens = data.lens;
     this.world.rotation.x = aligned ? -Math.PI / 2 : 0;
-    this.frame(data.snapshot, aligned);
+    this.axes.visible = aligned;
+    this.floor.visible = aligned && layers.floor;
+    const snapshot = data.snapshot;
+    this.updatePoints(snapshot?.points ?? null, layers.points);
+    this.updatePath(snapshot, layers.path);
+    this.updateKeyframes(snapshot, layers.keyframes);
+    this.updateFieldTags(data.fieldTags, aligned && layers.fieldTags, snapshot?.tag_size_m ?? 0.1651);
+    this.updateMapTags(snapshot, aligned ? new Set(data.fieldTags.map((t) => t.id)) : new Set(), layers.mapTags);
+    this.updateMesh(data.mesh, data.shading, layers.mesh);
+    this.updateCurrent(data.camera, layers.camera);
+    this.updateRobot(data.robot, aligned && layers.robot);
+    this.frameOnce(snapshot, aligned);
+    this.lastPose = data.camera;
+    this.syncCamera();
+    this.placeCamera(data.camera);
     this.dirty = true;
   }
 
-  /** Points the view at the map (three-quarter view from above, the whole cloud in sight), once
-   * per run and alignment, so the user's own orbiting is never undone by a new snapshot. */
-  private frame(snapshot: MapSnapshot | null, aligned: boolean) {
-    if (!snapshot || !this.cloud?.visible || snapshot.points.count === 0) return;
+  /** Points the view at the content once per run and alignment, so orbiting is never undone. */
+  private frameOnce(snapshot: MapSnapshot | null, aligned: boolean) {
+    if (this.mode !== "field" || !snapshot || snapshot.points.count === 0) return;
     const key = `${snapshot.run_id}:${aligned}`;
     if (key === this.framedFor) return;
     this.framedFor = key;
-    this.world.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(this.cloud);
-    if (box.isEmpty()) return;
-    const centre = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
-    const direction = new THREE.Vector3(1, 0.75, 1).normalize();
-    this.controls.target.copy(centre);
-    this.camera.position.copy(centre).addScaledVector(direction, radius * 2.2);
-    this.controls.update();
+    this.frameContent();
   }
 
-  private updateCloud(snapshot: MapSnapshot | null) {
-    const points = snapshot?.points ?? null;
+  /** The view of the content as a whole, from the default direction (`reset`), or from where it is (`fit`). */
+  fit() {
+    if (this.mode === "field") this.frameContent();
+  }
+
+  /** The default three-quarter view of the content. */
+  resetView() {
+    if (this.mode !== "field") return;
+    this.frameContent(DEFAULT_DIRECTION);
+  }
+
+  private frameContent(direction?: THREE.Vector3) {
+    this.world.updateMatrixWorld(true);
+    const box = this.contentBox();
+    if (!box) return;
+    const centre = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+    const from = direction ?? this.camera.position.clone().sub(this.controls.target).normalize();
+    this.controls.target.copy(centre);
+    this.camera.position.copy(centre).addScaledVector(from, radius * 2.2);
+    this.controls.update();
+    this.dirty = true;
+  }
+
+  /** The bounds of what is drawn (the cloud, the mesh, the path, the tags), or null when nothing is. */
+  private contentBox(): THREE.Box3 | null {
+    const box = new THREE.Box3();
+    let any = false;
+    for (const object of [this.cloud, this.mesh, this.path, this.fieldTags, this.mapTags]) {
+      if (!object?.visible) continue;
+      const b = new THREE.Box3().setFromObject(object);
+      if (b.isEmpty()) continue;
+      box.union(b);
+      any = true;
+    }
+    return any ? box : null;
+  }
+
+  private updatePoints(points: MapSnapshot["points"] | null, visible: boolean) {
     if (!points || points.count === 0) {
       if (this.cloud) this.cloud.visible = false;
       return;
@@ -202,10 +322,9 @@ export class MapScene {
       this.cloud = new THREE.Points(geometry, material);
       this.world.add(this.cloud);
     }
-    this.cloud.visible = true;
+    this.cloud.visible = visible;
     if (this.cloudSource !== points) {
-      // Each snapshot is a new buffer: upload it once, with the grey of each point as its colour,
-      // lifted off black (dark texture still reads against the dark background) and slightly cool.
+      // Each snapshot is a new buffer: upload it once, with the grey of each point as its colour.
       const colours = new Float32Array(points.count * 3);
       for (let i = 0; i < points.count; i++) {
         const v = 0.32 + 0.68 * (points.grey[i] / 255);
@@ -222,94 +341,199 @@ export class MapScene {
     }
   }
 
-  private updateTrajectory(snapshot: MapSnapshot | null) {
+  private updatePath(snapshot: MapSnapshot | null, visible: boolean) {
     const path = snapshot?.trajectory ?? [];
     if (path.length < 2) {
-      if (this.trajectory) this.trajectory.visible = false;
+      if (this.path) this.path.visible = false;
       return;
     }
-    const positions = new Float32Array(path.length * 3);
-    path.forEach((f, i) => positions.set([f.pose.translation.x, f.pose.translation.y, f.pose.translation.z], i * 3));
-    if (!this.trajectory) {
+    if (!this.path) {
       const geometry = new THREE.BufferGeometry();
       const material = new THREE.LineBasicMaterial({ color: this.colours.trail, transparent: true, opacity: 0.9 });
       this.disposables.push(geometry, material);
-      this.trajectory = new THREE.Line(geometry, material);
-      this.world.add(this.trajectory);
+      this.path = new THREE.Line(geometry, material);
+      this.world.add(this.path);
     }
-    this.trajectory.visible = true;
-    this.trajectory.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    this.trajectory.geometry.computeBoundingSphere();
+    this.path.visible = visible;
+    if (this.pathSource === snapshot) return;
+    this.pathSource = snapshot;
+    const positions = new Float32Array(path.length * 3);
+    path.forEach((f, i) => positions.set([f.pose.translation.x, f.pose.translation.y, f.pose.translation.z], i * 3));
+    this.path.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    this.path.geometry.computeBoundingSphere();
   }
 
-  private updateKeyframes(snapshot: MapSnapshot | null) {
+  private updateKeyframes(snapshot: MapSnapshot | null, visible: boolean) {
+    this.keyframes.visible = visible;
+    if (this.keyframesSource === snapshot) return;
+    this.keyframesSource = snapshot;
     const vertices: number[] = [];
     for (const f of snapshot?.trajectory ?? []) if (f.keyframe) appendFrustum(vertices, f.pose, KEYFRAME_DEPTH);
     this.keyframes.geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     this.keyframes.geometry.computeBoundingSphere();
   }
 
-  private updateTags(snapshot: MapSnapshot | null, fieldIds: ReadonlySet<number>) {
-    const tags = snapshot?.tags ?? [];
+  /** A tag as a square with its id, in `group` (the tag's own frame: its normal is local +x for the field, +z for the map). */
+  private tagSquare(size: number, colour: THREE.Color, opacity: number, label: string, className: string, normalAlongX: boolean): THREE.Group {
+    const geometry = new THREE.PlaneGeometry(size, size);
+    if (normalAlongX) geometry.rotateY(Math.PI / 2);
+    const material = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: colour }));
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geometry, material), edges);
+    this.disposables.push(geometry, material, edges.geometry, edges.material as THREE.Material);
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = label;
+    const object = new CSS2DObject(span);
+    object.position.set(0, size * 0.75, 0);
+    group.add(object);
+    return group;
+  }
+
+  /** The map's own tags (where the mapper put them), without the field's ones when the layout draws them. */
+  private updateMapTags(snapshot: MapSnapshot | null, fieldIds: ReadonlySet<number>, visible: boolean) {
+    this.mapTags.visible = visible;
+    const tags = (snapshot?.tags ?? []).filter((t) => !fieldIds.has(t.id));
     const size = snapshot?.tag_size_m ?? 0.1651;
-    const key = `${size}:${tags.map((t) => `${t.id}/${fieldIds.has(t.id) ? 1 : 0}`).join(",")}:${snapshot?.run_id ?? 0}`;
-    if (key === this.lastTagKey) return;
-    this.lastTagKey = key;
-    for (const child of [...this.tags.children]) this.tags.remove(child);
-    for (const label of this.tagLabels) label.removeFromParent();
-    this.tagLabels = [];
+    const key = `${size}:${tags.map((t) => t.id).join(",")}:${snapshot?.run_id ?? 0}:${snapshot?.seq ?? 0}`;
+    if (key === this.mapTagKey) return;
+    this.mapTagKey = key;
+    for (const child of [...this.mapTags.children]) this.mapTags.remove(child);
+    for (const label of this.mapTagLabels) label.removeFromParent();
+    this.mapTagLabels = [];
     for (const tag of tags) {
-      const field = fieldIds.has(tag.id);
-      const colour = field ? this.colours.field : this.colours.placed;
-      const geometry = new THREE.PlaneGeometry(size, size);
-      const material = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: field ? 0.5 : 0.28, side: THREE.DoubleSide, depthWrite: false });
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: colour }));
-      const square = new THREE.Mesh(geometry, material);
-      const group = new THREE.Group();
-      group.add(square, edges);
+      const group = this.tagSquare(size, this.colours.placed, 0.28, `#${tag.id}`, "map-tag", false);
       group.position.copy(positionOf(tag.pose));
       group.quaternion.copy(quaternionOf(tag.pose));
-      this.tags.add(group);
-      this.disposables.push(geometry, material, edges.geometry, edges.material as THREE.Material);
-      const label = document.createElement("span");
-      label.className = field ? "map-tag field" : "map-tag";
-      label.textContent = `#${tag.id}`;
-      const object = new CSS2DObject(label);
-      object.position.set(0, size * 0.75, 0);
-      group.add(object);
-      this.tagLabels.push(object);
+      this.mapTags.add(group);
+      const label = group.children.find((c): c is CSS2DObject => c instanceof CSS2DObject);
+      if (label) this.mapTagLabels.push(label);
     }
   }
 
-  private updateCurrent(pose: MapPose | null) {
-    const estimate = pose?.valid ? pose.estimate : null;
-    if (!estimate) {
+  /** The field layout's tags, where the field is (the map is aligned to it): squares facing as the layout has them. */
+  private updateFieldTags(tags: FieldTag[], visible: boolean, size: number) {
+    this.fieldTags.visible = visible;
+    if (!visible) return;
+    const key = `${size}:${tags.map((t) => `${t.id}:${t.x}:${t.y}:${t.z}:${t.yaw}:${t.pitch}`).join("|")}`;
+    if (key === this.fieldTagKey) return;
+    this.fieldTagKey = key;
+    for (const child of [...this.fieldTags.children]) this.fieldTags.remove(child);
+    for (const label of this.fieldTagLabels) label.removeFromParent();
+    this.fieldTagLabels = [];
+    for (const tag of tags) {
+      const group = this.tagSquare(size, this.colours.field, 0.5, `#${tag.id}`, "map-tag field", true);
+      group.position.set(tag.x, tag.y, tag.z);
+      group.quaternion.copy(fieldTagQuaternion(tag));
+      this.fieldTags.add(group);
+      const label = group.children.find((c): c is CSS2DObject => c instanceof CSS2DObject);
+      if (label) this.fieldTagLabels.push(label);
+    }
+  }
+
+  /** The dense mesh: grey-shaded (the grey of each vertex) or by its normals. A new mesh is uploaded once. */
+  private updateMesh(mesh: DenseMeshView | null, shading: MeshShading, visible: boolean) {
+    if (!mesh || mesh.vertices === 0 || mesh.indices.length === 0) {
+      this.mesh.visible = false;
+      return;
+    }
+    this.mesh.visible = visible;
+    this.mesh.material = shading === "normal" ? this.meshNormal : this.meshGrey;
+    if (this.meshSource === mesh) return;
+    this.meshSource = mesh;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    if (mesh.normals) geometry.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+    else geometry.computeVertexNormals();
+    // Vertices without a grey are a neutral grey, so the grey shading still reads.
+    const colours = mesh.grey ? greyColours(mesh.grey) : new Float32Array(mesh.vertices * 3).fill(0.62);
+    geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+    geometry.computeBoundingSphere();
+    const previous = this.mesh.geometry;
+    this.mesh.geometry = geometry;
+    previous.dispose();
+  }
+
+  private updateCurrent(camera: MapTransform | null, visible: boolean) {
+    if (!camera || !visible) {
       this.current.visible = false;
       this.currentDot.visible = false;
       return;
     }
     const vertices: number[] = [];
-    appendFrustum(vertices, estimate.reference_from_camera, CURRENT_DEPTH);
+    appendFrustum(vertices, camera, CURRENT_DEPTH);
     this.current.geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     this.current.geometry.computeBoundingSphere();
     this.current.visible = true;
     this.currentDot.visible = true;
-    this.currentDot.position.copy(positionOf(estimate.reference_from_camera));
+    this.currentDot.position.copy(positionOf(camera));
+  }
+
+  /** The robot's box at its pose on the field (z up, its origin on the floor). */
+  private updateRobot(robot: MapTransform | null, visible: boolean) {
+    if (!robot || !visible) {
+      this.robot.visible = false;
+      return;
+    }
+    this.robot.visible = true;
+    this.robot.quaternion.copy(quaternionOf(robot));
+    this.robot.position.copy(positionOf(robot)).add(new THREE.Vector3(0, 0, ROBOT_SIZE[2] / 2));
+  }
+
+  /**
+   * The camera: the Field view is the orbit; the Camera view puts the scene's camera at the camera's
+   * own pose, with its lens' field of view when it is known (the view keeps the lens' vertical field
+   * and widens to fit the viewport's aspect).
+   */
+  private syncCamera() {
+    const { w, h } = this.size;
+    const aspect = w / h || 1;
+    if (this.mode === "camera" && this.lens) {
+      this.controls.enabled = false;
+      const tanY = Math.tan(this.lens.fovY / 2);
+      const tanX = tanY * this.lens.aspect;
+      const fovY = aspect >= this.lens.aspect ? this.lens.fovY : 2 * Math.atan(tanX / aspect);
+      this.camera.fov = THREE.MathUtils.radToDeg(fovY);
+      this.camera.aspect = aspect;
+      this.camera.updateProjectionMatrix();
+    } else {
+      this.controls.enabled = true;
+      if (this.camera.fov !== FIELD_FOV || this.camera.aspect !== aspect) {
+        this.camera.fov = FIELD_FOV;
+        this.camera.aspect = aspect;
+        this.camera.updateProjectionMatrix();
+      }
+    }
+    this.dirty = true;
+  }
+
+  /** Places the scene's camera at the camera pose (Camera view), each frame the pose changes. */
+  private placeCamera(pose: MapTransform | null) {
+    if (this.mode !== "camera" || !pose) return;
+    this.world.updateMatrix();
+    const local = new THREE.Matrix4().compose(positionOf(pose), quaternionOf(pose), new THREE.Vector3(1, 1, 1));
+    const m = new THREE.Matrix4().multiplyMatrices(this.world.matrix, local).multiply(OPTICAL_TO_SCENE);
+    m.decompose(this.camera.position, this.camera.quaternion, this.camera.scale);
+    this.camera.updateMatrixWorld(true);
   }
 
   private resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
+    this.size = { w, h };
     this.renderer.setSize(w, h, false);
     this.labels.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.dirty = true;
+    this.syncCamera();
   }
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
-    const moved = this.controls.update();
+    // The Camera view stands at the camera's pose: the orbit controls must not move it.
+    let moved = false;
+    if (this.mode === "camera") this.placeCamera(this.lastPose);
+    else moved = this.controls.update();
     if (!this.dirty && !moved) return;
     this.dirty = false;
     this.renderer.render(this.scene, this.camera);
@@ -321,6 +545,7 @@ export class MapScene {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.mesh.geometry.dispose();
     for (const d of this.disposables) d.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
