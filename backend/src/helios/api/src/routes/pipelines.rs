@@ -1545,6 +1545,42 @@ mod tests {
     }
 
     #[test]
+    fn templates_say_what_they_do_and_setup_finds_one_per_choice() {
+        let mut seen = std::collections::BTreeMap::new();
+        for (id, json) in crate::startup::GRAPHS {
+            let graph: serde_json::Value = serde_json::from_str(json).expect("template");
+            let capabilities = template_capabilities(&graph);
+            assert!(!capabilities.is_empty(), "{id} does something");
+            assert!(!template_text(id).1.is_empty(), "{id} has a summary");
+            if !id.ends_with("-staged") {
+                assert!(seen.insert(capabilities.clone(), *id).is_none(), "{id} and {:?} do the same: {capabilities:?}", seen.get(&capabilities));
+            }
+        }
+        let caps = |id: &str| template_capabilities(&serde_json::from_str(crate::startup::GRAPHS.iter().find(|(g, _)| *g == id).expect("graph").1).expect("json"));
+        assert_eq!(caps("apriltag-36h11-map"), ["tags", "tag_pose", "field_pose", "map"]);
+        assert_eq!(caps("apriltag-36h11-map-dense"), ["tags", "tag_pose", "field_pose", "map", "depth"]);
+        for id in ["apriltag-36h11-map", "apriltag-36h11-map-dense"] {
+            let graph: serde_json::Value = serde_json::from_str(crate::startup::GRAPHS.iter().find(|(g, _)| *g == id).expect("graph").1).expect("json");
+            assert!(field_layouts::has_multi_tag_pose(&graph), "{id} takes the field layout");
+            let spec = PipelineSpec {
+                name: id.into(),
+                graph,
+                bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), pyramid: Some(3), ..Binding::default() })]),
+                enabled: true,
+                search_mode: None,
+                full_search_every: None,
+                loss_full_search_after: None,
+                margin_growth_misses: None,
+                field_layout: None,
+                dictionary: None,
+                cpu: None,
+                nice: None,
+            };
+            validate_spec(&spec, &view_with_camera(), "node-local", None).unwrap_or_else(|error| panic!("{id} deploys: {error:?}"));
+        }
+    }
+
+    #[test]
     fn live_map_template_is_a_deployable_mapping_pipeline() {
         assert_eq!(template_family("live-map").expect("family"), "mapping");
         let json = crate::startup::GRAPHS.iter().find(|(id, _)| *id == "live-map").map(|(_, json)| *json).expect("live map template");
@@ -1685,14 +1721,54 @@ pub struct Template {
     pub dictionary: Option<String>,
     /// The graph input a camera binds to (its host bridge's frame input).
     pub camera_input: String,
-    /// Half-size pyramid levels its camera binding asks for: 1 for the detectors and the dense
-    /// mapper, 3 for feature tracking and the live mapper (Lucas-Kanade's levels, made by the ISP
-    /// where it can).
+    /// Half-size pyramid levels its camera binding asks for: 1 for the detectors, 3 for a graph
+    /// with feature tracking or the live mapper (Lucas-Kanade's levels, made by the ISP where it
+    /// can).
     pub pyramid: u8,
+    /// What the graph does, from its nodes: `tags` (a detector), `tag_pose`, `field_pose` (the
+    /// multi-tag pose), `map` (the live mapper), `depth` (the dense mapper), `features`. Setup
+    /// picks the one template whose capabilities match what a camera should do.
+    pub capabilities: Vec<&'static str>,
+    /// A short name and one line on what it gives, for setup.
+    pub title: &'static str,
+    pub summary: &'static str,
     /// The graph inputs that take another pipeline's output: bind each with `source: "pipeline"`,
     /// `pipeline` set to the id of a pipeline running `producer_template`, and `port`.
     pub pipeline_inputs: Vec<PipelineInputHint>,
     pub graph: serde_json::Value,
+}
+
+/// A graph's capabilities (`Template::capabilities`), in a fixed order, by the node types in it.
+fn template_capabilities(graph: &serde_json::Value) -> Vec<&'static str> {
+    let types: Vec<&str> = graph["graph"]["nodes"].as_array().into_iter().flatten().filter_map(|node| node["id"].as_str()).collect();
+    let has = |prefix: &str| types.iter().any(|id| id.starts_with(prefix));
+    [
+        ("tags", has("eidos:detectors.")),
+        ("tag_pose", has("eidos:aruco.pose")),
+        ("field_pose", has(field_layouts::MULTI_TAG_POSE_NODE)),
+        ("map", has("eidos:mapping.live_map")),
+        ("depth", has("eidos:dense.map")),
+        ("features", has("eidos:features.track")),
+    ]
+    .into_iter()
+    .filter_map(|(capability, present)| present.then_some(capability))
+    .collect()
+}
+
+/// A golden graph's name and one line on what it gives (`Template::title`, `summary`).
+fn template_text(id: &str) -> (&'static str, &'static str) {
+    match id {
+        "apriltag-36h11" => ("AprilTag localization", "Field tags give the robot's position on the field."),
+        "apriltag-36h11-staged" => ("AprilTag localization (staged)", "The same detector, each stage its own node for profiling."),
+        "aruco-4x4_50" => ("ArUco markers", "Small printed markers, for game pieces or practice targets."),
+        "aruco-4x4_50-staged" => ("ArUco markers (staged)", "The same detector, each stage its own node for profiling."),
+        "features-track" => ("Feature tracks", "Tracks image features from frame to frame, without tags."),
+        "live-map" => ("3D map", "Builds a live 3D map from the tags and the scene, and the camera's pose in it."),
+        "dense-map" => ("3D map with depth", "The live 3D map and a dense depth mesh of the surroundings."),
+        "apriltag-36h11-map" => ("Localization and 3D map", "Field position from the tags and a live 3D map, on one detector."),
+        "apriltag-36h11-map-dense" => ("Localization, 3D map and depth", "Field position, the live 3D map and a dense depth mesh, on one detector."),
+        _ => ("Pipeline", ""),
+    }
 }
 
 /// The family of a golden graph by its id: a detector family, or `features` (Eidos's feature
@@ -1719,10 +1795,12 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = template_family(id)?;
         let variant = if id.ends_with("-staged") { "staged" } else { "default" };
+        let capabilities = template_capabilities(&graph);
         // The feature tracks and the live mapper (`lk_levels` 4) read three half-size levels.
-        let pyramid = if family == "features" || *id == "live-map" { 3 } else { 1 };
+        let pyramid = if capabilities.iter().any(|c| *c == "features" || *c == "map") { 3 } else { 1 };
+        let (title, summary) = template_text(id);
         let pipeline_inputs = pipeline_bindings::template_pipeline_inputs(id);
-        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, pipeline_inputs, graph });
+        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, capabilities, title, summary, pipeline_inputs, graph });
     }
     Ok(Json(out))
 }

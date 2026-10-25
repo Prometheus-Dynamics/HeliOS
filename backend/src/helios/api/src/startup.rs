@@ -45,6 +45,10 @@ pub const GRAPHS: &[(&str, &str)] = &[
     // and mesh too, in the same pipeline on the same core (the dense mapper keeps to a time budget
     // per tick, so it never delays the tags or the live map).
     ("dense-map", include_str!("../../engine/graphs/dense-map.graph.json")),
+    // Localization and the live map in one pipeline: the AprilTag tag and field pose on the live
+    // map's detector (one detector, one core), and the same with the dense mapper.
+    ("apriltag-36h11-map", include_str!("../../engine/graphs/apriltag-36h11-map.graph.json")),
+    ("apriltag-36h11-map-dense", include_str!("../../engine/graphs/apriltag-36h11-map-dense.graph.json")),
 ];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

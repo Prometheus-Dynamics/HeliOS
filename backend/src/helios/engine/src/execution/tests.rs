@@ -60,6 +60,8 @@ mod live_map;
 #[cfg(test)]
 mod camera_uncertainty;
 mod dense_map;
+#[cfg(test)]
+mod localization_map;
 mod pipeline_feeds;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
@@ -73,6 +75,10 @@ const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-
 const LIVE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/live-map.graph.json");
 /// The live map with the dense mapper (`eidos:dense.map`) on its pose, one pipeline.
 const DENSE_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/dense-map.graph.json");
+/// Localization and the live map: the AprilTag tag and field pose on the live map's detector.
+const LOCALIZATION_MAP_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-map.graph.json");
+/// The same with the dense mapper, one pipeline.
+const LOCALIZATION_MAP_DENSE_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-map-dense.graph.json");
 
 #[node(id = "test.source", outputs("out"))]
 fn source() -> Result<i64, NodeError> {
@@ -398,6 +404,16 @@ fn graph_documents_are_eidos_templates() {
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
         ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
         ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), &[]), DENSE_MAP_GRAPH_DOCUMENT),
+        (
+            "graphs/apriltag-36h11-map.graph.json",
+            localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), false),
+            LOCALIZATION_MAP_GRAPH_DOCUMENT,
+        ),
+        (
+            "graphs/apriltag-36h11-map-dense.graph.json",
+            localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), true),
+            LOCALIZATION_MAP_DENSE_GRAPH_DOCUMENT,
+        ),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");

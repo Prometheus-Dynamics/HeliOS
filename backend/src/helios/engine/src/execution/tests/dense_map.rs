@@ -21,8 +21,20 @@ const DENSE_MAP_NODE: &str = "eidos:dense.map";
 /// (`detections`, `pose`, `snapshot`, `timing`) and the dense mapper's `mesh` and `dense_timing`.
 /// `tuning` sets the dense mapper's constants (empty for its defaults, budget mode included).
 pub(super) fn dense_map_document(registry: &PluginRegistry, tuning: &[(&str, Value)]) -> String {
+    let mut builder = with_dense_map(live_map_builder(registry));
+    for (port, value) in tuning {
+        builder = set_const(builder, port, value.clone());
+    }
+    let mut document = registry.graph_document(builder.build());
+    document.metadata.insert("title".into(), "HeliOS dense map".into());
+    stored_form(&document)
+}
+
+/// `builder` (a live map graph: its `mapper` and the host's `frame` and `camera`) with the dense
+/// mapper on the mapper's pose and its `mesh` and `dense_timing` host outputs.
+pub(super) fn with_dense_map(builder: GraphBuilder) -> GraphBuilder {
     let dense = |port: &str| PortHandle::new("dense", port);
-    let mut builder = live_map_builder(registry)
+    builder
         .try_node_id(DENSE_MAP_NODE, "dense")
         .expect("dense map node")
         .try_connect("frame", &dense("frame"))
@@ -34,13 +46,7 @@ pub(super) fn dense_map_document(registry: &PluginRegistry, tuning: &[(&str, Val
         .try_connect(&dense("mesh"), "mesh")
         .expect("mesh output")
         .try_connect(&dense("timing"), "dense_timing")
-        .expect("dense timing output");
-    for (port, value) in tuning {
-        builder = set_const(builder, port, value.clone());
-    }
-    let mut document = registry.graph_document(builder.build());
-    document.metadata.insert("title".into(), "HeliOS dense map".into());
-    stored_form(&document)
+        .expect("dense timing output")
 }
 
 fn set_const(builder: GraphBuilder, port: &str, value: Value) -> GraphBuilder {
