@@ -5,10 +5,10 @@
   import type { ParamValue } from "#lib/graph/graph.js";
   import ParamControl from "#lib/kit/ParamControl.svelte";
   import Prop from "#lib/kit/Prop.svelte";
-  import { isChangedParam, paramLabel } from "./params";
+  import { isChangedParam, labelOf } from "./params";
 
   let { param, value, onchange }: { param: Param; value: ParamValue | undefined; onchange: (v: ParamValue) => void } = $props();
-  const shown = $derived(paramLabel(param.name));
+  const shown = $derived(labelOf(param));
   const current = $derived(value ?? param.default);
 </script>
 

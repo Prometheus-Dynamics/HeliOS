@@ -34,7 +34,7 @@ pub fn catalog(registry: &PluginRegistry) -> Value {
 }
 
 /// A node as the palette needs it: its ports, and for each constant input its default, range,
-/// choices and description. A node-group's embedded graph stays out (it is most of a
+/// choices, description, label, unit, group and whether it is an expert setting. A node-group's embedded graph stays out (it is most of a
 /// `NodeDecl`'s size); `group` says it has one.
 fn node_entry(registry: &PluginRegistry, decl: &NodeDecl, plugin: Option<String>) -> Value {
     let meta = |key: &str| decl.metadata_json.get(key).and_then(|raw| serde_json::from_str::<Value>(raw).ok()).map(plain);
@@ -54,7 +54,9 @@ fn node_entry(registry: &PluginRegistry, decl: &NodeDecl, plugin: Option<String>
             if let Some(options) = schema.as_ref().and_then(enum_options).or_else(|| declared.as_ref().and_then(enum_options)) {
                 entry.insert("options".into(), options.into());
             }
-            for key in ["description", "min", "max", "step"] {
+            // `label`, `unit`, `group` and `advanced` (Daedalus `#[port(...)]`): how a settings
+            // screen names, groups and folds the parameter.
+            for key in ["description", "min", "max", "step", "label", "unit", "group", "advanced"] {
                 if let Some(value) = meta(&format!("inputs.{}.{key}", port.name)) {
                     entry.insert(key.into(), value);
                 }

@@ -24,7 +24,7 @@
   import Spark from "#lib/kit/Spark.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import ParamRow from "./ParamRow.svelte";
-  import { isChangedParam, matchesParam } from "./params";
+  import { byGroup, isChangedParam, matchesParam } from "./params";
 
   let { workload: w, focusNode = null }: { workload: Workload; focusNode?: string | null } = $props();
 
@@ -140,9 +140,26 @@
       {#snippet actions()}
         <span class="cat" style:--cat={CATEGORY_COLORS[s.type!.category]}><Icon name={CATEGORY_ICONS[s.type!.category]} size={12} /></span>
       {/snippet}
-      {#each s.params as p (p.name)}
-        <ParamRow param={p} value={s.node.data.params[p.name]} onchange={(v) => d.setParam(s.node.id, p.name, v)} />
+      {@const filtering = Boolean(query) || changedOnly}
+      <!-- Expert settings (declared advanced) fold away unless changed or searched for. -->
+      {@const expert = filtering ? [] : s.params.filter((p) => p.advanced && !isChangedParam(p, s.node.data.params[p.name]))}
+      {@const everyday = s.params.filter((p) => !expert.includes(p))}
+      {#each byGroup(everyday) as [group, list] (group)}
+        {#if group}<div class="group">{group}</div>{/if}
+        {#each list as p (p.name)}
+          <ParamRow param={p} value={s.node.data.params[p.name]} onchange={(v) => d.setParam(s.node.id, p.name, v)} />
+        {/each}
       {/each}
+      {#if expert.length}
+        <Section title="Expert settings" key="pipe-expert-{w.id}-{s.node.id}" open={false} count={expert.length}>
+          {#each byGroup(expert) as [group, list] (group)}
+            {#if group}<div class="group">{group}</div>{/if}
+            {#each list as p (p.name)}
+              <ParamRow param={p} value={s.node.data.params[p.name]} onchange={(v) => d.setParam(s.node.id, p.name, v)} />
+            {/each}
+          {/each}
+        </Section>
+      {/if}
     </Section>
   {:else}
     <div class="none">{query || changedOnly ? "Nothing matches." : "No stage has settings."}</div>
@@ -236,6 +253,14 @@
     color: var(--accent-fg);
     border-color: var(--accent-ring);
     background: color-mix(in oklab, var(--accent) 12%, transparent);
+  }
+  .group {
+    padding: 6px 10px 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-3);
   }
   .cat {
     display: grid;

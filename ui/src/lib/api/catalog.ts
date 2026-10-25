@@ -31,11 +31,22 @@ export interface Port {
   type: PortType;
 }
 
-export type Param =
+/** How a settings screen shows a parameter, when its node declares it: its name for people, its
+ * unit, the group it belongs to within the node, and whether it is an expert setting. */
+export interface ParamMeta {
+  label?: string;
+  unit?: string;
+  group?: string;
+  advanced?: boolean;
+}
+
+export type Param = (
   | { name: string; kind: "int"; default: number; min: number; max: number; help: string }
   | { name: string; kind: "float"; default: number; min: number; max: number; step: number; help: string }
   | { name: string; kind: "bool"; default: boolean; help: string }
-  | { name: string; kind: "enum"; default: string; options: string[]; help: string };
+  | { name: string; kind: "enum"; default: string; options: string[]; help: string }
+) &
+  ParamMeta;
 
 export interface NodeType {
   id: string;
@@ -520,6 +531,15 @@ function scalarOf(port: DeviceCatalogPort): string | undefined {
 }
 
 function toParam(port: DeviceCatalogPort, known: Param | undefined): Param {
+  const meta: ParamMeta = {};
+  if (port.label) meta.label = port.label;
+  if (port.unit) meta.unit = port.unit;
+  if (port.group) meta.group = port.group;
+  if (port.advanced) meta.advanced = true;
+  return { ...typedParam(port, known), ...meta };
+}
+
+function typedParam(port: DeviceCatalogPort, known: Param | undefined): Param {
   const help = port.description ?? known?.help ?? "";
   const scalar = scalarOf(port);
   if (port.options?.length) return { name: port.name, kind: "enum", default: String(port.default ?? port.options[0]), options: port.options.map(String), help };

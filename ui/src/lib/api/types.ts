@@ -628,6 +628,11 @@ export interface DeviceCatalogPort {
   max?: number;
   step?: number;
   description?: string;
+  /** How a settings screen shows the parameter (Daedalus `#[port(label, unit, group, advanced)]`). */
+  label?: string;
+  unit?: string;
+  group?: string;
+  advanced?: boolean;
 }
 
 /** The printed ChArUco board (`POST /v1/cameras/{id}/calibration/capture`). */

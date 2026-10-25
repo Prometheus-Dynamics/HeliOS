@@ -28,8 +28,9 @@ use crate::{
 
 /// `provenance.method` of a calibration fitted by a live mapper.
 pub const METHOD: &str = "self-calibration";
-/// The live relay's port of the mapper's pose.
-const POSE_PORT: &str = "pose";
+/// The live relay's ports of the mapper's pose: `map_pose` (Eidos's templates), `pose` (graphs
+/// stored before them).
+const POSE_PORTS: [&str; 2] = ["map_pose", "pose"];
 /// How often the live mappers are looked up in Orion.
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -231,11 +232,11 @@ async fn next(lines: &mut Option<broadcast::Receiver<Arc<str>>>) -> Result<Arc<s
 pub async fn handle_chunk(state: &SharedState, mappers: &BTreeMap<String, LiveMapper>, handled: &mut Handled, chunk: &str) {
     for line in chunk.lines() {
         // Cheap checks first: most lines are not a converged pose.
-        if !line.contains("\"converged\":true") || !line.contains("\"port\":\"pose\"") {
+        if !line.contains("\"converged\":true") || !POSE_PORTS.iter().any(|port| line.contains(&format!("\"port\":\"{port}\""))) {
             continue;
         }
         let Ok(parsed) = serde_json::from_str::<PoseLine>(line) else { continue };
-        if parsed.port != POSE_PORT {
+        if !POSE_PORTS.contains(&parsed.port.as_str()) {
             continue;
         }
         let Some(mapper) = mappers.get(&parsed.pipeline) else { continue };

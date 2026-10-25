@@ -115,3 +115,17 @@ fn localization_map_templates_pose_tags_and_map_in_one_pipeline() {
         }
     }
 }
+
+/// The node catalog the UI reads carries the parameter metadata Eidos declares (Daedalus
+/// `#[port(label, unit, group, advanced)]`): the tracked detector's settings have labels and
+/// groups, and some are marked expert.
+#[test]
+fn catalog_carries_parameter_labels_groups_and_expert_flags() {
+    let plugins = TestPlugins::load();
+    let catalog = crate::plugins::catalog::catalog(plugins.registry());
+    let detector = catalog["nodes"].as_array().expect("nodes").iter().find(|node| node["id"] == "eidos:detectors.tracked_detect").expect("tracked detector in the catalog");
+    let settings: Vec<&serde_json::Value> = detector["inputs"].as_array().expect("inputs").iter().filter(|port| port.get("default").is_some()).collect();
+    assert!(settings.iter().any(|port| port["label"].is_string()), "labels: {detector}");
+    assert!(settings.iter().any(|port| port["group"].is_string()), "groups: {detector}");
+    assert!(settings.iter().any(|port| port["advanced"] == true), "expert settings: {detector}");
+}

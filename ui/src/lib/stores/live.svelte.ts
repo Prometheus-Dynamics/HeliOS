@@ -10,6 +10,9 @@ import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl } from "#lib/a
 import { LiveOutputs } from "./live-outputs";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, PipelineInput, Resource, Stream, Workload } from "#lib/api/model.js";
 import { defaultsFrom, type DefaultTemplate } from "#lib/core/defaults.js";
+
+/** The live mapper's outputs: Eidos's template names and the older ones. */
+const MAP_PORTS = new Set(["map_pose", "map_snapshot", "map_timing", "pose", "snapshot", "timing"]);
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
@@ -304,9 +307,10 @@ export class LiveCluster {
   /** The live-map view of a pipeline from a list of its outputs (null when it has none of them). */
   private mapFromOutputs(pipelineId: string, outputs: W.PipelineOutput[]): MapView | null {
     const value = (port: string) => outputs.find((o) => o.pipeline === pipelineId && o.port === port)?.value;
-    const pose = parseMapPose(value("pose"));
-    const snapshot = parseMapSnapshot(value("snapshot"));
-    const timing = parseMapTiming(value("timing"));
+    // Eidos's templates name them map_pose, map_snapshot, map_timing; older graphs pose, snapshot, timing.
+    const pose = parseMapPose(value("map_pose") ?? value("pose"));
+    const snapshot = parseMapSnapshot(value("map_snapshot") ?? value("snapshot"));
+    const timing = parseMapTiming(value("map_timing") ?? value("timing"));
     if (!pose && !snapshot && !timing) return null;
     if (timing) this.mapWindow(pipelineId).push(performance.now(), timing.frame_ms, timing.map_ms);
     return { pose, snapshot, timing };
@@ -334,6 +338,7 @@ export class LiveCluster {
     }
     const current = this.maps[pipelineId] ?? { pose: null, snapshot: null, timing: null };
     const raw = data.value.value;
+    port = port.replace(/^map_/, "");
     if (port === "pose") current.pose = parseMapPose(raw);
     else if (port === "snapshot") current.snapshot = parseMapSnapshot(raw) ?? current.snapshot;
     else if (port === "timing") {
@@ -397,7 +402,7 @@ export class LiveCluster {
       if (camera && this.frameOverlays.has(camera)) return;
     }
     if (port === "tracks") return this.applyTracks(pipelineId, data);
-    if (port === "pose" || port === "snapshot" || port === "timing") return this.applyMap(pipelineId, port, data);
+    if (MAP_PORTS.has(port)) return this.applyMap(pipelineId, port, data);
     if (port !== "detections") return;
     const pipeline = this.pipelines.get(pipelineId);
     const camera = pipeline && this.cameraOfPipeline(pipeline);

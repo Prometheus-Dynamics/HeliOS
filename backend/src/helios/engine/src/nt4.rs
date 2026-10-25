@@ -189,7 +189,7 @@ impl Connection {
             let message = payload_message(payload, &tick.serializers);
             if port == robot_pose::MULTI_TAG_POSE_PORT {
                 self.publish_multi_tag_pose(&base, &message);
-            } else if port == robot_pose::MAP_POSE_PORT {
+            } else if robot_pose::is_map_pose_port(port) {
                 self.publish_map_pose(&base, tick.map_pose_prefix, &message);
             }
             self.set(format!("{base}/{}", topic_segment(port)), "string", Value::String(message), port);

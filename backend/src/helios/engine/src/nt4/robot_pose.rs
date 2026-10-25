@@ -51,9 +51,17 @@ use serde_json::Value as Json;
 
 /// The output port whose JSON these topics come from.
 pub const MULTI_TAG_POSE_PORT: &str = "multi_tag_pose";
-/// The output port of the live mapper's pose (`eidos:map_pose`). Only its shape tells it apart
-/// from the AprilTag graphs' `pose` outputs: see [`is_map_pose`].
-pub const MAP_POSE_PORT: &str = "pose";
+/// The output port of the live mapper's pose (`eidos:map_pose`): `map_pose` in the graphs built
+/// by Eidos's templates, `pose` in older stored graphs. Only its shape tells `pose` apart from the
+/// AprilTag graphs' `pose` outputs: see [`is_map_pose`].
+pub const MAP_POSE_PORT: &str = "map_pose";
+/// The live mapper's pose port in graphs stored before Eidos's templates named it.
+pub const LEGACY_MAP_POSE_PORT: &str = "pose";
+
+/// `port` carries the live mapper's pose (either name).
+pub fn is_map_pose_port(port: &str) -> bool {
+    port == MAP_POSE_PORT || port == LEGACY_MAP_POSE_PORT
+}
 /// The NT4 type of `robot_pose_struct` (WPILib's `Pose3d`).
 pub const POSE3D_STRUCT_TYPE: &str = "struct:Pose3d";
 /// The NT4 type of a struct schema topic.

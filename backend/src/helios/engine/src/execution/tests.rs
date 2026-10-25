@@ -205,7 +205,7 @@ fn stored_form(document: &daedalus::planner::GraphDocument) -> String {
     for node in value["graph"]["nodes"].as_array_mut().into_iter().flatten() {
         if let Some(metadata) = node.get_mut("metadata").and_then(serde_json::Value::as_object_mut) {
             metadata.retain(|key, _| {
-                let port = (key.starts_with("inputs.") || key.starts_with("outputs.")) && [".description", ".min", ".max", ".step"].iter().any(|suffix| key.ends_with(suffix));
+                let port = (key.starts_with("inputs.") || key.starts_with("outputs.")) && [".description", ".min", ".max", ".step", ".label", ".unit", ".group", ".advanced"].iter().any(|suffix| key.ends_with(suffix));
                 !port && !["daedalus.embedded_graph", "summary", "category", "stage_of", "eidos.operation", "eidos.operation_id"].contains(&key.as_str())
             });
         }

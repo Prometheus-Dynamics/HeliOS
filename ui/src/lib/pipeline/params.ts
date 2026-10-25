@@ -29,6 +29,12 @@ export interface ParamLabel {
   unit?: string;
 }
 
+/** A parameter's label and unit: its node's own when it declares them, else from its name. */
+export function labelOf(param: Param): ParamLabel {
+  const derived = paramLabel(param.name);
+  return { label: param.label ?? derived.label, unit: param.unit ?? (param.label ? undefined : derived.unit) };
+}
+
 /** `min_side_px` → { label: "Min side", unit: "px" }. */
 export function paramLabel(name: string): ParamLabel {
   let base = name;
@@ -56,5 +62,15 @@ export function isChangedParam(param: Param, value: ParamValue | undefined): boo
 export function matchesParam(param: Param, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return paramLabel(param.name).label.toLowerCase().includes(q) || param.name.toLowerCase().includes(q) || param.help.toLowerCase().includes(q);
+  return labelOf(param).label.toLowerCase().includes(q) || param.name.toLowerCase().includes(q) || param.help.toLowerCase().includes(q) || (param.group ?? "").toLowerCase().includes(q);
+}
+
+/** `params` by their declared group, in order of first appearance ("" for none). */
+export function byGroup(params: Param[]): [group: string, params: Param[]][] {
+  const groups = new Map<string, Param[]>();
+  for (const p of params) {
+    const key = p.group ?? "";
+    groups.set(key, [...(groups.get(key) ?? []), p]);
+  }
+  return [...groups.entries()];
 }
