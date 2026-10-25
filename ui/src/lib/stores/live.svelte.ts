@@ -8,7 +8,8 @@ import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, t
 import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl } from "#lib/api/client.js";
 import { LiveOutputs } from "./live-outputs";
-import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, Resource, Stream, Workload } from "#lib/api/model.js";
+import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, PipelineInput, Resource, Stream, Workload } from "#lib/api/model.js";
+import { defaultsFrom, type DefaultTemplate } from "#lib/core/defaults.js";
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
@@ -620,6 +621,70 @@ export class LiveCluster {
     );
     await this.refreshPipelines();
     return created?.id ?? "";
+  }
+
+  async defaultTemplates(): Promise<DefaultTemplate[]> {
+    return defaultsFrom(await this.guard("templates", () => api.pipelineTemplates()));
+  }
+
+  /** Deploy a default template as the camera's one pipeline: in place of its Eidos pipeline (same
+   * id, so robot code keeps its NetworkTables path), any other Eidos pipeline on it disabled;
+   * `null` disables them all (video only). */
+  async applyDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
+    const mine = [...this.pipelines.values()].filter((p) => p.graph?.requires.some((r) => r.id === "eidos") && Object.values(p.bindings).some((b) => b.resource_id === cameraId));
+    const keep = mine.find((p) => p.enabled) ?? mine[0];
+    for (const p of mine) {
+      if (p.enabled && (p !== keep || !template)) await this.act("Stop", () => api.putPipeline(p.id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: false }));
+    }
+    if (!template) {
+      await this.refreshPipelines();
+      toasts.info(`${name}: video only`);
+      return;
+    }
+    const templates = await this.guard("templates", () => api.pipelineTemplates());
+    const t = templates?.find((x) => x.id === template.id);
+    if (!t) {
+      toasts.error(`This device has no ${template.title} template`);
+      return;
+    }
+    const previous = keep ? Object.values(keep.bindings).find((b) => b.resource_id === cameraId) : undefined;
+    const bindings = { [t.camera_input]: { ...(previous ?? {}), resource_id: cameraId, pyramid: t.pyramid ?? 1 } };
+    const title = `${template.title} · ${name}`;
+    // The camera's tag family stays when the new template decodes the same kind of tags.
+    const current = keep ? this.data.workloads.find((w) => w.id === keep.id) : undefined;
+    const family = (d: string) => d.split("_")[0];
+    const was = String(current?.graph.nodes.find((n) => n.params.dictionary !== undefined)?.params.dictionary ?? "");
+    const kept = was && t.dictionary && family(was) === family(t.dictionary) ? was : undefined;
+    const spec: W.PipelineSpec = { name: title, graph: t.graph, bindings, enabled: true, dictionary: kept ?? t.dictionary ?? undefined, field_layout: keep?.field_layout ?? undefined };
+    if (keep) await this.act("Pipeline", () => api.putPipeline(keep.id, spec), () => `${name} now runs ${template.title}`);
+    else await this.act("Create pipeline", () => api.createPipeline(spec), () => `${name} now runs ${template.title}`);
+    await this.refreshPipelines();
+  }
+
+  /** Change one input's binding: only the given fields, the rest as deployed. */
+  async setInput(id: string, input: string, change: Partial<PipelineInput>) {
+    const existing = this.pipelines.get(id)?.bindings[input];
+    const binding: W.Binding =
+      (change.source ?? (existing?.source === "pipeline" ? "pipeline" : "camera")) === "pipeline"
+        ? { resource_id: "", source: "pipeline", pipeline: change.pipeline ?? existing?.pipeline, port: change.port ?? existing?.port, max_wait_ms: change.maxWaitMs ?? existing?.max_wait_ms }
+        : {
+            ...(existing?.source === "pipeline" ? { resource_id: "" } : existing),
+            resource_id: change.resourceId ?? existing?.resource_id ?? "",
+            ...("outputWidth" in change ? { output_width: change.outputWidth } : {}),
+            ...("outputHeight" in change ? { output_height: change.outputHeight } : {}),
+            ...("pyramid" in change ? { pyramid: change.pyramid } : {}),
+          };
+    await this.act("Input", () => api.bindInput(id, input, binding), () => `${this.name(id)}: ${input} updated`);
+    await this.refreshPipelines();
+  }
+
+  /** Redeploy a pipeline with another detector search (the same graph, bindings and settings). */
+  async setSearch(id: string, mode: "tracked" | "full", every: number | null) {
+    const p = this.pipelines.get(id);
+    if (!p?.graph) return;
+    const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
+    await this.act("Search", () => api.putPipeline(id, spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
+    await this.refreshPipelines();
   }
 
   /** The enabled pipeline that runs Eidos (its graph requires `eidos`) on `cameraId`, if any. */

@@ -317,7 +317,15 @@ export interface DaedalusGraphDocument {
 }
 
 export interface Binding {
+  /** The camera the input takes; empty for a pipeline input. */
   resource_id: string;
+  /** `resource` (the default) or `pipeline`: another pipeline's host output. */
+  source?: "resource" | "pipeline";
+  /** Pipeline inputs: the producing pipeline and its host output port. */
+  pipeline?: string;
+  port?: string;
+  /** Pipeline inputs: how long a frame waits for the producer's value of the same frame (0–1000 ms, default 50). */
+  max_wait_ms?: number;
   camera?: string;
   output_width?: number;
   output_height?: number;
@@ -347,8 +355,12 @@ export interface PipelineSpec {
 /** `GET /v1/pipelines/templates`: a graph helios-engine ships, deployable with a camera on `camera_input`. */
 export interface PipelineTemplate {
   id: string;
-  /** A detector family, or `features` (a non-detector template, such as the feature tracks). */
-  family: "apriltag" | "aruco" | "features";
+  /** A detector family, `features` (the feature tracks) or `mapping` (the live and dense maps). */
+  family: "apriltag" | "aruco" | "features" | "mapping";
+  /** What the graph does (`tags`, `tag_pose`, `field_pose`, `map`, `depth`, `features`); absent from an older device. */
+  capabilities?: Capability[];
+  title?: string;
+  summary?: string;
   /** `default` (one node, starts on a sliced frame's first rows) or `staged` (the node-group, one node per stage, for profiling). */
   variant?: "default" | "staged";
   dictionary: string | null;
@@ -359,6 +371,9 @@ export interface PipelineTemplate {
 }
 
 export type SearchMode = "full" | "tracked";
+
+/** What a pipeline graph does, from its node types (`GET /v1/pipelines/templates`, `capabilities`). */
+export type Capability = "tags" | "tag_pose" | "field_pose" | "map" | "depth" | "features";
 
 /** A rigid transform as Eidos's values show it (`a_from_b`). */
 export interface Pose3 {

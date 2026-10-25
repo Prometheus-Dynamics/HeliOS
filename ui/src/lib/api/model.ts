@@ -187,6 +187,21 @@ export type WorkloadState = "running" | "starting" | "quarantined" | "stopped";
  */
 export const ENGINE_CPU_CORES = [1, 2, 3] as const;
 
+/** One graph input of a pipeline: a camera's frames (with the pipeline's own output size and
+ * pyramid) or another pipeline's host output. */
+export interface PipelineInput {
+  source: "camera" | "pipeline";
+  /** Camera inputs: the camera, and what the pipeline asks of it (unset: the camera's own). */
+  resourceId?: string;
+  outputWidth?: number;
+  outputHeight?: number;
+  pyramid?: number;
+  /** Pipeline inputs: the producer, its output port, and how long a frame waits for it (ms). */
+  pipeline?: string;
+  port?: string;
+  maxWaitMs?: number;
+}
+
 export interface Workload {
   id: string;
   name: string;
@@ -194,7 +209,12 @@ export interface Workload {
   revision: number;
   state: WorkloadState;
   restarts: number;
+  /** Each input's camera (`resource_id`); pipeline inputs have none. See `inputs` for everything. */
   bindings: Record<string, string>;
+  inputs: Record<string, PipelineInput>;
+  /** The Eidos detector's search: `tracked` (a full search every `fullSearchEvery` frames) or `full`; null without a detector. */
+  searchMode: "tracked" | "full" | null;
+  fullSearchEvery: number | null;
   graph: GraphDocument;
   outputs: string[];
   /** The core the graph thread is pinned to (`null`: the scheduler's choice). */

@@ -7,6 +7,7 @@ import { definePane } from "#lib/workspace/panes.js";
 import BoardPane from "./BoardPane.svelte";
 import CalibrationPane from "./CalibrationPane.svelte";
 import CameraControlsPane from "./CameraControlsPane.svelte";
+import CameraJobsPane from "./CameraJobsPane.svelte";
 import CameraListPane from "./CameraListPane.svelte";
 import CameraMosaicPane from "./CameraMosaicPane.svelte";
 import CameraViewPane from "./CameraViewPane.svelte";
@@ -44,6 +45,7 @@ definePane({ type: "camera", title: "Camera", icon: "camera", group: "Vision", s
 definePane({ type: "recordings", title: "Recordings", icon: "player-record", group: "Vision", summary: "Record a camera, capture the last seconds, keep and export recordings", component: RecordingsPane });
 definePane({ type: "mosaic",title: "All cameras", icon: "layout-grid", group: "Vision", summary: "Every camera at once, tiled to fit", component: CameraMosaicPane });
 definePane({ type: "cameras", title: "Cameras", icon: "aperture", group: "Vision", summary: "List of cameras by device", component: CameraListPane });
+definePane({ type: "camera-jobs", title: "What cameras run", icon: "list-check", group: "Vision", summary: "Pick each camera's default pipeline: localization, 3D map, depth, markers or feature tracks", component: CameraJobsPane });
 definePane({ type: "camera-controls", title: "Camera controls", icon: "adjustments-horizontal", group: "Vision", summary: "Exposure, gain, ISP, ROI and transport", component: CameraControlsPane, label: (p) => (pinnedCamera(p) ? `${pinnedCamera(p)} controls` : null), identityOf: id("camera") });
 definePane({ type: "playback", title: "Playback", icon: "player-play", group: "Vision", summary: "Replay a recording or image folder as a camera, with transport and pipeline runs", component: PlaybackPane });
 definePane({ type: "calibration", title: "Calibration", icon: "grid-4x4", group: "Vision", summary: "Guided camera calibration", component: CalibrationPane });

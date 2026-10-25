@@ -3,7 +3,7 @@
 
 import { CATALOG_BY_ID } from "./catalog";
 import { previewUrl } from "./client";
-import type { Camera, CameraControlInfo, ClusterNode, CropRect, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, CropRect, GraphDocument, GraphEdge, GraphNode, LogLine, PipelineInput, Resource, ResourceType, Service, Slot, Stream, Workload, WorkloadState } from "./model";
 import type * as W from "./types";
 
 // --- Graphs ------------------------------------------------------------------
@@ -367,6 +367,11 @@ function quantile(values: number[], q: number): number {
   return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : 0;
 }
 
+function toInput(b: W.Binding): PipelineInput {
+  if (b.source === "pipeline") return { source: "pipeline", pipeline: b.pipeline, port: b.port, maxWaitMs: b.max_wait_ms };
+  return { source: "camera", resourceId: b.resource_id, outputWidth: b.output_width, outputHeight: b.output_height, pyramid: b.pyramid };
+}
+
 export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): Workload {
   const fps = Number(p.telemetry?.fps ?? 0);
   const tick = Number(p.telemetry?.last_tick_ms ?? 0);
@@ -379,7 +384,10 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): 
     revision: p.revision ?? 0,
     state: workloadState(p),
     restarts: previous?.restarts ?? 0,
-    bindings: Object.fromEntries(Object.entries(p.bindings).map(([input, b]) => [input, b.resource_id])),
+    bindings: Object.fromEntries(Object.entries(p.bindings).filter(([, b]) => b.resource_id).map(([input, b]) => [input, b.resource_id])),
+    inputs: Object.fromEntries(Object.entries(p.bindings).map(([input, b]) => [input, toInput(b)])),
+    searchMode: p.search_mode ?? null,
+    fullSearchEvery: p.full_search_every ?? null,
     graph,
     outputs: p.outputs.map((o) => outputStreamId(p.id, o.port)),
     cpu: p.cpu ?? null,

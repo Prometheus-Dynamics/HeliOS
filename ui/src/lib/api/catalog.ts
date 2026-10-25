@@ -405,6 +405,27 @@ export const CATALOG: NodeType[] = [
     ],
   },
   {
+    id: "eidos:dense.map",
+    plugin: "eidos",
+    category: "Motion",
+    title: "Dense map",
+    summary: "Dense mapper: keyframe depth fused into a TSDF and a mesh of the surroundings, on the live map's pose.",
+    inputs: [
+      { name: "frame", type: "styx:framelease" },
+      { name: "pose", type: "eidos:map_pose" },
+      { name: "calibration", type: "eidos:camera_calibration" },
+    ],
+    outputs: [
+      { name: "mesh", type: "eidos:dense_mesh" },
+      { name: "timing", type: "eidos:dense_timing" },
+    ],
+    params: [
+      { name: "budget_ms", kind: "float", default: 2, min: 0, max: 100, step: 0.1, help: "Time per tick the dense mapper may take (0: whole keyframes each tick)." },
+      { name: "key_every", kind: "int", default: 8, min: 1, max: 1000, help: "A keyframe every this many posed frames." },
+      { name: "voxel_m", kind: "float", default: 0.04, min: 0.005, max: 1, step: 0.005, help: "Side of a TSDF voxel, in metres." },
+    ],
+  },
+  {
     id: "helios:stream",
     plugin: "helios",
     category: "Output",

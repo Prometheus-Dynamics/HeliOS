@@ -119,8 +119,10 @@ class GuideStore {
     const named = cams.every((c) => identity.get(c.resourceId).name);
     const placed = cams.every((c) => robot.isCustom(c.resourceId));
     const cal = cams.filter((c) => this.calibrated(c)).length;
+    const working = cams.filter((c) => this.active(c)).length;
     return [
       { id: "name", title: "Name your cameras", detail: named ? "Every camera has a name and colour." : "Give each camera a name and colour so you can tell them apart.", done: named, icon: "tag" },
+      { id: "jobs", title: "Choose what each camera does", detail: working === cams.length ? "Every camera runs its pipeline." : `${working} of ${cams.length} run a pipeline. Pick localization, the 3D map and depth, markers or feature tracks.`, done: working === cams.length, icon: "list-check" },
       { id: "place", title: "Tell HeliOS where each camera is", detail: placed ? "All cameras are placed on the robot." : "Where it sits on the robot and which way it looks. Needed for positions.", done: placed, icon: "cube" },
       { id: "calibrate", title: "Calibrate each camera", detail: `${cal} of ${cams.length} done. About two minutes each with a printed board.`, done: cal === cams.length, icon: "grid-4x4" },
       { id: "field", title: "Pick this year's field", detail: field.layout.name === "Demo field" ? "Using the demo field. Load the official layout file." : `Using “${field.layout.name}”.`, done: field.layout.name !== "Demo field", icon: "map" },

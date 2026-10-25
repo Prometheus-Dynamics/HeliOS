@@ -7,12 +7,13 @@ import { tableFor, templateGraph } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, mockCameraFeatures, mockMapView } from "#lib/api/mock.js";
+import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockMapView } from "#lib/api/mock.js";
+import { BUILT_IN, type DefaultTemplate } from "#lib/core/defaults.js";
 import type { CameraFeatures } from "#lib/vision/features.js";
 import type { MapView } from "#lib/vision/map.js";
 import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
-import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
+import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, PipelineInput, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
 import { toasts } from "./toasts.svelte";
 
 interface FeedData {
@@ -311,6 +312,63 @@ class ClusterStore {
     return this.createWorkload(name, nodeId, cameraId, templateGraph(family, tableFor(nodeId)));
   }
 
+  /** The default pipelines this device offers a camera (`core/defaults.ts`). */
+  async defaultTemplates(): Promise<DefaultTemplate[]> {
+    if (this.live) return this.live.defaultTemplates();
+    return BUILT_IN;
+  }
+
+  /**
+   * Make `template` (a default template's id) what `camera` runs, or nothing but video (`null`).
+   * A camera runs one pipeline: its running one takes the new graph in place (same id, so its
+   * NetworkTables path stays), the others on the camera stop.
+   */
+  async applyDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
+    if (this.live) return this.live.applyDefault(cameraId, template, name);
+    const camera = this.camera(cameraId);
+    const mine = this.workloads.filter((w) => Object.values(w.bindings).includes(cameraId));
+    const keep = mine.find((w) => w.state === "running" || w.state === "starting") ?? mine[0];
+    for (const w of mine) if (w !== keep || !template) w.state = "stopped";
+    if (!template || !camera) {
+      toasts.info(`${name}: video only`);
+      return;
+    }
+    const graph = defaultGraph(template.id, tableFor(camera.nodeId));
+    if (!keep) {
+      await this.createWorkload(`${template.title} · ${name}`, camera.nodeId, cameraId, graph);
+      return;
+    }
+    keep.graph = graph;
+    keep.name = `${template.title} · ${name}`;
+    keep.revision += 1;
+    keep.state = "running";
+    keep.inputs = { camera: { ...keep.inputs.camera, source: "camera", resourceId: cameraId, pyramid: template.capabilities.includes("map") || template.capabilities.includes("features") ? 3 : 1 } };
+    keep.searchMode = template.capabilities.includes("tags") ? (keep.searchMode ?? "tracked") : null;
+    keep.perf = { ...keep.perf, nodeMs: Object.fromEntries(graph.nodes.map((n) => [n.id, 0.05])) };
+    toasts.success(`${name} now runs ${template.title}`);
+  }
+
+  /** Change what a pipeline asks of one input (its camera, output size, pyramid; or the producer
+   * and wait of a pipeline input). Only the fields given change. */
+  async setInput(id: string, input: string, change: Partial<PipelineInput>) {
+    if (this.live) return this.live.setInput(id, input, change);
+    const w = this.workload(id);
+    if (!w) return;
+    const next = { ...(w.inputs[input] ?? { source: "camera" as const }), ...change };
+    w.inputs = { ...w.inputs, [input]: next };
+    if (next.resourceId) w.bindings = { ...w.bindings, [input]: next.resourceId };
+    this.log(w.nodeId, "helios-runner", "info", `${w.name}: ${input} updated`);
+  }
+
+  /** The detector's search: `tracked` with a full search every `every` frames, or `full`. */
+  async setSearch(id: string, mode: "tracked" | "full", every: number | null) {
+    if (this.live) return this.live.setSearch(id, mode, every);
+    const w = this.workload(id);
+    if (!w) return;
+    w.searchMode = mode;
+    w.fullSearchEvery = mode === "tracked" ? (every ?? 8) : null;
+  }
+
   /** Change the tag family a pipeline decodes. */
   async setDictionary(id: string, dictionary: string) {
     if (this.live) return this.live.setDictionary(id, dictionary);
@@ -344,6 +402,9 @@ class ClusterStore {
       state: "running",
       restarts: 0,
       bindings: { camera: cameraId },
+      inputs: { camera: { source: "camera", resourceId: cameraId, pyramid: 1 } },
+      searchMode: graph.nodes.some((n) => n.type.startsWith("eidos:detectors.")) ? "tracked" : null,
+      fullSearchEvery: 8,
       graph: clone(graph),
       outputs: [`stream.${id}.poses`],
       cpu: null,

@@ -10,6 +10,10 @@
   const done = $derived(steps.filter((s) => s.done).length);
   const TARGET: Record<string, () => void> = {
     name: () => shell.go("cameras"),
+    jobs: () => {
+      shell.go("cameras");
+      workspaces.open("cameras", pane("camera-jobs"));
+    },
     place: () => shell.go("robot"),
     calibrate: () => shell.go("calibration"),
     field: () => {

@@ -304,6 +304,9 @@ function tagWorkload(id: string, name: string, nodeId: string, cameraId: string,
     state: "running",
     restarts: 0,
     bindings: { camera: cameraId },
+    inputs: { camera: { source: "camera", resourceId: cameraId, outputWidth: 640, outputHeight: 400, pyramid: 1 } },
+    searchMode: "tracked",
+    fullSearchEvery: 8,
     graph: tagGraph("apriltag_36h11", table),
     outputs: [`stream.${id}.poses`],
     cpu: null,
@@ -384,6 +387,35 @@ function liveMapGraph(): GraphDocument {
   };
 }
 
+/** A default template's graph (`core/defaults.ts`) as the mock draws it: one tracked detector
+ * feeding the tag pose, the field pose, the live map and the dense map as the template has them,
+ * or the feature tracks. */
+export function defaultGraph(templateId: string, table: string): GraphDocument {
+  if (templateId === "features-track") return featuresGraph();
+  const aruco = templateId.startsWith("aruco");
+  const map = templateId.includes("-map");
+  const dense = templateId.endsWith("-dense");
+  const nodes = [
+    node("camera", "styx:camera", 0, 120),
+    node("detector", "eidos:detectors.tracked_detect", 270, 100, { dictionary: aruco ? "aruco_4x4_50" : "apriltag_36h11" }),
+    node("pose", "eidos:aruco.pose", 540, 0),
+    ...(aruco ? [] : [node("field", "eidos:aruco.multi_tag_pose", 540, 160)]),
+    ...(map ? [node("mapper", "eidos:mapping.live_map", 540, 320)] : []),
+    ...(dense ? [node("dense", "eidos:dense.map", 810, 360)] : []),
+    node("nt4", "helios:nt4", 1080, 80, { table }),
+  ];
+  const edges = [
+    edge("camera", "frame", "detector", "frame"),
+    edge("detector", "detections", "pose", "detections"),
+    edge("detector", "refined_corners", "pose", "refined_corners"),
+    edge("pose", "poses", "nt4", "value"),
+    ...(aruco ? [] : [edge("detector", "detections", "field", "detections"), edge("detector", "refined_corners", "field", "refined_corners")]),
+    ...(map ? [edge("camera", "frame", "mapper", "frame"), edge("detector", "detections", "mapper", "detections"), edge("detector", "refined_corners", "mapper", "refined_corners")] : []),
+    ...(dense ? [edge("camera", "frame", "dense", "frame"), edge("mapper", "pose", "dense", "pose")] : []),
+  ];
+  return { format: "daedalus.graph", schema_version: 1, requires: [{ id: "styx.frames" }, { id: "eidos" }, { id: "helios" }], nodes, edges };
+}
+
 export const WORKLOADS: Workload[] = [
   tagWorkload("tags-front", "AprilTags · front", "raze-front", "camera.raze-front.cam0", "/helios/front"),
   {
@@ -394,6 +426,9 @@ export const WORKLOADS: Workload[] = [
     state: "running",
     restarts: 0,
     bindings: { camera: "camera.raze-front.cam0" },
+    inputs: { camera: { source: "camera", resourceId: "camera.raze-front.cam0", pyramid: 3 } },
+    searchMode: "tracked",
+    fullSearchEvery: 8,
     graph: liveMapGraph(),
     outputs: ["stream.live-map-front.pose", "stream.live-map-front.snapshot", "stream.live-map-front.timing"],
     cpu: null,
@@ -409,6 +444,9 @@ export const WORKLOADS: Workload[] = [
     state: "running",
     restarts: 0,
     bindings: { camera: "camera.raze-front.cam0" },
+    inputs: { camera: { source: "camera", resourceId: "camera.raze-front.cam0", pyramid: 3 } },
+    searchMode: null,
+    fullSearchEvery: null,
     graph: featuresGraph(),
     outputs: ["stream.features-front.tracks"],
     cpu: null,
