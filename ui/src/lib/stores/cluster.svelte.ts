@@ -96,9 +96,20 @@ class ClusterStore {
     WORKLOADS.filter((w) => w.revision > 1).map((w) => [w.id, [{ revision: w.revision - 1, graph: clone(w.graph) }]]),
   );
 
+  /**
+   * Resolves once every device write the UI started has returned (and no control change waits to
+   * be sent); at once on the mock. For what leaves the page (a test's end): a request cut off
+   * mid-way is a change the user never saw land.
+   */
+  settled(): Promise<void> {
+    return this.live ? this.live.settled() : Promise.resolve();
+  }
+
   start() {
     if (this.started || typeof window === "undefined") return () => {};
     this.started = true;
+    // `window.__helios.settled()`: the end-to-end suite waits for the UI's writes before it closes a page.
+    (window as Window & { __helios?: { settled(): Promise<void> } }).__helios = { settled: () => this.settled() };
     if (this.live) {
       const stop = this.live.start();
       return () => {

@@ -57,6 +57,11 @@ with polls. Mock tests check the screen only.
   do not need them.
 - **Clicks.** Real clicks and typing. Typed values are committed with Enter, and a helper
   (`applyIfChanged` in `flows.ts`) waits for a chooser's write to finish before the device is read.
+- **Writes land before a page closes.** The `page` fixture ends a test by waiting for
+  `window.__helios.settled()` (the cluster store: no device write in flight, no control change
+  waiting to be sent). A page closed with a PUT in flight once cut the device's handler off between
+  its Orion write and its revision record, and the next test's deploy showed no revision change.
+  `settleWrites(page)` (in `fixtures.ts`) is the same wait for a test that reloads or navigates.
 
 ## Not automated
 

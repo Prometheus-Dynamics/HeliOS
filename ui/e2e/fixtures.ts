@@ -23,6 +23,18 @@ function allowed(text: string) {
   return ALLOWED_CONSOLE.some((entry) => entry.pattern.test(text));
 }
 
+/**
+ * Waits until the UI has no device write in flight (`window.__helios.settled()`, from the cluster
+ * store). A page that is already gone, or an older UI without the hook, is nothing to wait for.
+ */
+export async function settleWrites(page: Page) {
+  try {
+    await page.evaluate(() => (window as Window & { __helios?: { settled(): Promise<void> } }).__helios?.settled());
+  } catch {
+    // The page was closed or navigated by the test: no writes of its own are left to wait for.
+  }
+}
+
 export const test = base.extend<{
   page: Page;
   target: Target;
@@ -66,6 +78,10 @@ export const test = base.extend<{
     await page.goto(target === "mock" ? "/?mock=1" : "/");
     await expect(page.getByRole("navigation", { name: "Screens" })).toBeVisible();
     await use(page);
+    // A test ends only once the UI's writes have landed. A page closed with a request in flight cuts
+    // the device's handler off mid-way (the device once kept a revision its history never recorded),
+    // and the next test would start from a state no one checked.
+    await settleWrites(page);
     expect(problems, "console errors and uncaught page errors during the test").toEqual([]);
   },
 

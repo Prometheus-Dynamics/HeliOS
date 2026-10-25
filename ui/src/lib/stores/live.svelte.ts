@@ -112,6 +112,28 @@ export class LiveCluster {
     this.writes = next.catch(() => undefined);
     return next;
   }
+  /** Every device action in flight (`act`), so `settled` can wait for the last of them. */
+  private inFlight = new Set<Promise<unknown>>();
+  /**
+   * Resolves once no device action is in flight and no control change waits to be sent. A page
+   * that leaves (a test's end, a reload) should wait for this: a request cut off mid-way is a
+   * change the user did not see land. Gives up after `timeoutMs`.
+   */
+  async settled(timeoutMs = 15_000): Promise<void> {
+    const deadline = performance.now() + timeoutMs;
+    for (;;) {
+      const pendingControls = [...this.pending.keys()].some((key) => key.startsWith("controls:"));
+      if (!this.inFlight.size && !pendingControls && !this.controlChanges.size) return;
+      if (performance.now() > deadline) return;
+      await Promise.race([...this.inFlight, new Promise((resolve) => setTimeout(resolve, 25))]).catch(() => undefined);
+    }
+  }
+  /**
+   * Refreshes of one list can overlap (a timer, an event and an action's own refresh): a reply
+   * that arrives after a newer one was sent is stale and is dropped, so the UI never shows the
+   * state before an action after the state after it.
+   */
+  private refreshSeq = { pipelines: 0, cameras: 0 };
   /** The latest detections per camera resource, from its running pipeline's `detections` output. */
   private detections = $state<Record<string, Detection[]>>({});
   /** The latest feature tracks per camera resource, from its running pipeline's `tracks` output. */
@@ -231,8 +253,9 @@ export class LiveCluster {
   }
 
   async refreshCameras() {
+    const seq = ++this.refreshSeq.cameras;
     const cameras = await this.guard("cameras", () => api.cameras());
-    if (!cameras) return;
+    if (!cameras || seq !== this.refreshSeq.cameras) return;
     const previous = new Map(this.data.cameras.map((c) => [c.resourceId, c]));
     this.data.cameras = cameras.map((wire) => {
       const camera = toCamera(wire);
@@ -260,8 +283,9 @@ export class LiveCluster {
   }
 
   async refreshPipelines() {
+    const seq = ++this.refreshSeq.pipelines;
     const pipelines = await this.guard("pipelines", () => api.pipelines());
-    if (!pipelines) return;
+    if (!pipelines || seq !== this.refreshSeq.pipelines) return;
     this.pipelines = new Map(pipelines.map((p) => [p.id, p]));
     const previous = new Map(this.data.workloads.map((w) => [w.id, w]));
     this.data.workloads = pipelines.map((p) => toWorkload(p, this.nodeId, previous.get(p.id)));
@@ -726,8 +750,10 @@ export class LiveCluster {
 
   /** Run an action; a 501 becomes one "not available" notice per feature. */
   private async act<T>(feature: string, run: () => Promise<T>, success?: (value: T) => string): Promise<T | undefined> {
+    const request = run();
+    this.inFlight.add(request);
     try {
-      const value = await run();
+      const value = await request;
       if (success) toasts.success(success(value));
       return value;
     } catch (error) {
@@ -738,6 +764,8 @@ export class LiveCluster {
         }
       } else toasts.error(`${feature}: ${errorText(error)}`);
       return undefined;
+    } finally {
+      this.inFlight.delete(request);
     }
   }
 
