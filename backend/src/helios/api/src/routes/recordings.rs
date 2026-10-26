@@ -128,7 +128,8 @@ pub async fn get_settings(State(state): State<SharedState>) -> ApiResult<Json<Re
 }
 
 /// `PUT /v1/recordings/settings`: the whole settings object (defaults for the missing fields).
-pub async fn put_settings(State(state): State<SharedState>, Json(settings): Json<RecorderSettings>) -> ApiResult<Json<RecorderSettings>> {
+pub async fn put_settings(State(state): State<SharedState>, Json(body): Json<serde_json::Value>) -> ApiResult<Json<RecorderSettings>> {
+    let settings = state.store.recording_settings_from(body).map_err(ApiError::unprocessable)?;
     settings.validate().map_err(ApiError::unprocessable)?;
     state.store.put_recording_settings(&settings).await?;
     state.events.publish("recording_settings", serde_json::to_value(&settings).unwrap_or_default());
