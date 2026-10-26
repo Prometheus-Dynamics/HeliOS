@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use helios_layout::Layout;
 use orion::{
     client::{ClientError, LocalNodeRuntime, LocalRuntimePublisher, ProviderResource},
     control_plane::{
@@ -79,14 +80,16 @@ impl OrionPeripheralPublisher {
 
     pub fn new(client_name: impl Into<String>, node_id: impl Into<String>) -> Self {
         let node_id = node_id.into();
+        // The defaults of the image; `from_config` takes the configured layout's paths.
+        let layout = Layout::image();
         Self {
             client_name: client_name.into(),
             executor_client_name: DEFAULT_EXECUTOR_CLIENT_NAME.to_string(),
             provider_id: provider_id_for(&node_id),
             executor_id: executor_id_for(&node_id),
             node_id,
-            stream_dir: std::env::temp_dir().join("helios-peripherals").join("streams"),
-            node_runtime: LocalNodeRuntime::new(PathBuf::from("/run/orion/control.sock"), PathBuf::from("/run/orion/control-stream.sock")),
+            stream_dir: layout.scratch_peripheral_streams_dir(),
+            node_runtime: LocalNodeRuntime::new(layout.orion_socket(), layout.orion_stream_socket()),
         }
     }
 

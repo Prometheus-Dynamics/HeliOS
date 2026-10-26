@@ -18,8 +18,6 @@ use tracing::{info, warn};
 
 use crate::host::{self, HostSender};
 
-/// Where lemnosd listens (its default socket).
-pub const DEFAULT_SOCKET: &str = lemnos_ipc::DEFAULT_SOCKET;
 const POLL: Duration = Duration::from_millis(100);
 const RECONNECT: Duration = Duration::from_secs(2);
 
