@@ -7,6 +7,7 @@ import type { FactSource, Nt4Settings, Nt4State } from "#lib/api/types.js";
 import { DEFAULT_NT4 } from "#lib/core/robot-facts.js";
 import { onSettingsChange } from "#lib/core/sync.js";
 import { toasts } from "#lib/stores/toasts.svelte.js";
+import { forget, loadRaw } from "./persist";
 
 class TeamStore {
   /** What the device resolves the robot's NetworkTables settings to (`null` until it answers). */
@@ -19,7 +20,7 @@ class TeamStore {
     this.#started = true;
     onSettingsChange("nt4", () => void this.load());
     onSettingsChange("robot", () => void this.load());
-    void this.load();
+    void this.#migrate().then(() => this.load());
   }
 
   async load() {
@@ -28,6 +29,14 @@ class TeamStore {
     } catch {
       // The device is not answering: what is shown stays until it does.
     }
+  }
+
+  /** A team entered in this browser before the device kept it moves to the device, once. */
+  async #migrate() {
+    const legacy = loadRaw<number | null>("team", null);
+    if (!legacy) return;
+    await this.load();
+    if (this.robot?.settings.team === null && (await this.save({ team: legacy }))) forget("team");
   }
 
   get number(): number | null {
