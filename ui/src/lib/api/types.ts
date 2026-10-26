@@ -117,6 +117,8 @@ export interface Peer {
   /** Security is on and the peer is not enrolled: its key must be enrolled first. */
   needs_enrollment: boolean;
   key_fingerprint: string;
+  /** How the gateway found the peer: orion, neighbour, lease or controller. */
+  found_by?: string;
 }
 
 /** The robot's peers: `cluster` is its Orion cluster (`robot-<team>`), null when discovery is off. */
