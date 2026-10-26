@@ -203,9 +203,10 @@ export function disabledReason(control: Pick<CameraControlInfo, "writable" | "re
   return null;
 }
 
-/** Choices for a control with labelled values: its menu (by index), a known label map, or none. */
+/** Choices for a control with labelled values: its menu (indexed by value; a V4L2 menu's gaps are
+ * empty names, values the device refuses), a known label map, or none. */
 export function enumOptions(control: Pick<CameraControlInfo, "name" | "menu">): { value: number; label: string }[] | null {
-  if (control.menu && control.menu.length > 0) return control.menu.map((label, value) => ({ value, label }));
+  if (control.menu && control.menu.length > 0) return control.menu.flatMap((label, value) => (label ? [{ value, label }] : []));
   return ENUM_OPTIONS[control.name] ?? null;
 }
 
