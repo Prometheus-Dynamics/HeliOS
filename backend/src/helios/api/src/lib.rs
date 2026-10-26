@@ -10,6 +10,7 @@ pub mod auth_state;
 pub mod board_update;
 pub mod calibration_capture;
 pub mod camera_context;
+pub mod camera_status;
 pub mod capabilities;
 pub mod camera_uncertainty;
 pub mod camera_controls;
@@ -81,6 +82,8 @@ pub struct AppState {
     pub playback: playback::Players,
     /// The node's live streams for the UI (`/v1/streams/ws`): one subscription, shared.
     pub live_streams: Arc<live_streams::LiveStreams>,
+    /// Why each camera's last self-calibration fit was not stored (`camera_status`).
+    pub self_calibration_notes: self_calibration::Notes,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -92,6 +95,7 @@ impl AppState {
         let orion_link = orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone());
         Arc::new(Self {
             live_streams: live_streams::LiveStreams::new(config.live_streams.clone(), orion_link.clone()),
+            self_calibration_notes: self_calibration::Notes::default(),
             orion: orion_link,
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),

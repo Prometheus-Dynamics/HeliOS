@@ -195,7 +195,7 @@ export class LiveCluster {
     // Camera settings the device keeps (mounts, control values, calibrations) show on the cameras.
     for (const domain of ["mounts", "camera_settings", "calibration"]) this.unsubscribers.push(onSettingsChange(domain, () => this.soon("cameras", () => this.refreshCameras())));
     this.timers.push(window.setInterval(() => void this.refreshDevice(), 10_000));
-    this.timers.push(window.setInterval(() => void this.refreshCameras(), 15_000));
+    this.timers.push(window.setInterval(() => void this.refreshCameras(), 5_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
     this.timers.push(
       window.setInterval(() => {

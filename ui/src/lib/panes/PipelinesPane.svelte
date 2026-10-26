@@ -96,7 +96,7 @@
         <span class="r mono">{w.perf.fps}</span>
         <span class="r mono dim">{w.perf.memMiB.toFixed(1)}</span>
       {:else}
-        <span class="r dim span4">{w.state === "quarantined" ? `quarantined · ${w.restarts} restarts` : w.state}</span>
+        <span class="r dim span4" class:bad={w.status?.state === "blocked"} data-tip={w.status?.hint ?? undefined}>{w.status && w.status.state !== "ok" ? w.status.reason : w.state === "quarantined" ? `quarantined · ${w.restarts} restarts` : w.state}</span>
         <span></span>
       {/if}
       <span class="acts">

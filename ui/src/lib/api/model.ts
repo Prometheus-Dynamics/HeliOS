@@ -3,6 +3,8 @@
 // resources; streams the workloads produce. Device-level facts (slots,
 // recovery, logs) come from each node's Atlas agent.
 
+import type { CameraStatus, StatusStage } from "./types";
+
 /** A node's kind: a HeliOS device's host (`raze`, `systemcore`, `linux`, from `GET /v1/device`), or a cluster peer's (`mcu`, `coprocessor`, `foreign`). */
 export type NodeKind = string;
 export type Health = "online" | "degraded" | "offline";
@@ -146,6 +148,8 @@ export interface Camera {
   controls?: CameraControlInfo[];
   /** Live mode: why the controls could not be read. */
   controlsError?: string;
+  /** Live mode: the camera's status chain (why there are no tags, frames, calibration...). */
+  status?: CameraStatus | null;
 }
 
 export interface GraphNode {
@@ -212,6 +216,8 @@ export interface Workload {
   revision: number;
   state: WorkloadState;
   restarts: number;
+  /** Why the pipeline is not running (its graph, its errors), or that it is. Live mode only. */
+  status?: StatusStage;
   /** Each input's camera (`resource_id`); pipeline inputs have none. See `inputs` for everything. */
   bindings: Record<string, string>;
   inputs: Record<string, PipelineInput>;

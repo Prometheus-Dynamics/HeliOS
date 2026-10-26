@@ -22,6 +22,7 @@ use crate::{
     SharedState,
     camera_context::{self, CalibrationMatch},
     camera_controls::standard_key,
+    camera_status::{self, PipelineFacts, Stage},
     error::{ApiError, ApiResult},
     field_layouts::{self, StoredLayout},
     host::now_ms,
@@ -506,6 +507,8 @@ pub struct Pipeline {
     pub nice: Option<u32>,
     /// Managed by this API (created through `/v1/pipelines`) rather than written by other tools.
     pub managed: bool,
+    /// This pipeline's line of the status chain: why it is not running, or that it is (`camera_status`).
+    pub status: Stage,
 }
 
 /// The pose summary of a pipeline's outputs: Eidos's `status` (`calibrated`, `uncalibrated` or
@@ -717,7 +720,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
     let metrics = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(METRICS_KIND))
         .map(|record| parse_message(state_field(record, "message")));
-    Pipeline {
+    let mut pipeline = Pipeline {
         id: pipeline_id(&workload_id),
         name: labels.get(NAME_LABEL).cloned().unwrap_or_else(|| pipeline_id(&workload_id)),
         revision: labels.get(REVISION_LABEL).and_then(|r| r.parse().ok()),
@@ -742,8 +745,11 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         full_search_every,
         loss_full_search_after: tuning.map(|tuning| tuning.loss_full_search_after),
         margin_growth_misses: tuning.map(|tuning| tuning.margin_growth_misses),
+        status: Stage::off("pipeline", "Pipeline", ""),
         workload_id,
-    }
+    };
+    pipeline.status = camera_status::pipeline_stage(&PipelineFacts::of(&pipeline));
+    pipeline
 }
 
 /// State per pipeline, for change events.
@@ -762,6 +768,11 @@ pub fn digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
 /// Pipelines whose bindings use `resource_id`.
 pub fn pipelines_using(view: &StateView, resource_id: &str) -> Vec<String> {
     engine_workloads(view).filter(|w| decode_bindings(w).values().any(|b| b.resource_id == resource_id)).map(|w| pipeline_id(w.workload_id.as_str())).collect()
+}
+
+/// The pipelines whose bindings use `resource_id`, as their DTOs (with their status).
+pub fn pipelines_using_dto(view: &StateView, resource_id: &str) -> Vec<Pipeline> {
+    engine_workloads(view).filter(|w| decode_bindings(w).values().any(|b| b.resource_id == resource_id)).map(|w| pipeline_dto(view, w)).collect()
 }
 
 /// Plugins helios-engine reports as loaded (labels on its runtime resource), when it runs.

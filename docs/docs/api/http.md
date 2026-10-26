@@ -107,6 +107,7 @@ as unavailable and not retry.
 |---|---|---|---|
 | `GET` | `/v1/cameras` | Orion + Styx | Camera resources with `live` facts, or `live_error` when the camera service did not answer |
 | `GET` | `/v1/cameras/{id}` | Orion + Styx | One camera |
+| `GET` | `/v1/cameras/{id}/status` | Orion + Styx + device | The camera's status chain: `stages` (camera, service, frames, pipeline, tags, calibration, map, depth, features), each `{stage, label, state: ok\|waiting\|blocked\|off, reason, hint, progress?}`, the `blocking` stage and a `summary`. Each camera in `GET /v1/cameras` has it as `status`; a pipeline has its own line as `status` |
 | `GET` | `/v1/cameras/{id}/settings` | Styx + API store | The camera's controls (range, default, value now, standard control, `writable`, `persisted`) plus the capture's mode, fps and measured exposure and gains, and the values kept across reboots (`persisted`) |
 | `PATCH` | `/v1/cameras/{id}/settings` | Styx + API store | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`) and the values now kept across reboots. Resolution and pyramid levels are set per pipeline (see bindings) |
 | `DELETE` | `/v1/cameras/{id}/settings` | Styx + API store | Reset to defaults: every writable control back to its default, and the stored values forgotten. Same answer as `PATCH` |

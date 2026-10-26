@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PlanSection from "#lib/components/pipeline/PlanSection.svelte";
   import { SvelteFlowProvider } from "@xyflow/svelte";
   import { identity } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
@@ -118,7 +119,7 @@
 {#if workload && draft}
   {#if workload.state === "quarantined"}
     <div class="banner">
-      <b>Quarantined</b> after {workload.restarts} restarts. The rest of the robot is unaffected.
+      <b>{workload.status?.reason ?? "Quarantined"}</b> {workload.status?.hint ?? `after ${workload.restarts} restarts. The rest of the robot is unaffected.`}
       <button type="button" onclick={() => draft.rollBack()}>Roll back</button>
       <button type="button" onclick={() => cluster.restartWorkload(workload.id)}>Restart</button>
     </div>
@@ -128,6 +129,7 @@
       <GraphCanvas {draft} />
     </SvelteFlowProvider>
   {/key}
+  <PlanSection pipelineId={workload.id} />
 {:else}
   <Empty icon="schema" text="No pipeline selected." />
 {/if}

@@ -33,6 +33,8 @@ import type {
   CalibrationSolve,
   CameraCalibration,
   CameraCalibrations,
+  CameraStatus,
+  PipelinePlan,
   PipelineOutput,
   PipelineSpec,
   ProcessInfo,
@@ -224,6 +226,8 @@ export const api = {
   resetCameraSettings: (id: string) => request<CameraSettingsApplied>("DELETE", `/v1/cameras/${enc(id)}/settings`),
   setMount: (id: string, mount: CameraMount) => request<CameraMount>("PUT", `/v1/cameras/${enc(id)}/mount`, { body: mount }),
   clearMount: (id: string) => request<void>("DELETE", `/v1/cameras/${enc(id)}/mount`),
+  /** The camera's status chain alone (each camera in `cameras()` has it too). */
+  cameraStatus: (id: string) => request<CameraStatus>("GET", `/v1/cameras/${enc(id)}/status`),
   calibrations: (id: string) => request<CameraCalibrations>("GET", `/v1/cameras/${enc(id)}/calibration`),
   putCalibration: (id: string, calibration: CameraCalibration) => request<CameraCalibrations>("PUT", `/v1/cameras/${enc(id)}/calibration`, { body: calibration }),
   captureCalibration: (id: string, body: { board: CalibrationBoard; width?: number; height?: number; keep?: boolean }) => request<CalibrationCapture>("POST", `/v1/cameras/${enc(id)}/calibration/capture`, { body }),
@@ -234,6 +238,8 @@ export const api = {
   pipelines: () => request<Pipeline[]>("GET", "/v1/pipelines"),
   pipelineTemplates: () => request<PipelineTemplate[]>("GET", "/v1/pipelines/templates"),
   pipeline: (id: string) => request<Pipeline>("GET", `/v1/pipelines/${enc(id)}`),
+  /** The pipeline's Daedalus plan: its nodes, the edges and any device transfers (`explain_plan`). */
+  pipelinePlan: (id: string) => request<PipelinePlan>("GET", `/v1/pipelines/${enc(id)}/plan`),
   createPipeline: (spec: PipelineSpec & { id?: string }) => request<Pipeline>("POST", "/v1/pipelines", { body: spec }),
   putPipeline: (id: string, spec: PipelineSpec) => request<Pipeline>("PUT", `/v1/pipelines/${enc(id)}`, { body: spec }),
   deletePipeline: (id: string) => request<void>("DELETE", `/v1/pipelines/${enc(id)}`),

@@ -5,6 +5,7 @@
 
 import { CATALOG_BY_ID, defaults } from "./catalog";
 import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
+import type { CameraStatus, StatusStage } from "./types";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
 import type { MapPoints, MapPosedFrame, MapSnapshot, MapTag, MapTransform, MapView } from "../vision/map";
 import { encodeBase64, type DenseMeshView, type DenseView } from "../vision/dense";
@@ -254,6 +255,87 @@ function ov9782Controls(values: { exposureUs: number; gain: number; fps: number;
   ];
 }
 
+/** One stage of a simulated status chain (helios-api `camera_status`). */
+function chainStage(stage: string, label: string, state: StatusStage["state"], reason: string, hint: string | null = null, progress: StatusStage["progress"] = null): StatusStage {
+  return { stage, label, state, reason, hint, progress };
+}
+
+/** A chain from its stages: it stops at the first stage that is waiting or blocked. */
+function chainOf(stages: StatusStage[]): CameraStatus {
+  const stop = stages.find((s) => s.state === "blocked" || s.state === "waiting");
+  return { stages, blocking: stop?.stage ?? null, summary: stop ? `${stop.label}: ${stop.reason}` : "Working: every stage that applies is running." };
+}
+
+const CAMERA_OK = [chainStage("camera", "Camera", "ok", "Connected"), chainStage("service", "Camera service", "ok", "Online")];
+
+/** A camera that streams, with no pipeline on it. */
+function streamingChain(fps: number): CameraStatus {
+  return chainOf([...CAMERA_OK, chainStage("frames", "Frames", "ok", `${fps.toFixed(1)} fps`), chainStage("pipeline", "Pipeline", "off", "No pipeline uses this camera")]);
+}
+
+/** Another program holds the camera: Limelight's vision server on the SystemCore. */
+function busyChain(): CameraStatus {
+  return chainOf([
+    ...CAMERA_OK,
+    chainStage("frames", "Frames", "blocked", "In use by visionserver (Limelight vision)", "Turn off that program's capture of this camera. HeliOS takes the camera once it is free."),
+    chainStage("pipeline", "Pipeline", "waiting", "Waiting for the camera's frames"),
+  ]);
+}
+
+/** The pipeline decodes another tag family than the field's tags (the tag 14 case on the SystemCore). */
+function familyChain(): CameraStatus {
+  return chainOf([
+    ...CAMERA_OK,
+    chainStage("frames", "Frames", "ok", "60.0 fps"),
+    chainStage("pipeline", "Pipeline", "ok", "tags-right: Running at 60 fps"),
+    chainStage(
+      "detections",
+      "Tags",
+      "blocked",
+      "No tags: the pipeline decodes apriltag_16h5, and the field's tags are apriltag_36h11",
+      "Set the pipeline's tag family to apriltag_36h11 in its settings. Tags of another family are never decoded.",
+    ),
+  ]);
+}
+
+/** The live map is fitting its lens: the calibration's frames toward its window, then the map bootstraps. */
+function bootstrappingChain(): CameraStatus {
+  return chainOf([
+    ...CAMERA_OK,
+    chainStage("frames", "Frames", "ok", "60.0 fps"),
+    chainStage("pipeline", "Pipeline", "ok", "live-map: Running at 60 fps"),
+    chainStage("detections", "Tags", "ok", "2 tags in view: ids 1, 7"),
+    chainStage(
+      "calibration",
+      "Calibration",
+      "waiting",
+      "Self-calibrating: 40 of 150 frames, 4 views so far",
+      "Move the camera so the tags are seen from many sides. The lens is fitted from what the mapper sees.",
+      { value: 40, target: 150, unit: "frames" },
+    ),
+    chainStage("map", "Map", "waiting", "Bootstrapping: waiting for a calibrated first tag", "The map starts from the first calibrated tags. Show a tag, or the field, to the camera."),
+  ]);
+}
+
+/** The map tracks and the lens is fitted, but the dense mapper has no depth: depth needs motion. */
+function depthChain(): CameraStatus {
+  return chainOf([
+    ...CAMERA_OK,
+    chainStage("frames", "Frames", "ok", "60.0 fps"),
+    chainStage("pipeline", "Pipeline", "ok", "dense-map: Running at 60 fps"),
+    chainStage("detections", "Tags", "ok", "3 tags in view: ids 1, 3, 7"),
+    chainStage("calibration", "Calibration", "ok", "Self-calibrated from 24 views, 0.31 px rms (at 1280x800)"),
+    chainStage("map", "Map", "ok", "Tracking"),
+    chainStage(
+      "depth",
+      "Depth and mesh",
+      "waiting",
+      "No depth yet: 2 keyframes",
+      "Depth needs motion: move the camera slowly so keyframes are taken from new views.",
+    ),
+  ]);
+}
+
 function cam(id: string, name: string, nodeId: string, mount: string, offset: number, extra: Partial<Camera> = {}): Camera {
   const settings = { width: 1280, height: 800, fps: 60, format: "GREY", exposureUs: 2200, autoExposure: false, gain: 4, pyramid: true, roi: null };
   return {
@@ -267,15 +349,16 @@ function cam(id: string, name: string, nodeId: string, mount: string, offset: nu
     controls: ov9782Controls(settings),
     stats: { fps: 60, dropped: 0, latencyMs: 9.7, cpuMsPerFrame: 0.3 },
     feed: { base: "/mock/robot", offset },
+    status: streamingChain(60),
     ...extra,
   };
 }
 
 export const CAMERAS: Camera[] = [
-  cam("camera.raze-front.cam0", "Front", "raze-front", "Front bumper, 18° up", 0),
-  cam("camera.raze-back.cam0", "Back", "raze-back", "Rear frame, 15° up", 120),
-  cam("camera.raze-left.cam0", "Left", "raze-left", "Left side, intake", 240),
-  cam("camera.raze-right.cam0", "Right", "raze-right", "Right side, 20° up", 360),
+  cam("camera.raze-front.cam0", "Front", "raze-front", "Front bumper, 18° up", 0, { status: bootstrappingChain() }),
+  cam("camera.raze-back.cam0", "Back", "raze-back", "Rear frame, 15° up", 120, { status: busyChain(), feed: { base: "/mock/robot", offset: 120 }, stats: { fps: 0, dropped: 0, latencyMs: 0, cpuMsPerFrame: 0 } }),
+  cam("camera.raze-left.cam0", "Left", "raze-left", "Left side, intake", 240, { status: depthChain() }),
+  cam("camera.raze-right.cam0", "Right", "raze-right", "Right side, 20° up", 360, { status: familyChain() }),
   cam("camera.pv-coproc.arducam", "PV Arducam", "pv-coproc", "Turret", 60, {
     sensor: "Arducam OV9281",
     backend: "PhotonVision adapter",
@@ -351,6 +434,7 @@ function tagWorkload(id: string, name: string, nodeId: string, cameraId: string,
     searchMode: "tracked",
     fullSearchEvery: 8,
     graph: tagGraph("apriltag_36h11", table),
+    status: chainStage("pipeline", "Pipeline", "ok", `${name}: Running at 60 fps`),
     outputs: [`stream.${id}.poses`],
     cpu: null,
     cpuApplied: null,
@@ -498,7 +582,7 @@ export const WORKLOADS: Workload[] = [
     perf: { tickP50Ms: 0.3, tickP99Ms: 0.4, fps: 60, memMiB: 2.1, nodeMs: { camera: 0.02, tracks: 0.2, stream: 0.006 }, tickHistory: history(0.3, 0.03) },
   },
   tagWorkload("tags-back", "AprilTags · back", "raze-back", "camera.raze-back.cam0", "/helios/back"),
-  tagWorkload("tags-right", "AprilTags · right", "raze-right", "camera.raze-right.cam0", "/helios/right"),
+  { ...tagWorkload("tags-right", "AprilTags · right", "raze-right", "camera.raze-right.cam0", "/helios/right"), graph: tagGraph("apriltag_16h5", "/helios/right") },
   {
     ...tagWorkload("tags-left", "ArUco game pieces · left", "raze-left", "camera.raze-left.cam0", "/helios/left"),
     revision: 3,
@@ -509,6 +593,7 @@ export const WORKLOADS: Workload[] = [
     revision: 2,
     state: "quarantined",
     restarts: 5,
+    status: chainStage("pipeline", "Pipeline", "blocked", "Failed: the CLAHE pre-filter raised an error", "Restart it. If it fails again, its error is in the Logs."),
     perf: { tickP50Ms: 0, tickP99Ms: 0, fps: 0, memMiB: 0, nodeMs: {}, tickHistory: [] },
   },
 ];

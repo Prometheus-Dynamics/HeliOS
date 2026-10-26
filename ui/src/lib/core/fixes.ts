@@ -3,6 +3,7 @@
 import type { IconName } from "#lib/ui/icons.js";
 import { drafts } from "#lib/graph/drafts.svelte.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
+import { blockingStage } from "#lib/status/chain.js";
 
 export interface Problem {
   id: string;
@@ -29,6 +30,10 @@ export function problems(): Problem[] {
         { label: "Stop", icon: "player-stop", run: () => cluster.stopWorkload(w.id) },
       ],
     });
+  }
+  for (const c of cluster.cameras) {
+    const stop = blockingStage(c.status);
+    if (stop?.state === "blocked") out.push({ id: `cam:${c.resourceId}`, severity: "error", title: `${c.name}: ${stop.reason}`, why: stop.hint ?? "", fixes: [] });
   }
   for (const n of cluster.nodes.filter((x) => x.health === "offline")) {
     out.push({ id: `off:${n.id}`, severity: "error", title: `${n.name}: offline`, why: "No heartbeat. Check power and link; it rejoins on its own.", fixes: [{ label: "Reboot", icon: "power", run: () => cluster.reboot(n.id) }] });

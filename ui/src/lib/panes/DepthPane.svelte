@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusChain from "#lib/components/status/StatusChain.svelte";
   // The dense mapper's depth of a live map, large: the latest keyframe's inverse depth in a colour
   // map (yellow is near, purple far, transparent is unknown), with its frame and age, and the
   // mapper's work per tick. Depth comes at most twice a second, after a keyframe.
@@ -81,6 +82,7 @@
       {:else}
         <div class="waiting">
           <b>No depth yet</b>
+          <StatusChain status={camera?.status} only={["calibration", "map", "depth"]} variant="why" />
           <span>The dense mapper makes depth once the camera is calibrated and it has a posed keyframe. {timing ? `It is ${timing.state}.` : ""}</span>
         </div>
       {/if}
