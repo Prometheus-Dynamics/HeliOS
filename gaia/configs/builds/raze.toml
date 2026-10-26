@@ -1,6 +1,6 @@
 gaia_version = ">=2.0.0"
 build_name = "helios-${input.profile}-raze"
-version = "2026.2.0-dev-${project.commit_short}"
+version = "2026.2.0-dev.${project.commit_count}+${project.commit_short}"
 description = "HeliOS image for the Raze (CM5 + OV9782). Use the profile input to switch between base OS and full appliance builds."
 profile = "${input.profile}"
 # Set here (not only in targets/raze.toml): `when = { target = ... }` imports
