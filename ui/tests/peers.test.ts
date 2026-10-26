@@ -82,6 +82,12 @@ describe("a peer's node", () => {
     const node = peerNode(peerOf("systemcore", { address: null }), snapshot(deviceOf("systemcore", "systemcore")));
     expect(node.address).toBe("");
   });
+
+  test("says how the gateway found it, for the devices pane", () => {
+    const node = peerNode(peerOf("raze-37bc", { found_by: "neighbour" }), snapshot(deviceOf("raze-37bc", "raze")));
+    expect(node.peer?.foundBy).toBe("neighbour");
+    expect(unreachableNode(peerOf("raze-37bc", { found_by: "orion" })).peer?.foundBy).toBe("orion");
+  });
 });
 
 describe("a peer that does not answer", () => {

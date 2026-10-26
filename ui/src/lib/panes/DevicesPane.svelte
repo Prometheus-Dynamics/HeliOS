@@ -57,6 +57,13 @@
           <i>{n.model}</i>
         </span>
         <span class="tags">
+          {#if n.peer}
+            {@const gw = cluster.gateway ? identity.name(cluster.gateway.id, cluster.gateway.name) : "gateway"}
+            <span data-tip={n.peer.routed ? `Reached through ${gw}` : "The gateway does not reach this peer"}>
+              <Badge tone={n.peer.routed ? "info" : "warn"} text={n.peer.routed ? `via ${gw}` : "not routed"} />
+            </span>
+            {#if n.peer.foundBy}<Badge tone="neutral" text={`found by ${n.peer.foundBy}`} mono />{/if}
+          {/if}
           <Badge tone={placeOf(n).tone} text={placeOf(n).text} />
           <Badge tone="neutral" text={n.kind} mono />
         </span>

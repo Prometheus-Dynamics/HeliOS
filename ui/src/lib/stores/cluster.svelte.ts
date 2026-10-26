@@ -255,6 +255,10 @@ class ClusterStore {
   node(id: string) {
     return this.nodes.find((n) => n.id === id);
   }
+  /** This device: the gateway the robot's peers are reached through (the node that is not a peer). */
+  get gateway() {
+    return this.nodes.find((n) => !n.peer);
+  }
   camera(id: string) {
     return this.cameras.find((c) => c.resourceId === id);
   }

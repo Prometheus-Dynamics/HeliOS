@@ -62,8 +62,8 @@
           {#if stop}<span class="sub" data-stage={stop.stage} style:color={stop.state === "blocked" ? "var(--err)" : "var(--info)"}>{stop.label}: {stop.reason}</span>{/if}
         </span>
         {#if cluster.node(c.nodeId)?.peer}
-          {@const host = cluster.node(c.nodeId)}
-          <Badge tone="info" text={identity.name(c.nodeId, host?.name ?? c.nodeId)} />
+          {@const gw = cluster.gateway}
+          <Badge tone="info" text={gw ? `via ${identity.name(gw.id, gw.name)}` : "via gateway"} />
         {/if}
         <span class="num" class:dim={!tags} data-tip="Tags this frame"><Icon name="target" size={11} />{tags}</span>
         <span class="num fps" class:bad={c.stats.fps < c.settings.fps * 0.9}>{c.stats.fps.toFixed(0)}</span>

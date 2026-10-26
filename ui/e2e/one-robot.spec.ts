@@ -45,14 +45,14 @@ test.describe("one robot (mock)", () => {
     await expect(systemcore.getByText("peer · routed", { exact: true })).toBeVisible();
   });
 
-  test("the camera list shows the peer's camera with a node badge, and this device's without one", async ({ page }) => {
+  test("the camera list shows the peer's camera as reached via this device, and this device's without one", async ({ page }) => {
     await openScreen(page, "Cameras");
     const back = cameraRow(page, /^Back /);
     await expect(back).toBeVisible();
-    await expect(back.getByText("SystemCore", { exact: true })).toBeVisible();
+    await expect(back.getByText(/^via /)).toBeVisible();
     const front = cameraRow(page, /^Front /);
     await expect(front).toBeVisible();
-    await expect(front.getByText("SystemCore", { exact: true })).toHaveCount(0);
+    await expect(front.getByText(/^via /)).toHaveCount(0);
   });
 
   test("the LED controls are the Raze's: they show for it and not for the SystemCore", async ({ page }) => {
