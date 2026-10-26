@@ -84,7 +84,11 @@ case "${1:-}" in
     args=()
     # Image builds (profile and slot inputs); a package build such as systemcore has neither.
     if grep -q '^\[inputs.profile\]' "$build_file"; then
-      args+=(--set "input.profile=$profile" --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit")
+      # Slot ids sort by slot.json's version and allow no "+": the version without its build
+      # metadata (`2026.2.0-dev.<count>`), the commit in its own field.
+      slot_version=$(grep -m1 '^version = ' "$build_file" | sed -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)-dev.*/\1/')
+      args+=(--set "input.profile=$profile" --set "input.slot_version=${slot_version}-dev.$(git rev-list --count HEAD)"
+        --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit")
     fi
     exec gaia run "$build_file" "${args[@]}" "$@"
     ;;

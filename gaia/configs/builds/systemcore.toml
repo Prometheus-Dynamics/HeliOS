@@ -302,7 +302,9 @@ allowed_prefixes = ["/usr/local", "/etc/systemd/system"]
 
 [image.assembly.packages.control]
 Package = "helios"
-Version = "${build.version}"
+# The package version: the build's, with "~dev" so opkg and dpkg sort a dev build below its
+# release (they split at the last "-", which would put "-dev" above it).
+Version = "2026.2.0~dev.${project.commit_count}+${project.commit_short}"
 Architecture = "aarch64"
 Maintainer = "Prometheus Dynamics"
 Description = "HeliOS vision: AprilTag localization, 3D mapping and depth on SystemCore's USB cameras."
