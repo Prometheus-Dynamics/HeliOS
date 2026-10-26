@@ -1,5 +1,4 @@
 <script lang="ts">
-  import StatusChain from "#lib/components/status/StatusChain.svelte";
   // One camera, big: follows the selected camera or stays pinned. Overlays,
   // ROI drawing, snapshot and quick exposure in the tab row.
   import type { Camera } from "#lib/api/model.js";
@@ -116,7 +115,6 @@
 {#if camera}
   <div class="wrap">
     <Feed {camera} {overlays} {roiTool} onroi={(roi) => roi && offerRegion(roi)} />
-    {#if camera.status}<div class="chain-status"><StatusChain status={camera.status} /></div>{/if}
   </div>
 {:else}
   <Empty icon="camera" text="No camera selected. Pick one in the tab bar." />

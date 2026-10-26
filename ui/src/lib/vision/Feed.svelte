@@ -40,6 +40,8 @@
   // canvas; the MJPEG <img> is the fallback when the socket cannot be used.
   let socketFailed = $state(false);
   const socketMode = $derived(Boolean(live) && !socketFailed && typeof WebSocket !== "undefined" && Boolean(cluster.live));
+  // A picture (or its element) is on screen. Without one the status chain takes the box instead.
+  const previewing = $derived(socketMode || (Boolean(live) && !previewFailed) || Boolean(camera.feed.base));
   let screen = $state<HTMLCanvasElement>();
   $effect(() => {
     void live;
@@ -310,6 +312,9 @@
     {/if}
     {#if camera.foreign}<span class="hud tr">via {camera.foreign}</span>{/if}
   </div>
+  {#if previewing && camera.status}
+    <div class="status-strip"><StatusChain status={camera.status} variant="strip" /></div>
+  {/if}
 </div>
 
 <style>
@@ -325,6 +330,14 @@
   }
   .frame {
     position: relative;
+  }
+  /* The status chain over the picture: one line, expanding upwards. Clear of the stats line and the histogram. */
+  .status-strip {
+    position: absolute;
+    left: 6px;
+    bottom: 30px;
+    z-index: 1;
+    max-width: min(560px, calc(100% - 170px));
   }
   img,
   .screen,

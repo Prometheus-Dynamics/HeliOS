@@ -2,7 +2,8 @@
   // A camera's status chain (helios-api `camera_status`): the one component every screen uses to say
   // what is happening and what to do. `why` shows the stage that stops the chain (of the named
   // stages, when `only` is given) with its reason, hint and progress. `chain` lists every stage that
-  // applies, in order, and marks where it stops.
+  // applies, in order, and marks where it stops. `strip` is a compact line for over a live picture:
+  // the stage that stops the chain and its hint, expanding to the whole chain.
   import Meter from "#lib/kit/Meter.svelte";
   import type { CameraStatus } from "#lib/api/types.js";
   import { blockingStage, fraction, visibleStages, STATE_TONE } from "#lib/status/chain.js";
@@ -14,12 +15,31 @@
   }: {
     status: CameraStatus | null | undefined;
     only?: readonly string[];
-    variant?: "chain" | "why";
+    variant?: "chain" | "why" | "strip";
   } = $props();
 
   const stages = $derived(visibleStages(status, only));
   const stop = $derived(only ? (stages.find((s) => s.state === "blocked" || s.state === "waiting") ?? null) : blockingStage(status));
 </script>
+
+{#snippet stageList()}
+  <ol>
+    {#each stages as s (s.stage)}
+      <li data-stage={s.stage} data-state={s.state} class:stop={s.stage === status?.blocking}>
+        <i class="dot {STATE_TONE[s.state]}"></i>
+        <span class="label">{s.label}</span>
+        <span class="reason">{s.reason}</span>
+        {#if s.progress}
+          <span class="progress">
+            <Meter value={fraction(s.progress)} color="var(--info)" height={4} />
+            <small>{s.progress.value} of {s.progress.target} {s.progress.unit}</small>
+          </span>
+        {/if}
+        {#if s.hint && s.state !== "ok"}<small class="hint">{s.hint}</small>{/if}
+      </li>
+    {/each}
+  </ol>
+{/snippet}
 
 {#if variant === "why"}
   {#if stop}
@@ -34,25 +54,27 @@
       {#if stop.hint}<small class="hint">{stop.hint}</small>{/if}
     </div>
   {/if}
+{:else if variant === "strip"}
+  {#if status}
+    <details class="strip" data-blocking={status.blocking ?? "none"}>
+      <summary>
+        {#if stop}
+          <i class="dot {STATE_TONE[stop.state]}"></i>
+          <b>{stop.label}</b>
+          <span class="reason">{stop.reason}</span>
+          {#if stop.hint}<small class="hint">{stop.hint}</small>{/if}
+        {:else}
+          <i class="dot success"></i>
+          <span class="reason">{status.summary}</span>
+        {/if}
+      </summary>
+      <div class="chain">{@render stageList()}</div>
+    </details>
+  {/if}
 {:else if status}
   <div class="chain">
     <p class="summary" data-blocking={status.blocking ?? "none"}>{status.summary}</p>
-    <ol>
-      {#each stages as s (s.stage)}
-        <li data-stage={s.stage} data-state={s.state} class:stop={s.stage === status.blocking}>
-          <i class="dot {STATE_TONE[s.state]}"></i>
-          <span class="label">{s.label}</span>
-          <span class="reason">{s.reason}</span>
-          {#if s.progress}
-            <span class="progress">
-              <Meter value={fraction(s.progress)} color="var(--info)" height={4} />
-              <small>{s.progress.value} of {s.progress.target} {s.progress.unit}</small>
-            </span>
-          {/if}
-          {#if s.hint && s.state !== "ok"}<small class="hint">{s.hint}</small>{/if}
-        </li>
-      {/each}
-    </ol>
+    {@render stageList()}
   </div>
 {/if}
 
@@ -98,6 +120,70 @@
     color: var(--fg);
     font-weight: 600;
   }
+  .strip {
+    max-width: 100%;
+    text-align: left;
+    color: #e8eaf0;
+    font-size: 12px;
+    line-height: 1.35;
+    background: rgba(8, 10, 14, 0.78);
+    border-radius: var(--r-1);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+  }
+  .strip summary {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    padding: 5px 8px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .strip summary::-webkit-details-marker {
+    display: none;
+  }
+  .strip summary::after {
+    content: "▸";
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.6);
+    transition: transform 0.12s;
+  }
+  .strip[open] summary::after {
+    transform: rotate(90deg);
+  }
+  .strip summary b {
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .strip summary .reason,
+  .strip summary .hint {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .strip summary .reason {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .strip summary .hint {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .strip .chain {
+    max-height: 40vh;
+    overflow: auto;
+    padding: 0 8px 8px;
+  }
+  .strip .label {
+    color: #fff;
+  }
+  .strip .reason {
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .strip li .hint {
+    color: rgba(255, 255, 255, 0.6);
+  }
   ol {
     display: grid;
     gap: 6px;
@@ -134,6 +220,7 @@
     margin-top: 5px;
     border-radius: 50%;
     background: var(--fg-4);
+    flex: none;
   }
   .dot.success {
     background: var(--ok);
