@@ -22,7 +22,7 @@ pub fn collect_failure_snapshot(config: &DiagnosticsConfig, unit: &str, trigger:
     let out_dir = config.base_dir.join(&id);
     ensure_dir(&out_dir)?;
     let commands = collect_command_outputs(&config, &out_dir, Some(unit))?;
-    collect_file_copies(&out_dir)?;
+    collect_file_copies(&config, &out_dir)?;
 
     let summary = SnapshotSummary { bundle_dir: out_dir.display().to_string(), archive: None, trigger: trigger.to_string(), unit: Some(unit.to_string()), generated_at: Utc::now(), commands };
     let summary_path = out_dir.join("summary.json");
@@ -58,9 +58,10 @@ fn collect_command_outputs(config: &DiagnosticsConfig, out_dir: &Path, unit: Opt
     ensure_dir(&commands_dir)?;
     let mut results = Vec::new();
 
+    let os_release = config.os_release_path.display().to_string();
     let mut specs = vec![
         ("uname", "uname", vec!["-a"]),
-        ("os-release", "cat", vec!["/etc/os-release"]),
+        ("os-release", "cat", vec![os_release.as_str()]),
         ("cmdline", "cat", vec!["/proc/cmdline"]),
         ("uptime", "uptime", vec![]),
         ("date", "date", vec![]),
@@ -92,25 +93,10 @@ fn collect_command_outputs(config: &DiagnosticsConfig, out_dir: &Path, unit: Opt
     Ok(results)
 }
 
-fn collect_file_copies(out_dir: &Path) -> Result<()> {
+fn collect_file_copies(config: &DiagnosticsConfig, out_dir: &Path) -> Result<()> {
     let files_out = out_dir.join("files");
-    let _ = try_glob_copy(
-        &[
-            "/etc/os-release",
-            "/etc/default/helios-image.env",
-            "/var/lib/helios/hostname",
-            "/var/lib/helios/team",
-            "/var/lib/helios/peers.json",
-            "/etc/lemnos/board.toml",
-            "/var/lib/helios/networkd/*.network",
-            "/run/board/identity.json",
-            "/run/board/update.json",
-            "/usr/lib/board/board-package.env",
-            "/etc/board/*",
-            "/etc/board/*/*",
-        ],
-        &files_out,
-    )?;
+    let patterns = config.snapshot_files.iter().map(String::as_str).collect::<Vec<_>>();
+    let _ = try_glob_copy(&patterns, &files_out)?;
     write_str(&out_dir.join("README.txt"), "Helios diagnostics snapshot bundle\n")?;
     Ok(())
 }

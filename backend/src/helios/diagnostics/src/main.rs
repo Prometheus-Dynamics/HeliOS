@@ -25,7 +25,7 @@ enum Command {
 
 fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
-    let config = DiagnosticsConfig::default();
+    let config = DiagnosticsConfig::from_layout(&helios_layout::Layout::load()?);
     match cli.command {
         Command::Doctor => {
             let report = collect_health_report(&config)?;

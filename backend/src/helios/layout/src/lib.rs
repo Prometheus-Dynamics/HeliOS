@@ -355,15 +355,11 @@ impl Layout {
         vec![self.shipped_plugin_dir(), self.state_dir.join("plugins/daedalus")]
     }
 
-    /// The first-boot data setup helper.
-    pub fn data_setup_script(&self) -> PathBuf {
-        self.lib_dir.join("data-setup")
-    }
-
-    /// Image helper scripts that the diagnostics expect (none on a guest).
-    pub fn image_scripts(&self) -> Vec<PathBuf> {
+    /// The image's own helpers: the first-boot data setup and the scripts the image installs
+    /// (none on a guest, which has no image of its own).
+    pub fn image_helpers(&self) -> Vec<PathBuf> {
         match self.profile {
-            Profile::Image => vec![Path::new(IMAGE_OPT_DIR).join("set-governor.sh"), Path::new(IMAGE_OPT_DIR).join("helios-update-issue.sh")],
+            Profile::Image => vec![self.lib_dir.join("data-setup"), Path::new(IMAGE_OPT_DIR).join("set-governor.sh"), Path::new(IMAGE_OPT_DIR).join("helios-update-issue.sh")],
             Profile::Guest => Vec::new(),
         }
     }
@@ -546,8 +542,7 @@ mod tests {
         assert_eq!(layout.binary("helios-api"), PathBuf::from("/usr/bin/helios-api"));
         assert_eq!(layout.shipped_plugin_dir(), PathBuf::from("/usr/lib/helios/plugins/daedalus"));
         assert_eq!(layout.plugin_dirs(), vec![PathBuf::from("/usr/lib/helios/plugins/daedalus"), PathBuf::from("/var/lib/helios/plugins/daedalus")]);
-        assert_eq!(layout.data_setup_script(), PathBuf::from("/usr/lib/helios/data-setup"));
-        assert_eq!(layout.image_scripts(), vec![PathBuf::from("/opt/set-governor.sh"), PathBuf::from("/opt/helios-update-issue.sh")]);
+        assert_eq!(layout.image_helpers(), vec![PathBuf::from("/usr/lib/helios/data-setup"), PathBuf::from("/opt/set-governor.sh"), PathBuf::from("/opt/helios-update-issue.sh")]);
         assert_eq!(layout.ui_dir(), PathBuf::from("/usr/share/helios/ui"));
         assert_eq!(layout.config_dir(), Path::new("/etc/helios"));
         assert_eq!(layout.startup_file(), PathBuf::from("/etc/helios/startup.toml"));
@@ -617,7 +612,7 @@ mod tests {
         assert_eq!(layout.lemnos_board_file(), PathBuf::from("/usr/local/etc/lemnos/board.toml"));
         assert_eq!(layout.fallback_recordings_dir(), PathBuf::from("/usr/local/var/lib/helios/recordings"));
         assert_eq!(layout.data_dir(), layout.state_dir());
-        assert_eq!(layout.image_scripts(), Vec::<PathBuf>::new());
+        assert_eq!(layout.image_helpers(), Vec::<PathBuf>::new());
         // Host facts and runtime sockets are the same on every profile.
         assert_eq!(layout.os_release_file(), PathBuf::from("/etc/os-release"));
         assert_eq!(layout.engine_socket(), PathBuf::from("/run/helios/engine.sock"));
@@ -666,11 +661,7 @@ mod tests {
     fn layout_file_is_read_and_the_environment_overrides_it() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("layout.env");
-        std::fs::write(
-            &file,
-            "# SystemCore guest\nHELIOS_LAYOUT_PROFILE=guest\nHELIOS_PREFIX=\"/usr/local\"\nHELIOS_STATE_DIR='/data/helios'\n\nHELIOS_DATA_DIR=\n",
-        )
-        .expect("write");
+        std::fs::write(&file, "# SystemCore guest\nHELIOS_LAYOUT_PROFILE=guest\nHELIOS_PREFIX=\"/usr/local\"\nHELIOS_STATE_DIR='/data/helios'\n\nHELIOS_DATA_DIR=\n").expect("write");
         let path = file.to_string_lossy().into_owned();
 
         let from_file = Layout::from_vars([(LAYOUT_FILE_ENV, path.as_str())]).expect("layout");

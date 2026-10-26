@@ -134,7 +134,7 @@ pub struct OrionReport {
 }
 
 /// The device package's A/B updater (`/usr/lib/board/update`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateReport {
     pub tool_installed: bool,
     pub confirm_service_loaded: bool,

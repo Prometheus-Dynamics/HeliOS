@@ -1413,6 +1413,7 @@ dependencies = [
  "getrandom 0.4.3",
  "helios-diagnostics",
  "helios-field",
+ "helios-layout",
  "helios-recorder",
  "hex",
  "lemnos-ipc",
@@ -1445,6 +1446,7 @@ dependencies = [
  "clap",
  "flate2",
  "glob",
+ "helios-layout",
  "serde",
  "serde_json",
  "tar",
@@ -1464,11 +1466,13 @@ dependencies = [
 name = "helios-engine"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "daedalus-rs",
  "eidos-aruco",
  "eidos-daedalus",
  "helios-eidos-plugin",
  "helios-field",
+ "helios-layout",
  "libc",
  "nix",
  "notify",
@@ -1495,10 +1499,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-layout"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "tempfile",
+]
+
+[[package]]
 name = "helios-peripherals"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "helios-layout",
  "lemnos-ipc",
  "lemnosd",
  "orion",
@@ -1518,6 +1532,7 @@ version = "1.0.0"
 dependencies = [
  "chrono",
  "helios-field",
+ "helios-layout",
  "lemnos-ipc",
  "lz4",
  "mcap",
@@ -1549,6 +1564,7 @@ name = "helios-vision-probe"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
+ "helios-layout",
  "serde_json",
  "styx",
 ]
