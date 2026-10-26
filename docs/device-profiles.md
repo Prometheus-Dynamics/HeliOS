@@ -41,6 +41,23 @@ A **guest** profile runs on someone else's OS, so HeliOS:
   package manager installs and updates it;
 - reads host facts (release, team, robot network) from the host, with no board contract.
 
+## Features
+
+A device says what it has in one place: `GET /v1/device` reports `profile` (`owner` or `guest`),
+`host` (the kind, name and release) and `features`, every feature on or off, with the `reasons` of
+the ones that are off. Each is derived from facts, never from a device name
+(`backend/src/helios/api/src/capabilities.rs`):
+
+- board features (`updates`, `slots`, `reboot`, `safe_mode`, `recovery_ladder`, `console`) need the
+  layout's board contract, so they are on an owner only;
+- `security` is on an owner, or on a guest with `HELIOS_API_GUEST_SECURITY=on`;
+- hardware (`leds`, `fan`, `imu`, `power`, `usb_power`) is on when lemnosd reports the device
+  (its `lemnos.device` resource, by `lemnos.class`).
+
+The API refuses a request for a feature the device lacks with 404 `not on this device`. The UI
+reads the same map: `device.has("leds")` where a control is drawn, and `requires` on panes, palette
+commands and intents. Nothing device-specific is drawn until the device has answered.
+
 ## The install layout
 
 Every path HeliOS uses comes from one layout, never a literal in the code:
