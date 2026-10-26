@@ -39,9 +39,11 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     let (mut driver, frames) = start_pipeline(&plugins, &PipelineBus::default(), dense, "frame");
     driver.update_camera_context(&spec);
 
+    // Three scene poses per frame: the camera moves about 4 cm a frame around the tagged wall, so
+    // keyframes come with the 10 cm baselines the dense mapper needs for its neighbours.
     let frame_count = 24_u64;
     for index in 0..frame_count {
-        frames.send(live_map_scene(586, index, (index + 1) * 100_000_000)).expect("send frame");
+        frames.send(live_map_scene(586, index * 3, (index + 1) * 100_000_000)).expect("send frame");
         wait_for("the pipeline to process the frame", || driver.stats().ticks_processed == index + 1);
     }
     assert!(driver.stats().last_error.is_none(), "{:?}", driver.stats().last_error);
@@ -55,7 +57,7 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     let mesh = json_with_keys(&artifacts, "host_output:dense_mesh", &["seq", "frame", "t_ns", "keyframes", "submaps", "voxel_m", "vertices", "triangles", "positions", "normals", "grey", "indices"]);
     let vertices = mesh["vertices"].as_u64().expect("vertex count") as usize;
     let triangles = mesh["triangles"].as_u64().expect("triangle count") as usize;
-    assert!(vertices > 0 && triangles > 0, "the mesh has surface: {mesh}");
+    assert!(vertices > 0 && triangles > 0, "the mesh has surface: {mesh} timing {timing}");
     assert_eq!(base64_decoded_len(mesh["positions"].as_str().expect("positions")), vertices * 12, "f32 xyz per vertex");
     assert_eq!(base64_decoded_len(mesh["normals"].as_str().expect("normals")), vertices * 12, "f32 xyz per vertex");
     assert_eq!(base64_decoded_len(mesh["indices"].as_str().expect("indices")), triangles * 3 * 4, "u32 per corner");

@@ -70,42 +70,57 @@ fn tag_homography(pose_index: u64) -> [[f64; 3]; 3] {
     h
 }
 
-/// A GREY frame of 640 x 480 with the AprilTag 36h11 marker `id`, seen through `tag_homography`
-/// of `pose_index`, over a flat grey background with a little hashed texture for the tracker to
-/// follow.
+/// Smooth value noise on a lattice of `cell` (any unit): corners everywhere, no period.
+fn value_noise(x: f64, y: f64, cell: f64, seed: u32) -> f64 {
+    let lattice = |i: i64, j: i64| {
+        let mut h = (i as u32).wrapping_mul(0x9E37_79B1) ^ (j as u32).wrapping_mul(0x85EB_CA77) ^ seed.wrapping_mul(0xC2B2_AE3D);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        f64::from(h & 0xFF)
+    };
+    let (gx, gy) = (x / cell, y / cell);
+    let (i, j) = (gx.floor() as i64, gy.floor() as i64);
+    let smooth = |t: f64| t * t * (3.0 - 2.0 * t);
+    let (u, v) = (smooth(gx - gx.floor()), smooth(gy - gy.floor()));
+    let top = lattice(i, j) * (1.0 - u) + lattice(i + 1, j) * u;
+    let bottom = lattice(i, j + 1) * (1.0 - u) + lattice(i + 1, j + 1) * u;
+    top * (1.0 - v) + bottom * v
+}
+
+/// The wall's texture at (`x`, `y`) metres on the wall: three octaves of value noise (13, 4 and
+/// 1.7 cm cells, as Eidos's dense tests), 0..255.
+fn wall_texture(x: f64, y: f64) -> f64 {
+    let (x, y) = (x * 300.0, y * 300.0);
+    0.5 * value_noise(x, y, 40.0, 1) + 0.3 * value_noise(x, y, 13.0, 2) + 0.2 * value_noise(x, y, 5.0, 3)
+}
+
+/// A GREY frame of 640 x 480 with the AprilTag 36h11 marker `id` on a textured wall, seen through
+/// `tag_homography` of `pose_index`. The wall is the tag's plane and every pixel goes through the
+/// same homography, so the scene is one rigid plane seen from the moving camera: the tracker has
+/// texture to follow and the dense mapper has parallax that agrees with the tag's pose.
 pub(super) fn live_map_scene(id: u32, pose_index: u64, timestamp: u64) -> FrameLease {
     let (width, height) = (640_usize, 480_usize);
-    let mut pixels = vec![0_u8; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let hash = (x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663);
-            pixels[y * width + x] = 180 + (hash % 17) as u8;
-        }
-    }
     let dictionary = dictionary(ArucoDictionaryKind::AprilTag36h11);
     let grid = BitGrid::from_marker(dictionary, id, 0).expect("marker bits");
     let cells = usize::from(dictionary.marker_size) + 2;
-    let h = tag_homography(pose_index);
-    let inverse = invert3(&h);
-    // The marker's bounding box in the image, from its four projected corners.
-    let corners = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[u, v]| {
-        let p = mul3(&h, [u, v, 1.0]);
-        [p[0] / p[2], p[1] / p[2]]
-    });
-    let min_x = corners.iter().map(|c| c[0]).fold(f64::INFINITY, f64::min).floor().max(0.0) as usize;
-    let max_x = corners.iter().map(|c| c[0]).fold(f64::NEG_INFINITY, f64::max).ceil().min(width as f64 - 1.0) as usize;
-    let min_y = corners.iter().map(|c| c[1]).fold(f64::INFINITY, f64::min).floor().max(0.0) as usize;
-    let max_y = corners.iter().map(|c| c[1]).fold(f64::NEG_INFINITY, f64::max).ceil().min(height as f64 - 1.0) as usize;
-    for y in min_y..=max_y {
-        for x in min_x..=max_x {
+    let inverse = invert3(&tag_homography(pose_index));
+    let half = SCENE_TAG_SIDE_M / 2.0;
+    let mut pixels = vec![0_u8; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            // The wall point under the pixel, in units of the tag's half side (the tag spans -1..1).
             let q = mul3(&inverse, [x as f64 + 0.5, y as f64 + 0.5, 1.0]);
-            let (u, v) = ((q[0] / q[2] + 1.0) / 2.0, (q[1] / q[2] + 1.0) / 2.0);
-            if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
-                continue;
-            }
-            let (cx, cy) = ((u * cells as f64) as usize, (v * cells as f64) as usize);
-            let border = cx == 0 || cy == 0 || cx == cells - 1 || cy == cells - 1;
-            pixels[y * width + x] = if !border && grid.bit(cx - 1, cy - 1) { 235 } else { 20 };
+            let (wu, wv) = (q[0] / q[2], q[1] / q[2]);
+            let (u, v) = ((wu + 1.0) / 2.0, (wv + 1.0) / 2.0);
+            pixels[y * width + x] = if (0.0..1.0).contains(&u) && (0.0..1.0).contains(&v) {
+                let (cx, cy) = ((u * cells as f64) as usize, (v * cells as f64) as usize);
+                let border = cx == 0 || cy == 0 || cx == cells - 1 || cy == cells - 1;
+                if !border && grid.bit(cx - 1, cy - 1) { 235 } else { 20 }
+            } else {
+                // Bright enough that the tag's black border stands out against it.
+                (120.0 + wall_texture(wu * half, wv * half) * 0.5) as u8
+            };
         }
     }
     grey_frame(width as u32, height as u32, &pixels, timestamp)
