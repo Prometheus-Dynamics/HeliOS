@@ -42,8 +42,6 @@ use tracing::{info, warn};
 use crate::execution::outputs::payload_message;
 use robot_pose::{RobotPose, RobotPoseTopics, WeakPoseTopics};
 
-/// Where helios-api keeps the NT4 settings.
-pub const DEFAULT_SETTINGS_PATH: &str = "/var/lib/helios/api/nt4.json";
 /// How often the settings file is checked for changes.
 const SETTINGS_CHECK: Duration = Duration::from_secs(2);
 /// Ticks waiting to be published; more are dropped (the newest tick matters, not every tick).
