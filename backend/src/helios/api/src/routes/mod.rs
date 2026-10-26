@@ -162,6 +162,8 @@ pub fn check_id(id: &str) -> Result<(), ApiError> {
 }
 
 #[cfg(test)]
+mod capability_tests;
+#[cfg(test)]
 mod leds_tests;
 #[cfg(test)]
 mod tests;

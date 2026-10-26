@@ -29,6 +29,7 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     SharedState,
     board_update::{self, BoardUpdateStatus},
+    capabilities::{self, feature},
     config::ApiConfig,
     error::{ApiError, ApiResult},
     events::{ApiEvent, sse_stream},
@@ -176,6 +177,7 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// `POST /v1/update/uploads`: the image as the raw request body (`application/octet-stream`).
 pub async fn upload_raw(State(state): State<SharedState>, Query(params): Query<UploadParams>, headers: HeaderMap, body: Body) -> ApiResult<(StatusCode, Json<Upload>)> {
+    capabilities::require(&state, feature::UPDATES).await?;
     let filename = params.filename.or_else(|| header(&headers, "x-helios-filename")).unwrap_or_else(|| "helios-update.img.xz".into());
     let sha256 = params.sha256.or_else(|| header(&headers, "x-helios-sha256"));
     let version = params.version.or_else(|| header(&headers, "x-helios-version"));
@@ -405,6 +407,7 @@ async fn apply_upload(state: &SharedState, upload: Upload, version: Option<Strin
 }
 
 pub async fn apply(State(state): State<SharedState>, Json(request): Json<ApplyRequest>) -> ApiResult<(StatusCode, Json<ApplyResponse>)> {
+    capabilities::require(&state, feature::UPDATES).await?;
     let upload = match (&request.upload_id, &request.image_url) {
         (Some(id), _) => find_upload(&state.config, id).await?,
         (None, Some(url)) => upload_for_url(&state.config, url).await?,
@@ -413,8 +416,12 @@ pub async fn apply(State(state): State<SharedState>, Json(request): Json<ApplyRe
     Ok((StatusCode::ACCEPTED, Json(apply_upload(&state, upload, request.version, request.sha256, request.reboot.unwrap_or(true)).await?)))
 }
 
-pub async fn switch_slot() -> ApiError {
-    ApiError::not_available("switching boot slots without an update is not available", "the board update writer offering a trial boot of the other slot without staging an image")
+pub async fn switch_slot(State(state): State<SharedState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match capabilities::require(&state, feature::SLOTS).await {
+        Err(error) => error.into_response(),
+        Ok(()) => ApiError::not_available("switching boot slots without an update is not available", "the board update writer offering a trial boot of the other slot without staging an image").into_response(),
+    }
 }
 
 // --- status --------------------------------------------------------------------
@@ -486,7 +493,8 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
         slots: Slots {
             active: board.as_ref().and_then(|board| board.slot_active.clone()),
             staged: board.as_ref().and_then(|board| board.slot_staged.clone()),
-            layout: board.as_ref().and_then(|board| board.layout.clone()).unwrap_or_else(|| "ab".into()),
+            // A guest has no boot slots at all; the owner's default is the A/B layout.
+            layout: board.as_ref().and_then(|board| board.layout.clone()).unwrap_or_else(|| if config.board.is_some() { "ab" } else { "none" }.into()),
             default: board.as_ref().and_then(|board| board.slot_default.clone()),
             previous: board.as_ref().and_then(|board| board.slot_previous.clone()),
             trial: board.as_ref().and_then(|board| board.slot_trial.clone()),
@@ -542,6 +550,7 @@ pub struct AtlasUploadResponse {
 
 /// `POST /v1/ota/upload`: multipart/form-data with the image in a part named `file`.
 pub async fn atlas_upload(State(state): State<SharedState>, mut multipart: Multipart) -> ApiResult<Json<AtlasUploadResponse>> {
+    capabilities::require(&state, feature::UPDATES).await?;
     while let Some(field) = multipart.next_field().await.map_err(|error| ApiError::bad_request(error.to_string()))? {
         if field.name() != Some("file") {
             continue;
@@ -573,6 +582,7 @@ pub struct AtlasApplyResponse {
 }
 
 pub async fn atlas_apply(State(state): State<SharedState>, Json(request): Json<AtlasApplyRequest>) -> ApiResult<Json<AtlasApplyResponse>> {
+    capabilities::require(&state, feature::UPDATES).await?;
     let upload = upload_for_url(&state.config, &request.image_url).await?;
     if let Some(size) = request.size_bytes
         && size != upload.size_bytes

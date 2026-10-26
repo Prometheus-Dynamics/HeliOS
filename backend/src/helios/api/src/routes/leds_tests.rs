@@ -10,7 +10,8 @@ use tower::ServiceExt;
 
 use crate::{ApiConfig, AppState, router};
 
-fn test_state(dir: &std::path::Path) -> crate::SharedState {
+/// The owner image with lemnosd's status ring (`classes`: the devices lemnosd reports).
+fn state_with_devices(dir: &std::path::Path, classes: &[&str]) -> crate::SharedState {
     AppState::new(ApiConfig {
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
@@ -20,8 +21,13 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         ui_dir: None,
         upload_dir: dir.join("uploads"),
         auth_file: dir.join("auth").join("auth.json"),
+        test_lemnos_classes: Some(classes.iter().map(|class| class.to_string()).collect()),
         ..ApiConfig::default()
     })
+}
+
+fn test_state(dir: &std::path::Path) -> crate::SharedState {
+    state_with_devices(dir, &["light"])
 }
 
 async fn call(state: &crate::SharedState, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -111,6 +117,18 @@ async fn a_preview_names_a_state_and_stops_on_null() {
     let (status, body) = call(&state, "POST", "/v1/device/leds/preview", Some(json!({ "state": null }))).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["preview"].is_null());
+}
+
+#[tokio::test]
+async fn a_device_without_a_status_ring_has_no_led_routes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = state_with_devices(dir.path(), &["fan", "imu"]);
+    for (method, uri) in [("GET", "/v1/device/leds"), ("PUT", "/v1/device/leds"), ("POST", "/v1/device/leds/locate"), ("POST", "/v1/device/leds/preview")] {
+        let (status, body) = call(&state, method, uri, Some(json!({}))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {body}");
+        assert!(body["error"]["message"].as_str().unwrap_or_default().starts_with("leds is not on this device"), "{body}");
+    }
+    assert!(!dir.path().join("state").join("leds.json").exists(), "nothing is saved on a device without the ring");
 }
 
 #[tokio::test]

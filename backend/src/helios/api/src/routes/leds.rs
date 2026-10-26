@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     SharedState,
+    capabilities::{self, feature},
     error::{ApiError, ApiResult},
     leds::{
         settings::{LedSettings, RING_LEDS},
@@ -89,10 +90,12 @@ fn view(state: &SharedState) -> LedsView {
 }
 
 pub async fn get_leds(State(state): State<SharedState>) -> ApiResult<Json<LedsView>> {
+    capabilities::require(&state, feature::LEDS).await?;
     Ok(Json(view(&state)))
 }
 
 pub async fn put_leds(State(state): State<SharedState>, Json(settings): Json<LedSettings>) -> ApiResult<Json<LedsView>> {
+    capabilities::require(&state, feature::LEDS).await?;
     settings.validate()?;
     state.store.put_led_settings(&settings).await?;
     state.leds.set_settings(settings);
@@ -100,6 +103,7 @@ pub async fn put_leds(State(state): State<SharedState>, Json(settings): Json<Led
 }
 
 pub async fn locate(State(state): State<SharedState>, request: Option<Json<LocateRequest>>) -> ApiResult<Json<LedsView>> {
+    capabilities::require(&state, feature::LEDS).await?;
     let seconds = request.and_then(|Json(request)| request.seconds).unwrap_or(LOCATE_SECONDS);
     if !(1..=LOCATE_MAX_SECONDS).contains(&seconds) {
         return Err(ApiError::unprocessable("seconds is 1 to 60"));
@@ -109,6 +113,7 @@ pub async fn locate(State(state): State<SharedState>, request: Option<Json<Locat
 }
 
 pub async fn preview(State(state): State<SharedState>, Json(request): Json<PreviewRequest>) -> ApiResult<Json<LedsView>> {
+    capabilities::require(&state, feature::LEDS).await?;
     let seconds = request.seconds.unwrap_or(PREVIEW_SECONDS);
     if !(1..=PREVIEW_MAX_SECONDS).contains(&seconds) {
         return Err(ApiError::unprocessable("seconds is 1 to 30"));

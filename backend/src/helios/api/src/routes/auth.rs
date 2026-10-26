@@ -14,6 +14,7 @@ use serde::Deserialize;
 use crate::{
     SharedState,
     auth::{AuthMode, CSRF_HEADER, Caller, NewSession, SESSION_COOKIE, SESSION_TTL_MS, secrets_equal},
+    capabilities,
     error::{ApiError, ApiResult},
 };
 
@@ -124,6 +125,7 @@ pub async fn logout(State(state): State<SharedState>, caller: Option<Extension<C
 
 /// Open → secured. Signs the caller in.
 pub async fn enable(State(state): State<SharedState>, Json(body): Json<PasswordBody>) -> ApiResult<Response> {
+    capabilities::require(&state, capabilities::feature::SECURITY).await?;
     let session = state.auth.enable(&body.password).await?;
     Ok(with_session(&state, session))
 }
@@ -173,6 +175,7 @@ pub async fn change_password(
     connect: Option<Extension<ConnectInfo<SocketAddr>>>,
     Json(body): Json<ChangePasswordBody>,
 ) -> ApiResult<Response> {
+    capabilities::require(&state, capabilities::feature::SECURITY).await?;
     if caller_of(caller) == Caller::Open {
         return Err(ApiError::conflict("the device is open; secure it to set a password"));
     }
@@ -192,6 +195,7 @@ pub struct CreateTokenBody {
 
 /// 201 with the token. The secret is shown in this answer only.
 pub async fn create_token(State(state): State<SharedState>, Json(body): Json<CreateTokenBody>) -> ApiResult<Response> {
+    capabilities::require(&state, capabilities::feature::SECURITY).await?;
     Ok((StatusCode::CREATED, Json(state.auth.create_token(&body.label)?)).into_response())
 }
 
