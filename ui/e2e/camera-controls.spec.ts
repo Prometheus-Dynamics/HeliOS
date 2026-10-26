@@ -1,6 +1,6 @@
 // Camera controls: search, "Changed only", exposure and gain, and reset. On the sim each change is
 // read back from the camera's settings (GET /v1/cameras/{id}/settings).
-import { device, simCamera, waitForCameraService } from "./device";
+import { device, readingOf, simCamera, waitForCameraService } from "./device";
 import { expect, test } from "./fixtures";
 import { openScreen } from "./nav";
 
@@ -19,10 +19,14 @@ test.describe("camera controls", () => {
     const exposure = page.getByRole("textbox", { name: "Exposure", exact: true }).first();
     const gain = page.getByRole("textbox", { name: "Gain", exact: true }).first();
 
+    // What the device reports for exposure and gain, by their roles (whatever the camera calls them).
+    const reading = async (role: "exposure_us" | "gain") => (camera ? readingOf(await device.cameraSettings(api, camera.id), role) : null);
+
     // Start from the defaults, so "changed" means what this test changed.
     if (camera) await waitForCameraService(api, camera.id);
     await reset.click();
     if (camera) await expect.poll(async () => (await device.cameraSettings(api, camera.id)).persisted).toEqual({});
+    const exposureAtStart = await reading("exposure_us");
 
     // Exposure is typed in manual mode: auto exposure holds the field.
     await page.getByRole("radiogroup", { name: "Exposure mode" }).getByRole("radio", { name: "Manual", exact: true }).click();
@@ -43,10 +47,11 @@ test.describe("camera controls", () => {
     await exposure.press("Enter");
     // The field shows short exposures with more decimals ("1.200"): compare the number.
     await expect.poll(async () => Math.abs(parseFloat(await exposure.inputValue()) - 1.2) < 0.005).toBe(true);
+    // Gain is a factor on the libcamera devices (two decimals) and a whole number on a UVC camera.
     await gain.click();
     await gain.fill("2.00");
     await gain.press("Enter");
-    await expect(gain).toHaveValue("2.00");
+    await expect.poll(async () => Math.abs(parseFloat(await gain.inputValue()) - 2) < 0.005).toBe(true);
 
     // Changed only: the two controls are shown, and the unchanged ones are not.
     await changedOnly.click();
@@ -59,13 +64,18 @@ test.describe("camera controls", () => {
     await expect(changedOnly).toHaveAttribute("aria-pressed", "false");
 
     if (camera) {
-      // The sensor quantises its exposure line time: 1.20 ms reads back within a few microseconds.
+      // The sensor quantises its exposure line time: 1.20 ms reads back within a few microseconds where
+      // the device reports µs (its summary). A camera without that summary reports its own units, so
+      // there the exposure only has to have moved from where it started.
       await expect
         .poll(async () => {
           const s = await device.cameraSettings(api, camera.id);
-          return { exposureNearOk: Math.abs((s.exposure_us ?? -1e9) - 1200) <= 30, gainOk: Math.abs((s.analogue_gain ?? -1) - 2) <= 0.01 };
+          return {
+            exposureOk: s.exposure_us !== null ? Math.abs(s.exposure_us - 1200) <= 30 : readingOf(s, "exposure_us") !== exposureAtStart,
+            gainOk: Math.abs((readingOf(s, "gain") ?? -1) - 2) <= 0.01,
+          };
         })
-        .toEqual({ exposureNearOk: true, gainOk: true });
+        .toEqual({ exposureOk: true, gainOk: true });
     }
 
     // Reset puts the defaults back on the camera and forgets what was kept.
@@ -73,7 +83,7 @@ test.describe("camera controls", () => {
     await expect.poll(async () => Math.abs(parseFloat(await exposure.inputValue()) - 1.2) < 0.005).toBe(false);
     if (camera) {
       await expect.poll(async () => (await device.cameraSettings(api, camera.id)).persisted).toEqual({});
-      await expect.poll(async () => Math.round((await device.cameraSettings(api, camera.id)).exposure_us ?? -1)).not.toBe(1200);
+      await expect.poll(() => reading("exposure_us")).toBe(exposureAtStart);
     }
   });
 });

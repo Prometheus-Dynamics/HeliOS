@@ -45,18 +45,32 @@ export interface DeviceCamera {
   /** The Styx frames socket, when the camera serves frames. */
   frames_endpoint?: string | null;
 }
+/** A camera control as `GET /v1/cameras/{id}/settings` lists it. `standard` is its role (`exposure_us`, `gain`, `ae`...). */
 export interface CameraControl {
   name: string;
-  value?: unknown;
+  standard?: string | null;
+  current?: unknown;
   [key: string]: unknown;
 }
 export interface DeviceCameraSettings {
   writable: boolean;
   controls: CameraControl[];
+  /** The summary the libcamera devices report; null where the camera does not report it (a UVC camera). */
   exposure_us: number | null;
   analogue_gain: number | null;
   persisted: Record<string, unknown>;
   live_error: string | null;
+}
+
+/**
+ * A camera's exposure or gain as the device reports it. The summary fields are the libcamera
+ * devices' (exposure in µs); a camera without them answers through its control with the role.
+ */
+export function readingOf(settings: DeviceCameraSettings, role: "exposure_us" | "gain"): number | null {
+  const summary = role === "exposure_us" ? settings.exposure_us : settings.analogue_gain;
+  if (summary !== null) return summary;
+  const current = settings.controls.find((c) => c.standard === role)?.current;
+  return typeof current === "number" ? current : null;
 }
 
 async function getJson<T>(api: APIRequestContext, path: string): Promise<T> {

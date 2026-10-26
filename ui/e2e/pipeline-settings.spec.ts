@@ -17,9 +17,16 @@ test.describe("pipeline settings", () => {
     await applyAprilTag(page);
     await tuneRunningPipeline(page);
 
+    // A size the camera offers that the input does not have yet (the camera's own size is "", the
+    // others are its full, half and quarter sizes: whatever the camera is).
     const resolution = page.getByRole("combobox", { name: "Resolution" });
-    await resolution.selectOption("640x400");
-    await expect(resolution).toHaveValue("640x400");
+    const offered = await resolution.locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+    const current = await resolution.inputValue();
+    const size = offered.find((value) => value !== "" && value !== current);
+    expect(size, "a size the camera offers besides the current one").toBeTruthy();
+    const [width, height] = size!.split("x").map(Number);
+    await resolution.selectOption(size!);
+    await expect(resolution).toHaveValue(size!);
 
     const pyramid = page.getByRole("textbox", { name: "Pyramid levels", exact: true });
     await pyramid.click();
@@ -36,7 +43,7 @@ test.describe("pipeline settings", () => {
           const binding = Object.values(p.bindings).find((b) => b.resource_id === camera.id);
           return [binding?.output_width, binding?.output_height, binding?.pyramid];
         })
-        .toEqual([640, 400, 2]);
+        .toEqual([width, height, 2]);
     }
   });
 
