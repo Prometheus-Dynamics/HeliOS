@@ -11,6 +11,8 @@ pub enum ResourceKind {
     Fan,
     /// lemnosd's raw GPIO, PWM, I2C and SPI access (one per node), with HeliOS's claims.
     LemnosRaw,
+    /// One of lemnosd's devices, read-only: its status, labels and latest readings.
+    LemnosDevice,
     Virtual,
 }
 
@@ -20,6 +22,7 @@ impl ResourceKind {
             Self::CaptureDevice => "capture_device",
             Self::Fan => "helios_fan",
             Self::LemnosRaw => "lemnos_raw",
+            Self::LemnosDevice => "lemnos_device",
             Self::Virtual => "virtual",
         }
     }

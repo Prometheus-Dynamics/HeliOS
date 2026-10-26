@@ -14,8 +14,9 @@ use lemnosd::mock::{MockHardware, MockLemnosd};
 use serde_json::json;
 
 use super::raw::{GPIO_CLAIM_ACTION, GPIO_GET_ACTION, GPIO_RELEASE_ACTION, GPIO_SET_ACTION, I2C_TRANSFER_ACTION, PWM_CLAIM_ACTION, PWM_CONFIGURE_ACTION, RAW_RENEW_ACTION, SPI_TRANSFER_ACTION};
+use super::resources::{DEVICE_ID_LABEL, lemnosd_resources};
 use super::{FanOverrideRequest, LemnosdBridge, LemnosdOptions, RawAction};
-use crate::model::ObservedValue;
+use crate::model::{NodeId, ObservedValue, ResourceKind, ResourceStatus};
 
 /// A Raze-like board: the fan and a thermal zone (fake sysfs), the USB-A power line (a board
 /// device, so never raw), the status ring, a spare line `aux` (safe low) and a PWM channel
@@ -122,7 +123,11 @@ fn start(root: &Path, hardware: &MockHardware) -> MockLemnosd {
 }
 
 fn bridge(socket: PathBuf) -> (LemnosdBridge, Arc<AtomicUsize>) {
-    let bridge = LemnosdBridge::new(LemnosdOptions { socket, client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::from_secs(2) });
+    bridge_with(socket, None)
+}
+
+fn bridge_with(socket: PathBuf, board_file: Option<PathBuf>) -> (LemnosdBridge, Arc<AtomicUsize>) {
+    let bridge = LemnosdBridge::new(LemnosdOptions { socket, client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::from_secs(2), board_file });
     let notified = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&notified);
     bridge
@@ -217,6 +222,33 @@ fn bridge_publishes_devices_holds_the_status_and_runs_a_timed_override() {
     selftest.set("fan", "duty", 0.3).expect("selftest write");
     wait_until("the takeover", || bridge.state().overrides.is_empty());
     drop(selftest);
+
+    drop(bridge);
+    drop(service);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn devices_are_published_read_only_and_raw_access_follows_the_board_definition() {
+    let root = root("resources");
+    let hardware = hardware();
+    let service = start(&root, &hardware);
+    // A board definition that admits another client only: no raw access for HeliOS.
+    let board_dir = tempfile::tempdir().expect("tempdir");
+    let board_file = board_dir.path().join("board.toml");
+    fs::write(&board_file, "format = \"lemnos.board\"\nschema_version = 1\nraw_clients = [\"aux-tool\"]\n").expect("board file");
+    let (bridge, _) = bridge_with(service.socket().to_path_buf(), Some(board_file));
+    wait_until("the thermal reading", || bridge.state().readings.get("cpu-thermal").is_some_and(|reading| reading.values.iter().any(|(_, value)| value.is_some())));
+
+    let state = bridge.state();
+    assert!(!state.raw_access, "raw_clients names another client");
+    let resources = lemnosd_resources(&NodeId::new("node1"), &state).expect("resources");
+    assert!(resources.iter().all(|resource| resource.kind != ResourceKind::LemnosRaw), "no raw resource on this board");
+    let zone = resources.iter().find(|resource| resource.kind == ResourceKind::LemnosDevice && resource.label(DEVICE_ID_LABEL) == Some("cpu-thermal")).expect("the thermal zone");
+    assert_eq!(zone.status, ResourceStatus::Available);
+    assert!(zone.capabilities.is_empty(), "a device is read-only");
+    let Some(ObservedValue::F64(celsius)) = zone.observation.as_ref().expect("observation").values.get("temperature").cloned() else { panic!("temperature: {zone:?}") };
+    assert!((celsius - 57.85).abs() < 0.5, "{celsius}");
 
     drop(bridge);
     drop(service);
@@ -403,12 +435,17 @@ fn claims_are_taken_again_after_a_lemnosd_restart() {
 #[test]
 fn requests_fail_cleanly_without_lemnosd() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let not_started = LemnosdBridge::new(LemnosdOptions { socket: dir.path().join("none.sock"), client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::ZERO });
+    let not_started = LemnosdBridge::new(LemnosdOptions { socket: dir.path().join("none.sock"), client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::ZERO, board_file: None });
     let rt = runtime();
     assert!(rt.block_on(not_started.fan_release("fan")).is_err());
 
-    let bridge =
-        LemnosdBridge::new(LemnosdOptions { socket: dir.path().join("missing.sock"), client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::from_millis(50) });
+    let bridge = LemnosdBridge::new(LemnosdOptions {
+        socket: dir.path().join("missing.sock"),
+        client: "helios".into(),
+        reading_interval: Duration::from_millis(20),
+        startup_wait: Duration::from_millis(50),
+        board_file: None,
+    });
     bridge.start(Box::new(|| {})).expect("start");
     let error = rt.block_on(bridge.fan_override("fan", FanOverrideRequest { duty: 0.5, duration: Duration::from_secs(1) })).expect_err("no lemnosd");
     assert!(error.contains("not connected"), "{error}");
