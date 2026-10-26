@@ -8,6 +8,7 @@
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
+  import Badge from "#lib/kit/Badge.svelte";
   import Swatch from "#lib/kit/Swatch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { Camera } from "#lib/api/model.js";
@@ -60,6 +61,10 @@
           <span class="sub">{c.settings.width}×{c.settings.height} · {c.settings.format}{c.foreign ? ` · ${c.foreign}` : ""}</span>
           {#if stop}<span class="sub" data-stage={stop.stage} style:color={stop.state === "blocked" ? "var(--err)" : "var(--info)"}>{stop.label}: {stop.reason}</span>{/if}
         </span>
+        {#if cluster.node(c.nodeId)?.peer}
+          {@const host = cluster.node(c.nodeId)}
+          <Badge tone="info" text={identity.name(c.nodeId, host?.name ?? c.nodeId)} />
+        {/if}
         <span class="num" class:dim={!tags} data-tip="Tags this frame"><Icon name="target" size={11} />{tags}</span>
         <span class="num fps" class:bad={c.stats.fps < c.settings.fps * 0.9}>{c.stats.fps.toFixed(0)}</span>
       </button>

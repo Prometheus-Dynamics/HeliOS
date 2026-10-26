@@ -12,6 +12,7 @@ Type=simple
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/peripherals
 Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0
 EnvironmentFile=-/etc/default/helios-peripherals.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-peripherals
 # No fan hand-back here: helios-peripherals ends its fan override through lemnosd
 # (release) when it stops, a crashed run's override is released on the next start,

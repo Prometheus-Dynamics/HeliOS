@@ -7,7 +7,9 @@ import { tableFor } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, GUEST_NODES, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
+import { CAMERAS, GUEST_NODES, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, ROBOT_CAMERAS, ROBOT_LOGS, ROBOT_NODES, ROBOT_RESOURCES, ROBOT_STREAMS, ROBOT_WORKLOADS, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
+import { scoped, type HeliosApi } from "#lib/api/client.js";
+import type { CameraControlChanges } from "#lib/api/types.js";
 import type { DenseView } from "#lib/vision/dense.js";
 import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
 import { BUILT_IN, type DefaultTemplate } from "#lib/core/defaults.js";
@@ -80,12 +82,14 @@ class ClusterStore {
   readonly mock = MOCK;
   /** The simulated Raze cluster; a simulated SystemCore is one guest node with nothing else on it. */
   private readonly razeMock = MOCK && MOCK_DEVICE === "raze";
-  nodes = $state<ClusterNode[]>(MOCK ? clone(this.razeMock ? NODES : GUEST_NODES) : []);
-  cameras = $state<Camera[]>(this.razeMock ? clone(CAMERAS) : []);
-  workloads = $state<Workload[]>(this.razeMock ? clone(WORKLOADS) : []);
-  streams = $state<Stream[]>(this.razeMock ? clone(STREAMS) : []);
-  resources = $state<Resource[]>(this.razeMock ? clone(RESOURCES) : []);
-  logs = $state<LogLine[]>(this.razeMock ? clone(LOGS) : []);
+  /** One robot with two HeliOS devices: the Raze (this device) and a routed SystemCore peer. */
+  private readonly robotMock = MOCK && MOCK_DEVICE === "robot";
+  nodes = $state<ClusterNode[]>(MOCK ? clone(this.razeMock ? NODES : this.robotMock ? ROBOT_NODES : GUEST_NODES) : []);
+  cameras = $state<Camera[]>(this.razeMock ? clone(CAMERAS) : this.robotMock ? clone(ROBOT_CAMERAS) : []);
+  workloads = $state<Workload[]>(this.razeMock ? clone(WORKLOADS) : this.robotMock ? clone(ROBOT_WORKLOADS) : []);
+  streams = $state<Stream[]>(this.razeMock ? clone(STREAMS) : this.robotMock ? clone(ROBOT_STREAMS) : []);
+  resources = $state<Resource[]>(this.razeMock ? clone(RESOURCES) : this.robotMock ? clone(ROBOT_RESOURCES) : []);
+  logs = $state<LogLine[]>(this.razeMock ? clone(LOGS) : this.robotMock ? clone(ROBOT_LOGS) : []);
   /** Advances FEED_FPS times a second; every camera view follows it. */
   frame = $state(0);
   playing = $state(true);
@@ -279,7 +283,7 @@ class ClusterStore {
       const stop = blockingStage(c.status);
       if (stop?.state === "blocked") items.push({ tone: "error", text: `${c.name}: ${stop.reason}`, href: `/cameras/${c.resourceId}` });
     }
-    for (const n of this.nodes.filter((x) => x.health !== "online")) {
+    for (const n of this.nodes.filter((x) => x.health !== "online" && x.peer?.routed !== false)) {
       items.push({ tone: n.health === "offline" ? "error" : "warning", text: `${n.name} is ${n.health}`, href: `/devices/${n.id}` });
     }
     for (const n of this.nodes.filter((x) => x.clock.offsetUs > 1000 && x.health !== "offline")) {
@@ -296,12 +300,22 @@ class ClusterStore {
     await new Promise((r) => setTimeout(r, ms));
   }
 
+  /**
+   * Mock only: sends a write for a routed peer through the peer's scope, as the live store does, so
+   * the simulated peer keeps the request (`mock-device.ts`). Nothing is sent for this device.
+   */
+  private toPeer(nodeId: string | undefined, run: (peer: HeliosApi) => Promise<unknown>) {
+    if (!this.mock || !nodeId || this.node(nodeId)?.peer?.routed !== true) return;
+    run(scoped(nodeId)).catch(() => undefined);
+  }
+
   // --- Actions -----------------------------------------------------------
 
   async restartWorkload(id: string) {
     if (this.live) return this.live.restartWorkload(id);
     const w = this.workload(id);
     if (!w) return;
+    this.toPeer(w.nodeId, (peer) => peer.restartPipeline(id));
     w.state = "starting";
     await this.later();
     w.state = "running";
@@ -315,6 +329,7 @@ class ClusterStore {
     if (this.live) return this.live.stopWorkload(id);
     const w = this.workload(id);
     if (!w) return;
+    this.toPeer(w.nodeId, (peer) => peer.stopPipeline(id));
     await this.later(300);
     w.state = "stopped";
     this.log(w.nodeId, "helios-runner", "info", `${w.name} stopped`);
@@ -489,12 +504,16 @@ class ClusterStore {
     }
     // The mock's controls take the same keys the device does: standard keys, or names.
     const keys: Record<string, ControlWrite | undefined> = { exposure_us: settings.exposureUs, ae: settings.autoExposure, gain: settings.gain, fps: settings.fps, ...extra };
+    const sent: Record<string, ControlWrite> = {};
     for (const [key, value] of Object.entries(keys)) {
       if (value === undefined) continue;
       const note = mockControl(c, key, value);
       if (note) toasts.info(`${c.name}: ${note}`);
+      if (value !== null && typeof value !== "object") sent[key] = value;
     }
     c.stats.fps = c.settings.fps;
+    // A peer's camera takes the same change on the peer (the mock peer keeps the request).
+    this.toPeer(c.nodeId, (peer) => peer.setCameraSettings(id, sent as CameraControlChanges));
   }
 
   async updateCamera(id: string, settings: Partial<CameraSettings>) {
@@ -521,7 +540,7 @@ class ClusterStore {
   }
 
   async restartService(nodeId: string, service: string) {
-    if (this.live) return this.live.restartService(service);
+    if (this.live) return this.live.restartService(nodeId, service);
     const s = this.node(nodeId)?.services.find((x) => x.name === service);
     if (!s) return;
     s.state = "restarting";
@@ -532,7 +551,7 @@ class ClusterStore {
   }
 
   async switchSlot(nodeId: string) {
-    if (this.live) return this.live.switchSlot();
+    if (this.live) return this.live.switchSlot(nodeId);
     const n = this.node(nodeId);
     if (!n || n.slots.length < 2) return;
     const target = n.slots.find((s) => !s.active)!;
@@ -561,7 +580,7 @@ class ClusterStore {
   }
 
   async safeMode(nodeId: string) {
-    if (this.live) return this.live.safeMode();
+    if (this.live) return this.live.safeMode(nodeId);
     const n = this.node(nodeId);
     if (!n) return;
     await this.later(500);

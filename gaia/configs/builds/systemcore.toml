@@ -281,6 +281,17 @@ tree = "pkg-root"
 src = "@assets/systemcore/systemd/helios-api.service"
 dest = "etc/systemd/system/helios-api.service"
 
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/robot/robot-env"
+dest = "usr/local/lib/helios/robot-env"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-robot.service"
+dest = "etc/systemd/system/helios-robot.service"
+
 [[image.assembly.packages]]
 id = "helios"
 format = "ipk"
@@ -307,7 +318,7 @@ X-Auto-Start = "true"
 X-Icon-Path = "/usr/local/share/helios/helios.png"
 
 [image.assembly.packages.scripts]
-services = ["helios-orion.service", "helios-lemnosd.service", "helios-engine.socket", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
+services = ["helios-robot.service", "helios-orion.service", "helios-lemnosd.service", "helios-engine.socket", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
 conffiles = ["/usr/local/etc/helios/startup.toml", "/usr/local/etc/helios/orion-node.env"]
 
 # Every ELF against the SDK's sysroot: glibc symbol versions, 16 KiB segments, libraries present.

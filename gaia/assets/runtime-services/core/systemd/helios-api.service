@@ -15,6 +15,7 @@ ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
 Environment=RUST_LOG=info
 Environment=HELIOS_API_BIND=0.0.0.0:5800
 EnvironmentFile=-/etc/default/helios-api.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-api
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

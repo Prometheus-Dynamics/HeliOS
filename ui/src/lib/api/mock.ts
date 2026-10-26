@@ -4,6 +4,7 @@
 // any screen.
 
 import { CATALOG_BY_ID, defaults } from "./catalog";
+import { MOCK_SYSTEMCORE_PEER } from "./mock-devices";
 import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import type { CameraStatus, StatusStage } from "./types";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
@@ -663,6 +664,69 @@ const mockLogs: LogLine[] = Array.from({ length: 40 }, (_, i) => {
 });
 // As on a real board: systemd logs the same line twice in one millisecond (two units starting).
 export const LOGS: LogLine[] = [...mockLogs, { ...mockLogs[mockLogs.length - 1] }];
+
+// --- One robot, two HeliOS devices (`?mock=robot`) ----------------------------------------------
+// The Raze image is this device (an owner: its cameras, LED ring, fan, IMU and pipelines); the
+// SystemCore is a routed peer on its USB link (its own camera and one pipeline, no hardware).
+
+const ROBOT_OWNER = "raze-owner";
+
+/** This device and the routed peer, as the cluster lists them: the Raze, then the SystemCore. */
+export const ROBOT_NODES: ClusterNode[] = [
+  raze(ROBOT_OWNER, "Owner", "AprilTag localisation", "10.0.0.11", 0.06, 50),
+  { ...GUEST_NODES[0], id: MOCK_SYSTEMCORE_PEER, name: "SystemCore", address: "172.27.0.1", peer: { routed: true, state: "enrolled" } },
+];
+
+export const ROBOT_CAMERAS: Camera[] = [
+  cam("camera.raze-owner.cam0", "Front", ROBOT_OWNER, "Front bumper, 18° up", 0, { status: bootstrappingChain() }),
+  cam("camera.systemcore-peer.cam0", "Back", MOCK_SYSTEMCORE_PEER, "Rear frame, 15° up", 120),
+];
+
+export const ROBOT_WORKLOADS: Workload[] = [
+  tagWorkload("tags-owner", "AprilTags · front", ROBOT_OWNER, "camera.raze-owner.cam0", "/helios/front"),
+  {
+    ...WORKLOADS[1],
+    id: "live-map-owner",
+    nodeId: ROBOT_OWNER,
+    bindings: { camera: "camera.raze-owner.cam0" },
+    inputs: { camera: { source: "camera", resourceId: "camera.raze-owner.cam0", pyramid: 3 } },
+    outputs: ["stream.live-map-owner.pose", "stream.live-map-owner.snapshot", "stream.live-map-owner.timing"],
+  },
+  tagWorkload("tags-systemcore", "AprilTags · back", MOCK_SYSTEMCORE_PEER, "camera.systemcore-peer.cam0", "/helios/back"),
+];
+
+export const ROBOT_STREAMS: Stream[] = ROBOT_WORKLOADS.filter((w) => w.state === "running" && w.outputs.includes(`stream.${w.id}.poses`)).map((w) => ({
+  id: `stream.${w.id}.poses`,
+  name: `${w.name} · poses`,
+  schema: "poses" as const,
+  producer: w.id,
+  rateHz: 60,
+  latencyMs: 1.9,
+  bridges: ["nt4", "api"],
+}));
+
+export const ROBOT_RESOURCES: Resource[] = [
+  ...ROBOT_CAMERAS.map((c): Resource => ({
+    id: c.resourceId,
+    type: "camera",
+    name: `${c.name} camera`,
+    nodeId: c.nodeId,
+    provider: "helios-io",
+    ownership: "shared-read",
+    health: "online",
+    endpoints: [`styx-frames+unix:///run/helios/cameras/${c.resourceId}.sock`],
+    labels: { sensor: c.sensor, mount: c.mount },
+    leasedBy: ROBOT_WORKLOADS.filter((w) => Object.values(w.bindings).includes(c.resourceId) && w.state === "running").map((w) => w.id),
+  })),
+  ...ROBOT_STREAMS.map((s): Resource => ({ id: s.id, type: "stream", name: s.name, nodeId: ROBOT_WORKLOADS.find((w) => w.id === s.producer)?.nodeId ?? ROBOT_OWNER, provider: s.producer, ownership: "shared-read", health: "online", endpoints: [`stream+quic://cluster/${s.id}`], labels: { schema: s.schema, rate: `${s.rateHz} Hz` }, leasedBy: [] })),
+  { id: `fan.${ROBOT_OWNER}`, type: "fan", name: "Cooling fan", nodeId: ROBOT_OWNER, provider: "helios-io", ownership: "exclusive", health: "online", endpoints: ["lemnos://hwmon/pwm-fan"], labels: { mode: "auto" }, leasedBy: [] },
+];
+
+export const ROBOT_LOGS: LogLine[] = [
+  { ts: now - 90_000, nodeId: ROBOT_OWNER, unit: "helios-runner", level: "info", text: "tags-owner tick p50 0.70 ms, p99 0.80 ms over 3600 frames" },
+  { ts: now - 60_000, nodeId: MOCK_SYSTEMCORE_PEER, unit: "helios-engine", level: "info", text: "tags-systemcore running at 60 fps" },
+  { ts: now - 30_000, nodeId: ROBOT_OWNER, unit: "atlas-agent", level: "info", text: "health ok · slot A confirmed · watchdog fed" },
+];
 
 // --- The live map (`eidos:mapping.live_map`), simulated -----------------------------------------
 // A 5 x 3.6 m room: points on its walls and floor, a camera looping through it, six tags on the

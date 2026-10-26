@@ -38,6 +38,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true }
+# The gateway's HTTP client to the robot's other nodes (`peers.rs`); styx builds it already.
+reqwest = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 # The startup file (`startup.rs`).

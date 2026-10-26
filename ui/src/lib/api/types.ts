@@ -101,6 +101,32 @@ export interface Device extends Capabilities {
   clock: ClockFacts | null;
 }
 
+/**
+ * A HeliOS device on this robot, as the gateway lists it (`GET /v1/peers`). `enrolled` peers are
+ * the robot's own; `routed` is true when the gateway can reach the peer's API (enrolled, with a link
+ * address and an API port). A listed peer that is not routed gets no requests.
+ */
+export type PeerState = "enrolled" | "discovered" | "revoked" | "key_mismatch" | "incompatible";
+
+export interface Peer {
+  node_id: string;
+  state: PeerState;
+  address: string | null;
+  api_port: number | null;
+  routed: boolean;
+  /** Security is on and the peer is not enrolled: its key must be enrolled first. */
+  needs_enrollment: boolean;
+  key_fingerprint: string;
+}
+
+/** The robot's peers: `cluster` is its Orion cluster (`robot-<team>`), null when discovery is off. */
+export interface PeerList {
+  cluster: string | null;
+  /** Whether security is on (the peers then need enrollment). */
+  security: "open" | "secured";
+  peers: Peer[];
+}
+
 /** The Raze board identity document plus the API's own section. */
 export interface Identity {
   contract: number;

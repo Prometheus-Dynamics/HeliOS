@@ -9,6 +9,7 @@
   import { capabilitiesOf } from "#lib/core/defaults.js";
   import { DICTIONARIES, guide } from "#lib/core/guide.svelte.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import { isReachable } from "#lib/devices.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { drafts } from "#lib/graph/drafts.svelte.js";
@@ -62,7 +63,7 @@
 
   const producers = $derived(cluster.workloads.filter((x) => x.id !== w.id));
   /** Devices a pipeline can run on; with one device there is nothing to choose. */
-  const hosts = $derived(cluster.nodes.filter((n) => n.runsPipelines || n.id === w.nodeId));
+  const hosts = $derived(cluster.nodes.filter((n) => n.id === w.nodeId || (n.runsPipelines && isReachable(n))));
   const portsOf = (id: string | undefined) => (cluster.workload(id ?? "")?.outputs ?? []).map((o) => o.split(".").at(-1) ?? o);
 </script>
 

@@ -1,5 +1,5 @@
 // Device vocabulary shared by the device screens: recovery levels, kinds, links.
-import type { Link, NodeKind, RecoveryLevel } from "#lib/api/model.js";
+import type { ClusterNode, Link, NodeKind, RecoveryLevel } from "#lib/api/model.js";
 import type { IconName } from "#lib/ui/icons.js";
 
 export const RECOVERY: Record<RecoveryLevel, { title: string; detail: string }> = {
@@ -17,3 +17,16 @@ export const KIND_LABEL: Record<NodeKind, { title: string; subtitle: string }> =
 };
 
 export const LINK_ICON: Record<Link, IconName> = { ethernet: "network", usb: "usb", can: "route", uart: "plug-connected" };
+
+/** Whether the UI can reach a device: this device, or a peer the gateway routes to (a listed peer that is not routed gets no requests). */
+export function isReachable(node: ClusterNode): boolean {
+  return node.peer?.routed !== false;
+}
+
+/** A device's place on the robot, as its badge reads: this device, a routed peer, or a peer the gateway does not reach. */
+export function placeOf(node: ClusterNode): { text: string; tone: "ok" | "info" | "warn" } {
+  if (!node.peer) return { text: "this device", tone: "ok" };
+  if (node.peer.routed) return { text: "peer · routed", tone: "info" };
+  if (node.peer.needsEnrollment) return { text: `needs enrollment · ${node.peer.keyFingerprint ?? ""}`.trim(), tone: "warn" };
+  return { text: node.peer.state === "discovered" ? "found, not enrolled" : `peer · ${node.peer.state.replace(/_/g, " ")}`, tone: "warn" };
+}

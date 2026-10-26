@@ -20,6 +20,9 @@ pub struct PeripheralConfig {
     pub enable_linux_probes: bool,
     /// lemnosd's socket (sensors, fan, status light).
     pub lemnosd_socket_path: PathBuf,
+    /// The board definition lemnosd runs (`/etc/lemnos/board.toml`): its `raw_clients` says whether
+    /// HeliOS may claim raw access, which decides whether the `lemnos.raw` resource is published.
+    pub lemnosd_board_file: PathBuf,
     /// The lemnosd subscription period, and the most often readings are republished to Orion.
     pub lemnosd_reading_interval_ms: u64,
     /// How long the first lemnosd connection waits for the service before it keeps trying in the
@@ -56,6 +59,7 @@ impl PeripheralConfig {
             orion_ipc_stream_socket_path: layout.orion_stream_socket(),
             enable_linux_probes: true,
             lemnosd_socket_path: layout.lemnos_socket(),
+            lemnosd_board_file: layout.lemnos_board_file(),
             lemnosd_reading_interval_ms: 250,
             lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,

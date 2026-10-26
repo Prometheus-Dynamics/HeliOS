@@ -174,7 +174,7 @@ impl PeripheralRuntime {
         let Some(bridge) = &self.lemnosd else { return snapshot };
         let context = DiscoveryContext::new(NodeId::new(self.config.node_id.clone()), chrono::Utc::now().timestamp_millis().max(0) as u64);
         match bridge.probe().discover(&context) {
-            Ok(lemnosd) => DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw)).collect()).merge(lemnosd),
+            Ok(lemnosd) => DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw | ResourceKind::LemnosDevice)).collect()).merge(lemnosd),
             Err(error) => {
                 warn!(probe = PROBE_NAME, error = %error, "lemnosd resources could not be built");
                 snapshot
@@ -477,6 +477,7 @@ fn build_runtime_components(config: &PeripheralConfig) -> Result<(PeripheralInve
         client: LEMNOSD_CLIENT_NAME.to_string(),
         reading_interval: StdDuration::from_millis(config.lemnosd_reading_interval_ms),
         startup_wait: StdDuration::from_millis(config.lemnosd_startup_wait_ms),
+        board_file: Some(config.lemnosd_board_file.clone()),
     });
     let mut service = PeripheralInventoryService::new(local_node_id);
     service.register_probe(Arc::new(lemnosd.probe()));

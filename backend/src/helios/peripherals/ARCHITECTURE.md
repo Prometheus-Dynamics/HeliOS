@@ -45,9 +45,10 @@ Styx owns:
 
 Peripherals owns:
 - stable resource identity and records
-- the `lemnos-ipc` client (`helios`): the fan override (`helios.fan`), raw
-  access (`lemnos.raw`) and HeliOS's status on the light; the devices'
-  resources are lemnosd's Orion bridge's (`lemnos.device`), not HeliOS's
+- the `lemnos-ipc` client (`helios`): each lemnosd device read-only
+  (`helios.lemnos_device`), the fan override (`helios.fan`), raw access
+  (`lemnos.raw`, only where the board definition admits HeliOS) and HeliOS's
+  status on the light
 - action decoding (an Orion action request's typed arguments back to JSON, then per kind)
 - local reconcile/apply
 - observed state publication
@@ -102,12 +103,22 @@ src/
   `HELIOS_PERIPHERALS_LEMNOSD_READING_MS`, default 250), re-sends the LED
   status and claims the live raw claims again. On `Disconnected` the devices
   stay published as missing, without readings.
-- The lemnosd devices are not mirrored: lemnosd's Orion bridge publishes one
-  `lemnos.device` resource per device (`lemnos.<board>.<device>`, Lemnos
-  `docs/orion.md`), and HeliOS's API reads its status entries. helios-peripherals
-  publishes only the fan override (`helios_fan_<node>_<device>`, type `helios.fan`,
-  with the override's state) and `lemnos.raw`, so there is one publisher per
-  resource.
+- Every lemnosd device is published read-only as `lemnos_device_<node>_<device>`
+  (type `helios.lemnos_device`): its status and reason, labels (`lemnos.class`,
+  `lemnos.model`, `lemnos.board`, `lemnos.device_id`) and the latest reading as
+  one `F64` per channel (for example `temperature` in °C). It offers no
+  capability, so a device's write is never offered here, whatever its
+  controls; the fan's write stays on `helios.fan`. Lemnos's own Orion bridge
+  (`lemnos-orion`, Lemnos `docs/orion.md`) publishes the same devices as
+  `lemnos.device` (`lemnos.<board>.<device>`); when both run, a device appears
+  once per publisher. Only the fan override (`helios_fan_<node>_<device>`, type
+  `helios.fan`, with the override's state), `lemnos.raw` and these read-only
+  devices are HeliOS's.
+- `lemnos.raw` is published only when the board definition (`lemnosd_board_file`,
+  `/etc/lemnos/board.toml`) admits HeliOS: its `raw_clients` is empty (any
+  member of the `lemnos` group) or lists `helios` (exactly, or with a trailing
+  `*`). A board file that cannot be read admits nothing. The file is read at
+  each connection.
 - Fan: read-only by default. `fan.override` (`{pwm: 0-255 | duty: 0.0-1.0,
   duration_ms: 1000-600000}`, default 60 s) is the only write
   (`DeviceClient::set(fan, "duty", ..)`); it ends with

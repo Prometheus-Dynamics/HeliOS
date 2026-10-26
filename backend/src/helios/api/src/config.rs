@@ -63,6 +63,11 @@ pub struct ApiConfig {
     pub playback: crate::playback::PlaybackSettings,
     /// The node's live stream the UI shows, and the history a new client starts with.
     pub live_streams: crate::live_streams::LiveStreamSettings,
+    /// The networks the robot's links are on. The gateway reaches a peer only over one of these
+    /// (`peers.rs`); none means no peer is reached.
+    pub peer_nets: Vec<crate::peers::Ipv4Net>,
+    /// The HeliOS API ports a discovered peer is probed on while security is open (`peers.rs`).
+    pub peer_ports: Vec<u16>,
 }
 
 impl Default for ApiConfig {
@@ -98,6 +103,8 @@ impl ApiConfig {
             lemnos_socket: layout.lemnos_socket(),
             playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
             live_streams: crate::live_streams::LiveStreamSettings::default(),
+            peer_nets: Vec::new(),
+            peer_ports: crate::peers::DEFAULT_PEER_PORTS.to_vec(),
         }
     }
 
@@ -196,6 +203,19 @@ impl ApiConfig {
         if let Some(value) = env.get("HELIOS_API_PLAYBACK_STREAM_DIR") {
             config.playback.stream_dir = value.into();
         }
+        if let Some(value) = env.get("HELIOS_API_PEER_PORTS") {
+            config.peer_ports = value
+                .split(',')
+                .map(|port| port.trim().parse::<u16>().map_err(|_| anyhow::anyhow!("HELIOS_API_PEER_PORTS takes port numbers, got {port:?}")))
+                .collect::<anyhow::Result<_>>()?;
+        }
+        if let Some(value) = env.get("HELIOS_API_PEER_NETS") {
+            config.peer_nets = value
+                .split(',')
+                .filter(|net| !net.trim().is_empty())
+                .map(|net| crate::peers::Ipv4Net::parse(net).ok_or_else(|| anyhow::anyhow!("HELIOS_API_PEER_NETS takes a.b.c.d/len entries, got {net:?}")))
+                .collect::<anyhow::Result<_>>()?;
+        }
         if let Some(value) = env.get("HELIOS_API_PLAYBACK_ROOTS") {
             config.playback.roots = value.split(':').filter(|root| !root.is_empty()).map(PathBuf::from).collect();
         }
@@ -225,6 +245,14 @@ mod tests {
         assert_eq!(config.ui_dir, None);
         assert_eq!(config.startup_file, PathBuf::from("/data/startup.toml"));
         assert_eq!(config.preview, crate::camera_preview::PreviewSettings::default());
+    }
+
+    #[test]
+    fn peer_networks_are_read_from_the_environment() {
+        let config = ApiConfig::from_vars([("HELIOS_API_PEER_NETS", "172.31.12.80/29, 10.63.90.0/24")]).expect("config");
+        assert_eq!(config.peer_nets.len(), 2);
+        assert!(ApiConfig::from_vars([("HELIOS_API_PEER_NETS", "172.31.12.80")]).is_err(), "a network needs its prefix");
+        assert!(ApiConfig::from_vars([("HELIOS_API_PEER_NETS", "")]).expect("unset").peer_nets.is_empty());
     }
 
     #[test]

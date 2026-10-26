@@ -230,13 +230,15 @@ fn resource_type_for(kind: ResourceKind) -> &'static str {
         ResourceKind::CaptureDevice => "camera.device",
         ResourceKind::Fan => "helios.fan",
         ResourceKind::LemnosRaw => "lemnos.raw",
+        ResourceKind::LemnosDevice => "helios.lemnos_device",
         ResourceKind::Virtual => "virtual.resource",
     }
 }
 
 fn ownership_mode_for(kind: ResourceKind) -> ResourceOwnershipMode {
     match kind {
-        ResourceKind::CaptureDevice => ResourceOwnershipMode::SharedRead,
+        // Read-only: any number of readers, no writer to exclude.
+        ResourceKind::CaptureDevice | ResourceKind::LemnosDevice => ResourceOwnershipMode::SharedRead,
         _ => ResourceOwnershipMode::Exclusive,
     }
 }

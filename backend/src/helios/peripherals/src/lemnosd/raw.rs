@@ -18,6 +18,7 @@
 //! I2C and SPI transactions need no claim (each one is atomic in lemnosd).
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use lemnos_ipc::raw::{Bias, Direction, Drive, EdgeDetect, LineConfig, Polarity, PwmConfig, SafeState, SpiConfig, SpiMode};
@@ -741,6 +742,28 @@ fn lease_end_ms(now_ms: u64, ttl: Duration) -> u64 {
     now_ms.saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX))
 }
 
+/// Whether the board definition in `board_file` lets `client` claim raw access, by lemnosd's own
+/// rule (`raw_clients`: an exact name, or a trailing `*` for a prefix). An empty list admits any
+/// member of the `lemnos` group, which HeliOS cannot see from its own connection, so it counts as
+/// allowed here and lemnosd still decides each claim.
+pub fn raw_access_allowed(board_file: &Path, client: &str) -> Result<bool, String> {
+    #[derive(Deserialize)]
+    struct Policy {
+        #[serde(default)]
+        raw_clients: Vec<String>,
+    }
+    let text = std::fs::read_to_string(board_file).map_err(|error| format!("{}: {error}", board_file.display()))?;
+    let policy: Policy = toml::from_str(&text).map_err(|error| format!("{}: {error}", board_file.display()))?;
+    Ok(policy.raw_clients.is_empty() || policy.raw_clients.iter().any(|entry| client_admitted(entry, client)))
+}
+
+fn client_admitted(entry: &str, client: &str) -> bool {
+    match entry.strip_suffix('*') {
+        Some(prefix) => client.starts_with(prefix),
+        None => entry == client,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -893,5 +916,23 @@ mod tests {
         assert_eq!(values.get(&format!("claim.{id}.direction")), Some(&ObservedValue::String("input".into())));
         assert_eq!(values.get(&format!("claim.{id}.edges")), Some(&ObservedValue::UInt(0)));
         assert_eq!(values.get(&format!("claim.{id}.held")), Some(&ObservedValue::Bool(false)));
+    }
+
+    #[test]
+    fn the_board_definition_admits_raw_access_by_lemnosd_rule() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let board = |raw_clients: &str| {
+            let path = dir.path().join("board.toml");
+            std::fs::write(&path, format!("format = \"lemnos.board\"\nschema_version = 1\n{raw_clients}\n[board]\nid = \"b\"\n")).expect("board");
+            path
+        };
+        // No list: any member of the lemnos group (lemnosd decides each claim).
+        assert_eq!(raw_access_allowed(&board(""), "helios"), Ok(true));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios\"]"), "helios"), Ok(true));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios*\"]"), "helios-peripherals"), Ok(true));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"*\"]"), "helios"), Ok(true));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"atlas\"]"), "helios"), Ok(false));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios-x\"]"), "helios"), Ok(false), "an exact name, without a `*`");
+        assert!(raw_access_allowed(&dir.path().join("missing.toml"), "helios").is_err());
     }
 }

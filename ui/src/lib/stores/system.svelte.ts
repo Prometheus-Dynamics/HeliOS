@@ -4,6 +4,7 @@
 // With `?mock=1` everything is simulated next to the mock cluster.
 
 import { api, errorText, isNotAvailable } from "#lib/api/client.js";
+import { LEMNOS_DEVICE_TYPE, lemnosDevices, type LemnosDevice } from "#lib/api/lemnos-devices.js";
 import { MOCK } from "#lib/api/mode.js";
 import type * as W from "#lib/api/types.js";
 import { cluster } from "./cluster.svelte";
@@ -81,14 +82,17 @@ export interface DeviceHw {
   live?: boolean;
   /** The fan resource that takes `fan.override` / `fan.release`. */
   fanResource?: string;
+  /** lemnosd's devices, read-only (the thermal zone's temperature, the CAN links' carrier). */
+  lemnos?: LemnosDevice[];
 }
 
 /** The device's lemnos peripherals (fan, status ring, IMU orientation, power monitor, USB power
- * switches) as the hardware panes show them. */
+ * switches, and every lemnosd device read-only) as the hardware panes show them. */
 function livePeripherals(resources: W.Resource[]) {
   const state = (id: string) => (resources.find((r) => r.id === id)?.state ?? null) as Record<string, unknown> | null;
   const num = (s: Record<string, unknown> | null, key: string) => (s && typeof s[key] === "number" ? (s[key] as number) : undefined);
-  const byKind = (suffix: string) => resources.find((r) => r.id.endsWith(suffix))?.id ?? "";
+  // The lemnosd devices are matched by their own type: their ids end like the Orion bridge's.
+  const byKind = (suffix: string) => resources.find((r) => r.type !== LEMNOS_DEVICE_TYPE && r.id.endsWith(suffix))?.id ?? "";
   const fanState = state(byKind(".fan"));
   const fanResource = resources.find((r) => r.type === "helios.fan")?.id;
   const overridden = Boolean(fanResource && state(fanResource)?.["fan.override.active"]);
@@ -107,9 +111,9 @@ function livePeripherals(resources: W.Resource[]) {
   const power = state(byKind(".power"));
   const rails = power ? [{ rail: "Board input", volts: num(power, "bus_voltage") ?? 0, amps: Math.abs(num(power, "current") ?? 0) }] : [];
   const switches = resources
-    .filter((r) => /usb-[a-z]-power$/.test(r.id))
+    .filter((r) => r.type !== LEMNOS_DEVICE_TYPE && /usb-[a-z]-power$/.test(r.id))
     .map((r) => ({ id: r.id, name: `USB-${r.id.match(/usb-([a-z])-power$/)![1].toUpperCase()} power`, on: (r.state as Record<string, unknown> | null)?.["power.on"] === 1 }));
-  return { fan, leds, imu, power: rails, switches, fanResource };
+  return { fan, leds, imu, power: rails, switches, fanResource, lemnos: lemnosDevices(resources) };
 }
 
 const CORES: Record<string, number> = { raze: 4, systemcore: 4, mcu: 2, foreign: 8, coprocessor: 8 };
@@ -151,15 +155,17 @@ function defaultHw(nodeId: string): DeviceHw {
   const n = CORES[node.kind] ?? 4;
   const cores = Array.from({ length: n }, (_, i) => (i === 3 && node.runsPipelines ? 0.06 : node.cpu * (0.6 + Math.random() * 0.8)));
   const raze = node.runsPipelines;
+  // The Raze image owns the board: its fan, LED ring, GPIO and rails (a SystemCore has none of them).
+  const owner = node.kind === "raze";
   return {
     cores,
     coreHistory: cores.map((c) => Array.from({ length: 40 }, () => jitter(c, c * 0.4))),
     freqMHz: cores.map(() => (raze ? 2400 : node.kind === "mcu" ? 150 : 3200)),
     procs: procsFor(nodeId),
-    fan: raze
+    fan: owner
       ? { mode: "auto", duty: 0.32, rpm: 3100, curve: [[40, 0.2], [55, 0.35], [65, 0.6], [75, 1]] }
       : null,
-    leds: raze
+    leds: owner
       ? [{ id: "status", name: "Status LED", count: 1, color: "#22c55e", pattern: "status", brightness: 0.6 }]
       : nodeId === "mcu-leds"
         ? [
@@ -169,7 +175,7 @@ function defaultHw(nodeId: string): DeviceHw {
             { id: "strip-d", name: "Strip D · rear", count: 30, color: "#da77f2", pattern: "blink", brightness: 0.5 },
           ]
         : [],
-    gpio: raze
+    gpio: owner
       ? [
           { pin: 4, name: "FLASH_SYNC", mode: "out", value: 0, owner: "helios-io" },
           { pin: 17, name: "IR_LED", mode: "pwm", value: 0.4, owner: null },
@@ -180,7 +186,7 @@ function defaultHw(nodeId: string): DeviceHw {
         ]
       : [],
     imu: nodeId === "mcu-imu" ? { yaw: 12.5, pitch: 0.4, roll: -0.2, rateHz: 1000, gyroRange: 2000, accelRange: 24, lpfHz: 116, mount: [0, 0, 0], gyroBias: [0.012, -0.004, 0.021], temperatureC: 38.5 } : null,
-    power: raze
+    power: owner
       ? [
           { rail: "5V in", volts: 5.08, amps: 1.42 },
           { rail: "3V3", volts: 3.31, amps: 0.21 },
@@ -268,7 +274,7 @@ class SystemStore {
     const hw = node ? this.hw[node.id] : undefined;
     if (!node || !hw) return;
     const devices = livePeripherals(this.peripherals);
-    this.hw[node.id] = { ...hw, fan: devices.fan, leds: devices.leds, imu: devices.imu, power: devices.power, switches: devices.switches, fanResource: devices.fanResource };
+    this.hw[node.id] = { ...hw, fan: devices.fan, leds: devices.leds, imu: devices.imu, power: devices.power, switches: devices.switches, fanResource: devices.fanResource, lemnos: devices.lemnos };
   }
 
   private async liveTick() {
@@ -319,6 +325,7 @@ class SystemStore {
       switches: devices.switches,
       live: true,
       fanResource: devices.fanResource,
+      lemnos: devices.lemnos,
       throttled: metrics.throttled != null && (metrics.throttled & 0x4) !== 0,
     };
   }

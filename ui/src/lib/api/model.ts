@@ -3,7 +3,7 @@
 // resources; streams the workloads produce. Device-level facts (slots,
 // recovery, logs) come from each node's Atlas agent.
 
-import type { CameraStatus, StatusStage } from "./types";
+import type { CameraStatus, PeerState, StatusStage } from "./types";
 
 /** A node's kind: a HeliOS device's host (`raze`, `systemcore`, `linux`, from `GET /v1/device`), or a cluster peer's (`mcu`, `coprocessor`, `foreign`). */
 export type NodeKind = string;
@@ -52,6 +52,8 @@ export interface ClusterNode {
   slots: Slot[];
   services: Service[];
   foreignSystem?: string;
+  /** Another HeliOS device on this robot, reached through the gateway (`GET /v1/peers`); unset on this device. */
+  peer?: { routed: boolean; state: PeerState; needsEnrollment?: boolean; keyFingerprint?: string };
 }
 
 export interface Service {

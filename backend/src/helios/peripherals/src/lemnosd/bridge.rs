@@ -29,7 +29,7 @@ use tracing::{debug, info, warn};
 
 use crate::lemnosd::fan::{FAN_DUTY_CONTROL, FanOverrideRequest, FanOverrides};
 use crate::lemnosd::led::{LED_PRIORITY, status_look};
-use crate::lemnosd::raw::{ClaimSpec, Claims, EdgeView, Held, MAX_CLAIMS, RawAction};
+use crate::lemnosd::raw::{ClaimSpec, Claims, EdgeView, Held, MAX_CLAIMS, RawAction, raw_access_allowed};
 use crate::lemnosd::resources::{DeviceReading, LemnosdProbe, LemnosdState, OverrideView};
 use crate::model::ObservedValue;
 
@@ -50,6 +50,9 @@ pub struct LemnosdOptions {
     /// How long the first connection waits for lemnosd (`ClientOptions::wait`) before the client
     /// keeps trying in the background.
     pub startup_wait: Duration,
+    /// The board definition lemnosd runs, read at each connection for its raw-access policy. Without
+    /// one (or when it cannot be read), HeliOS publishes no raw access.
+    pub board_file: Option<PathBuf>,
 }
 
 /// Called from the bridge thread when [`LemnosdState`] changed.
@@ -280,6 +283,16 @@ impl Worker {
         }
     }
 
+    /// Whether the board definition lets HeliOS claim raw access (the `lemnos.raw` resource is
+    /// published only then). A board file that cannot be read counts as none.
+    fn raw_access(&self) -> bool {
+        let Some(board_file) = &self.options.board_file else { return false };
+        raw_access_allowed(board_file, &self.options.client).unwrap_or_else(|error| {
+            warn!(error = %error, "the lemnosd board definition could not be read; raw access is not published");
+            false
+        })
+    }
+
     fn connected(&mut self) -> Result<&mut DeviceClient, String> {
         self.devices.as_mut().filter(|devices| devices.is_connected()).ok_or_else(|| NOT_CONNECTED.to_string())
     }
@@ -329,11 +342,13 @@ impl Worker {
             }
         }
         let board = devices.board().to_string();
-        info!(board = %board, devices = list.len(), reconnects, "connected to lemnosd");
+        let raw_access = self.raw_access();
+        info!(board = %board, devices = list.len(), reconnects, raw_access, "connected to lemnosd");
         {
             let mut state = lock(&self.state);
             state.connected = true;
             state.board = board;
+            state.raw_access = raw_access;
             state.readings.retain(|device, _| list.iter().any(|known| &known.id == device));
             state.devices = list;
         }

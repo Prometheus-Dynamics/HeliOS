@@ -24,9 +24,11 @@ pub mod field_layouts;
 pub mod host;
 pub mod host_facts;
 pub mod leds;
+pub mod migration;
 pub mod live_outputs;
 pub mod live_streams;
 pub mod orion;
+pub mod peers;
 pub mod playback;
 pub mod recording_nt;
 pub mod recording_rings;
@@ -52,6 +54,8 @@ pub const BUILD: &str = env!("HELIOS_BUILD_ID");
 pub struct AppState {
     pub config: ApiConfig,
     pub orion: orion::Orion,
+    /// The HTTP client the gateway proxies to the robot's other nodes with (`peers.rs`).
+    pub peer_client: reqwest::Client,
     pub store: Arc<store::Store>,
     pub events: Arc<events::EventHub>,
     /// One Styx control client per camera, for camera controls and their persisted values.
@@ -103,6 +107,7 @@ impl AppState {
             self_calibration_notes: self_calibration::Notes::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
             orion: orion_link,
+            peer_client: peers::client(),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
             calibrations: calibration_capture::CalibrationSessions::default(),
