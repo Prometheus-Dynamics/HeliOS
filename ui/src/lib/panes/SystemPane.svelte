@@ -6,6 +6,7 @@
   import { identity } from "#lib/core/identity.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { RECOVERY } from "#lib/devices.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
   import Badge from "#lib/kit/Badge.svelte";
   import IconButton from "#lib/kit/IconButton.svelte";
@@ -24,7 +25,7 @@
   const target = follow(() => pane, () => ws, "device", () => cluster.nodes[0]?.id);
   const node = $derived(target.id ? cluster.node(target.id) : undefined);
   // The simulated robot offers a release; a real device installs an image file you pick.
-  const available = $derived(!cluster.mock ? null : node?.kind === "raze" ? "2026.5.0" : node?.kind === "mcu" ? "0.3.1" : null);
+  const available = $derived(!cluster.mock ? null : node?.runsPipelines ? "2026.5.0" : node?.kind === "mcu" ? "0.3.1" : null);
   const update = $derived(liveState.update);
   let confirmSafe = $state(false);
 
@@ -73,15 +74,19 @@
         <b>{node.os.name} {node.os.version}</b>
         <span>agent {node.agent.version} · up {duration(node.uptimeS)}</span>
       </div>
-      <IconButton icon="power" label="Reboot" text="Reboot" size={26} onclick={() => cluster.reboot(node.id)} />
-      {#if confirmSafe}
-        <IconButton icon="lifebuoy" label="Confirm safe mode" text="Stop apps?" tone="accent" size={26} onclick={() => { confirmSafe = false; cluster.safeMode(node.id); }} />
-      {:else}
-        <IconButton icon="lifebuoy" label="Safe mode: stop applications, keep the agent and control plane" text="Safe mode" size={26} onclick={() => { confirmSafe = true; setTimeout(() => (confirmSafe = false), 3000); }} />
+      {#if device.has("reboot")}
+        <IconButton icon="power" label="Reboot" text="Reboot" size={26} onclick={() => cluster.reboot(node.id)} />
+      {/if}
+      {#if device.has("safe_mode")}
+        {#if confirmSafe}
+          <IconButton icon="lifebuoy" label="Confirm safe mode" text="Stop apps?" tone="accent" size={26} onclick={() => { confirmSafe = false; cluster.safeMode(node.id); }} />
+        {:else}
+          <IconButton icon="lifebuoy" label="Safe mode: stop applications, keep the agent and control plane" text="Safe mode" size={26} onclick={() => { confirmSafe = true; setTimeout(() => (confirmSafe = false), 3000); }} />
+        {/if}
       {/if}
     </div>
 
-    {#if node.slots.length}
+    {#if device.has("slots") && node.slots.length}
       <Section title="Boot slots" key="sys-slots">
         <div class="slots">
           {#each node.slots as s (s.name)}
@@ -142,16 +147,18 @@
       {/each}
     </Section>
 
-    <Section title="Recovery" key="sys-recovery">
-      {#each Object.entries(RECOVERY) as [level, r] (level)}
-        {@const ok = node.recovery.includes(level as never)}
-        <div class="rec" class:ok>
-          <span class="lv">{level}</span>
-          <span class="rt"><b>{r.title}</b><i>{r.detail}</i></span>
-          <Icon name={ok ? "circle-check" : "circle-dashed"} size={15} />
-        </div>
-      {/each}
-    </Section>
+    {#if device.has("recovery_ladder")}
+      <Section title="Recovery" key="sys-recovery">
+        {#each Object.entries(RECOVERY) as [level, r] (level)}
+          {@const ok = node.recovery.includes(level as never)}
+          <div class="rec" class:ok>
+            <span class="lv">{level}</span>
+            <span class="rt"><b>{r.title}</b><i>{r.detail}</i></span>
+            <Icon name={ok ? "circle-check" : "circle-dashed"} size={15} />
+          </div>
+        {/each}
+      </Section>
+    {/if}
 
     <Section title="Clock and link" key="sys-clock" advanced>
       <Prop label="Clock source"><span class="mono">{node.clock.source}</span></Prop>

@@ -13,6 +13,7 @@
   import Slider from "#lib/kit/Slider.svelte";
   import Switch from "#lib/kit/Switch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { system } from "#lib/stores/system.svelte.js";
   import PaneBar from "#lib/workspace/PaneBar.svelte";
   import type { PaneProps } from "#lib/workspace/panes.js";
@@ -24,7 +25,11 @@
   const target = follow(() => pane, () => ws, "device", () => cluster.nodes[0]?.id);
   const node = $derived(target.id ? cluster.node(target.id) : undefined);
   const hw = $derived(node ? system.of(node.id) : undefined);
-  const empty = $derived(hw && !hw.fan && !hw.leds.length && !hw.gpio.length && !hw.imu && !hw.power.length && !hw.switches?.length);
+  // A section shows only for a feature the device has (`device.has`), so the pane is empty when
+  // none of them is there.
+  const empty = $derived(
+    hw && !(device.has("fan") && hw.fan) && !(device.has("leds") && hw.leds.length) && !hw.gpio.length && !(device.has("imu") && hw.imu) && !(device.has("power") && hw.power.length) && !(device.has("usb_power") && hw.switches?.length),
+  );
   // Live readings at 4 Hz while this pane is open.
   $effect(() => system.watchPeripherals());
 </script>
@@ -43,7 +48,7 @@
 
 {#if node && hw && !empty}
   <div class="scroll">
-    {#if hw.fan}
+    {#if device.has("fan") && hw.fan}
       {@const fan = hw.fan}
       <Section title="Fan" key="hw-fan">
         {#snippet actions()}<span class="live">{#if fan.rpm}<b>{fan.rpm}</b> rpm · {/if}<b>{Math.round(fan.duty * 100)}</b>%</span>{/snippet}
@@ -62,7 +67,7 @@
       </Section>
     {/if}
 
-    {#if hw.leds.length}
+    {#if device.has("leds") && hw.leds.length}
       <Section title="LEDs" key="hw-leds" count={hw.leds.length}>
         {#each hw.leds as led (led.id)}
           <div class="led">
@@ -112,7 +117,7 @@
       </Section>
     {/if}
 
-    {#if hw.imu}
+    {#if device.has("imu") && hw.imu}
       {@const imu = hw.imu}
       <Section title="IMU" key="hw-imu">
         <ImuPanel />
@@ -137,7 +142,7 @@
       </Section>
     {/if}
 
-    {#if hw.switches?.length}
+    {#if device.has("usb_power") && hw.switches?.length}
       <Section title="Power outputs" key="hw-switches" count={hw.switches.length}>
         {#each hw.switches as s (s.id)}
           <Prop label={s.name}><Badge tone={s.on ? "ok" : "neutral"} text={s.on ? "On" : "Off"} /></Prop>
@@ -145,7 +150,7 @@
       </Section>
     {/if}
 
-    {#if hw.power.length}
+    {#if device.has("power") && hw.power.length}
       <Section title="Power" key="hw-power" count={hw.power.length}>
         {#each hw.power as r (r.rail)}
           <Prop label={r.rail}>

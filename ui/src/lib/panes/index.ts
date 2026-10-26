@@ -63,7 +63,7 @@ definePane({ type: "mounts", title: "Mounts", icon: "ruler-2", group: "Robot", s
 definePane({ type: "field", title: "Field", icon: "map", group: "Robot", summary: "Field layout editor (WPILib JSON)", component: FieldPane });
 definePane({ type: "devices", title: "Devices", icon: "server", group: "Hardware", summary: "Every device with live load", component: DevicesPane });
 definePane({ type: "processes", title: "Processes", icon: "terminal-2", group: "Hardware", summary: "Cores and processes: pause, kill, pin", component: ProcessesPane, label: pinnedDevice, identityOf: id("device") });
-definePane({ type: "imu", title: "IMU", icon: "compass", group: "Hardware", summary: "The board in 3D from its IMU or fusion, with the status ring's LEDs live", component: ImuPane });
+definePane({ type: "imu", title: "IMU", icon: "compass", group: "Hardware", summary: "The board in 3D from its IMU or fusion, with the status ring's LEDs live", component: ImuPane, requires: "imu" });
 definePane({ type: "peripherals", title: "Peripherals", icon: "plug", group: "Hardware", summary: "Fan curve, LEDs, GPIO, IMU, power", component: PeripheralsPane, label: pinnedDevice, identityOf: id("device") });
 definePane({ type: "system", title: "Updates & recovery", icon: "versions", group: "Hardware", summary: "Boot slots, updates, services, recovery", component: SystemPane, label: pinnedDevice, identityOf: id("device") });
 definePane({ type: "inspector", title: "Inspector", icon: "info-circle", group: "Tools", summary: "Whatever is selected, editable", component: InspectorPane });

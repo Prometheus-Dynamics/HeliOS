@@ -9,6 +9,7 @@
   import { nodeIcon } from "#lib/present.js";
   import Swatch from "#lib/kit/Swatch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { system } from "#lib/stores/system.svelte.js";
   import type { ClusterNode } from "#lib/api/model.js";
 
@@ -17,9 +18,9 @@
   function actions(n: ClusterNode) {
     return menu.context(() => [
       { heading: identity.name(n.id, n.name) },
-      { label: "Reboot", icon: "power", run: () => cluster.reboot(n.id) },
-      { label: "Safe mode", icon: "lifebuoy", hint: "Stop applications; keep the agent and control plane", run: () => cluster.safeMode(n.id) },
-      { label: "Switch boot slot", icon: "versions", disabled: n.slots.length < 2, run: () => cluster.switchSlot(n.id) },
+      ...(device.has("reboot") ? [{ label: "Reboot", icon: "power" as const, run: () => cluster.reboot(n.id) }] : []),
+      ...(device.has("safe_mode") ? [{ label: "Safe mode", icon: "lifebuoy" as const, hint: "Stop applications; keep the agent and control plane", run: () => cluster.safeMode(n.id) }] : []),
+      ...(device.has("slots") ? [{ label: "Switch boot slot", icon: "versions" as const, disabled: n.slots.length < 2, run: () => cluster.switchSlot(n.id) }] : []),
       { separator: true },
       ...n.services.map((s) => ({ label: `Restart ${s.name}`, icon: "refresh" as const, run: () => cluster.restartService(n.id, s.name) })),
     ]);
@@ -66,7 +67,9 @@
       </span>
       <span class="r mono" style:color={heat(n.tempC)}>{n.tempC.toFixed(0)}°</span>
       <span class="r mono" class:warn={n.clock.offsetUs > 1000} data-tip="{n.clock.source} offset">{n.clock.offsetUs >= 1000 ? `${(n.clock.offsetUs / 1000).toFixed(1)}ms` : `${n.clock.offsetUs}µs`}</span>
-      <span class="rec">{#each ["R1", "R2", "R3", "R4"] as r (r)}<i class:on={n.recovery.includes(r as never)}>{r}</i>{/each}</span>
+      {#if device.has("recovery_ladder")}
+        <span class="rec">{#each ["R1", "R2", "R3", "R4"] as r (r)}<i class:on={n.recovery.includes(r as never)}>{r}</i>{/each}</span>
+      {/if}
     </div>
   {/each}
 </div>

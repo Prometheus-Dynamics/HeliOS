@@ -11,6 +11,7 @@
   import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { workspaces } from "#lib/core/workspace.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
   import IconButton from "#lib/kit/IconButton.svelte";
   import Prop from "#lib/kit/Prop.svelte";
@@ -48,7 +49,9 @@
 </script>
 
 <div class="settings">
-  <SecuritySection />
+  {#if device.has("security")}
+    <SecuritySection />
+  {/if}
 
   <Section title="Robot" key="set-robot">
     {#if cluster.live}
@@ -73,9 +76,11 @@
     <RecordingSection />
   </Section>
 
-  <Section title="LEDs" key="set-leds">
-    <LedSection />
-  </Section>
+  {#if device.has("leds")}
+    <Section title="LEDs" key="set-leds">
+      <LedSection />
+    </Section>
+  {/if}
 
   <Section title="Theme" key="set-theme">
     <div class="themes">

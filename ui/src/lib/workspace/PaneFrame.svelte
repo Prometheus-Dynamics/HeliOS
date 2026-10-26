@@ -4,6 +4,7 @@
   import { untrack, type Snippet } from "svelte";
   import Icon from "#lib/components/common/Icon.svelte";
   import { workspaces } from "#lib/core/workspace.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { setBarSlot } from "./bar";
   import { paneDef } from "./panes";
 
@@ -47,7 +48,7 @@
     </div>
   {/if}
   <div class="body">
-    {#if def}
+    {#if def && (!def.requires || device.has(def.requires))}
       <def.component pane={ref} ws="embed" />
     {/if}
   </div>

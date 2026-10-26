@@ -7,6 +7,7 @@
   import type { LiveDevice } from "./feed.ts";
   import ImuView from "./ImuView.svelte";
   import RingView from "./RingView.svelte";
+  import { device } from "#lib/stores/device.svelte.js";
   import Trace from "./Trace.svelte";
 
   /** compact: the model smaller, for a card under others. */
@@ -56,7 +57,7 @@
     </div>
 
     <div class="row">
-      {#if light}<RingView light={light} {tick} size={compact ? 56 : 72} />{/if}
+      {#if light && device.has("leds")}<RingView light={light} {tick} size={compact ? 56 : 72} />{/if}
       <dl class="axes mono">
         <dt>accel g</dt><dd>{AXES.map((_, i) => fmt(accelG[i], 2)).join(" ")}</dd>
         <dt>gyro °/s</dt><dd>{AXES.map((_, i) => fmt(gyroDps[i], 1)).join(" ")}</dd>

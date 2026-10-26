@@ -10,6 +10,7 @@
   import Section from "#lib/kit/Section.svelte";
   import Switch from "#lib/kit/Switch.svelte";
   import { auth, MIN_PASSWORD } from "#lib/stores/auth.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import SecureForm from "./SecureForm.svelte";
 
@@ -104,7 +105,7 @@
     <div class="state" class:open={auth.open}>
       <Icon name={auth.open ? "lock-open" : "lock"} size={16} />
       {#if auth.open}
-        <span><b>Open.</b> Anyone on this network can change this device, install updates and reboot it. Fine on an FRC robot; secure it anywhere else.</span>
+        <span><b>Open.</b> Anyone on this network can change this device{device.has("updates") ? ", install updates" : ""}{device.has("reboot") ? " and reboot it" : ""}. Fine on an FRC robot; secure it anywhere else.</span>
       {:else}
         <span><b>Secured.</b> HeliOS needs the device password; tools need an API token.{#if auth.status.via === "token"} You are using an API token.{/if}</span>
       {/if}
@@ -184,7 +185,7 @@
       </div>
     {/if}
 
-    <p class="hint">Lost the password? From a root shell on the device (USB serial console or SSH) run <code>helios-api auth reset</code>: the device becomes open again. HeliOS uses plain HTTP on the robot network; anyone who can watch that network can see the traffic.</p>
+    <p class="hint">Lost the password? From a root shell on the device ({device.has("console") ? "USB serial console or " : ""}SSH) run <code>helios-api auth reset</code>: the device becomes open again. HeliOS uses plain HTTP on the robot network; anyone who can watch that network can see the traffic.</p>
   {:else}
     <p class="hint">{auth.error ? `Security status unavailable: ${auth.error}` : "Reading security status…"}</p>
   {/if}

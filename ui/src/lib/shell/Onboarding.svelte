@@ -13,6 +13,7 @@
   import SecureForm from "#lib/components/security/SecureForm.svelte";
   import { auth } from "#lib/stores/auth.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
   import Feed from "#lib/vision/Feed.svelte";
   import { DEFAULT_OVERLAYS } from "#lib/vision/overlays.js";
   import { help } from "./help.svelte";
@@ -20,9 +21,10 @@
   let step = $state(0);
   let simple = $state(true);
   let teamText = $state(team.number ? String(team.number) : "");
-  const STEPS = ["Team", "Cameras", "Screens", "Security", "Done"];
-  const SECURITY = 3;
-  const LAST = STEPS.length - 1;
+  // The security step is the owner's: a guest's access belongs to its host, so it is not offered.
+  const STEPS = $derived(device.has("security") ? ["Team", "Cameras", "Screens", "Security", "Done"] : ["Team", "Cameras", "Screens", "Done"]);
+  const SECURITY = $derived(STEPS.indexOf("Security"));
+  const LAST = $derived(STEPS.length - 1);
   // FRC robots run open; anything else is offered a password first. The
   // choice is explicit either way, and the top bar always shows the result.
   let secureChoice = $state<"open" | "secure" | null>(null);

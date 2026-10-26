@@ -4,7 +4,9 @@
 
 import type { Component } from "svelte";
 import type { PaneRef } from "#lib/core/workspace.svelte.js";
+import type { FeatureName } from "#lib/api/types.js";
 import type { IconName } from "#lib/ui/icons.js";
+import { device } from "#lib/stores/device.svelte.js";
 
 export interface PaneProps {
   pane: PaneRef;
@@ -23,6 +25,8 @@ export interface PaneDef {
   label?: (props: Record<string, unknown>) => string | null;
   /** Identity id the tab takes its colour from. */
   identityOf?: (props: Record<string, unknown>) => string | null;
+  /** The device feature the pane is for: it is offered (galleries, palette) only where the device has it. */
+  requires?: FeatureName;
 }
 
 const registry = new Map<string, PaneDef>();
@@ -35,6 +39,7 @@ export function paneDef(type: string): PaneDef | undefined {
   return registry.get(type);
 }
 
+/** The panes this device offers: those whose feature it has. */
 export function allPanes(): PaneDef[] {
-  return [...registry.values()];
+  return [...registry.values()].filter((def) => !def.requires || device.has(def.requires));
 }

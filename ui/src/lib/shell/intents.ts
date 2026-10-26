@@ -5,6 +5,7 @@ import { commands } from "#lib/core/commands.svelte.js";
 import { selection } from "#lib/core/selection.svelte.js";
 import { shell } from "#lib/core/shell.svelte.js";
 import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+import type { FeatureName } from "#lib/api/types.js";
 import type { IconName } from "#lib/ui/icons.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
 
@@ -17,7 +18,7 @@ const go = (screen: string, then?: () => void) => () => {
 };
 const open = (type: string) => () => workspaces.open(shell.active, pane(type));
 
-const INTENTS: { title: string; words: string; icon: IconName; run: () => void }[] = [
+const INTENTS: { title: string; words: string; icon: IconName; run: () => void; requires?: FeatureName }[] = [
   { title: "Image too dark or too bright", words: "dark bright exposure gain light dim washed", icon: "sun", run: go("cameras", camera) },
   { title: "Image blurry when moving", words: "blur blurry motion smear exposure", icon: "focus-2", run: go("cameras", camera) },
   { title: "Change what a camera detects", words: "job apriltag aruco detect pipeline video off", icon: "target", run: go("cameras", camera) },
@@ -33,13 +34,13 @@ const INTENTS: { title: string; words: string; icon: IconName; run: () => void }
   { title: "Pipeline slow / where time goes", words: "slow latency profiler timing fps ms", icon: "stopwatch", run: go("pipelines", open("profiler")) },
   { title: "Processes, cores, kill or pin", words: "process kill cpu core pin priority nice memory", icon: "terminal-2", run: go("hardware") },
   { title: "Fan, LEDs, GPIO, IMU, power", words: "fan led gpio imu gyro power rail pins sensor", icon: "plug", run: go("hardware") },
-  { title: "Install an update / roll back", words: "update upgrade install slot rollback version", icon: "cloud-download", run: go("hardware") },
+  { title: "Install an update / roll back", words: "update upgrade install slot rollback version", icon: "cloud-download", run: go("hardware"), requires: "updates" },
   { title: "Something crashed or is stuck", words: "crash stuck broken restart reboot frozen quarantined error", icon: "lifebuoy", run: go("overview") },
   { title: "Setup checklist", words: "setup start new first checklist getting started", icon: "list-check", run: open("setup") },
-  { title: "Secure this device / password / API tokens", words: "security secure password lock login sign token atlas open", icon: "lock", run: go("settings") },
+  { title: "Secure this device / password / API tokens", words: "security secure password lock login sign token atlas open", icon: "lock", run: go("settings"), requires: "security" },
   { title: "Theme, density, backup", words: "theme dark light density backup export import restore", icon: "settings", run: go("settings") },
 ];
 
 export function registerIntents() {
-  commands.register("intents", () => INTENTS.map((i, n) => ({ id: `how:${n}`, title: i.title, group: "How do I…", icon: i.icon, keywords: i.words, run: i.run })));
+  commands.register("intents", () => INTENTS.map((i, n) => ({ id: `how:${n}`, title: i.title, group: "How do I…", icon: i.icon, keywords: i.words, requires: i.requires, run: i.run })));
 }

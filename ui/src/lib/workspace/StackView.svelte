@@ -9,6 +9,7 @@
   import { NEW_PANE_MIME, PANE_MIME, addPaneTo, paneMenu } from "./library";
   import { paneDef } from "./panes";
   import { help } from "#lib/shell/help.svelte.js";
+  import { device } from "#lib/stores/device.svelte.js";
 
   let { stack, ws }: { stack: Extract<LayoutNode, { kind: "stack" }>; ws: string } = $props();
 
@@ -208,8 +209,13 @@
     {#if active}
       {@const def = paneDef(active.type)}
       {#key active.id}
-        {#if def}
+        {#if def && (!def.requires || device.has(def.requires))}
           <def.component pane={active} {ws} />
+        {:else if def}
+          <div class="missing">
+            <Icon name="plug" size={18} />
+            <span>{def.title} is not on this device.</span>
+          </div>
         {:else}
           <div class="missing">
             <Icon name="alert-triangle" size={18} />

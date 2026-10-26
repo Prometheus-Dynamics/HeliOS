@@ -1,7 +1,9 @@
 // Commands: everything the palette (Ctrl+K) can do. Screens and panes register
 // their own; the palette searches titles and keywords.
 
+import type { FeatureName } from "#lib/api/types.js";
 import type { IconName } from "#lib/ui/icons.js";
+import { device } from "#lib/stores/device.svelte.js";
 
 export interface Command {
   id: string;
@@ -10,6 +12,8 @@ export interface Command {
   icon?: IconName;
   keywords?: string;
   shortcut?: string;
+  /** The device feature the command is for: it is listed only where the device has it. */
+  requires?: FeatureName;
   run: () => void | Promise<void>;
 }
 
@@ -23,7 +27,9 @@ class CommandStore {
   }
 
   get all(): Command[] {
-    return Object.values(this.#sources).flatMap((p) => p());
+    return Object.values(this.#sources)
+      .flatMap((p) => p())
+      .filter((c) => !c.requires || device.has(c.requires));
   }
 
   search(query: string): Command[] {
