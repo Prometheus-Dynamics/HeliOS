@@ -42,6 +42,7 @@ Chromium comes from `bunx playwright install chromium`.
 | `camera-controls.spec.ts` | Search filters the sections, Changed only, exposure and gain typed in manual mode and read back from the camera, reset. |
 | `setup.spec.ts` | The checklist's "Choose what each camera does" opens the chooser; the first-run wizard shows once and can be skipped. |
 | `screens.spec.ts` | Every screen in the left rail opens; the add-a-screen gallery opens. |
+| `device-features.spec.ts` | A device's own features (LED ring, security, reboot, boot slots, recovery ladder) show only where the device has them. Mock: the Raze image (all of them) and `?mock=systemcore`, a guest (none). Sim: the UI matches what `GET /v1/device` reports, so `HELIOS_E2E_URL` can point at a real device (read-only). |
 
 Sim tests start from whatever the device holds (a previous run's pipeline, its tag family, its
 camera settings), so each one sets the state it needs through the UI and then checks the device
