@@ -19,6 +19,9 @@ device. The software is the same on every profile; only the profile differs.
 | Board contract | Atlas device package: identity, update writer, slots | none of its own; host facts come from the host |
 | Host integration | none | SystemCore UI tile, port, auto-start, service buttons (`X-*` control fields) |
 
+What a SystemCore unit provides (network, ports in use, hardware and who owns it, packaging
+conventions, scheduling) is in [devices/systemcore.md](devices/systemcore.md).
+
 Later profiles fit the same table: a Debian coprocessor or laptop (guest, `.deb`), a container
 (guest, OCI), another owned board (owner, image).
 
