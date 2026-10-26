@@ -3,6 +3,7 @@
   import "../app.css";
   import "@xyflow/svelte/dist/style.css";
   import Toasts from "#lib/components/shell/Toasts.svelte";
+  import UpdateBanner from "#lib/shell/UpdateBanner.svelte";
   import { commands } from "#lib/core/commands.svelte.js";
   import { identity } from "#lib/core/identity.svelte.js";
   import { prefs } from "#lib/core/prefs.svelte.js";
@@ -133,6 +134,7 @@
 <Tour />
 <TipHost />
 <Toasts />
+<UpdateBanner />
 
 <style>
   :global(body) {

@@ -29,6 +29,7 @@ import { parseFieldPose, parseTagPoses, type Intrinsics, type PoseView } from "#
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
+import { build } from "./build.svelte";
 import { device as deviceStore } from "./device.svelte";
 import { recordings } from "./recordings.svelte";
 import { emitPeripheral, type PeripheralEvent } from "./peripheral-events";
@@ -704,6 +705,9 @@ export class LiveCluster {
 
   private onEvent(event: W.ApiEvent) {
     switch (event.type) {
+      case "hello":
+        build.note((event.data as { build?: string } | undefined)?.build);
+        break;
       case "nt4":
         this.soon("nt4", () => this.refreshNt4(), 2500);
         break;

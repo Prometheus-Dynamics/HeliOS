@@ -46,6 +46,8 @@ pub use config::ApiConfig;
 
 pub const API_VERSION: &str = "v1";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// This build: changes with every build of the API (`build.rs`), so a UI can tell it was updated.
+pub const BUILD: &str = env!("HELIOS_BUILD_ID");
 
 pub struct AppState {
     pub config: ApiConfig,
