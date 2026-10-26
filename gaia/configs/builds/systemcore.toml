@@ -1,13 +1,14 @@
 gaia_version = ">=2.0.0"
 build_name = "helios-systemcore"
 version = "2026.2.0"
-description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine and its Eidos plugin, helios-peripherals, helios-diagnostics, orion-node, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
+description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine and its Eidos plugin, helios-peripherals, helios-diagnostics, orion-node, lemnosd, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
 profile = "release"
 target = "systemcore"
 
 # The device facts behind every choice here (ports, slices, opkg conventions, what the host owns)
-# are in docs/devices/systemcore.md. Lemnos joins when its SystemCore board definition lands;
-# every SystemCore device is host-owned on alpha18, so nothing on the board needs it yet.
+# are in docs/devices/systemcore.md. Lemnos's lemnosd joins with the SystemCore board definition
+# (Lemnos packaging/boards/systemcore.toml): every device it lists is host-owned, so lemnosd reads
+# them through the host's interfaces and drives nothing.
 imports = ["../workspace/base.toml"]
 
 # The cargo profile of the backend binaries, as in raze.toml.
@@ -67,6 +68,14 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
 rev = "0653560deba9c5e2b8745cd66de8c2fa33a6525d"
 
+# Lemnos at the commit that adds the SystemCore board and host-owned devices (lemnosd, and its
+# board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
+[[sources]]
+id = "lemnos"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
+rev = "9cfd6d2044809a42e52714ad83f5218a65f0256e"
+
 [[artifacts]]
 id = "helios-api"
 kind = "rust"
@@ -125,6 +134,17 @@ toolchain = "systemcore"
 profile = "${input.cargo_profile}"
 output_path = "${workspace.out_dir}/artifacts/helios-peripherals"
 
+# lemnosd, Lemnos's hardware service, built with the SystemCore toolchain (its `service` profile is
+# the one Lemnos ships). It reads the host-owned devices of the SystemCore board definition.
+[[artifacts]]
+id = "lemnosd"
+kind = "rust"
+package = "lemnosd"
+source = "lemnos"
+toolchain = "systemcore"
+profile = "service"
+output_path = "${workspace.out_dir}/artifacts/lemnosd"
+
 # orion-node's appliance build (Orion packaging/gaia/orion-node.toml): IPC control plane, peer
 # sync, mDNS discovery, sd_notify and the watchdog.
 [[artifacts]]
@@ -180,6 +200,19 @@ tree = "pkg-root"
 src = "${workspace.out_dir}/artifacts/orion-node"
 dest = "usr/local/bin/orion-node"
 mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/lemnosd"
+dest = "usr/local/bin/lemnosd"
+mode = "0755"
+
+# The SystemCore board definition, from the pinned Lemnos checkout (host-owned devices only).
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@source:lemnos/packaging/boards/systemcore.toml"
+dest = "usr/local/share/lemnos/boards/systemcore.toml"
+mode = "0644"
 
 [[image.assembly.files]]
 tree = "pkg-root"
@@ -282,6 +315,11 @@ dest = "etc/systemd/system/helios-engine.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-lemnosd.service"
+dest = "etc/systemd/system/helios-lemnosd.service"
+
+[[image.assembly.files]]
+tree = "pkg-root"
 src = "@assets/systemcore/systemd/helios-peripherals.service"
 dest = "etc/systemd/system/helios-peripherals.service"
 
@@ -316,7 +354,7 @@ X-Auto-Start = "true"
 X-Icon-Path = "/usr/local/share/helios/helios.png"
 
 [image.assembly.packages.scripts]
-services = ["helios-orion.service", "helios-engine.socket", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
+services = ["helios-orion.service", "helios-lemnosd.service", "helios-engine.socket", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
 conffiles = ["/usr/local/etc/helios/startup.toml", "/usr/local/etc/helios/orion-node.env"]
 
 # Every ELF against the SDK's sysroot: glibc symbol versions, 16 KiB segments, libraries present.

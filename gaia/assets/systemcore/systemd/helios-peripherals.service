@@ -1,9 +1,9 @@
 # HeliOS cameras and peripherals on SystemCore. USB cameras only: the host's own vision servers
-# keep the ports they claim. No lemnosd dependency: every SystemCore device is host-owned.
+# keep the ports they claim. Its lemnosd devices (host-owned: read-only) come from helios-lemnosd.
 [Unit]
 Description=HeliOS peripherals
-After=network.target helios-orion.service
-Wants=network.target helios-orion.service
+After=network.target helios-orion.service helios-lemnosd.service
+Wants=network.target helios-orion.service helios-lemnosd.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
