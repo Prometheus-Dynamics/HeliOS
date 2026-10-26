@@ -16,8 +16,6 @@ use crate::model::{
     ProcessRuntimeReport, RuntimeReport, ServiceReport, UpdateReport,
 };
 
-const EXPECTED_SERVICES: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
-
 const SSH_HOST_KEYS: &[&str] = &["ssh_host_ecdsa_key", "ssh_host_ed25519_key", "ssh_host_rsa_key"];
 
 pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport> {
@@ -27,13 +25,13 @@ pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport>
     let journal = collect_journal_report(config, &data)?;
     let identity = collect_identity_report(config);
     let camera = collect_camera_report(config)?;
-    let runtime = collect_runtime_report()?;
+    let runtime = collect_runtime_report(config)?;
     let executable_files = collect_executable_files(config);
     let dynamic_links = config.expected_binaries.iter().map(|binary| inspect_dynamic_links(binary)).collect::<Vec<_>>();
     let plugins = collect_plugins(&config.plugin_dir)?;
     let orion = collect_orion(&config.orion_run_dir);
     let update = collect_update_report(config.board.as_ref());
-    let services = collect_services()?;
+    let services = collect_services(config)?;
     let data_is_tmpfs = data.fs_type.as_deref() == Some("tmpfs");
     let store_on_data = on_mount(&writable_store, &data);
 
@@ -48,7 +46,7 @@ pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport>
         || !journal.mounted
         || !journal.on_writable_store
         || services.iter().any(|service| service.active_state == "failed")
-        || services.iter().any(|service| service.unit == "orion-node.service" && !service_is_healthy(service))
+        || services.iter().any(|service| service.unit == config.orion_unit && !service_is_healthy(service))
     {
         status = HealthStatus::Failed;
     } else if !journal.has_files
@@ -73,8 +71,8 @@ fn on_mount(mount: &MountReport, store: &MountReport) -> bool {
     }
 }
 
-fn collect_runtime_report() -> Result<RuntimeReport> {
-    Ok(RuntimeReport { loadavg: collect_loadavg()?, memory: collect_memory_report()?, processes: collect_process_runtime_reports()? })
+fn collect_runtime_report(config: &DiagnosticsConfig) -> Result<RuntimeReport> {
+    Ok(RuntimeReport { loadavg: collect_loadavg()?, memory: collect_memory_report()?, processes: collect_process_runtime_reports(config)? })
 }
 
 fn collect_loadavg() -> Result<Option<LoadAverageReport>> {
@@ -147,9 +145,9 @@ fn collect_memory_report() -> Result<Option<MemoryReport>> {
     }))
 }
 
-fn collect_process_runtime_reports() -> Result<Vec<ProcessRuntimeReport>> {
+fn collect_process_runtime_reports(config: &DiagnosticsConfig) -> Result<Vec<ProcessRuntimeReport>> {
     let mut reports = Vec::new();
-    for unit in EXPECTED_SERVICES {
+    for unit in &config.services {
         let output = Command::new("systemctl").args(["show", unit, "--property=MainPID", "--value"]).output().with_context(|| format!("failed to inspect main pid for {unit}"))?;
         let pid = String::from_utf8_lossy(&output.stdout).trim().parse::<u32>().ok().filter(|pid| *pid > 0);
         let Some(pid) = pid else {
@@ -403,9 +401,9 @@ fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
     }
 }
 
-fn collect_services() -> Result<Vec<ServiceReport>> {
+fn collect_services(config: &DiagnosticsConfig) -> Result<Vec<ServiceReport>> {
     let mut reports = Vec::new();
-    for unit in EXPECTED_SERVICES {
+    for unit in &config.services {
         let output = Command::new("systemctl")
             .args(["show", unit, "--property=ActiveState", "--property=SubState", "--property=MainPID"])
             .output()

@@ -5,6 +5,11 @@ use helios_layout::{BoardContract, Layout};
 /// Service binaries in the layout's bin directory.
 const SERVICE_BINARIES: &[&str] = &["orion-node", "orionctl", "helios-engine", "helios-peripherals", "helios-api"];
 
+/// The owner image's units: Orion, HeliOS's services, and the image's own sshd and governor.
+const IMAGE_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
+/// A guest's units: HeliOS's own (the host runs its own sshd and governor).
+const GUEST_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
+
 /// Where the image keeps things (see gaia/configs/README.md, "Read-only root"): the root
 /// filesystem is a read-only EROFS slot, `/data` (p7) holds everything kept across updates and
 /// is bind-mounted where the services expect it. On a guest the same roots sit under the guest
@@ -32,6 +37,10 @@ pub struct DiagnosticsConfig {
     pub expected_binaries: Vec<PathBuf>,
     /// Helper files that must be present and executable.
     pub expected_executables: Vec<PathBuf>,
+    /// The systemd units the health report checks.
+    pub services: Vec<String>,
+    /// Orion's unit: its health decides the report's status.
+    pub orion_unit: String,
     /// Paths (globs allowed) the failure snapshot copies.
     pub snapshot_files: Vec<String>,
     pub snapshot_tar: bool,
@@ -43,6 +52,7 @@ impl DiagnosticsConfig {
     /// The diagnostics of the device whose layout this is.
     pub fn from_layout(layout: &Layout) -> Self {
         let board = layout.board().cloned();
+        let (units, orion_unit) = if board.is_some() { (IMAGE_UNITS, "orion-node.service") } else { (GUEST_UNITS, "helios-orion.service") };
         let mut expected_executables = layout.image_helpers();
         let mut snapshot_files = vec![
             layout.os_release_file().display().to_string(),
@@ -77,6 +87,8 @@ impl DiagnosticsConfig {
             startup_preset_path: layout.startup_file(),
             expected_binaries: SERVICE_BINARIES.iter().map(|name| layout.binary(name)).collect(),
             expected_executables,
+            services: units.iter().map(|unit| unit.to_string()).collect(),
+            orion_unit: orion_unit.to_string(),
             snapshot_files,
             snapshot_tar: true,
             snapshot_keep: 10,
