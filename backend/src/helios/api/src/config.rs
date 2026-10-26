@@ -66,6 +66,8 @@ pub struct ApiConfig {
     /// The networks the robot's links are on. The gateway reaches a peer only over one of these
     /// (`peers.rs`); none means no peer is reached.
     pub peer_nets: Vec<crate::peers::Ipv4Net>,
+    /// The HeliOS API ports a discovered peer is probed on while security is open (`peers.rs`).
+    pub peer_ports: Vec<u16>,
 }
 
 impl Default for ApiConfig {
@@ -102,6 +104,7 @@ impl ApiConfig {
             playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
             live_streams: crate::live_streams::LiveStreamSettings::default(),
             peer_nets: Vec::new(),
+            peer_ports: crate::peers::DEFAULT_PEER_PORTS.to_vec(),
         }
     }
 
@@ -199,6 +202,12 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_API_PLAYBACK_STREAM_DIR") {
             config.playback.stream_dir = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_API_PEER_PORTS") {
+            config.peer_ports = value
+                .split(',')
+                .map(|port| port.trim().parse::<u16>().map_err(|_| anyhow::anyhow!("HELIOS_API_PEER_PORTS takes port numbers, got {port:?}")))
+                .collect::<anyhow::Result<_>>()?;
         }
         if let Some(value) = env.get("HELIOS_API_PEER_NETS") {
             config.peer_nets = value

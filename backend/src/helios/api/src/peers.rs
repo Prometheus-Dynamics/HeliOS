@@ -45,6 +45,11 @@ pub const NODE_HEADER: &str = "x-helios-node";
 pub const CLUSTER_PREFIX: &str = "robot-";
 /// How long a peer may take to accept a connection before the request fails.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long one probe of a discovered peer's HeliOS port may take.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+/// The HeliOS API ports the device profiles use (SystemCore 5880, Raze 5800): probed on a
+/// discovered peer while security is open (`HELIOS_API_PEER_PORTS` overrides them).
+pub const DEFAULT_PEER_PORTS: &[u16] = &[5800, 5880];
 /// Request headers the gateway passes on. Cookies are not: a peer's sign-in is its own.
 const FORWARDED_REQUEST_HEADERS: &[&str] = &["authorization", "content-type", "accept", "x-helios-csrf", "x-helios-sha256", "x-helios-filename", "x-helios-version"];
 /// Response headers the gateway passes back. `Set-Cookie` is not: it would replace the gateway's session.
@@ -84,9 +89,13 @@ pub struct Peer {
     pub state: String,
     /// The peer's IPv4 link address (its `orion+tcp` host).
     pub address: Option<String>,
-    /// The peer's HeliOS API port (its `helios.api_port` label).
+    /// The peer's HeliOS API port (its `helios.api_port` label, or found by probing).
     pub api_port: Option<u16>,
-    /// The gateway reaches this peer: enrolled, on a link address, with an API port.
+    /// The advertised key's fingerprint: what an operator compares before enrolling the peer.
+    pub key_fingerprint: String,
+    /// Security is on and the peer is not enrolled: it is refused until enrolled with its key.
+    pub needs_enrollment: bool,
+    /// The gateway reaches this peer (see [`routes`]).
     pub routed: bool,
 }
 
@@ -97,11 +106,29 @@ pub struct Robot {
     pub peers: Vec<Peer>,
 }
 
+/// `GET /v1/peers`: the robot, and whether security is on (`open` or `secured`). Security off is
+/// the FRC default: a discovered peer on the robot's own links is routed without a key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Listing {
+    pub security: &'static str,
+    #[serde(flatten)]
+    pub robot: Robot,
+}
+
+/// Whether the gateway reaches a peer. Always: a link address and an API port. An enrolled peer
+/// (Orion has pinned its key) is reached. A discovered one is reached only while security is open,
+/// since then no key is asked for; it is never reached once secured until it is enrolled. Revoked,
+/// mismatched and incompatible peers are never reached.
+pub fn routes(state: DiscoveredPeerState, open: bool, address: Option<Ipv4Addr>, api_port: Option<u16>) -> bool {
+    let trusted = state == DiscoveredPeerState::Enrolled || (open && state == DiscoveredPeerState::Discovered);
+    trusted && address.is_some() && api_port.is_some()
+}
+
 /// The peers of the robot Orion's discovery is in. Only peers of the same cluster count, and none
 /// count while discovery is off (no backend). `nets` are the networks the robot's links are on; a
-/// peer is routed only over one of them. `api_port` gives a node's HeliOS API port, from its synced
-/// record.
-pub fn robot_peers(discovery: &DiscoverySnapshot, nets: &[Ipv4Net], api_port: impl Fn(&str) -> Option<u16>) -> Robot {
+/// peer is routed only over one of them. `open` is security being off. `api_port` gives a node's
+/// HeliOS API port, from its synced record.
+pub fn robot_peers(discovery: &DiscoverySnapshot, nets: &[Ipv4Net], open: bool, api_port: impl Fn(&str) -> Option<u16>) -> Robot {
     if discovery.backend.is_empty() || discovery.cluster.is_empty() {
         return Robot { cluster: None, peers: Vec::new() };
     }
@@ -109,18 +136,51 @@ pub fn robot_peers(discovery: &DiscoverySnapshot, nets: &[Ipv4Net], api_port: im
         .peers
         .iter()
         .filter(|record| record.cluster == discovery.cluster)
-        .map(|record| peer_of(record, nets, &api_port))
+        .map(|record| peer_of(record, nets, open, &api_port))
         .collect();
     Robot { cluster: Some(discovery.cluster.clone()), peers }
 }
 
-fn peer_of(record: &DiscoveredPeerRecord, nets: &[Ipv4Net], api_port: &impl Fn(&str) -> Option<u16>) -> Peer {
+fn peer_of(record: &DiscoveredPeerRecord, nets: &[Ipv4Net], open: bool, api_port: &impl Fn(&str) -> Option<u16>) -> Peer {
     let node_id = record.node_id.as_str().to_string();
-    let state = record.state.to_string();
     let address = link_address(&record.peer_urls, nets);
     let api_port = api_port(&node_id);
-    let routed = record.state == DiscoveredPeerState::Enrolled && address.is_some() && api_port.is_some();
-    Peer { node_id, state, address: address.map(|a| a.to_string()), api_port, routed }
+    Peer {
+        state: record.state.to_string(),
+        address: address.map(|a| a.to_string()),
+        api_port,
+        key_fingerprint: record.key_fingerprint.clone(),
+        needs_enrollment: record.state == DiscoveredPeerState::Discovered && !open,
+        routed: routes(record.state, open, address, api_port),
+        node_id,
+    }
+}
+
+/// Finds the API port of each peer that is not routed yet and is only discovered, by asking the
+/// configured HeliOS ports whether a HeliOS API answers at its link address. Used while security is
+/// open, where a discovered peer has no synced record to name its port.
+pub async fn probe_discovered(client: &reqwest::Client, peers: &mut [Peer], open: bool, ports: &[u16]) {
+    if !open {
+        return;
+    }
+    for peer in peers.iter_mut().filter(|peer| peer.state == "discovered" && peer.api_port.is_none()) {
+        let Some(address) = peer.address.as_deref().and_then(|a| a.parse::<Ipv4Addr>().ok()) else { continue };
+        peer.api_port = probe_api_port(client, address, ports).await;
+        peer.routed = peer.api_port.is_some();
+    }
+}
+
+/// The first of `ports` at `address` that answers `GET /v1/health` as helios-api.
+pub async fn probe_api_port(client: &reqwest::Client, address: Ipv4Addr, ports: &[u16]) -> Option<u16> {
+    for &port in ports {
+        let url = format!("http://{address}:{port}/v1/health");
+        let Ok(answer) = client.get(url).timeout(PROBE_TIMEOUT).send().await else { continue };
+        let Ok(health) = answer.json::<serde_json::Value>().await else { continue };
+        if health.get("service").and_then(serde_json::Value::as_str) == Some("helios-api") {
+            return Some(port);
+        }
+    }
+    None
 }
 
 /// The IPv4 host of a peer's `orion+tcp` URL, when it lies on one of the robot's networks `nets`
@@ -144,12 +204,14 @@ pub fn routed_peer<'a>(peers: &'a [Peer], node: &str) -> ApiResult<&'a Peer> {
     if peer.routed {
         return Ok(peer);
     }
-    let reason = if peer.state != "enrolled" {
+    let reason = if peer.needs_enrollment {
+        format!("it needs enrollment: compare key {} on the peer, then enroll it", peer.key_fingerprint)
+    } else if peer.state != "enrolled" && peer.state != "discovered" {
         format!("it is {} (enroll it on this robot)", peer.state)
     } else if peer.address.is_none() {
-        "it has no link address".to_string()
+        "it has no link address on the robot's networks".to_string()
     } else {
-        "it does not name its HeliOS API port".to_string()
+        "no HeliOS API answers at its link address".to_string()
     };
     Err(ApiError::conflict(format!("peer {node} cannot be reached: {reason}")))
 }
@@ -202,21 +264,52 @@ pub fn api_port_of(labels: &[String]) -> Option<u16> {
     label_values(labels, API_PORT_LABEL).last().and_then(|value| value.parse().ok())
 }
 
+/// The team whose cluster the robot's services were last restarted for (`align_cluster`): once per
+/// team, so a restart that does not fix the cluster does not loop.
+static ALIGNED_TEAM: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+/// Brings the robot's cluster to `team`'s when Orion is in another one (the team was learned or
+/// changed after boot). Orion reads its cluster at start, so robot-env (which writes the cluster)
+/// runs again and orion-node restarts after it. Returns whether it restarted anything.
+pub async fn align_cluster(state: &SharedState, team: u32) -> ApiResult<bool> {
+    let cluster = robot_cluster(team);
+    if state.orion.discovery().await?.cluster == cluster {
+        return Ok(false);
+    }
+    {
+        let mut aligned = ALIGNED_TEAM.lock().unwrap_or_else(|error| error.into_inner());
+        if *aligned == Some(team) {
+            return Ok(false);
+        }
+        *aligned = Some(team);
+    }
+    let orion = if state.config.board.is_some() { "orion-node.service" } else { "helios-orion.service" };
+    crate::host::systemctl(&["restart", "helios-robot.service"]).await?;
+    crate::host::systemctl(&["restart", orion]).await?;
+    tracing::info!(cluster = %cluster, "robot cluster aligned to the controller's team: orion restarted");
+    Ok(true)
+}
+
 /// The HTTP client the gateway talks to peers with (no overall timeout: streams stay open).
 pub fn client() -> reqwest::Client {
     reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT).build().unwrap_or_default()
 }
 
-/// This robot as the gateway sees it now: Orion's discovery and the synced node records.
+/// This robot as the gateway sees it now: Orion's discovery and the synced node records, and the
+/// probed ports of discovered peers while security is open.
 pub async fn robot(state: &SharedState) -> ApiResult<Robot> {
+    let open = state.auth.mode() == crate::auth::AuthMode::Open;
     let discovery = state.orion.discovery().await?;
     let view = state.orion.view().await?;
-    Ok(robot_peers(&discovery, &state.config.peer_nets, |node| view.nodes.get(node).and_then(|record| api_port_of(&record.labels))))
+    let mut robot = robot_peers(&discovery, &state.config.peer_nets, open, |node| view.nodes.get(node).and_then(|record| api_port_of(&record.labels)));
+    probe_discovered(&state.peer_client, &mut robot.peers, open, &state.config.peer_ports).await;
+    Ok(robot)
 }
 
-/// `GET /v1/peers`: the robot this device belongs to, and its peers.
-pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Robot>> {
-    Ok(Json(robot(&state).await?))
+/// `GET /v1/peers`: the robot this device belongs to, its security state, and its peers.
+pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Listing>> {
+    let security = if state.auth.mode() == crate::auth::AuthMode::Open { "open" } else { "secured" };
+    Ok(Json(Listing { security, robot: robot(&state).await? }))
 }
 
 /// `ANY /v1/peers/{node}/{rest}`: the request, sent to peer `node`'s HeliOS API at `/v1/{rest}`.
@@ -333,7 +426,7 @@ mod tests {
                 record("other-board", "robot-254", DiscoveredPeerState::Enrolled, "orion+tcp://172.31.12.90:9200"),
             ],
         );
-        let robot = robot_peers(&discovery, &links(), |_| Some(5800));
+        let robot = robot_peers(&discovery, &links(), false, |_| Some(5800));
         assert_eq!(robot.cluster.as_deref(), Some("robot-6390"));
         let ids: Vec<&str> = robot.peers.iter().map(|p| p.node_id.as_str()).collect();
         assert_eq!(ids, ["raze-1"]);
@@ -349,7 +442,7 @@ mod tests {
                 record("revoked", "robot-6390", DiscoveredPeerState::Revoked, "orion+tcp://172.31.12.83:9200"),
             ],
         );
-        let robot = robot_peers(&discovery, &links(), |_| Some(5800));
+        let robot = robot_peers(&discovery, &links(), false, |_| Some(5800));
         let routed: Vec<(&str, bool)> = robot.peers.iter().map(|p| (p.node_id.as_str(), p.routed)).collect();
         assert_eq!(routed, [("enrolled", true), ("found", false), ("revoked", false)]);
         assert_eq!(robot.peers[1].state, "discovered");
@@ -359,7 +452,7 @@ mod tests {
     fn discovery_off_means_no_robot_and_no_peers() {
         let mut discovery = snapshot("robot-6390", vec![record("raze-1", "robot-6390", DiscoveredPeerState::Enrolled, RAZE_URL)]);
         discovery.backend.clear();
-        assert_eq!(robot_peers(&discovery, &links(), |_| Some(5800)), Robot { cluster: None, peers: Vec::new() });
+        assert_eq!(robot_peers(&discovery, &links(), false, |_| Some(5800)), Robot { cluster: None, peers: Vec::new() });
     }
 
     #[test]
@@ -372,7 +465,7 @@ mod tests {
                 record("loopback", "robot-6390", DiscoveredPeerState::Enrolled, "orion+tcp://127.0.0.1:9200"),
             ],
         );
-        let robot = robot_peers(&discovery, &links(), |node| (node != "no-port").then_some(5800));
+        let robot = robot_peers(&discovery, &links(), false, |node| (node != "no-port").then_some(5800));
         let routed: Vec<bool> = robot.peers.iter().map(|p| p.routed).collect();
         assert_eq!(routed, [false, false, false]);
         assert_eq!(robot.peers[0].address.as_deref(), Some("172.31.12.81"));
@@ -389,14 +482,14 @@ mod tests {
     #[test]
     fn routing_names_the_reason_a_peer_is_refused() {
         let peers = vec![
-            Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), routed: true },
-            Peer { node_id: "found".into(), state: "discovered".into(), address: Some("172.31.12.82".into()), api_port: None, routed: false },
+            Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true },
+            Peer { node_id: "found".into(), state: "discovered".into(), address: Some("172.31.12.82".into()), api_port: None, key_fingerprint: "sha256:x".into(), needs_enrollment: true, routed: false },
         ];
         assert_eq!(routed_peer(&peers, "raze-1").expect("routed").address.as_deref(), Some("172.31.12.81"));
         assert_eq!(routed_peer(&peers, "nobody").unwrap_err().code.status(), axum::http::StatusCode::NOT_FOUND);
         let refused = routed_peer(&peers, "found").unwrap_err();
         assert_eq!(refused.code.status(), axum::http::StatusCode::CONFLICT);
-        assert!(refused.message.contains("discovered"), "{}", refused.message);
+        assert!(refused.message.contains("needs enrollment"), "{}", refused.message);
     }
 
     #[test]
@@ -427,9 +520,71 @@ mod tests {
 
     #[test]
     fn a_peers_url_keeps_the_query_and_names_its_port() {
-        let peer = Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), routed: true };
+        let peer = Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true };
         assert_eq!(peer_url(&peer, "cameras/a%3Ab/preview", Some("fps=5")).as_deref(), Some("http://172.31.12.81:5800/v1/cameras/a%3Ab/preview?fps=5"));
         assert_eq!(peer_url(&peer, "device", None).as_deref(), Some("http://172.31.12.81:5800/v1/device"));
+    }
+
+    #[test]
+    fn with_security_open_a_discovered_peer_is_routed_without_a_key() {
+        let discovery = snapshot(
+            "robot-6390",
+            vec![
+                record("found", "robot-6390", DiscoveredPeerState::Discovered, RAZE_URL),
+                record("gone", "robot-6390", DiscoveredPeerState::Revoked, "orion+tcp://172.31.12.83:9200"),
+            ],
+        );
+        let open = robot_peers(&discovery, &links(), true, |_| Some(5800));
+        assert_eq!(open.peers.iter().map(|p| (p.routed, p.needs_enrollment)).collect::<Vec<_>>(), [(true, false), (false, false)]);
+
+        let secured = robot_peers(&discovery, &links(), false, |_| Some(5800));
+        assert!(!secured.peers[0].routed);
+        assert!(secured.peers[0].needs_enrollment, "secured and discovered needs its key");
+        assert_eq!(secured.peers[0].key_fingerprint, "sha256:00", "the fingerprint to compare is listed");
+        assert!(routed_peer(&secured.peers, "found").unwrap_err().message.contains("sha256:00"));
+    }
+
+    #[test]
+    fn a_revoked_peer_is_never_routed() {
+        assert!(!routes(DiscoveredPeerState::Revoked, true, Some(Ipv4Addr::new(172, 31, 12, 81)), Some(5800)));
+        assert!(!routes(DiscoveredPeerState::KeyMismatch, true, Some(Ipv4Addr::new(172, 31, 12, 81)), Some(5800)));
+        assert!(routes(DiscoveredPeerState::Enrolled, false, Some(Ipv4Addr::new(172, 31, 12, 81)), Some(5800)));
+    }
+
+    /// A stand-in helios-api: answers `GET /v1/health` as the service.
+    async fn fake_api() -> u16 {
+        async fn health() -> Json<serde_json::Value> {
+            Json(serde_json::json!({ "service": "helios-api", "status": "ok" }))
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, Router::new().route("/v1/health", axum::routing::get(health))).await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn a_discovered_peers_port_is_the_one_that_answers_as_helios_api() {
+        let api = fake_api().await;
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("address").port();
+        let client = client();
+        let loopback = Ipv4Addr::LOCALHOST;
+        assert_eq!(probe_api_port(&client, loopback, &[closed, api]).await, Some(api));
+        assert_eq!(probe_api_port(&client, loopback, &[closed]).await, None);
+
+        let mut peers = vec![Peer {
+            node_id: "found".into(),
+            state: "discovered".into(),
+            address: Some("127.0.0.1".into()),
+            api_port: None,
+            key_fingerprint: "sha256:x".into(),
+            needs_enrollment: false,
+            routed: false,
+        }];
+        probe_discovered(&client, &mut peers, true, &[closed, api]).await;
+        assert!(peers[0].routed);
+        assert_eq!(peers[0].api_port, Some(api));
     }
 
     #[test]

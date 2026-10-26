@@ -150,7 +150,21 @@ pub async fn refresh(state: &SharedState) -> ApiResult<()> {
     match (stored, probe(&state.config.layout, state.config.board.as_ref()).await) {
         (Some(before), Some(now)) if before.same_controller(&now) => Ok(()),
         (None, None) => Ok(()),
-        (_, Some(now)) => state.store.put_controller_facts(Some(&ControllerFacts { seen_at_ms: now_ms(), ..now })).await,
+        (before, Some(now)) => {
+            let team = now.team;
+            let learned = before.and_then(|before| before.team) != team;
+            state.store.put_controller_facts(Some(&ControllerFacts { seen_at_ms: now_ms(), ..now })).await?;
+            // A team learned or changed after boot: the robot's cluster follows it (`peers.rs`).
+            if let (true, Some(team)) = (learned, team) {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = crate::peers::align_cluster(&state, team).await {
+                        tracing::warn!(error = %error.message, "robot cluster not aligned to the team");
+                    }
+                });
+            }
+            Ok(())
+        }
         (_, None) => state.store.put_controller_facts(None).await,
     }
 }
