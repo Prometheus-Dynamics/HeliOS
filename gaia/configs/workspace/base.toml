@@ -52,9 +52,3 @@ jobs = 0
 rollback_on_error = true
 preserve_failed_outputs = true
 rollback_domains = ["artifacts", "installs", "stage", "checkpoints"]
-
-# The HeliOS commit the build is made from (short): tools/build-os.sh passes it, since project
-# tokens don't resolve in input defaults. Dev builds are versioned `<year>.<major>.<minor>-dev-<commit>`.
-[inputs.commit]
-kind = "string"
-default = "00000000"
