@@ -411,7 +411,8 @@ export const CATALOG: NodeType[] = [
     params: [
       { name: "tag_size_m", kind: "float", default: 0.1651, min: 0.001, max: 10, step: 0.0001, help: "Side of the tags, in metres (the outer black border)." },
       { name: "snapshot_hz", kind: "float", default: 2, min: 0, max: 1000, step: 0.5, help: "Snapshots per second at most, on the frame timestamps (0 for none)." },
-      { name: "calibration_frames", kind: "int", default: 150, min: 1, max: 100000, help: "Frames fed to the self-calibration when no calibration input is connected." },
+      { name: "calibration_frames", kind: "int", default: 7200, min: 1, max: 100000, help: "Most frames the self-calibration may take: a cap, not a target. It fits as soon as the tag views are varied enough." },
+      { name: "calibration_seconds", kind: "float", default: 60, min: 0, max: 3600, step: 1, help: "Most seconds the self-calibration may take: the time cap, with the frame cap (whichever comes first)." },
       { name: "lk_levels", kind: "int", default: 4, min: 1, max: 8, help: "Pyramid levels of the Lucas-Kanade tracker." },
     ],
   },

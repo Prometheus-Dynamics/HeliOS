@@ -21,8 +21,6 @@ use crate::routes::{cameras::CaptureLive, pipelines::Pipeline};
 /// The tag family FRC fields are printed with. A pipeline that decodes another family never sees
 /// the field's tags, whatever their size.
 pub const FIELD_TAG_FAMILY: &str = "apriltag_36h11";
-/// Eidos's default `calibration_frames`: the frames the live mapper fits its lens from.
-pub const DEFAULT_CALIBRATION_FRAMES: u64 = 150;
 /// The analogue gain (x) from which the image is noisy enough to say so.
 const NOISY_GAIN: f64 = 8.0;
 /// How many tag ids a stage names before it counts the rest.
@@ -162,8 +160,6 @@ pub struct PipelineFacts<'a> {
     pub live_map: bool,
     pub dense: bool,
     pub features: bool,
-    /// The live mapper's `calibration_frames` (its window), from the graph.
-    pub calibration_frames: Option<u64>,
 }
 
 impl<'a> PipelineFacts<'a> {
@@ -188,7 +184,6 @@ impl<'a> PipelineFacts<'a> {
             live_map: node(crate::field_layouts::LIVE_MAP_NODE).is_some(),
             dense: node(DENSE_NODE).is_some(),
             features: node(FEATURES_NODE).is_some(),
-            calibration_frames: node(crate::field_layouts::LIVE_MAP_NODE).and_then(|n| const_int(n, "calibration_frames")),
         }
     }
 
@@ -471,15 +466,46 @@ fn calibration_stage(camera: &CameraFacts, pipelines: &[PipelineFacts]) -> Stage
     let note = camera.calibration_note.as_ref().map(|note| format!(" Last fit not stored: {note}."));
     let mapper = pipelines.iter().find(|p| p.map_pose().is_some() || p.live_map);
     let pose = mapper.and_then(|p| p.map_pose());
-    if let Some(p) = mapper {
-        let target = p.calibration_frames.unwrap_or(DEFAULT_CALIBRATION_FRAMES);
-        let frames = pose.and_then(|pose| pose.pointer("/calibration/frames")).and_then(|v| v.as_u64()).unwrap_or(0);
-        let views = pose.and_then(|pose| pose.pointer("/calibration/views")).and_then(|v| v.as_u64()).unwrap_or(0);
-        let hint = format!("Move the camera so the tags are seen from many sides. The lens is fitted from what the mapper sees.{}", note.unwrap_or_default());
-        return stage(StageState::Waiting, format!("Self-calibrating: {frames} of {target} frames, {views} views so far")).progress(frames.min(target), target, "frames").hint(hint);
+    if mapper.is_some() {
+        // The window closes when the tag views are varied enough; the frame and time counts in the
+        // mapper's reason are its caps, not a target. The reason after them says what is missing.
+        let hint = format!("Move the camera so the tags are seen from many sides and distances, and across the whole image. The lens is fitted from what the mapper sees.{}", note.unwrap_or_default());
+        let reason = pose.and_then(|pose| pose.get("reason")).and_then(|v| v.as_str()).unwrap_or("");
+        return match calibrating(reason) {
+            Some(window) => {
+                let stage = stage(StageState::Waiting, format!("Self-calibrating: {}", window.missing));
+                match window.seconds {
+                    Some((elapsed, cap)) => stage.progress(elapsed.min(cap) as u64, cap as u64, "s"),
+                    None => stage,
+                }
+                .hint(hint)
+            }
+            None => stage(StageState::Waiting, "Self-calibrating: waiting for tags".into()).hint(hint),
+        };
     }
     stage(StageState::Waiting, "Uncalibrated: poses are not in metres".into())
         .hint(format!("Capture a calibration in the Calibration pane, or add a live map to fit one from the tags.{}", note.unwrap_or_default()))
+}
+
+/// The live mapper's self-calibration window, from its reason (`calibrating k/N frames, t/T s:
+/// <what is missing>`, or `calibration failed, retrying: <why>`).
+struct CalibrationWindow<'a> {
+    missing: &'a str,
+    /// Seconds of frames so far and the time cap.
+    seconds: Option<(f64, f64)>,
+}
+
+fn calibrating(reason: &str) -> Option<CalibrationWindow<'_>> {
+    if let Some(why) = reason.strip_prefix("calibration failed, retrying: ") {
+        return Some(CalibrationWindow { missing: why, seconds: None });
+    }
+    let rest = reason.strip_prefix("calibrating ")?;
+    let (counts, missing) = rest.split_once(": ").unwrap_or((rest, ""));
+    let seconds = counts.split(", ").find_map(|part| part.strip_suffix(" s")).and_then(|part| {
+        let (elapsed, cap) = part.split_once('/')?;
+        Some((elapsed.parse().ok()?, cap.parse().ok()?))
+    });
+    Some(CalibrationWindow { missing: if missing.is_empty() { "collecting tag views" } else { missing }, seconds })
 }
 
 fn map_stage(pipelines: &[PipelineFacts]) -> Stage {
@@ -722,8 +748,9 @@ mod tests {
     }
 
     #[test]
-    fn self_calibration_shows_its_progress_toward_the_window() {
-        let pose = json!({ "state": "bootstrapping", "reason": "", "valid": false, "calibration": { "estimated": false, "rms_px": 0.0, "views": 4, "frames": 40 } });
+    fn self_calibration_says_what_its_window_still_needs() {
+        // Eidos's reason: the frame and time counts are caps; after them, what is missing.
+        let pose = json!({ "state": "bootstrapping", "reason": "calibrating 412/7200 frames, 17.2/60 s: tags cover 30% of the image, need 50%", "valid": false, "calibration": { "estimated": false, "rms_px": 0.0, "views": 4, "frames": 412 } });
         let telemetry = running();
         let p = PipelineFacts {
             name: "live-map",
@@ -732,14 +759,15 @@ mod tests {
             telemetry: Some(&telemetry),
             dictionary: Some("apriltag_36h11"),
             live_map: true,
-            calibration_frames: Some(150),
             outputs: BTreeMap::from([("map_pose", &pose)]),
             ..PipelineFacts::default()
         };
         let calibration = stage(&derive(&served(Some(capture(Some(24.0), 1, None))), std::slice::from_ref(&p)), "calibration").clone();
         assert_eq!(calibration.state, StageState::Waiting);
-        assert_eq!(calibration.progress, Some(Progress { value: 40, target: 150, unit: "frames" }));
-        assert!(calibration.reason.contains("40 of 150 frames, 4 views"));
+        assert_eq!(calibration.progress, Some(Progress { value: 17, target: 60, unit: "s" }));
+        assert_eq!(calibration.reason, "Self-calibrating: tags cover 30% of the image, need 50%");
+        let failed = calibrating("calibration failed, retrying: fx and fy disagree by 9%").expect("failed window");
+        assert_eq!((failed.missing, failed.seconds), ("fx and fy disagree by 9%", None));
     }
 
     #[test]
