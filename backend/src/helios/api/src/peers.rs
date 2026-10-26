@@ -97,6 +97,8 @@ pub struct Peer {
     pub needs_enrollment: bool,
     /// The gateway reaches this peer (see [`routes`]).
     pub routed: bool,
+    /// How the peer was found: `orion` (Orion discovery), `neighbour`, `lease` or `controller` (HeliOS, open security).
+    pub found_by: String,
 }
 
 /// This robot's peers: `None` cluster when discovery is off.
@@ -152,6 +154,7 @@ fn peer_of(record: &DiscoveredPeerRecord, nets: &[Ipv4Net], open: bool, api_port
         key_fingerprint: record.key_fingerprint.clone(),
         needs_enrollment: record.state == DiscoveredPeerState::Discovered && !open,
         routed: routes(record.state, open, address, api_port),
+        found_by: "orion".into(),
         node_id,
     }
 }
@@ -310,6 +313,24 @@ pub async fn robot(state: &SharedState) -> ApiResult<Robot> {
     let view = state.orion.view().await?;
     let mut robot = robot_peers(&discovery, &state.config.peer_nets, open, |node| view.nodes.get(node).and_then(|record| api_port_of(&record.labels)));
     probe_discovered(&state.peer_client, &mut robot.peers, open, &state.config.peer_ports).await;
+    if open {
+        // Orion does not discover in open security: HeliOS finds the nodes on the robot's networks.
+        let controller = state.store.controller_facts().await?.and_then(|facts| facts.nt4_server?.parse::<Ipv4Addr>().ok());
+        let found = crate::peer_scan::scan(&state.peer_client, &state.config.peer_nets, &state.config.peer_ports, controller, &state.config.node_id).await;
+        let fresh: Vec<_> = found.into_iter().filter(|found| !robot.peers.iter().any(|peer| peer.node_id == found.node_id)).collect();
+        for found in fresh {
+            robot.peers.push(Peer {
+                node_id: found.node_id,
+                state: "discovered".into(),
+                address: Some(found.address.to_string()),
+                api_port: Some(found.api_port),
+                key_fingerprint: String::new(),
+                needs_enrollment: false,
+                routed: true,
+                found_by: found.found_by.into(),
+            });
+        }
+    }
     Ok(robot)
 }
 
@@ -489,8 +510,8 @@ mod tests {
     #[test]
     fn routing_names_the_reason_a_peer_is_refused() {
         let peers = vec![
-            Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true },
-            Peer { node_id: "found".into(), state: "discovered".into(), address: Some("172.31.12.82".into()), api_port: None, key_fingerprint: "sha256:x".into(), needs_enrollment: true, routed: false },
+            Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true, found_by: "orion".into() },
+            Peer { node_id: "found".into(), state: "discovered".into(), address: Some("172.31.12.82".into()), api_port: None, key_fingerprint: "sha256:x".into(), needs_enrollment: true, routed: false, found_by: "orion".into() },
         ];
         assert_eq!(routed_peer(&peers, "raze-1").expect("routed").address.as_deref(), Some("172.31.12.81"));
         assert_eq!(routed_peer(&peers, "nobody").unwrap_err().code.status(), axum::http::StatusCode::NOT_FOUND);
@@ -527,7 +548,7 @@ mod tests {
 
     #[test]
     fn a_peers_url_keeps_the_query_and_names_its_port() {
-        let peer = Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true };
+        let peer = Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true, found_by: "orion".into() };
         assert_eq!(peer_url(&peer, "cameras/a%3Ab/preview", Some("fps=5")).as_deref(), Some("http://172.31.12.81:5800/v1/cameras/a%3Ab/preview?fps=5"));
         assert_eq!(peer_url(&peer, "device", None).as_deref(), Some("http://172.31.12.81:5800/v1/device"));
     }
@@ -588,6 +609,7 @@ mod tests {
             key_fingerprint: "sha256:x".into(),
             needs_enrollment: false,
             routed: false,
+            found_by: "orion".into(),
         }];
         probe_discovered(&client, &mut peers, true, &[closed, api]).await;
         assert!(peers[0].routed);

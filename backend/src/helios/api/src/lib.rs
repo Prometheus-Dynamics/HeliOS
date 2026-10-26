@@ -28,6 +28,7 @@ pub mod migration;
 pub mod live_outputs;
 pub mod live_streams;
 pub mod orion;
+pub mod peer_scan;
 pub mod peers;
 pub mod playback;
 pub mod recording_nt;
