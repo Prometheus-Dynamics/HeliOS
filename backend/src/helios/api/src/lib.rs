@@ -24,6 +24,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod host_facts;
 pub mod leds;
+pub mod migration;
 pub mod live_outputs;
 pub mod live_streams;
 pub mod orion;

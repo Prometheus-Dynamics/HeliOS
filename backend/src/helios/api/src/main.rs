@@ -90,6 +90,8 @@ async fn run() -> anyhow::Result<()> {
     let state = AppState::new(config);
     let _stop = server::stop_on_signal(state.shutdown.clone());
     let _watcher = events::spawn_state_watcher(state.clone());
+    // The board's node id changed from `node-local`: its state and pipelines follow it, once (`migration.rs`).
+    let _node_id_migration = helios_api::migration::spawn(state.clone());
     // The robot controller's team and NetworkTables server, kept current (`host_facts`).
     let _controller = helios_api::host_facts::spawn_refresh(state.clone());
     // Pipeline outputs every tick from helios-engine, while anyone follows the event stream.
