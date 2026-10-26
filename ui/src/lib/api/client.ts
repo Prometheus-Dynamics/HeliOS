@@ -51,6 +51,7 @@ import type {
   FieldLayoutList,
   SetupRecord,
   StoredIdentity,
+  PeerList,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
@@ -102,8 +103,8 @@ export function liveOutputsUrl(): string {
   return address.toString();
 }
 
-export function previewUrl(cameraId: string): string {
-  return url(`/v1/cameras/${enc(cameraId)}/preview`);
+export function previewUrl(cameraId: string, nodeId?: string): string {
+  return url(nodeId === undefined ? `/v1/cameras/${enc(cameraId)}/preview` : peerPath(nodeId, `/v1/cameras/${enc(cameraId)}/preview`));
 }
 
 /** A stored recording's MCAP download (`GET /v1/recordings/{id}`), for a link. */
@@ -185,131 +186,167 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
 
 export const EVENT_TYPES = ["hello", "output", "peripheral", "nt4", "settings", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
 
-export const api = {
+/** The request options a call takes (the body, query, raw body and headers). */
+type CallOptions = Parameters<typeof request>[2];
+
+/**
+ * The device's API calls, each at `at(path)`: the device's own `/v1` for `api`, or one peer's
+ * through the gateway for `scoped(nodeId)`. The local calls are the same paths as before.
+ */
+function methods(at: (path: string) => string) {
+  const call = <T>(method: string, path: string, options?: CallOptions) => request<T>(method, at(path), options);
+  return {
   // Device security
-  authStatus: () => request<AuthStatus>("GET", "/v1/auth/status"),
-  login: (password: string) => request<AuthStatus>("POST", "/v1/auth/login", { body: { password } }),
-  logout: () => request<void>("POST", "/v1/auth/logout"),
-  enableAuth: (password: string) => request<AuthStatus>("POST", "/v1/auth/enable", { body: { password } }),
-  disableAuth: (password?: string) => request<AuthStatus>("POST", "/v1/auth/disable", { body: password === undefined ? {} : { password } }),
-  changePassword: (current_password: string, new_password: string) => request<AuthStatus>("POST", "/v1/auth/password", { body: { current_password, new_password } }),
-  tokens: () => request<ApiToken[]>("GET", "/v1/auth/tokens"),
-  createToken: (label: string) => request<NewApiToken>("POST", "/v1/auth/tokens", { body: { label } }),
-  revokeToken: (id: string) => request<void>("DELETE", `/v1/auth/tokens/${enc(id)}`),
+  authStatus: () => call<AuthStatus>("GET", "/v1/auth/status"),
+  login: (password: string) => call<AuthStatus>("POST", "/v1/auth/login", { body: { password } }),
+  logout: () => call<void>("POST", "/v1/auth/logout"),
+  enableAuth: (password: string) => call<AuthStatus>("POST", "/v1/auth/enable", { body: { password } }),
+  disableAuth: (password?: string) => call<AuthStatus>("POST", "/v1/auth/disable", { body: password === undefined ? {} : { password } }),
+  changePassword: (current_password: string, new_password: string) => call<AuthStatus>("POST", "/v1/auth/password", { body: { current_password, new_password } }),
+  tokens: () => call<ApiToken[]>("GET", "/v1/auth/tokens"),
+  createToken: (label: string) => call<NewApiToken>("POST", "/v1/auth/tokens", { body: { label } }),
+  revokeToken: (id: string) => call<void>("DELETE", `/v1/auth/tokens/${enc(id)}`),
 
   // Device and system
-  health: () => request<Health>("GET", "/v1/health"),
-  identity: () => request<Identity>("GET", "/v1/identity"),
-  device: () => request<Device>("GET", "/v1/device"),
-  metrics: () => request<Metrics>("GET", "/v1/metrics"),
-  services: () => request<UnitStatus[]>("GET", "/v1/system/services"),
-  restartService: (unit: string) => request<UnitStatus>("POST", `/v1/system/services/${enc(unit)}/restart`),
-  reboot: () => request<{ accepted: boolean; message: string }>("POST", "/v1/system/reboot"),
-  safeMode: () => request<never>("POST", "/v1/system/safe-mode"),
-  processes: () => request<ProcessInfo[]>("GET", "/v1/system/processes"),
-  signal: (pid: number, signal: "TERM" | "KILL" | "STOP" | "CONT") => request<{ accepted: boolean; message: string }>("POST", `/v1/system/processes/${pid}/signal`, { body: { signal } }),
-  setAffinity: (pid: number, core: number | null) => request<never>("PUT", `/v1/system/processes/${pid}/affinity`, { body: { core } }),
-  setNice: (pid: number, nice: number) => request<never>("PUT", `/v1/system/processes/${pid}/nice`, { body: { nice } }),
+  health: () => call<Health>("GET", "/v1/health"),
+  identity: () => call<Identity>("GET", "/v1/identity"),
+  device: () => call<Device>("GET", "/v1/device"),
+  metrics: () => call<Metrics>("GET", "/v1/metrics"),
+  services: () => call<UnitStatus[]>("GET", "/v1/system/services"),
+  restartService: (unit: string) => call<UnitStatus>("POST", `/v1/system/services/${enc(unit)}/restart`),
+  reboot: () => call<{ accepted: boolean; message: string }>("POST", "/v1/system/reboot"),
+  safeMode: () => call<never>("POST", "/v1/system/safe-mode"),
+  processes: () => call<ProcessInfo[]>("GET", "/v1/system/processes"),
+  signal: (pid: number, signal: "TERM" | "KILL" | "STOP" | "CONT") => call<{ accepted: boolean; message: string }>("POST", `/v1/system/processes/${pid}/signal`, { body: { signal } }),
+  setAffinity: (pid: number, core: number | null) => call<never>("PUT", `/v1/system/processes/${pid}/affinity`, { body: { core } }),
+  setNice: (pid: number, nice: number) => call<never>("PUT", `/v1/system/processes/${pid}/nice`, { body: { nice } }),
 
   // Logs and events
-  logs: (query: { unit?: string; lines?: number; since_ms?: number; level?: "error" | "warn" | "info" | "debug" } = {}) => request<{ lines: LogLine[] }>("GET", "/v1/logs", { query }),
-  followLogs: (query: { unit?: string; level?: string }, onLine: (line: LogLine) => void) => subscribe("/v1/logs/stream", query, { onEvent: (e) => onLine(e as unknown as LogLine) }, ["log"]),
+  logs: (query: { unit?: string; lines?: number; since_ms?: number; level?: "error" | "warn" | "info" | "debug" } = {}) => call<{ lines: LogLine[] }>("GET", "/v1/logs", { query }),
+  followLogs: (query: { unit?: string; level?: string }, onLine: (line: LogLine) => void) => subscribe(at("/v1/logs/stream"), query, { onEvent: (e) => onLine(e as unknown as LogLine) }, ["log"]),
   events: (handlers: { onEvent: (event: ApiEvent) => void; onOpen?: () => void; onError?: () => void }, types?: string[]) =>
-    subscribe("/v1/events", types ? { types: types.join(",") } : undefined, handlers, types ?? EVENT_TYPES),
+    subscribe(at("/v1/events"), types ? { types: types.join(",") } : undefined, handlers, types ?? EVENT_TYPES),
 
   // Cameras
-  cameras: () => request<Camera[]>("GET", "/v1/cameras"),
-  camera: (id: string) => request<Camera>("GET", `/v1/cameras/${enc(id)}`),
-  cameraSettings: (id: string) => request<CameraSettings>("GET", `/v1/cameras/${enc(id)}/settings`),
-  setCameraSettings: (id: string, changes: CameraControlChanges) => request<CameraSettingsApplied>("PATCH", `/v1/cameras/${enc(id)}/settings`, { body: changes }),
+  cameras: () => call<Camera[]>("GET", "/v1/cameras"),
+  camera: (id: string) => call<Camera>("GET", `/v1/cameras/${enc(id)}`),
+  cameraSettings: (id: string) => call<CameraSettings>("GET", `/v1/cameras/${enc(id)}/settings`),
+  setCameraSettings: (id: string, changes: CameraControlChanges) => call<CameraSettingsApplied>("PATCH", `/v1/cameras/${enc(id)}/settings`, { body: changes }),
   /** Every writable control back to its default; the values kept across reboots are forgotten. */
-  resetCameraSettings: (id: string) => request<CameraSettingsApplied>("DELETE", `/v1/cameras/${enc(id)}/settings`),
-  setMount: (id: string, mount: CameraMount) => request<CameraMount>("PUT", `/v1/cameras/${enc(id)}/mount`, { body: mount }),
-  clearMount: (id: string) => request<void>("DELETE", `/v1/cameras/${enc(id)}/mount`),
+  resetCameraSettings: (id: string) => call<CameraSettingsApplied>("DELETE", `/v1/cameras/${enc(id)}/settings`),
+  setMount: (id: string, mount: CameraMount) => call<CameraMount>("PUT", `/v1/cameras/${enc(id)}/mount`, { body: mount }),
+  clearMount: (id: string) => call<void>("DELETE", `/v1/cameras/${enc(id)}/mount`),
   /** The camera's status chain alone (each camera in `cameras()` has it too). */
-  cameraStatus: (id: string) => request<CameraStatus>("GET", `/v1/cameras/${enc(id)}/status`),
-  calibrations: (id: string) => request<CameraCalibrations>("GET", `/v1/cameras/${enc(id)}/calibration`),
-  putCalibration: (id: string, calibration: CameraCalibration) => request<CameraCalibrations>("PUT", `/v1/cameras/${enc(id)}/calibration`, { body: calibration }),
-  captureCalibration: (id: string, body: { board: CalibrationBoard; width?: number; height?: number; keep?: boolean }) => request<CalibrationCapture>("POST", `/v1/cameras/${enc(id)}/calibration/capture`, { body }),
-  solveCalibration: (id: string, body: { model?: "pinhole" | "fisheye"; drop?: number[] }) => request<CalibrationSolve>("POST", `/v1/cameras/${enc(id)}/calibration/solve`, { body }),
-  resetCalibration: (id: string) => request<void>("DELETE", `/v1/cameras/${enc(id)}/calibration/views`),
+  cameraStatus: (id: string) => call<CameraStatus>("GET", `/v1/cameras/${enc(id)}/status`),
+  calibrations: (id: string) => call<CameraCalibrations>("GET", `/v1/cameras/${enc(id)}/calibration`),
+  putCalibration: (id: string, calibration: CameraCalibration) => call<CameraCalibrations>("PUT", `/v1/cameras/${enc(id)}/calibration`, { body: calibration }),
+  captureCalibration: (id: string, body: { board: CalibrationBoard; width?: number; height?: number; keep?: boolean }) => call<CalibrationCapture>("POST", `/v1/cameras/${enc(id)}/calibration/capture`, { body }),
+  solveCalibration: (id: string, body: { model?: "pinhole" | "fisheye"; drop?: number[] }) => call<CalibrationSolve>("POST", `/v1/cameras/${enc(id)}/calibration/solve`, { body }),
+  resetCalibration: (id: string) => call<void>("DELETE", `/v1/cameras/${enc(id)}/calibration/views`),
 
   // Pipelines
-  pipelines: () => request<Pipeline[]>("GET", "/v1/pipelines"),
-  pipelineTemplates: () => request<PipelineTemplate[]>("GET", "/v1/pipelines/templates"),
-  pipeline: (id: string) => request<Pipeline>("GET", `/v1/pipelines/${enc(id)}`),
+  pipelines: () => call<Pipeline[]>("GET", "/v1/pipelines"),
+  pipelineTemplates: () => call<PipelineTemplate[]>("GET", "/v1/pipelines/templates"),
+  pipeline: (id: string) => call<Pipeline>("GET", `/v1/pipelines/${enc(id)}`),
   /** The pipeline's Daedalus plan: its nodes, the edges and any device transfers (`explain_plan`). */
-  pipelinePlan: (id: string) => request<PipelinePlan>("GET", `/v1/pipelines/${enc(id)}/plan`),
-  createPipeline: (spec: PipelineSpec & { id?: string }) => request<Pipeline>("POST", "/v1/pipelines", { body: spec }),
-  putPipeline: (id: string, spec: PipelineSpec) => request<Pipeline>("PUT", `/v1/pipelines/${enc(id)}`, { body: spec }),
-  deletePipeline: (id: string) => request<void>("DELETE", `/v1/pipelines/${enc(id)}`),
-  startPipeline: (id: string) => request<Pipeline>("POST", `/v1/pipelines/${enc(id)}/start`),
-  stopPipeline: (id: string) => request<Pipeline>("POST", `/v1/pipelines/${enc(id)}/stop`),
-  restartPipeline: (id: string) => request<Pipeline>("POST", `/v1/pipelines/${enc(id)}/restart`),
-  rollbackPipeline: (id: string) => request<Pipeline>("POST", `/v1/pipelines/${enc(id)}/rollback`),
-  revisions: (id: string) => request<Revision[]>("GET", `/v1/pipelines/${enc(id)}/revisions`),
-  bindInput: (id: string, input: string, binding: Binding) => request<Pipeline>("PUT", `/v1/pipelines/${enc(id)}/bindings/${enc(input)}`, { body: binding }),
-  outputs: () => request<PipelineOutput[]>("GET", "/v1/outputs"),
-  plugins: () => request<{ engine_running: boolean; plugins: string[] }>("GET", "/v1/plugins"),
-  catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
-  nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
-  setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
+  pipelinePlan: (id: string) => call<PipelinePlan>("GET", `/v1/pipelines/${enc(id)}/plan`),
+  createPipeline: (spec: PipelineSpec & { id?: string }) => call<Pipeline>("POST", "/v1/pipelines", { body: spec }),
+  putPipeline: (id: string, spec: PipelineSpec) => call<Pipeline>("PUT", `/v1/pipelines/${enc(id)}`, { body: spec }),
+  deletePipeline: (id: string) => call<void>("DELETE", `/v1/pipelines/${enc(id)}`),
+  startPipeline: (id: string) => call<Pipeline>("POST", `/v1/pipelines/${enc(id)}/start`),
+  stopPipeline: (id: string) => call<Pipeline>("POST", `/v1/pipelines/${enc(id)}/stop`),
+  restartPipeline: (id: string) => call<Pipeline>("POST", `/v1/pipelines/${enc(id)}/restart`),
+  rollbackPipeline: (id: string) => call<Pipeline>("POST", `/v1/pipelines/${enc(id)}/rollback`),
+  revisions: (id: string) => call<Revision[]>("GET", `/v1/pipelines/${enc(id)}/revisions`),
+  bindInput: (id: string, input: string, binding: Binding) => call<Pipeline>("PUT", `/v1/pipelines/${enc(id)}/bindings/${enc(input)}`, { body: binding }),
+  outputs: () => call<PipelineOutput[]>("GET", "/v1/outputs"),
+  plugins: () => call<{ engine_running: boolean; plugins: string[] }>("GET", "/v1/plugins"),
+  catalog: () => call<DeviceCatalog>("GET", "/v1/catalog"),
+  nt4: () => call<Nt4State>("GET", "/v1/device/nt4"),
+  setNt4: (settings: Nt4Settings) => call<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
   /** The camera and object identities (names, icons, colours) the device keeps, by object id. */
-  identities: () => request<Record<string, StoredIdentity>>("GET", "/v1/device/identities"),
-  putIdentity: (id: string, identity: StoredIdentity) => request<Record<string, StoredIdentity>>("PUT", `/v1/device/identities/${enc(id)}`, { body: identity }),
-  deleteIdentity: (id: string) => request<void>("DELETE", `/v1/device/identities/${enc(id)}`),
-  setup: () => request<SetupRecord>("GET", "/v1/device/setup"),
-  setSetup: (record: SetupRecord) => request<SetupRecord>("PUT", "/v1/device/setup", { body: record }),
-  fieldLayouts: () => request<FieldLayoutList>("GET", "/v1/field-layouts"),
-  fieldLayout: (id: string) => request<FieldLayoutDocument>("GET", `/v1/field-layouts/${enc(id)}`),
+  identities: () => call<Record<string, StoredIdentity>>("GET", "/v1/device/identities"),
+  putIdentity: (id: string, identity: StoredIdentity) => call<Record<string, StoredIdentity>>("PUT", `/v1/device/identities/${enc(id)}`, { body: identity }),
+  deleteIdentity: (id: string) => call<void>("DELETE", `/v1/device/identities/${enc(id)}`),
+  setup: () => call<SetupRecord>("GET", "/v1/device/setup"),
+  setSetup: (record: SetupRecord) => call<SetupRecord>("PUT", "/v1/device/setup", { body: record }),
+  fieldLayouts: () => call<FieldLayoutList>("GET", "/v1/field-layouts"),
+  fieldLayout: (id: string) => call<FieldLayoutDocument>("GET", `/v1/field-layouts/${enc(id)}`),
   /** Keep a WPILib AprilTag field layout (JSON text) as `id`, replacing an uploaded layout of that id. */
   uploadFieldLayout: (id: string, name: string, wpilibJson: string, tagSideM: number) =>
-    request<{ id: string }>("POST", "/v1/field-layouts", { query: { id, name, tag_side_m: tagSideM }, raw: wpilibJson, headers: { "Content-Type": "application/json" } }),
-  selectFieldLayout: (id: string) => request<{ id: string }>("PUT", "/v1/field-layouts/selected", { body: { id } }),
+    call<{ id: string }>("POST", "/v1/field-layouts", { query: { id, name, tag_side_m: tagSideM }, raw: wpilibJson, headers: { "Content-Type": "application/json" } }),
+  selectFieldLayout: (id: string) => call<{ id: string }>("PUT", "/v1/field-layouts/selected", { body: { id } }),
 
   // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings
   // (the recordings it lists come from `recordings()` below).
-  playbackPlayers: () => request<PlayerView[]>("GET", "/v1/playback"),
-  openPlayback: (body: PlaybackCreate) => request<PlayerView>("POST", "/v1/playback", { body }),
-  closePlayback: (id: string) => request<void>("DELETE", `/v1/playback/${enc(id)}`),
-  runOnPlayback: (id: string, pipeline: string) => request<PlaybackRun>("POST", `/v1/playback/${enc(id)}/runs`, { body: { pipeline } }),
+  playbackPlayers: () => call<PlayerView[]>("GET", "/v1/playback"),
+  openPlayback: (body: PlaybackCreate) => call<PlayerView>("POST", "/v1/playback", { body }),
+  closePlayback: (id: string) => call<void>("DELETE", `/v1/playback/${enc(id)}`),
+  runOnPlayback: (id: string, pipeline: string) => call<PlaybackRun>("POST", `/v1/playback/${enc(id)}/runs`, { body: { pipeline } }),
 
   // The LED ring (settings, locate, and previewing a state)
-  leds: () => request<LedsResponse>("GET", "/v1/device/leds"),
-  setLeds: (settings: LedSettings) => request<LedsResponse>("PUT", "/v1/device/leds", { body: settings }),
-  locateLeds: (seconds = 10) => request<LedsResponse>("POST", "/v1/device/leds/locate", { body: { seconds } }),
+  leds: () => call<LedsResponse>("GET", "/v1/device/leds"),
+  setLeds: (settings: LedSettings) => call<LedsResponse>("PUT", "/v1/device/leds", { body: settings }),
+  locateLeds: (seconds = 10) => call<LedsResponse>("POST", "/v1/device/leds/locate", { body: { seconds } }),
   /** Shows `state` for `seconds`; `null` ends the preview. */
-  previewLeds: (state: LedState | null, seconds?: number) => request<LedsResponse>("POST", "/v1/device/leds/preview", { body: seconds === undefined ? { state } : { state, seconds } }),
+  previewLeds: (state: LedState | null, seconds?: number) => call<LedsResponse>("POST", "/v1/device/leds/preview", { body: seconds === undefined ? { state } : { state, seconds } }),
 
   // Session recordings (helios-recorder): record a camera's frames, keep and export them
-  recordings: () => request<RecordingListing>("GET", "/v1/recordings"),
-  startRecording: (camera: string) => request<RecordingStatus>("POST", "/v1/recordings", { body: { camera } }),
-  stopRecording: (id: string) => request<RecordingStatus>("POST", `/v1/recordings/${enc(id)}/stop`),
-  deleteRecording: (id: string) => request<void>("DELETE", `/v1/recordings/${enc(id)}`),
+  recordings: () => call<RecordingListing>("GET", "/v1/recordings"),
+  startRecording: (camera: string) => call<RecordingStatus>("POST", "/v1/recordings", { body: { camera } }),
+  stopRecording: (id: string) => call<RecordingStatus>("POST", `/v1/recordings/${enc(id)}/stop`),
+  deleteRecording: (id: string) => call<void>("DELETE", `/v1/recordings/${enc(id)}`),
   /** The last seconds of a camera's ring, written as a new stored recording. */
-  captureLast: (body: { seconds?: number; camera?: string }) => request<PartSummary>("POST", "/v1/recordings/capture-last", { body }),
-  exportEidos: (id: string) => request<EidosExport>("POST", `/v1/recordings/${enc(id)}/export/eidos`),
-  recordingSettings: () => request<RecorderSettings>("GET", "/v1/recordings/settings"),
-  setRecordingSettings: (settings: RecorderSettings) => request<RecorderSettings>("PUT", "/v1/recordings/settings", { body: settings }),
+  captureLast: (body: { seconds?: number; camera?: string }) => call<PartSummary>("POST", "/v1/recordings/capture-last", { body }),
+  exportEidos: (id: string) => call<EidosExport>("POST", `/v1/recordings/${enc(id)}/export/eidos`),
+  recordingSettings: () => call<RecorderSettings>("GET", "/v1/recordings/settings"),
+  setRecordingSettings: (settings: RecorderSettings) => call<RecorderSettings>("PUT", "/v1/recordings/settings", { body: settings }),
 
   // Resources and peripherals
-  resources:(type?: string) => request<Resource[]>("GET", "/v1/resources", { query: { type } }),
-  peripherals: () => request<Resource[]>("GET", "/v1/peripherals"),
+  resources:(type?: string) => call<Resource[]>("GET", "/v1/resources", { query: { type } }),
+  peripherals: () => call<Resource[]>("GET", "/v1/peripherals"),
   peripheralAction: (id: string, kind: string, arg: Record<string, unknown> = {}) =>
-    request<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", `/v1/peripherals/${enc(id)}/actions`, { body: { kind, arg } }),
+    call<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", `/v1/peripherals/${enc(id)}/actions`, { body: { kind, arg } }),
   /** Raw GPIO/PWM/I2C/SPI through lemnosd: the live claims, and a raw action (`gpio.claim`, ...). */
-  rawIo: () => request<RawIo>("GET", "/v1/peripherals/io"),
+  rawIo: () => call<RawIo>("GET", "/v1/peripherals/io"),
   rawIoAction: (kind: string, arg: Record<string, unknown> = {}) =>
-    request<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", "/v1/peripherals/io/actions", { body: { kind, arg } }),
+    call<{ action_id: string; resource: string; done: boolean; result: Resource["action_result"] }>("POST", "/v1/peripherals/io/actions", { body: { kind, arg } }),
 
   // Updates
   uploadImage: (file: Blob, options: { filename?: string; sha256?: string; version?: string } = {}) =>
-    request<Upload>("POST", "/v1/update/uploads", { query: { filename: options.filename ?? (file instanceof File ? file.name : undefined), sha256: options.sha256, version: options.version }, raw: file, headers: { "Content-Type": "application/octet-stream" } }),
-  uploads: () => request<Upload[]>("GET", "/v1/update/uploads"),
-  deleteUpload: (id: string) => request<void>("DELETE", `/v1/update/uploads/${enc(id)}`),
-  applyUpdate: (body: { upload_id?: string; image_url?: string; version?: string; sha256?: string; reboot?: boolean }) => request<ApplyResponse>("POST", "/v1/update/apply", { body }),
-  updateStatus: () => request<UpdateStatus>("GET", "/v1/update/status"),
-  switchSlot: () => request<never>("POST", "/v1/update/slots/switch"),
+    call<Upload>("POST", "/v1/update/uploads", { query: { filename: options.filename ?? (file instanceof File ? file.name : undefined), sha256: options.sha256, version: options.version }, raw: file, headers: { "Content-Type": "application/octet-stream" } }),
+  uploads: () => call<Upload[]>("GET", "/v1/update/uploads"),
+  deleteUpload: (id: string) => call<void>("DELETE", `/v1/update/uploads/${enc(id)}`),
+  applyUpdate: (body: { upload_id?: string; image_url?: string; version?: string; sha256?: string; reboot?: boolean }) => call<ApplyResponse>("POST", "/v1/update/apply", { body }),
+  updateStatus: () => call<UpdateStatus>("GET", "/v1/update/status"),
+  switchSlot: () => call<never>("POST", "/v1/update/slots/switch"),
+  };
+}
+
+/** A peer's path through the gateway: the device's own `/v1` path, under `/v1/peers/{node_id}`. */
+export function peerPath(nodeId: string, path: string): string {
+  return `/v1/peers/${enc(nodeId)}${path.replace(/^\/v1/, "")}`;
+}
+
+export const api = {
+  ...methods((path) => path),
+  /** The HeliOS devices on this robot (`GET /v1/peers`): the cluster's name and each peer's state. */
+  peers: () => request<PeerList>("GET", "/v1/peers"),
 };
 
 export type HeliosApi = typeof api;
+
+const scopes = new Map<string, HeliosApi>();
+
+/**
+ * The same calls as `api`, for one peer of the robot: each path goes to that peer's own API through
+ * the gateway. A peer that is not routed (listed, not enrolled) gets no request from the UI.
+ */
+export function scoped(nodeId: string): HeliosApi {
+  let scope = scopes.get(nodeId);
+  if (!scope) {
+    scope = { ...methods((path) => peerPath(nodeId, path)), peers: api.peers };
+    scopes.set(nodeId, scope);
+  }
+  return scope;
+}
