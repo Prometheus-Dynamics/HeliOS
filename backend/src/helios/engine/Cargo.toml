@@ -26,6 +26,7 @@ workspace = true
 anyhow = { workspace = true }
 # Where every path lives (the image or a guest prefix): `config.rs`.
 helios-layout = { path = "../layout" }
+helios-robot = { path = "../robot" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

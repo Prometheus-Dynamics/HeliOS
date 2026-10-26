@@ -21,8 +21,6 @@
   import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { exportWorkspace, importWorkspace } from "#lib/shell/workspace-actions.js";
-  import Num from "#lib/kit/Num.svelte";
-  import { team } from "#lib/core/team.svelte.js";
   import { gallery } from "#lib/shell/gallery.svelte.js";
   import { help } from "#lib/shell/help.svelte.js";
 
@@ -54,14 +52,7 @@
   {/if}
 
   <Section title="Robot" key="set-robot">
-    {#if cluster.live}
-      <NtSection />
-    {:else}
-      <Prop label="Team number" help="Sets where robot code is expected (NetworkTables server).">
-        <Num value={team.number ?? 0} min={0} max={99999} width={90} label="Team number" onchange={(v) => (team.number = v || null)} />
-      </Prop>
-      <Prop label="Robot code at"><span class="mono">{team.ntServer}</span></Prop>
-    {/if}
+    <NtSection />
     <Prop label="Screens in the rail">
       <button type="button" class="mini" onclick={() => gallery.show("screens")}>Choose…</button>
       <button type="button" class="mini" onclick={() => workspaces.setVisible(null)}>Show all</button>
@@ -368,10 +359,6 @@
   .mini:hover {
     color: var(--fg);
     background: var(--s3);
-  }
-  .mono {
-    font-family: var(--font-code);
-    font-size: 11.5px;
   }
   kbd {
     font-family: var(--font-code);

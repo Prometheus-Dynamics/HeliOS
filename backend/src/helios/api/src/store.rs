@@ -16,8 +16,10 @@ use tokio::sync::Mutex;
 use crate::{
     camera_context::CameraCalibration,
     error::{ApiError, ApiResult},
+    events::EventHub,
     field_layouts::StoredLayout,
 };
+use std::sync::Arc;
 
 /// Revisions kept per pipeline.
 pub const MAX_REVISIONS: usize = 20;
@@ -82,21 +84,45 @@ impl CameraMount {
 }
 
 pub struct Store {
-    dir: PathBuf,
-    lock: Mutex<()>,
+    pub(crate) dir: PathBuf,
+    pub(crate) lock: Mutex<()>,
     /// The recording settings until they are saved: the defaults of this device.
     recording_defaults: helios_recorder::RecorderSettings,
+    /// Where every write is announced (`settings` events); none in tests that do not listen.
+    events: Option<Arc<EventHub>>,
 }
 
 impl Store {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into(), lock: Mutex::new(()), recording_defaults: helios_recorder::RecorderSettings::default() }
+        Self { dir: dir.into(), lock: Mutex::new(()), recording_defaults: helios_recorder::RecorderSettings::default(), events: None }
     }
 
     /// The recording settings a device without saved ones starts with (its layout's folders).
     pub fn with_recording_defaults(mut self, defaults: helios_recorder::RecorderSettings) -> Self {
         self.recording_defaults = defaults;
         self
+    }
+
+    /// Announce every write on `events`.
+    pub fn with_events(mut self, events: Arc<EventHub>) -> Self {
+        self.events = Some(events);
+        self
+    }
+
+    /// Write `value` to `path` (the file is replaced whole), then announce the change of `domain`
+    /// and `key` to every client. Every settings write goes through here, so a new setting is live
+    /// on every open client without any extra wiring.
+    pub(crate) async fn save<T: Serialize>(&self, domain: &str, key: &str, path: &Path, value: &T) -> ApiResult<()> {
+        write_json(path, value).await?;
+        self.notify_changed(domain, key);
+        Ok(())
+    }
+
+    /// Announce that `domain`'s `key` changed: one `settings` event, `{domain, key}`.
+    pub(crate) fn notify_changed(&self, domain: &str, key: &str) {
+        if let Some(events) = &self.events {
+            events.publish("settings", serde_json::json!({ "domain": domain, "key": key }));
+        }
     }
 
     fn pipeline_path(&self, id: &str) -> PathBuf {
@@ -108,14 +134,14 @@ impl Store {
     }
 
     /// NetworkTables settings (helios-engine reads the same file).
-    pub async fn nt4_settings(&self) -> ApiResult<crate::routes::nt4::Nt4Settings> {
+    pub async fn nt4_settings(&self) -> ApiResult<helios_robot::Nt4Settings> {
         let _guard = self.lock.lock().await;
         read_json(&self.nt4_path()).await.map(Option::unwrap_or_default)
     }
 
-    pub async fn put_nt4_settings(&self, settings: &crate::routes::nt4::Nt4Settings) -> ApiResult<()> {
+    pub async fn put_nt4_settings(&self, settings: &helios_robot::Nt4Settings) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.nt4_path(), settings).await
+        self.save("nt4", "settings", &self.nt4_path(), settings).await
     }
 
     /// The LED director's settings (`leds.json`); the defaults until saved.
@@ -126,7 +152,7 @@ impl Store {
 
     pub async fn put_led_settings(&self, settings: &crate::leds::settings::LedSettings) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.dir.join("leds.json"), settings).await
+        self.save("leds", "settings", &self.dir.join("leds.json"), settings).await
     }
 
     fn recording_settings_path(&self) -> PathBuf {
@@ -153,7 +179,7 @@ impl Store {
 
     pub async fn put_recording_settings(&self, settings: &helios_recorder::RecorderSettings) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.recording_settings_path(), settings).await
+        self.save("recording", "settings", &self.recording_settings_path(), settings).await
     }
 
     fn mounts_path(&self) -> PathBuf {
@@ -171,7 +197,7 @@ impl Store {
 
     pub async fn record_default_pipeline(&self, created: bool, decided_at_ms: u64) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.default_pipeline_path(), &DefaultPipelineRecord { created, decided_at_ms }).await
+        self.save("default_pipeline", "record", &self.default_pipeline_path(), &DefaultPipelineRecord { created, decided_at_ms }).await
     }
 
     pub async fn history(&self, id: &str) -> ApiResult<PipelineHistory> {
@@ -190,7 +216,7 @@ impl Store {
         history.revisions.push(PipelineRevision { revision, saved_at_ms, spec });
         let excess = history.revisions.len().saturating_sub(MAX_REVISIONS);
         history.revisions.drain(..excess);
-        write_json(&path, &history).await?;
+        self.save("pipeline", id, &path, &history).await?;
         Ok(revision)
     }
 
@@ -215,14 +241,17 @@ impl Store {
         }
         history.revisions.pop();
         let previous = history.revisions.last().cloned().expect("at least one revision left");
-        write_json(&path, &history).await?;
+        self.save("pipeline", id, &path, &history).await?;
         Ok(previous)
     }
 
     pub async fn forget(&self, id: &str) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
         match tokio::fs::remove_file(self.pipeline_path(id)).await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.notify_changed("pipeline", id);
+                Ok(())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
         }
@@ -245,7 +274,7 @@ impl Store {
                 mounts.remove(camera);
             }
         }
-        write_json(&path, &mounts).await
+        self.save("mounts", camera, &path, &mounts).await
     }
 
     /// The control values set through the API for `camera` (standard keys and the camera's
@@ -267,7 +296,7 @@ impl Store {
         stored.extend(values);
         let stored = stored.clone();
         if stored != before {
-            write_json(&path, &all).await?;
+            self.save("camera_settings", camera, &path, &all).await?;
         }
         Ok(stored)
     }
@@ -291,7 +320,7 @@ impl Store {
             all.remove(camera);
         }
         if changed {
-            write_json(&path, &all).await?;
+            self.save("camera_settings", camera, &path, &all).await?;
         }
         Ok(remaining)
     }
@@ -302,7 +331,7 @@ impl Store {
         let path = self.camera_settings_path();
         let mut all: BTreeMap<String, BTreeMap<String, serde_json::Value>> = read_json(&path).await?.unwrap_or_default();
         if all.remove(camera).is_some() {
-            write_json(&path, &all).await?;
+            self.save("camera_settings", camera, &path, &all).await?;
         }
         Ok(())
     }
@@ -332,7 +361,7 @@ impl Store {
         list.push(calibration);
         list.sort_by_key(|c| (c.width, c.height));
         let list = list.clone();
-        write_json(&path, &all).await?;
+        self.save("calibration", camera, &path, &all).await?;
         Ok(list)
     }
 
@@ -352,7 +381,7 @@ impl Store {
         if left.is_empty() {
             all.remove(camera);
         }
-        write_json(&path, &all).await?;
+        self.save("calibration", camera, &path, &all).await?;
         Ok(left)
     }
 }
@@ -389,14 +418,17 @@ impl Store {
 
     pub async fn put_field_layout(&self, layout: &StoredLayout) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.field_layouts_dir().join(format!("{}.json", file_stem(&layout.id))), layout).await
+        self.save("field_layout", &layout.id, &self.field_layouts_dir().join(format!("{}.json", file_stem(&layout.id))), layout).await
     }
 
     /// Forget an uploaded layout; false when there was none.
     pub async fn delete_field_layout(&self, id: &str) -> ApiResult<bool> {
         let _guard = self.lock.lock().await;
         match tokio::fs::remove_file(self.field_layouts_dir().join(format!("{}.json", file_stem(id)))).await {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                self.notify_changed("field_layout", id);
+                Ok(true)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(error.into()),
         }
@@ -411,7 +443,7 @@ impl Store {
 
     pub async fn select_field_layout(&self, id: &str) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        write_json(&self.field_layout_selection_path(), &FieldLayoutSelection { selected: id.to_string() }).await
+        self.save("field_layout", "selected", &self.field_layout_selection_path(), &FieldLayoutSelection { selected: id.to_string() }).await
     }
 }
 
@@ -424,7 +456,7 @@ fn file_stem(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect()
 }
 
-async fn read_json<T: DeserializeOwned>(path: &Path) -> ApiResult<Option<T>> {
+pub(crate) async fn read_json<T: DeserializeOwned>(path: &Path) -> ApiResult<Option<T>> {
     match tokio::fs::read(path).await {
         Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| ApiError::internal(format!("{} is corrupt: {error}", path.display()))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -432,7 +464,7 @@ async fn read_json<T: DeserializeOwned>(path: &Path) -> ApiResult<Option<T>> {
     }
 }
 
-async fn write_json<T: Serialize>(path: &Path, value: &T) -> ApiResult<()> {
+pub(crate) async fn write_json<T: Serialize>(path: &Path, value: &T) -> ApiResult<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }

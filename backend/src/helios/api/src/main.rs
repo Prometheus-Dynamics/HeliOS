@@ -82,6 +82,8 @@ async fn serve() -> anyhow::Result<()> {
     let bind = config.bind;
     let state = AppState::new(config);
     let _watcher = events::spawn_state_watcher(state.clone());
+    // The robot controller's team and NetworkTables server, kept current (`host_facts`).
+    let _controller = helios_api::host_facts::spawn_refresh(state.clone());
     // Pipeline outputs every tick from helios-engine, while anyone follows the event stream.
     let _live_outputs = helios_api::live_outputs::spawn(state.live.clone(), helios_api::live_outputs::socket_path(&state.config.layout));
     // The LED director: HeliOS's state on the status ring, through lemnosd.

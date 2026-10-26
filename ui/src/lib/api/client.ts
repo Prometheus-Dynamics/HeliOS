@@ -3,6 +3,7 @@
 // (`?mock=1`) they run the simulated robot in mock.ts instead.
 
 import { API_BASE, MOCK } from "./mode";
+import { mockDevice } from "./mock-device";
 import type {
   ApiErrorBody,
   ApiErrorCode,
@@ -44,6 +45,10 @@ import type {
   PlayerView,
   PlaybackCreate,
   PlaybackRun,
+  FieldLayoutDocument,
+  FieldLayoutList,
+  SetupRecord,
+  StoredIdentity,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
@@ -125,7 +130,11 @@ async function request<T>(method: string, path: string, options: { query?: Query
   // The simulated robot (`?mock=1`) has no device. A call that reaches the API directly (the LEDs,
   // a camera's calibrations) is "not available" there, without a request to a dev server that has no
   // device behind it (each one a failed-request error in the console).
-  if (MOCK) throw new ApiError(501, "not_available", `${method} ${path} is not on the simulated robot`);
+  if (MOCK) {
+    const answer = await mockDevice(method, path, options);
+    if (answer) return answer.value as T;
+    throw new ApiError(501, "not_available", `${method} ${path} is not on the simulated robot`);
+  }
   const headers: Record<string, string> = { Accept: "application/json", ...(options.headers ?? {}) };
   if (csrfToken && method !== "GET" && method !== "HEAD") headers["X-Helios-CSRF"] = csrfToken;
   let body: BodyInit | undefined = options.raw;
@@ -172,7 +181,7 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
   return () => source.close();
 }
 
-export const EVENT_TYPES = ["hello", "output", "peripheral", "nt4", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
+export const EVENT_TYPES = ["hello", "output", "peripheral", "nt4", "settings", "pipeline", "resource", "update", "camera", "metrics", "orion", "gpio", "recording", "recording_settings", "lagged"];
 
 export const api = {
   // Device security
@@ -239,6 +248,18 @@ export const api = {
   catalog: () => request<DeviceCatalog>("GET", "/v1/catalog"),
   nt4: () => request<Nt4State>("GET", "/v1/device/nt4"),
   setNt4: (settings: Nt4Settings) => request<Nt4State>("PUT", "/v1/device/nt4", { body: settings }),
+  /** The camera and object identities (names, icons, colours) the device keeps, by object id. */
+  identities: () => request<Record<string, StoredIdentity>>("GET", "/v1/device/identities"),
+  putIdentity: (id: string, identity: StoredIdentity) => request<Record<string, StoredIdentity>>("PUT", `/v1/device/identities/${enc(id)}`, { body: identity }),
+  deleteIdentity: (id: string) => request<void>("DELETE", `/v1/device/identities/${enc(id)}`),
+  setup: () => request<SetupRecord>("GET", "/v1/device/setup"),
+  setSetup: (record: SetupRecord) => request<SetupRecord>("PUT", "/v1/device/setup", { body: record }),
+  fieldLayouts: () => request<FieldLayoutList>("GET", "/v1/field-layouts"),
+  fieldLayout: (id: string) => request<FieldLayoutDocument>("GET", `/v1/field-layouts/${enc(id)}`),
+  /** Keep a WPILib AprilTag field layout (JSON text) as `id`, replacing an uploaded layout of that id. */
+  uploadFieldLayout: (id: string, name: string, wpilibJson: string, tagSideM: number) =>
+    request<{ id: string }>("POST", "/v1/field-layouts", { query: { id, name, tag_side_m: tagSideM }, raw: wpilibJson, headers: { "Content-Type": "application/json" } }),
+  selectFieldLayout: (id: string) => request<{ id: string }>("PUT", "/v1/field-layouts/selected", { body: { id } }),
 
   // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings
   // (the recordings it lists come from `recordings()` below).

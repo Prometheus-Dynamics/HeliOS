@@ -7,6 +7,7 @@ import { dictionaryLabel } from "#lib/format.js";
 import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl } from "#lib/api/client.js";
+import { dispatchSettings, onSettingsChange } from "#lib/core/sync.js";
 import { LiveOutputs } from "./live-outputs";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, PipelineInput, Resource, Stream, Workload } from "#lib/api/model.js";
 import { defaultsFrom, type DefaultTemplate } from "#lib/core/defaults.js";
@@ -191,6 +192,8 @@ export class LiveCluster {
       }),
     );
     this.unsubscribers.push(api.followLogs({}, (line) => this.appendLog(toLogLine(line, this.nodeId))));
+    // Camera settings the device keeps (mounts, control values, calibrations) show on the cameras.
+    for (const domain of ["mounts", "camera_settings", "calibration"]) this.unsubscribers.push(onSettingsChange(domain, () => this.soon("cameras", () => this.refreshCameras())));
     this.timers.push(window.setInterval(() => void this.refreshDevice(), 10_000));
     this.timers.push(window.setInterval(() => void this.refreshCameras(), 15_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
@@ -703,6 +706,11 @@ export class LiveCluster {
     switch (event.type) {
       case "nt4":
         this.soon("nt4", () => this.refreshNt4(), 2500);
+        break;
+      case "settings":
+        // Every setting the device changes: its domain's owner refetches (see core/sync.ts).
+        dispatchSettings(event.data as W.SettingsChange);
+        if (["nt4", "robot"].includes((event.data as W.SettingsChange).domain)) this.soon("nt4", () => this.refreshNt4(), 500);
         break;
       case "output":
         this.applyOutput(event.data as { id: string; change: string; value?: W.PipelineOutput });

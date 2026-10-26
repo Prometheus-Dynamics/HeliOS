@@ -145,6 +145,9 @@ fn absorb(fast: &mut Fast, event: &ApiEvent, now: u64) {
 async fn sample_slow(state: &SharedState) -> Slow {
     let mut slow = Slow::default();
     let nt4 = state.store.nt4_settings().await.unwrap_or_default();
+    let controller = state.store.controller_facts().await.unwrap_or_default();
+    // Robot code's server is known: the user's, or the robot controller's.
+    let wanted = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value.is_some();
     // Each camera's calibrations, turned into the orientation its frames are read out in now.
     for (camera, calibrations) in state.store.calibrations().await.unwrap_or_default() {
         let orientation = Orientation::from_settings(&state.store.camera_settings(&camera).await.unwrap_or_default());
@@ -153,11 +156,11 @@ async fn sample_slow(state: &SharedState) -> Slow {
     slow.calibration = state.calibrations.most_views().await;
     slow.recording = state.recorder.status().is_some_and(|status| status.state.is_active());
     // Without Orion the engine is not running, and robot code is not connected (if it is wanted).
-    slow.robot_missing = nt4.host().is_some();
+    slow.robot_missing = wanted;
     let Ok(view) = state.orion.view().await else { return slow };
     let runtime = view.resources.get(&format!("engine.runtime.{}", state.config.node_id));
     let labels: &[String] = runtime.map(|resource| resource.labels.as_slice()).unwrap_or(&[]);
-    slow.robot_missing = nt4.host().is_some() && label_values(labels, "helios.nt4.connected").first() != Some(&"true");
+    slow.robot_missing = wanted && label_values(labels, "helios.nt4.connected").first() != Some(&"true");
     slow.robot_enabled = label_values(labels, "helios.robot.enabled").first() == Some(&"true");
     slow.lux = label_values(labels, "helios.camera.lux").first().and_then(|lux| lux.parse().ok());
     let engines = view.workloads.values().filter(|workload| workload.runtime_type.as_str() == ENGINE_RUNTIME);

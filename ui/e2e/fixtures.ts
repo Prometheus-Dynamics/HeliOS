@@ -35,6 +35,23 @@ export async function settleWrites(page: Page) {
   }
 }
 
+/**
+ * Whether first-time setup is done for the target: the simulated robot's document in this browser
+ * (mock), or the device's own `/v1/device/setup` (sim). The page must be open on the target's origin.
+ */
+export async function setOnboarded(page: Page, target: Target, onboarded: boolean) {
+  if (target === "mock") {
+    await page.evaluate((value) => {
+      const raw = localStorage.getItem("helios:mock-device");
+      const doc = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      localStorage.setItem("helios:mock-device", JSON.stringify({ ...doc, setup: { onboarded: value } }));
+    }, onboarded);
+    return;
+  }
+  const response = await page.request.put("/v1/device/setup", { data: { onboarded } });
+  expect(response.ok(), "PUT /v1/device/setup").toBeTruthy();
+}
+
 export const test = base.extend<{
   page: Page;
   target: Target;
@@ -63,17 +80,20 @@ export const test = base.extend<{
       const text = `pageerror: ${error.message}${frames ? ` [${frames}]` : ""}`;
       if (!permitted(error.message)) problems.push(text);
     });
-    // Every test starts past the first-run wizard (a per-browser flag, `helios:onboarded`). The
-    // wizard has its own test. A test that needs it fresh clears the flag itself.
+    // Every test starts past the first-run wizard: first-time setup is done on the device (the sim's
+    // own `/v1/device/setup`, or the simulated robot's document in this browser). The wizard has its
+    // own test, which sets it back (see setup.spec.ts).
     await page.addInitScript(() => {
       try {
         // A test that wants the wizard sets this session flag first (see setup.spec.ts).
         if (sessionStorage.getItem("e2e:no-onboarding-seed") !== null) return;
-        if (localStorage.getItem("helios:onboarded") === null) localStorage.setItem("helios:onboarded", "true");
+        const raw = localStorage.getItem("helios:mock-device");
+        if (raw === null) localStorage.setItem("helios:mock-device", JSON.stringify({ setup: { onboarded: true } }));
       } catch {
         // Storage can be blocked: the wizard then shows, and the test's scrim check fails loudly.
       }
     });
+    if (target === "sim") await setOnboarded(page, target, true);
     // The mock runs without a device: `?mock=1` is its switch. The sim is the device itself.
     await page.goto(target === "mock" ? "/?mock=1" : "/");
     await expect(page.getByRole("navigation", { name: "Screens" })).toBeVisible();

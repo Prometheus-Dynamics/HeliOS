@@ -16,10 +16,12 @@ pub mod camera_controls;
 pub mod camera_preview;
 pub mod camera_streams;
 pub mod config;
+pub mod device_settings;
 pub mod error;
 pub mod events;
 pub mod field_layouts;
 pub mod host;
+pub mod host_facts;
 pub mod leds;
 pub mod live_outputs;
 pub mod live_streams;
@@ -85,8 +87,8 @@ pub type SharedState = Arc<AppState>;
 
 impl AppState {
     pub fn new(config: ApiConfig) -> SharedState {
-        let store = Arc::new(store::Store::new(config.state_dir.clone()).with_recording_defaults(helios_recorder::RecorderSettings::for_layout(&config.layout)));
         let events = Arc::new(events::EventHub::new(256));
+        let store = Arc::new(store::Store::new(config.state_dir.clone()).with_recording_defaults(helios_recorder::RecorderSettings::for_layout(&config.layout)).with_events(events.clone()));
         let orion_link = orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone());
         Arc::new(Self {
             live_streams: live_streams::LiveStreams::new(config.live_streams.clone(), orion_link.clone()),

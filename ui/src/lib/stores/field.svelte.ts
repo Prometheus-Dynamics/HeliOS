@@ -1,61 +1,56 @@
-// The field: its size and where every tag is. Imports and exports WPILib's
-// AprilTag field layout JSON, so robot code and HeliOS share one file.
+// The field: its size and where every tag is. The layout is the device's selected field layout
+// (`/v1/field-layouts`, the one the pipelines without their own use), so every tab and every
+// pipeline see the same field. Edits are saved back to the device as WPILib's AprilTag field JSON,
+// which is also the file format the field imports and exports, so robot code and HeliOS share one file.
 
-import { loadRaw, save } from "#lib/core/persist.js";
+import { api, errorText } from "#lib/api/client.js";
+import { onSettingsChange } from "#lib/core/sync.js";
+import { type FieldLayout, type WpilibFieldLayout, anglesOf, demoLayout, layoutFromDocument, layoutToWpilib } from "./field-layout";
 import { toasts } from "./toasts.svelte";
 
-export interface FieldTag {
-  id: number;
-  x: number;
-  y: number;
-  z: number;
-  /** Facing direction on the field, degrees CCW from +x. */
-  yaw: number;
-  pitch: number;
-}
+export type { FieldLayout, FieldTag } from "./field-layout";
 
-export interface FieldLayout {
-  name: string;
-  length: number;
-  width: number;
-  tagSize: number;
-  family: string;
-  tags: FieldTag[];
-}
-
-/** A demo layout: tags around a 16.5 × 8.1 m field (not an official game layout). */
-function demoLayout(): FieldLayout {
-  const L = 16.54;
-  const W = 8.07;
-  const tags: FieldTag[] = [];
-  let id = 1;
-  const add = (x: number, y: number, z: number, yaw: number) => tags.push({ id: id++, x: +x.toFixed(3), y: +y.toFixed(3), z, yaw, pitch: 0 });
-  // Driver-station walls, both ends.
-  for (const y of [1.2, 2.6, 5.5, 6.9]) add(0.02, y, 1.35, 0);
-  for (const y of [1.2, 2.6, 5.5, 6.9]) add(L - 0.02, y, 1.35, 180);
-  // Side walls.
-  for (const x of [4.1, 8.27, 12.4]) add(x, 0.02, 1.2, 90);
-  for (const x of [4.1, 8.27, 12.4]) add(x, W - 0.02, 1.2, -90);
-  // Two central structures, four faces each.
-  for (const [cx, cy] of [[4.9, W / 2], [L - 4.9, W / 2]]) {
-    add(cx - 0.6, cy, 0.31, 180);
-    add(cx + 0.6, cy, 0.31, 0);
-    add(cx, cy - 0.6, 0.31, -90);
-    add(cx, cy + 0.6, 0.31, 90);
-  }
-  return { name: "Demo field", length: L, width: W, tagSize: 0.1651, family: "36h11", tags };
-}
+/** Edits are saved once they pause this long (a drag is one save, not one per pointer move). */
+const SAVE_DELAY_MS = 400;
+/** The id an edited layout is saved under when the selected one is built in (read only). */
+const EDITED_ID = "field-edited";
 
 class FieldStore {
-  layout = $state<FieldLayout>(loadRaw("field", demoLayout()));
+  layout = $state<FieldLayout>(demoLayout());
+  /** The device's selected layout (`null` until the device answers). */
+  selectedId = $state<string | null>(null);
   /** Where the robot is, for previews: metres, degrees. */
   robotPose = $state({ x: 3.2, y: 2.4, heading: 20 });
+  #builtin = false;
+  #edits = 0;
+  #saved = 0;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #chain: Promise<void> = Promise.resolve();
+  #started = false;
 
-  persist() {
-    save("field", this.layout);
+  /** Read the device's field and follow its changes (once). */
+  start() {
+    if (this.#started) return;
+    this.#started = true;
+    onSettingsChange("field_layout", () => void this.load());
+    void this.load();
   }
 
-  update(id: number, patch: Partial<FieldTag>) {
+  /** The selected layout from the device; not while edits are waiting to be saved. */
+  async load() {
+    if (this.#edits !== this.#saved) return;
+    try {
+      const list = await api.fieldLayouts();
+      const doc = await api.fieldLayout(list.selected);
+      this.layout = layoutFromDocument(doc);
+      this.selectedId = list.selected;
+      this.#builtin = list.layouts.find((layout) => layout.id === list.selected)?.builtin ?? false;
+    } catch {
+      // The device is not answering: the layout on screen stays until it does.
+    }
+  }
+
+  update(id: number, patch: Partial<FieldLayout["tags"][number]>) {
     const t = this.layout.tags.find((x) => x.id === id);
     if (!t) return;
     Object.assign(t, patch);
@@ -79,32 +74,49 @@ class FieldStore {
     this.persist();
   }
 
-  toWpilib() {
-    const q = (yaw: number, pitch: number) => {
-      const cy = Math.cos((yaw * Math.PI) / 360);
-      const sy = Math.sin((yaw * Math.PI) / 360);
-      const cp = Math.cos((pitch * Math.PI) / 360);
-      const sp = Math.sin((pitch * Math.PI) / 360);
-      return { W: cy * cp, X: -sy * sp, Y: cy * sp, Z: sy * cp };
-    };
-    return {
-      tags: this.layout.tags.map((t) => ({ ID: t.id, pose: { translation: { x: t.x, y: t.y, z: t.z }, rotation: { quaternion: q(t.yaw, t.pitch) } } })),
-      field: { length: this.layout.length, width: this.layout.width },
-    };
+  /** Save the layout to the device, shortly after the last edit. */
+  persist() {
+    this.#edits++;
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => {
+      this.#chain = this.#chain.then(() => this.#save());
+    }, SAVE_DELAY_MS);
+  }
+
+  async #save() {
+    const edits = this.#edits;
+    const current = $state.snapshot(this.layout);
+    const id = this.selectedId && !this.#builtin ? this.selectedId : EDITED_ID;
+    try {
+      await api.uploadFieldLayout(id, current.name || "Field", JSON.stringify(layoutToWpilib(current)), current.tagSize);
+      if (id !== this.selectedId) {
+        await api.selectFieldLayout(id);
+        this.selectedId = id;
+        this.#builtin = false;
+      }
+      this.#saved = Math.max(this.#saved, edits);
+    } catch (error) {
+      toasts.error(`Field layout not saved: ${errorText(error)}`);
+    }
+  }
+
+  toWpilib(): WpilibFieldLayout {
+    return layoutToWpilib(this.layout);
   }
 
   fromWpilib(doc: unknown, name: string): boolean {
-    const d = doc as { tags?: { ID: number; pose: { translation: { x: number; y: number; z: number }; rotation: { quaternion: { W: number; X: number; Y: number; Z: number } } } }[]; field?: { length: number; width: number } };
+    const d = doc as Partial<WpilibFieldLayout>;
     if (!Array.isArray(d?.tags) || !d.field) {
       toasts.error("That file is not a WPILib AprilTag field layout");
       return false;
     }
-    const tags = d.tags.map((t) => {
-      const { W, X, Y, Z } = t.pose.rotation.quaternion;
-      const yaw = (Math.atan2(2 * (W * Z + X * Y), 1 - 2 * (Y * Y + Z * Z)) * 180) / Math.PI;
-      const pitch = (Math.asin(Math.max(-1, Math.min(1, 2 * (W * Y - Z * X)))) * 180) / Math.PI;
-      return { id: t.ID, x: t.pose.translation.x, y: t.pose.translation.y, z: t.pose.translation.z, yaw: +yaw.toFixed(2), pitch: +pitch.toFixed(2) };
-    });
+    const tags = d.tags.map((t) => ({
+      id: t.ID,
+      x: t.pose.translation.x,
+      y: t.pose.translation.y,
+      z: t.pose.translation.z,
+      ...anglesOf(t.pose.rotation.quaternion),
+    }));
     this.layout = { ...this.layout, name, length: d.field.length, width: d.field.width, tags };
     this.persist();
     toasts.success(`Loaded ${tags.length} tags from ${name}`);

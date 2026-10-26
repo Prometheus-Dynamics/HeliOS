@@ -19,6 +19,8 @@ pub struct EngineConfig {
     pub plan_dir: PathBuf,
     /// helios-api's NetworkTables settings (`HELIOS_NT4_SETTINGS`), read when they change.
     pub nt4_settings_path: PathBuf,
+    /// The robot controller's facts helios-api found (`HELIOS_CONTROLLER_FACTS`), read when they change.
+    pub controller_facts_path: PathBuf,
     /// Where helios-api reads every tick's outputs live (`HELIOS_ENGINE_LIVE_SOCKET`).
     pub live_socket_path: PathBuf,
     pub plugin_dirs: Vec<PathBuf>,
@@ -52,6 +54,7 @@ impl EngineConfig {
             plan_dir: plan_dir_for(&catalog_path, layout),
             catalog_path,
             nt4_settings_path: layout.nt4_settings_file(),
+            controller_facts_path: layout.controller_facts_file(),
             live_socket_path: layout.engine_live_socket(),
             plugin_dirs: layout.plugin_dirs(),
             orion_ipc_socket_path: layout.orion_socket(),
@@ -86,6 +89,9 @@ impl EngineConfig {
         }
         if let Some(value) = env.get("HELIOS_NT4_SETTINGS") {
             config.nt4_settings_path = PathBuf::from(value);
+        }
+        if let Some(value) = env.get("HELIOS_CONTROLLER_FACTS") {
+            config.controller_facts_path = PathBuf::from(value);
         }
         if let Some(value) = env.get("HELIOS_ENGINE_LIVE_SOCKET") {
             config.live_socket_path = PathBuf::from(value);
@@ -185,6 +191,7 @@ mod tests {
         assert_eq!(config.catalog_path, PathBuf::from("/var/lib/helios/state/catalog.json"));
         assert_eq!(config.plan_dir, PathBuf::from("/var/lib/helios/state/plans"));
         assert_eq!(config.nt4_settings_path, PathBuf::from("/var/lib/helios/api/nt4.json"));
+        assert_eq!(config.controller_facts_path, PathBuf::from("/var/lib/helios/api/controller.json"));
         assert_eq!(config.live_socket_path, PathBuf::from("/run/helios/engine-live.sock"));
         assert_eq!(config.plugin_dirs, vec![PathBuf::from("/usr/lib/helios/plugins/daedalus"), PathBuf::from("/var/lib/helios/plugins/daedalus")]);
     }

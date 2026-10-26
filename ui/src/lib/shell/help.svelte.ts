@@ -1,6 +1,7 @@
 // Help: the first-run setup, the guided tour, and "what's on this screen".
 
-import { loadRaw, save } from "#lib/core/persist.js";
+import { setup } from "#lib/core/setup.svelte.js";
+import { onSettingsChange } from "#lib/core/sync.js";
 
 export interface TourStep {
   /** CSS selector of the element to point at (first match). */
@@ -21,13 +22,27 @@ export const TOUR: TourStep[] = [
 ];
 
 class HelpStore {
-  onboarding = $state(!loadRaw("onboarded", false));
+  /** First-time setup is showing. Follows the device (see `followSetup`). */
+  onboarding = $state(false);
   explain = $state(false);
   tourStep = $state<number | null>(null);
+  #followed = false;
+
+  /** Show first-time setup until the device says it is done, and follow it on every tab. */
+  followSetup() {
+    if (this.#followed) return;
+    this.#followed = true;
+    onSettingsChange("setup", () => void this.#syncSetup());
+    void this.#syncSetup();
+  }
+
+  async #syncSetup() {
+    this.onboarding = !(await setup.load());
+  }
 
   finishOnboarding() {
     this.onboarding = false;
-    save("onboarded", true);
+    void setup.complete();
   }
 
   startTour() {

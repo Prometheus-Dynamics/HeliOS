@@ -1,46 +1,24 @@
 <script lang="ts">
-  // Where the robot's pipelines publish for robot code: NetworkTables (NT4)
-  // on the team's roboRIO, or another server. Stored on the device; the
-  // engine publishes every frame's outputs while connected.
-  import { api, errorText } from "#lib/api/client.js";
-  import type { Nt4Settings, Nt4State } from "#lib/api/types.js";
+  // Where the robot's pipelines publish for robot code: NetworkTables (NT4) on the team's
+  // roboRIO, or another server. The settings are kept on the device; the team and the server
+  // show where they come from (set here, the robot controller, or nothing).
+  import type { FactSource } from "#lib/api/types.js";
   import { team } from "#lib/core/team.svelte.js";
+  import { roborioAddress } from "#lib/core/robot-facts.js";
   import Badge from "#lib/kit/Badge.svelte";
   import Num from "#lib/kit/Num.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Switch from "#lib/kit/Switch.svelte";
-  import { toasts } from "#lib/stores/toasts.svelte.js";
 
-  let nt = $state<Nt4State | null>(null);
-  let error = $state<string | null>(null);
-
-  async function load() {
-    try {
-      nt = await api.nt4();
-      error = null;
-      if (nt.settings.team) team.number = nt.settings.team;
-    } catch (e) {
-      error = errorText(e);
-    }
-  }
-
-  async function save(change: Partial<Nt4Settings>) {
-    if (!nt) return;
-    const settings = { ...nt.settings, ...change };
-    try {
-      nt = await api.setNt4(settings);
-      if (settings.team !== undefined) team.number = settings.team;
-    } catch (e) {
-      toasts.error(`NetworkTables: ${errorText(e)}`);
-    }
-  }
+  const nt = $derived(team.robot);
 
   $effect(() => {
-    void load();
     // The connection state follows the engine; check it while this is open.
-    const timer = window.setInterval(() => void load(), 3000);
+    const timer = window.setInterval(() => void team.load(), 3000);
     return () => clearInterval(timer);
   });
+
+  const SOURCE_TEXT: Record<FactSource, string> = { user: "Set here", controller: "From the robot controller", none: "Not set" };
 
   const status = $derived(
     !nt
@@ -55,22 +33,27 @@
   );
 </script>
 
-{#if error}
-  <Prop label="NetworkTables"><span class="small dim">{error}</span></Prop>
-{:else if nt}
-  <Prop label="Team number" help="Robot code is on the team's roboRIO (10.TE.AM.2); pipelines publish there.">
-    <Num value={nt.settings.team ?? 0} min={0} max={25599} width={90} label="Team number" onchange={(v) => save({ team: v || null })} />
+{#if nt}
+  <Prop label="Team number" help="Robot code is on the team's roboRIO (10.TE.AM.2). Leave it empty to use the team the robot controller reports.">
+    <Num value={nt.settings.team ?? 0} min={0} max={25599} width={90} label="Team number" onchange={(v) => team.save({ team: v || null })} />
+    <Badge tone={team.source === "controller" ? "ok" : team.source === "user" ? "neutral" : "warn"} text={team.source === "controller" && team.controllerName ? `${team.number} from ${team.controllerName}` : SOURCE_TEXT[team.source]} />
   </Prop>
   <Prop label="NetworkTables" help="Every frame's pipeline outputs, latency and fps, for robot code.">
-    <Switch checked={nt.settings.enabled} label="Publish to NetworkTables" onchange={(v) => save({ enabled: v })} />
+    <Switch checked={nt.settings.enabled} label="Publish to NetworkTables" onchange={(v) => team.save({ enabled: v })} />
     {#if status}<Badge tone={status.tone as "ok"} text={status.text} />{/if}
   </Prop>
-  <Prop label="Server" help="Leave empty for the team's roboRIO; set a host for a simulator or another server.">
-    <input class="text mono" type="text" placeholder={nt.settings.team ? `10.${Math.floor(nt.settings.team / 100)}.${nt.settings.team % 100}.2` : "roboRIO"} value={nt.settings.server ?? ""} onchange={(e) => save({ server: e.currentTarget.value.trim() || null })} aria-label="NetworkTables server" />
+  <Prop label="Robot code at" help="The server publishing goes to. Leave the server empty to use the team's roboRIO, or the robot controller's own server.">
+    <span class="mono">{team.ntServer}</span>
+    <Badge tone="neutral" text={SOURCE_TEXT[nt.effective.nt4_server.source]} />
+  </Prop>
+  <Prop label="Server" help="Set a host for a simulator or another server.">
+    <input class="text mono" type="text" placeholder={roborioAddress(nt.settings.team ?? 0) ?? "roboRIO"} value={nt.settings.server ?? ""} onchange={(e) => team.save({ server: e.currentTarget.value.trim() || null })} aria-label="NetworkTables server" />
   </Prop>
   <Prop label="Topics" help="Each pipeline publishes <prefix>/<pipeline>/<output> (JSON), plus latency_ms, fps and capture_time_us.">
-    <input class="text mono" type="text" value={nt.settings.prefix} onchange={(e) => save({ prefix: e.currentTarget.value.trim() || "/helios" })} aria-label="NetworkTables topic prefix" />
+    <input class="text mono" type="text" value={nt.settings.prefix} onchange={(e) => team.save({ prefix: e.currentTarget.value.trim() || "/helios" })} aria-label="NetworkTables topic prefix" />
   </Prop>
+{:else}
+  <Prop label="NetworkTables"><span class="small dim">Loading the robot's settings…</span></Prop>
 {/if}
 
 <style>

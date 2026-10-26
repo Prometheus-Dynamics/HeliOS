@@ -1415,6 +1415,7 @@ dependencies = [
  "helios-field",
  "helios-layout",
  "helios-recorder",
+ "helios-robot",
  "hex",
  "lemnos-ipc",
  "libc",
@@ -1473,6 +1474,7 @@ dependencies = [
  "helios-eidos-plugin",
  "helios-field",
  "helios-layout",
+ "helios-robot",
  "libc",
  "nix",
  "notify",
@@ -1544,6 +1546,13 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "helios-robot"
+version = "1.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
