@@ -3,7 +3,8 @@
   // One camera, big: follows the selected camera or stays pinned. Overlays,
   // ROI drawing, snapshot and quick exposure in the tab row.
   import type { Camera } from "#lib/api/model.js";
-  import { controlNamed, writeControls } from "#lib/camera/write.js";
+  import { controlNamed } from "#lib/camera/controls.js";
+  import { writeControls } from "#lib/camera/write.js";
   import { identity } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";

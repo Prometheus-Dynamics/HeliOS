@@ -6,13 +6,13 @@
   import Num from "#lib/kit/Num.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Seg from "#lib/kit/Seg.svelte";
-  import { clamp, clampExposure, disabledReason, EXPOSURE_FALLBACK, frameRateChoice, frameRatePresetsIn } from "./controls.js";
-  import { controlNamed, keyOf, writeControls } from "./write.js";
+  import { autoOn, clamp, clampExposure, controlFor, disabledReason, EXPOSURE_FALLBACK, frameRateChoice, frameRatePresetsIn } from "./controls.js";
+  import { keyOf, writeControls } from "./write.js";
 
   let { camera, help }: { camera: Camera; help?: string } = $props();
 
   const controls = $derived(camera.controls ?? []);
-  const frame = $derived(controlNamed(controls, "frame_rate"));
+  const frame = $derived(controlFor(controls, "fps", "frame_rate"));
   const range = $derived({ min: frame?.min ?? 1, max: frame?.max ?? 120 });
   const fps = $derived(typeof frame?.value === "number" ? frame.value : camera.settings.fps);
   const presets = $derived(frameRatePresetsIn(range));
@@ -23,9 +23,9 @@
     if (!frame || lock) return;
     const next = clamp(value, range.min, range.max);
     const changes: Record<string, number | boolean> = { [keyOf(frame)]: next };
-    const exposure = controlNamed(controls, "exposure_time_us");
-    const ae = controlNamed(controls, "ae_enable");
-    if (exposure && ae?.value !== true && typeof exposure.value === "number") {
+    const exposure = controlFor(controls, "exposure_us", "exposure_time_us");
+    const ae = controlFor(controls, "ae", "ae_enable");
+    if (exposure && autoOn(ae) !== true && typeof exposure.value === "number") {
       const bounds = { min: exposure.min ?? EXPOSURE_FALLBACK.min, max: exposure.max ?? EXPOSURE_FALLBACK.max };
       const cut = clampExposure(exposure.value, bounds, next);
       if (cut !== exposure.value) changes[keyOf(exposure)] = cut;

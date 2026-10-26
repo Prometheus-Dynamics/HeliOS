@@ -141,9 +141,24 @@ export function unitOf(name: string): string | undefined {
   return undefined;
 }
 
-/** The pane section a control belongs to. Crop regions and unknown controls are never lost. */
-export function groupOf(control: Pick<CameraControlInfo, "name">): ControlGroup {
+/** The group of each standard role: a device's control answers it whatever the device calls it. */
+const ROLE_GROUP: Record<string, ControlGroup> = {
+  fps: "capture",
+  exposure_us: "exposure",
+  gain: "exposure",
+  ae: "exposure",
+  ev: "exposure",
+  awb: "white",
+  colour_temperature: "white",
+  red_gain: "white",
+  blue_gain: "white",
+};
+
+/** The pane section a control belongs to, by its standard role, else its name. Crop regions and unknown controls are never lost. */
+export function groupOf(control: Pick<CameraControlInfo, "name"> & Partial<Pick<CameraControlInfo, "standard">>): ControlGroup {
   if (isCropName(control.name)) return "crop";
+  const byRole = control.standard ? ROLE_GROUP[control.standard] : undefined;
+  if (byRole) return byRole;
   const named = GROUP_BY_NAME[control.name];
   if (named) return named;
   if (isMaxExposureName(control.name)) return "exposure";
@@ -166,6 +181,19 @@ export function isChanged(control: Control): boolean {
   if (target === null || control.value === null) return false;
   if (typeof target === "number" && typeof control.value === "number") return Math.abs(target - control.value) > 1e-6;
   return target !== control.value;
+}
+
+/**
+ * The control was changed by the user, not just left away from its default. A camera in auto keeps
+ * its own live value for what the auto mode sets: the colour temperature under auto white balance is
+ * its estimate, and the exposure and gain under auto exposure are its live values.
+ */
+export function changedByUser(controls: CameraControlInfo[], control: CameraControlInfo): boolean {
+  if (!isChanged(control)) return false;
+  if (control === controlFor(controls, "colour_temperature", "colour_temperature") && autoOn(controlFor(controls, "awb", "awb_enable")) === true) return false;
+  const exposureAuto = autoOn(controlFor(controls, "ae", "ae_enable")) === true;
+  if (exposureAuto && (control === controlFor(controls, "exposure_us", "exposure_time_us") || control === controlFor(controls, "gain", "gain"))) return false;
+  return true;
 }
 
 /** Why the control cannot be changed here, or null when it can. */
@@ -276,6 +304,57 @@ export function aprilTagCapWrites(keys: { ae: string; exposureMax: string; gainM
 /** A limit control where 0 means off (`ae_exposure_max_us`, `ae_gain_max`): whether it limits now. */
 export function limitOn(value: number | boolean | null | undefined): boolean {
   return typeof value === "number" && value > 0;
+}
+
+/** The V4L2 exposure menu's manual value; aperture priority is 3, and any other value is auto. */
+const V4L2_MANUAL = 1;
+
+/**
+ * Whether an auto mode (auto exposure, auto white balance) is on. A boolean control says so. A menu
+ * whose entries name "Manual" is the V4L2 exposure menu (manual is 1, so any other value is auto).
+ * Null when the device says neither: the UI then reads the mode as manual and still offers both
+ * writes (as booleans).
+ */
+export function autoOn(control: Pick<CameraControlInfo, "value" | "menu"> | undefined): boolean | null {
+  if (!control || control.value === null) return null;
+  if (typeof control.value === "boolean") return control.value;
+  const menuHasManual = control.menu?.some((label) => /manual/i.test(label)) ?? false;
+  return menuHasManual ? control.value !== V4L2_MANUAL : null;
+}
+
+/** The standard roles the fields use (the API's names for them, see `CameraStandardControl`). */
+export type Role = "exposure_us" | "gain" | "ae" | "ev" | "fps" | "awb" | "colour_temperature" | "red_gain" | "blue_gain";
+
+/**
+ * The control that plays a role. A device's control for it carries the standard role, whatever
+ * the device calls it (a UVC "Exposure Time, Absolute" is `exposure_us`); `name` is only the
+ * fallback for a control the device lists without a role.
+ */
+export function controlFor(controls: CameraControlInfo[], role: Role, name?: string): CameraControlInfo | undefined {
+  return controls.find((c) => c.standard === role) ?? (name ? controlNamed(controls, name) : undefined);
+}
+
+/** A control with no standard role, by its name (`ae_state`, `ae_gain_max`...). */
+export function controlNamed(controls: CameraControlInfo[], name: string): CameraControlInfo | undefined {
+  return controls.find((c) => c.name === name && !c.standard);
+}
+
+/** The roles the camera fields show, with the name each falls back to (see `controlFor`). */
+const FIELD_ROLES: [Role, string][] = [
+  ["ae", "ae_enable"],
+  ["exposure_us", "exposure_time_us"],
+  ["gain", "gain"],
+  ["ev", "exposure_value"],
+  ["fps", "frame_rate"],
+  ["awb", "awb_enable"],
+  ["colour_temperature", "colour_temperature"],
+  ["red_gain", "red_gain"],
+  ["blue_gain", "blue_gain"],
+];
+
+/** The controls the camera fields show, so a pane's generic lists leave them out. */
+export function fieldControlsOf(controls: CameraControlInfo[]): Set<CameraControlInfo> {
+  return new Set(FIELD_ROLES.flatMap(([role, name]) => controlFor(controls, role, name) ?? []));
 }
 
 export function clamp(value: number, min: number, max: number): number {

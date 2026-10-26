@@ -5,17 +5,17 @@
   import Prop from "#lib/kit/Prop.svelte";
   import Seg from "#lib/kit/Seg.svelte";
   import Slider from "#lib/kit/Slider.svelte";
-  import { disabledReason, isChanged, resetTarget } from "./controls.js";
-  import { controlNamed, forgetControl, keyOf, writeControls } from "./write.js";
+  import { autoOn, controlFor, disabledReason, isChanged, resetTarget } from "./controls.js";
+  import { forgetControl, keyOf, writeControls } from "./write.js";
 
   let { camera }: { camera: Camera } = $props();
 
   const controls = $derived(camera.controls ?? []);
-  const awb = $derived(controlNamed(controls, "awb_enable"));
-  const colour = $derived(controlNamed(controls, "colour_temperature"));
-  const red = $derived(controlNamed(controls, "red_gain"));
-  const blue = $derived(controlNamed(controls, "blue_gain"));
-  const auto = $derived(awb?.value === true);
+  const awb = $derived(controlFor(controls, "awb", "awb_enable"));
+  const colour = $derived(controlFor(controls, "colour_temperature", "colour_temperature"));
+  const red = $derived(controlFor(controls, "red_gain", "red_gain"));
+  const blue = $derived(controlFor(controls, "blue_gain", "blue_gain"));
+  const auto = $derived(autoOn(awb) === true);
 
   const numberOr = (value: number | boolean | null | undefined, fallback: number) => (typeof value === "number" ? value : fallback);
 

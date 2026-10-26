@@ -10,17 +10,17 @@
   import Slider from "#lib/kit/Slider.svelte";
   import Switch from "#lib/kit/Switch.svelte";
   import ControlRow from "./ControlRow.svelte";
-  import { clampExposure, disabledReason, EXPOSURE_FALLBACK, formatMs, limitOn, maxExposureUs, rangeOr, rectText } from "./controls.js";
-  import { controlNamed, keyOf, writeControls } from "./write.js";
+  import { autoOn, clampExposure, controlFor, controlNamed, disabledReason, EXPOSURE_FALLBACK, formatMs, limitOn, maxExposureUs, rangeOr, rectText } from "./controls.js";
+  import { keyOf, writeControls } from "./write.js";
 
   let { camera, compact = false }: { camera: Camera; compact?: boolean } = $props();
 
   const controls = $derived(camera.controls ?? []);
-  const ae = $derived(controlNamed(controls, "ae_enable"));
-  const exposure = $derived(controlNamed(controls, "exposure_time_us"));
-  const gain = $derived(controlNamed(controls, "gain"));
-  const frame = $derived(controlNamed(controls, "frame_rate"));
-  const ev = $derived(controlNamed(controls, "exposure_value"));
+  const ae = $derived(controlFor(controls, "ae", "ae_enable"));
+  const exposure = $derived(controlFor(controls, "exposure_us", "exposure_time_us"));
+  const gain = $derived(controlFor(controls, "gain", "gain"));
+  const frame = $derived(controlFor(controls, "fps", "frame_rate"));
+  const ev = $derived(controlFor(controls, "ev", "exposure_value"));
   const aeState = $derived(controlNamed(controls, "ae_state"));
   const maxExposureLimit = $derived(controlNamed(controls, "ae_exposure_max_us"));
   const maxGainLimit = $derived(controlNamed(controls, "ae_gain_max"));
@@ -28,7 +28,7 @@
   const meteringMode = $derived(controlNamed(controls, "ae_metering_mode"));
   const meteringRegion = $derived(controlNamed(controls, "ae_metering_region"));
 
-  const auto = $derived(ae?.value === true);
+  const auto = $derived(autoOn(ae) === true);
   const fps = $derived(typeof frame?.value === "number" ? frame.value : camera.settings.fps);
   const range = $derived(rangeOr(exposure, EXPOSURE_FALLBACK));
   const gainRange = $derived(rangeOr(gain, { min: 1, max: 16 }));

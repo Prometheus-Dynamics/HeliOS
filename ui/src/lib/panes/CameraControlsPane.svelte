@@ -18,7 +18,7 @@
   import ExposureFields from "#lib/camera/ExposureFields.svelte";
   import FrameRateField from "#lib/camera/FrameRateField.svelte";
   import WhiteBalanceFields from "#lib/camera/WhiteBalanceFields.svelte";
-  import { friendlyLabel, groupOf, isChanged, resetTarget } from "#lib/camera/controls.js";
+  import { changedByUser, fieldControlsOf, friendlyLabel, groupOf, resetTarget } from "#lib/camera/controls.js";
   import type { CameraControlInfo } from "#lib/api/model.js";
   import { capabilitiesOf } from "#lib/core/defaults.js";
   import { pane as paneRef, workspaces } from "#lib/core/workspace.svelte.js";
@@ -49,18 +49,20 @@
   let changedOnly = $state(false);
   const q = $derived(query.trim().toLowerCase());
   /** A control row the search and the "changed only" filter let through. */
-  const shown = (c: CameraControlInfo) => (!q || friendlyLabel(c.name).toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) && (!changedOnly || isChanged(c));
+  const shown = (c: CameraControlInfo) => (!q || friendlyLabel(c.name).toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) && (!changedOnly || changedByUser(controls, c));
   /** A section of composite fields (exposure, white balance) shows while the search names it. */
   const named = (...words: string[]) => !q || words.some((w) => w.includes(q) || q.includes(w));
-  const inGroup = (group: ReturnType<typeof groupOf>) => controls.filter((c) => groupOf(c) === group && shown(c));
+  /** The controls a field shows (exposure, white balance, frame rate) are not listed again. */
+  const fields = $derived(fieldControlsOf(controls));
+  const inGroup = (group: ReturnType<typeof groupOf>) => controls.filter((c) => !fields.has(c) && groupOf(c) === group && shown(c));
   const flicker = $derived(inGroup("flicker"));
-  /** Capture controls beyond the frame rate (its own field): the sensor's rotation. */
-  const capture = $derived(inGroup("capture").filter((c) => c.name !== "frame_rate"));
+  /** The capture controls beyond the frame rate's field: the sensor's rotation and mirroring. */
+  const capture = $derived(inGroup("capture"));
   const advanced = $derived(inGroup("advanced"));
   const runs = $derived(active ? capabilitiesOf(active.graph) : []);
   const filtering = $derived(Boolean(q) || changedOnly);
   /** A composite section (exposure, white balance) has a changed control behind it. */
-  const changedIn = (group: ReturnType<typeof groupOf>) => controls.some((c) => groupOf(c) === group && isChanged(c));
+  const changedIn = (group: ReturnType<typeof groupOf>) => controls.some((c) => groupOf(c) === group && changedByUser(controls, c));
   // Which sections the filters leave: unfiltered, everything; a search, the sections it names or
   // whose controls match; changed only, the sections with a changed control.
   const showSensor = $derived(!filtering || capture.length > 0 || (!changedOnly && named("sensor", "mode", "frame rate", "fps", "capture")));

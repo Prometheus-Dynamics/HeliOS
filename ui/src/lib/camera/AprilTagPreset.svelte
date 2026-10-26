@@ -7,16 +7,16 @@
   // kept no value for it before.
   import type { Camera } from "#lib/api/model.js";
   import Icon from "#lib/components/common/Icon.svelte";
-  import { APRILTAG_EXPOSURE_US, aprilTagCapWrites, aprilTagPlan, disabledReason, EXPOSURE_FALLBACK, formatMs, formatNumber, presetUndoChanges, rangeOr, type PresetBefore } from "./controls.js";
-  import { controlNamed, keyOf, writeControls } from "./write.js";
+  import { APRILTAG_EXPOSURE_US, aprilTagCapWrites, aprilTagPlan, autoOn, controlFor, controlNamed, disabledReason, EXPOSURE_FALLBACK, formatMs, formatNumber, presetUndoChanges, rangeOr, type PresetBefore } from "./controls.js";
+  import { keyOf, writeControls } from "./write.js";
 
   let { camera }: { camera: Camera } = $props();
 
   const controls = $derived(camera.controls ?? []);
-  const ae = $derived(controlNamed(controls, "ae_enable"));
-  const exposure = $derived(controlNamed(controls, "exposure_time_us"));
-  const gain = $derived(controlNamed(controls, "gain"));
-  const frame = $derived(controlNamed(controls, "frame_rate"));
+  const ae = $derived(controlFor(controls, "ae", "ae_enable"));
+  const exposure = $derived(controlFor(controls, "exposure_us", "exposure_time_us"));
+  const gain = $derived(controlFor(controls, "gain", "gain"));
+  const frame = $derived(controlFor(controls, "fps", "frame_rate"));
   const ceiling = $derived(controlNamed(controls, "ae_exposure_max_us"));
   const gainCap = $derived(controlNamed(controls, "ae_gain_max"));
 
@@ -103,7 +103,7 @@
         {:else if plan}
           Sets <b>manual</b> exposure to <b>{formatMs(plan.exposureUs)} ms</b> and gain to <b>{formatNumber(plan.gain)}×</b>.
           Now {exposureNow !== null ? `${formatMs(exposureNow)} ms` : "unknown"} at {gainNow !== null ? `${formatNumber(gainNow)}×` : "unknown"}
-          ({ae?.value ? "auto" : "manual"}), so the image keeps about the same brightness.
+          ({autoOn(ae) ? "auto" : "manual"}), so the image keeps about the same brightness.
           {#if plan.capped}<span class="warn">Gain is at the camera's limit, so the image will be darker.</span>{/if}
         {/if}
       </p>
