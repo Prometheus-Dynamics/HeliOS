@@ -10,25 +10,37 @@
 //! A peer is routed only when Orion has enrolled it, its `orion+tcp` address is an IPv4 link
 //! address, and it names its HeliOS API port in its node labels (`helios.api_port`). The proxy
 //! passes HeliOS's own `/v1` paths and nothing else.
+//!
+//! Two more routes serve what Atlas needs of a board behind its controller. `board/identity` reads
+//! the peer's board agent (its `/.well-known/pd-device`). `orion` is a TCP tunnel, by HTTP upgrade,
+//! to the peer's Orion listener: Orion's enrollment and auth run end to end inside it.
 
 use std::{
-    net::Ipv4Addr,
-    time::Duration,
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use axum::{
     Json,
     body::Body,
     extract::{Request, State},
-    http::{HeaderMap, HeaderName, HeaderValue, Method, header},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use futures_util::TryStreamExt;
+use hyper_util::rt::TokioIo;
 use orion::{
     control_plane::{DiscoveredPeerRecord, DiscoveredPeerState, DiscoverySnapshot},
     core::PeerBaseUrl,
 };
 use serde::Serialize;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
+    sync::{OwnedSemaphorePermit, Semaphore},
+};
 
 use crate::{
     SharedState,
@@ -50,6 +62,20 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 /// The HeliOS API ports the device profiles use (SystemCore 5880, Raze 5800): probed on a
 /// discovered peer while security is open (`HELIOS_API_PEER_PORTS` overrides them).
 pub const DEFAULT_PEER_PORTS: &[u16] = &[5800, 5880];
+/// The port of a peer's board agent, Atlas's `/.well-known/pd-device` (`HELIOS_BOARD_AGENT_PORT`).
+pub const DEFAULT_BOARD_AGENT_PORT: u16 = 5899;
+/// The port of a peer's Orion listener when its record advertises none (`HELIOS_ORION_PEER_PORT`).
+pub const DEFAULT_ORION_PORT: u16 = 9200;
+/// The board agent's identity document on a peer.
+const BOARD_IDENTITY_PATH: &str = "/.well-known/pd-device";
+/// The protocol an Orion tunnel upgrades to: `Connection: Upgrade` with `Upgrade: orion`.
+pub const ORION_UPGRADE: &str = "orion";
+/// How many Orion tunnels one peer may hold open at once; a request past them is refused (429).
+pub const TUNNELS_PER_PEER: usize = 4;
+/// A tunnel direction that moves no bytes for this long is closed.
+pub const TUNNEL_IDLE: Duration = Duration::from_secs(120);
+/// The size of one relayed read.
+const RELAY_BUFFER: usize = 16 * 1024;
 /// Request headers the gateway passes on. Cookies are not: a peer's sign-in is its own.
 const FORWARDED_REQUEST_HEADERS: &[&str] = &["authorization", "content-type", "accept", "x-helios-csrf", "x-helios-sha256", "x-helios-filename", "x-helios-version"];
 /// Response headers the gateway passes back. `Set-Cookie` is not: it would replace the gateway's session.
@@ -191,12 +217,18 @@ pub async fn probe_api_port(client: &reqwest::Client, address: Ipv4Addr, ports: 
 /// (a PC-facing or driver-station-facing one) is therefore never routed through them. IPv6 is not
 /// routed: its link-local addresses need a scope.
 pub fn link_address(urls: &[PeerBaseUrl], nets: &[Ipv4Net]) -> Option<Ipv4Addr> {
+    link_endpoint(urls, nets).map(|(address, _)| address)
+}
+
+/// The link address and Orion port of a peer's `orion+tcp` URL on one of the robot's networks.
+fn link_endpoint(urls: &[PeerBaseUrl], nets: &[Ipv4Net]) -> Option<(Ipv4Addr, u16)> {
     urls.iter().find_map(|url| {
         let authority = url.as_str().strip_prefix("orion+tcp://")?.split('/').next()?;
-        let (host, _port) = authority.rsplit_once(':')?;
+        let (host, port) = authority.rsplit_once(':')?;
         let address: Ipv4Addr = host.parse().ok()?;
+        let port: u16 = port.parse().ok()?;
         let usable = !(address.is_loopback() || address.is_unspecified() || address.is_multicast() || address.is_broadcast());
-        (usable && nets.iter().any(|net| net.contains(address))).then_some(address)
+        (usable && nets.iter().any(|net| net.contains(address))).then_some((address, port))
     })
 }
 
@@ -341,19 +373,178 @@ pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Listing>> 
 }
 
 /// `ANY /v1/peers/{node}/{rest}`: the request, sent to peer `node`'s HeliOS API at `/v1/{rest}`.
+/// Two paths are not HeliOS API paths: `board/identity` (the board agent's identity document) and
+/// `orion` (the Orion tunnel).
 pub async fn proxy(State(state): State<SharedState>, request: Request) -> ApiResult<Response> {
-    let (node, rest) = split_proxy_path(request.uri().path()).ok_or_else(|| ApiError::not_found("not a peer API path"))?;
-    if !is_api_path(rest) {
+    let (node, rest) = split_proxy_path(request.uri().path()).map(|(node, rest)| (node.to_string(), rest.to_string())).ok_or_else(|| ApiError::not_found("not a peer API path"))?;
+    if rest == "board/identity" {
+        if request.method() != Method::GET {
+            return Err(ApiError::bad_request("the board identity is read with GET"));
+        }
+        return board_identity(&state, &node).await;
+    }
+    if rest == "orion" {
+        return orion_tunnel(&state, &node, request).await;
+    }
+    if !is_api_path(&rest) {
         return Err(ApiError::not_found(format!("{rest} is not a HeliOS API path")));
     }
     if request.headers().contains_key(header::UPGRADE) {
         return Err(ApiError::not_available("a WebSocket on a peer", "a WebSocket relay in the gateway (use the peer's polled routes)"));
     }
-    let (node, rest, query) = (node.to_string(), rest.to_string(), request.uri().query().map(str::to_owned));
+    let query = request.uri().query().map(str::to_owned);
     let robot = robot(&state).await?;
     let peer = routed_peer(&robot.peers, &node)?;
     let url = peer_url(peer, &rest, query.as_deref()).ok_or_else(|| ApiError::conflict(format!("peer {node} cannot be reached")))?;
     forward(&state.peer_client, &node, &url, request).await
+}
+
+/// `GET /v1/peers/{node}/board/identity`: the peer board's identity document, from its board agent.
+/// Atlas names the same board (`raze:<serial8>`) whether it is seen over USB or behind the controller.
+pub async fn board_identity(state: &SharedState, node: &str) -> ApiResult<Response> {
+    let robot = robot(state).await?;
+    let peer = routed_peer(&robot.peers, node)?;
+    let address = peer.address.as_deref().ok_or_else(|| ApiError::conflict(format!("peer {node} cannot be reached: it has no link address")))?;
+    fetch_board_identity(&state.peer_client, node, address, state.config.board_agent_port).await
+}
+
+/// The identity document at `address`'s board agent on `port`. A peer with no board agent (a
+/// SystemCore guest, say) refuses the connection: 404, with the reason.
+pub async fn fetch_board_identity(client: &reqwest::Client, node: &str, address: &str, port: u16) -> ApiResult<Response> {
+    let url = format!("http://{address}:{port}{BOARD_IDENTITY_PATH}");
+    let answer = match client.get(url).send().await {
+        Ok(answer) => answer,
+        Err(error) if error.is_connect() && !error.is_timeout() => return Err(ApiError::not_found(format!("peer {node} has no board agent on port {port}"))),
+        Err(error) => return Err(ApiError::backend(format!("peer {node}'s board agent did not answer: {error}"))),
+    };
+    let status = answer.status();
+    if status == StatusCode::NOT_FOUND {
+        return Err(ApiError::not_found(format!("peer {node}'s board agent has no identity document")));
+    }
+    if !status.is_success() {
+        return Err(ApiError::backend(format!("peer {node}'s board agent answered {status}")));
+    }
+    let body = answer.bytes().await.map_err(|error| ApiError::backend(format!("peer {node}'s board agent did not finish: {error}")))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(HeaderName::from_static(NODE_HEADER), HeaderValue::from_str(node).map_err(|_| ApiError::internal("peer id is not a header value"))?);
+    Ok((StatusCode::OK, headers, body).into_response())
+}
+
+/// `GET /v1/peers/{node}/orion` with `Connection: Upgrade` and `Upgrade: orion`: a TCP tunnel to the
+/// peer's Orion listener. HeliOS adds nothing to the bytes, so Orion's own enrollment and auth run
+/// end to end. Refused (403) unless device security is open; only to a peer of this robot that the
+/// gateway routes; at most `TUNNELS_PER_PEER` at once per peer.
+pub async fn orion_tunnel(state: &SharedState, node: &str, mut request: Request) -> ApiResult<Response> {
+    if state.auth.mode() != crate::auth::AuthMode::Open {
+        return Err(ApiError::forbidden("the Orion tunnel is closed while device security is on"));
+    }
+    if !asks_for_upgrade(request.headers(), ORION_UPGRADE) {
+        return Err(ApiError::bad_request("the Orion tunnel is an HTTP upgrade: send Connection: Upgrade and Upgrade: orion"));
+    }
+    let robot = robot(state).await?;
+    let peer = routed_peer(&robot.peers, node)?;
+    let address: Ipv4Addr = peer.address.as_deref().and_then(|address| address.parse().ok()).ok_or_else(|| ApiError::conflict(format!("peer {node} cannot be reached: it has no link address")))?;
+    let port = orion_port(state, node).await?;
+    let permit = state.tunnels.acquire(node).ok_or_else(|| ApiError::too_many_requests(format!("peer {node} already has {TUNNELS_PER_PEER} Orion tunnels open")))?;
+    // Connected before the upgrade is answered: a listener that does not accept is an error here, not a closed socket.
+    let target = SocketAddr::new(IpAddr::V4(address), port);
+    let listener = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(target)).await {
+        Ok(Ok(listener)) => listener,
+        _ => return Err(ApiError::backend(format!("peer {node}'s Orion listener did not accept at {target}"))),
+    };
+    Ok(open_tunnel(&mut request, node, listener, Some(permit), TUNNEL_IDLE))
+}
+
+/// The Orion port of peer `node`: the one its record advertises on the robot's networks, else
+/// `HELIOS_ORION_PEER_PORT`.
+async fn orion_port(state: &SharedState, node: &str) -> ApiResult<u16> {
+    let discovery = state.orion.discovery().await?;
+    let advertised = discovery.peers.iter().find(|record| record.node_id.as_str() == node).and_then(|record| link_endpoint(&record.peer_urls, &state.config.peer_nets)).map(|(_, port)| port);
+    Ok(advertised.unwrap_or(state.config.orion_peer_port))
+}
+
+/// Answers the request's upgrade with `101` and relays the upgraded connection to `peer` (the
+/// connected Orion listener) until both sides are done. The `permit` (the peer's tunnel slot) is
+/// held until the relay ends.
+pub fn open_tunnel(request: &mut Request, node: &str, peer: TcpStream, permit: Option<OwnedSemaphorePermit>, idle: Duration) -> Response {
+    let upgrade = hyper::upgrade::on(request);
+    let node = node.to_string();
+    let target = peer.peer_addr().ok();
+    tokio::spawn(async move {
+        let _permit = permit;
+        let upgraded = match upgrade.await {
+            Ok(upgraded) => upgraded,
+            Err(error) => {
+                tracing::warn!(node = %node, %error, "Orion tunnel: the upgrade did not complete");
+                return;
+            }
+        };
+        tracing::info!(node = %node, ?target, "Orion tunnel opened");
+        let opened = Instant::now();
+        let (up, down) = relay(TokioIo::new(upgraded), peer, idle).await;
+        tracing::info!(node = %node, ?target, up, down, seconds = opened.elapsed().as_secs(), "Orion tunnel closed");
+    });
+    (StatusCode::SWITCHING_PROTOCOLS, [(header::CONNECTION, "Upgrade"), (header::UPGRADE, ORION_UPGRADE)]).into_response()
+}
+
+/// Whether the request asks to upgrade to `protocol`: `Connection` names `upgrade`, `Upgrade` names `protocol`.
+pub fn asks_for_upgrade(headers: &HeaderMap, protocol: &str) -> bool {
+    let names =
+        |name: HeaderName, token: &str| headers.get_all(name).iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')).any(|item| item.trim().eq_ignore_ascii_case(token));
+    names(header::UPGRADE, protocol) && names(header::CONNECTION, "upgrade")
+}
+
+/// Copies bytes both ways between `client` and `peer` until both directions are done. A direction
+/// that moves no bytes for `idle` ends, and the other side is shut down with it. Returns the bytes
+/// each way (client to peer, peer to client).
+pub async fn relay<A, B>(client: A, peer: B, idle: Duration) -> (u64, u64)
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
+    let (client_read, client_write) = tokio::io::split(client);
+    let (peer_read, peer_write) = tokio::io::split(peer);
+    tokio::join!(pump(client_read, peer_write, idle), pump(peer_read, client_write, idle))
+}
+
+async fn pump<R, W>(mut from: R, mut to: W, idle: Duration) -> u64
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buffer = vec![0u8; RELAY_BUFFER];
+    let mut moved = 0;
+    loop {
+        let read = match tokio::time::timeout(idle, from.read(&mut buffer)).await {
+            Ok(Ok(read)) if read > 0 => read,
+            _ => break,
+        };
+        if !matches!(tokio::time::timeout(idle, to.write_all(&buffer[..read])).await, Ok(Ok(()))) {
+            break;
+        }
+        moved += read as u64;
+    }
+    let _ = to.shutdown().await;
+    moved
+}
+
+/// How many Orion tunnels each peer has open, at most `TUNNELS_PER_PEER`.
+#[derive(Default)]
+pub struct TunnelLimits {
+    per_peer: Mutex<HashMap<String, Arc<Semaphore>>>,
+}
+
+impl TunnelLimits {
+    /// A slot for one more tunnel to `node`, held until dropped; `None` when it has none left.
+    pub fn acquire(&self, node: &str) -> Option<OwnedSemaphorePermit> {
+        let semaphore = {
+            let mut per_peer = self.per_peer.lock().unwrap_or_else(|error| error.into_inner());
+            per_peer.entry(node.to_string()).or_insert_with(|| Arc::new(Semaphore::new(TUNNELS_PER_PEER))).clone()
+        };
+        semaphore.try_acquire_owned().ok()
+    }
 }
 
 /// Sends `request` to `url` and streams the answer back. Only the headers listed above cross.
@@ -667,5 +858,140 @@ mod tests {
         let request = HttpRequest::builder().uri("/v1/device").body(Body::empty()).expect("request");
         let error = forward(&client(), "raze-1", &format!("http://{closed}/v1/device"), request).await.unwrap_err();
         assert_eq!(error.code.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// A stand-in board agent: its identity document, answered with `status`.
+    async fn fake_board_agent(status: StatusCode) -> u16 {
+        let app = Router::new().route(BOARD_IDENTITY_PATH, axum::routing::get(move || async move { (status, Json(serde_json::json!({ "contract": 1, "serial": "0708c973b00a37bc" }))) }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn the_board_identity_is_read_from_the_peers_board_agent() {
+        let port = fake_board_agent(StatusCode::OK).await;
+        let answer = fetch_board_identity(&client(), "raze-37bc", "127.0.0.1", port).await.expect("identity");
+        assert_eq!(answer.status(), StatusCode::OK);
+        assert_eq!(answer.headers().get(NODE_HEADER).and_then(|v| v.to_str().ok()), Some("raze-37bc"));
+        let text = String::from_utf8(axum::body::to_bytes(answer.into_body(), 1 << 20).await.expect("body").to_vec()).expect("utf8");
+        assert!(text.contains("0708c973b00a37bc"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_without_a_board_agent_is_404_with_the_reason() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("address").port();
+        let error = fetch_board_identity(&client(), "systemcore-3c99", "127.0.0.1", closed).await.unwrap_err();
+        assert_eq!(error.code.status(), StatusCode::NOT_FOUND);
+        assert!(error.message.contains("has no board agent on port"), "{}", error.message);
+
+        let port = fake_board_agent(StatusCode::NOT_FOUND).await;
+        let error = fetch_board_identity(&client(), "raze-37bc", "127.0.0.1", port).await.unwrap_err();
+        assert_eq!(error.code.status(), StatusCode::NOT_FOUND);
+
+        let port = fake_board_agent(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let error = fetch_board_identity(&client(), "raze-37bc", "127.0.0.1", port).await.unwrap_err();
+        assert_eq!(error.code.status(), StatusCode::SERVICE_UNAVAILABLE, "a failing agent is not an absent one");
+    }
+
+    #[test]
+    fn the_orion_port_is_the_one_the_peer_advertises_on_its_link() {
+        let urls = [PeerBaseUrl::new("orion+tcp://172.27.0.1:9300"), PeerBaseUrl::new("orion+tcp://172.31.12.81:9301")];
+        assert_eq!(link_endpoint(&urls, &links()), Some((Ipv4Addr::new(172, 31, 12, 81), 9301)));
+        assert_eq!(link_endpoint(&urls[..1], &links()), None);
+    }
+
+    #[test]
+    fn an_upgrade_names_both_its_connection_and_its_protocol() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive, Upgrade"));
+        headers.insert(header::UPGRADE, HeaderValue::from_static("orion"));
+        assert!(asks_for_upgrade(&headers, ORION_UPGRADE));
+        assert!(!asks_for_upgrade(&headers, "websocket"));
+        headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+        assert!(!asks_for_upgrade(&headers, ORION_UPGRADE), "the connection must ask for it too");
+    }
+
+    #[test]
+    fn a_peer_holds_four_orion_tunnels_at_most() {
+        let limits = TunnelLimits::default();
+        let held: Vec<_> = (0..TUNNELS_PER_PEER).map(|_| limits.acquire("raze-37bc").expect("a slot")).collect();
+        assert!(limits.acquire("raze-37bc").is_none(), "a fifth tunnel is refused");
+        assert!(limits.acquire("systemcore-3c99").is_some(), "another peer has its own slots");
+        drop(held);
+        assert!(limits.acquire("raze-37bc").is_some(), "a closed tunnel frees its slot");
+    }
+
+    #[tokio::test]
+    async fn bytes_are_relayed_both_ways_until_both_sides_close() {
+        let (client, mut client_far) = tokio::io::duplex(64);
+        let (peer, mut peer_far) = tokio::io::duplex(64);
+        let relayed = tokio::spawn(relay(client, peer, Duration::from_secs(5)));
+        client_far.write_all(b"to peer").await.expect("write");
+        let mut to_peer = [0u8; 7];
+        peer_far.read_exact(&mut to_peer).await.expect("read");
+        assert_eq!(&to_peer, b"to peer");
+        peer_far.write_all(b"to client").await.expect("write");
+        let mut to_client = [0u8; 9];
+        client_far.read_exact(&mut to_client).await.expect("read");
+        assert_eq!(&to_client, b"to client");
+        drop(client_far);
+        drop(peer_far);
+        assert_eq!(relayed.await.expect("relay"), (7, 9));
+    }
+
+    #[tokio::test]
+    async fn an_idle_tunnel_is_closed() {
+        let (client, _client_far) = tokio::io::duplex(64);
+        let (peer, _peer_far) = tokio::io::duplex(64);
+        let moved = tokio::time::timeout(Duration::from_secs(2), relay(client, peer, Duration::from_millis(50))).await.expect("closed within the idle time");
+        assert_eq!(moved, (0, 0));
+    }
+
+    /// A stand-in Orion listener: echoes every byte back.
+    async fn echo_listener() -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let (mut read, mut write) = tokio::io::split(stream);
+                    let _ = tokio::io::copy(&mut read, &mut write).await;
+                });
+            }
+        });
+        address
+    }
+
+    #[tokio::test]
+    async fn an_upgrade_is_a_tunnel_to_the_orion_listener() {
+        let target = echo_listener().await;
+        let app = Router::new().fallback(any(move |mut request: Request| async move {
+            let peer = tokio::net::TcpStream::connect(target).await.expect("the echo listener");
+            open_tunnel(&mut request, "raze-37bc", peer, None, Duration::from_secs(5))
+        }));
+        let gateway = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let gateway_address = gateway.local_addr().expect("address");
+        tokio::spawn(async move {
+            let _ = axum::serve(gateway, app).await;
+        });
+
+        let mut stream = tokio::net::TcpStream::connect(gateway_address).await.expect("connect");
+        stream.write_all(b"GET /v1/peers/raze-37bc/orion HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: orion\r\n\r\n").await.expect("request");
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(stream.read_u8().await.expect("response head"));
+        }
+        let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
+        assert!(head.starts_with("http/1.1 101"), "{head}");
+        assert!(head.contains("upgrade: orion"), "{head}");
+
+        stream.write_all(b"orion hello").await.expect("write");
+        let mut echoed = [0u8; 11];
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut echoed)).await.expect("in time").expect("echo");
+        assert_eq!(&echoed, b"orion hello");
     }
 }

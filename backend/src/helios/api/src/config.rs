@@ -68,6 +68,10 @@ pub struct ApiConfig {
     pub peer_nets: Vec<crate::peers::Ipv4Net>,
     /// The HeliOS API ports a discovered peer is probed on while security is open (`peers.rs`).
     pub peer_ports: Vec<u16>,
+    /// The port of a peer's board agent (Atlas's `/.well-known/pd-device`), `HELIOS_BOARD_AGENT_PORT`.
+    pub board_agent_port: u16,
+    /// The port of a peer's Orion listener when its record names none, `HELIOS_ORION_PEER_PORT`.
+    pub orion_peer_port: u16,
 }
 
 impl Default for ApiConfig {
@@ -105,6 +109,8 @@ impl ApiConfig {
             live_streams: crate::live_streams::LiveStreamSettings::default(),
             peer_nets: Vec::new(),
             peer_ports: crate::peers::DEFAULT_PEER_PORTS.to_vec(),
+            board_agent_port: crate::peers::DEFAULT_BOARD_AGENT_PORT,
+            orion_peer_port: crate::peers::DEFAULT_ORION_PORT,
         }
     }
 
@@ -209,6 +215,12 @@ impl ApiConfig {
                 .map(|port| port.trim().parse::<u16>().map_err(|_| anyhow::anyhow!("HELIOS_API_PEER_PORTS takes port numbers, got {port:?}")))
                 .collect::<anyhow::Result<_>>()?;
         }
+        if let Some(value) = env.get("HELIOS_BOARD_AGENT_PORT") {
+            config.board_agent_port = value.trim().parse().map_err(|_| anyhow::anyhow!("HELIOS_BOARD_AGENT_PORT takes a port number, got {value:?}"))?;
+        }
+        if let Some(value) = env.get("HELIOS_ORION_PEER_PORT") {
+            config.orion_peer_port = value.trim().parse().map_err(|_| anyhow::anyhow!("HELIOS_ORION_PEER_PORT takes a port number, got {value:?}"))?;
+        }
         if let Some(value) = env.get("HELIOS_API_PEER_NETS") {
             config.peer_nets = value
                 .split(',')
@@ -253,6 +265,16 @@ mod tests {
         assert_eq!(config.peer_nets.len(), 2);
         assert!(ApiConfig::from_vars([("HELIOS_API_PEER_NETS", "172.31.12.80")]).is_err(), "a network needs its prefix");
         assert!(ApiConfig::from_vars([("HELIOS_API_PEER_NETS", "")]).expect("unset").peer_nets.is_empty());
+    }
+
+    #[test]
+    fn peer_agent_and_orion_ports_are_read_from_the_environment() {
+        let config = ApiConfig::from_vars(std::iter::empty::<(String, String)>()).expect("config");
+        assert_eq!((config.board_agent_port, config.orion_peer_port), (5899, 9200));
+        let config = ApiConfig::from_vars([("HELIOS_BOARD_AGENT_PORT", "5901"), ("HELIOS_ORION_PEER_PORT", " 9300 ")]).expect("config");
+        assert_eq!((config.board_agent_port, config.orion_peer_port), (5901, 9300));
+        assert!(ApiConfig::from_vars([("HELIOS_BOARD_AGENT_PORT", "agent")]).is_err());
+        assert!(ApiConfig::from_vars([("HELIOS_ORION_PEER_PORT", "70000")]).is_err());
     }
 
     #[test]

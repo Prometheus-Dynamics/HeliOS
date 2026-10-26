@@ -1530,6 +1530,8 @@ dependencies = [
  "helios-recorder",
  "helios-robot",
  "hex",
+ "hyper",
+ "hyper-util",
  "lemnos-ipc",
  "libc",
  "mcap",

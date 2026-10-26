@@ -57,6 +57,8 @@ pub struct AppState {
     pub orion: orion::Orion,
     /// The HTTP client the gateway proxies to the robot's other nodes with (`peers.rs`).
     pub peer_client: reqwest::Client,
+    /// The Orion tunnels the gateway holds open, per peer (`peers.rs`).
+    pub tunnels: peers::TunnelLimits,
     pub store: Arc<store::Store>,
     pub events: Arc<events::EventHub>,
     /// One Styx control client per camera, for camera controls and their persisted values.
@@ -109,6 +111,7 @@ impl AppState {
             shutdown: tokio_util::sync::CancellationToken::new(),
             orion: orion_link,
             peer_client: peers::client(),
+            tunnels: peers::TunnelLimits::default(),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
             calibrations: calibration_capture::CalibrationSessions::default(),

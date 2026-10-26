@@ -239,3 +239,13 @@ async fn password_change_ends_other_sessions() {
     assert_eq!(send(&state, "GET", "/v1/update/uploads", &[("cookie", &fresh)], None).await.status, StatusCode::OK);
     assert_eq!(send(&state, "POST", "/v1/auth/login", &[], Some(json!({ "password": "battery staple" }))).await.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn the_orion_tunnel_is_closed_while_secured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    let (cookie, _csrf) = secure(&state).await;
+    // Refused before any peer is looked up, whatever the request asks.
+    let upgrade = [("cookie", cookie.as_str()), ("connection", "Upgrade"), ("upgrade", "orion")];
+    assert_eq!(send(&state, "GET", "/v1/peers/raze-37bc/orion", &upgrade, None).await.status, StatusCode::FORBIDDEN);
+}
