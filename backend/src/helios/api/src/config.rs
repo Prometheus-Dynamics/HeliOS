@@ -10,8 +10,10 @@ use helios_layout::{BoardContract, Layout};
 pub const DEFAULT_BIND: &str = "127.0.0.1:5800";
 pub const DEFAULT_NODE_ID: &str = "node-local";
 
-/// systemd units the API reports and may restart.
+/// systemd units the API reports and may restart, on the owner image.
 pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
+/// The same units on a guest package: its Orion is `helios-orion.service` (the SystemCore build).
+pub const GUEST_MANAGED_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -35,6 +37,16 @@ pub struct ApiConfig {
     /// The device package's files (identity, update writer, camera description). `None` on a
     /// guest, which has none: the features that need them report that they are not available.
     pub board: Option<BoardContract>,
+    /// The systemd units the services list reports and may restart (`MANAGED_UNITS` on the owner,
+    /// `GUEST_MANAGED_UNITS` on a guest).
+    pub managed_units: &'static [&'static str],
+    /// A guest's security (sign-in and tokens) is off unless this is set: the host owns access
+    /// there. `HELIOS_API_GUEST_SECURITY=on` turns it on.
+    pub guest_security: bool,
+    /// Unit tests have no Orion: these stand in for the lemnosd device classes Orion reports
+    /// (`None` reads Orion).
+    #[cfg(test)]
+    pub test_lemnos_classes: Option<std::collections::BTreeSet<String>>,
     /// `Access-Control-Allow-Origin` value; `None` sends no CORS headers.
     pub cors_origin: Option<String>,
     /// Largest accepted OTA upload.
@@ -74,6 +86,10 @@ impl ApiConfig {
             board_update_systemd_run: true,
             ui_dir: Some(layout.ui_dir()),
             board: layout.board().cloned(),
+            managed_units: if layout.board().is_some() { MANAGED_UNITS } else { GUEST_MANAGED_UNITS },
+            guest_security: false,
+            #[cfg(test)]
+            test_lemnos_classes: None,
             cors_origin: None,
             max_upload_bytes: 8 << 30,
             auth_file: layout.auth_file(),
@@ -127,6 +143,13 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_API_UI_DIR") {
             config.ui_dir = if value == "off" { None } else { Some(value.into()) };
+        }
+        if let Some(value) = env.get("HELIOS_API_GUEST_SECURITY") {
+            config.guest_security = match value.as_str() {
+                "on" | "1" | "true" => true,
+                "off" | "0" | "false" => false,
+                other => anyhow::bail!("HELIOS_API_GUEST_SECURITY must be on or off, got {other}"),
+            };
         }
         if let Some(value) = env.get("HELIOS_API_CORS_ORIGIN") {
             config.cors_origin = Some(value.clone());
@@ -229,6 +252,17 @@ mod tests {
         assert_eq!(config.ui_dir, Some(PathBuf::from("/usr/local/share/helios/ui")));
         assert_eq!(config.startup_file, PathBuf::from("/usr/local/etc/helios/startup.toml"));
         assert_eq!(config.layout.plans_dir(), PathBuf::from("/usr/local/var/lib/helios/state/plans"));
+    }
+
+    #[test]
+    fn a_guest_manages_its_own_units_and_keeps_security_off() {
+        let image = ApiConfig::from_vars(std::iter::empty::<(String, String)>()).expect("config");
+        assert_eq!(image.managed_units, MANAGED_UNITS);
+        assert!(!image.guest_security);
+        let guest = ApiConfig::from_vars([("HELIOS_LAYOUT_PROFILE", "guest"), ("HELIOS_API_GUEST_SECURITY", "on")]).expect("config");
+        assert_eq!(guest.managed_units, GUEST_MANAGED_UNITS);
+        assert!(guest.guest_security);
+        assert!(ApiConfig::from_vars([("HELIOS_API_GUEST_SECURITY", "maybe")]).is_err());
     }
 
     #[test]

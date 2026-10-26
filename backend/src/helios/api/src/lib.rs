@@ -10,6 +10,7 @@ pub mod auth_state;
 pub mod board_update;
 pub mod calibration_capture;
 pub mod camera_context;
+pub mod capabilities;
 pub mod camera_uncertainty;
 pub mod camera_controls;
 pub mod camera_preview;

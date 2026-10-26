@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     API_VERSION, SharedState, VERSION,
     auth::Caller,
-    config::MANAGED_UNITS,
+    capabilities::{self, feature},
     error::{ApiError, ApiResult},
     host::{self, DiskUsage, UnitStatus, now_ms, read_trimmed},
     orion::{enum_name, label_map},
@@ -75,8 +75,11 @@ pub fn identity_document(board: Option<&helios_layout::BoardContract>, layout: &
         Some(doc) => (doc, "board"),
         None => (synthesized_identity(board, layout), "helios-api"),
     };
+    // The OTA path is HeliOS's own writer: only an owner device has one.
+    let owner = board.is_some();
     if let Some(object) = doc.as_object_mut() {
-        if let Some(methods) = object.get_mut("update_methods").and_then(|m| m.as_array_mut())
+        if owner
+            && let Some(methods) = object.get_mut("update_methods").and_then(|m| m.as_array_mut())
             && !methods.iter().any(|m| m == "helios-ota")
         {
             methods.push(serde_json::Value::from("helios-ota"));
@@ -117,7 +120,8 @@ fn synthesized_identity(board: Option<&helios_layout::BoardContract>, layout: &h
         "hostname": hostname(),
         "os": { "name": os.get("ID"), "version": os.get("VERSION_ID").or_else(|| os.get("VERSION")) },
         "device_package": { "version": package.get("BOARD_PACKAGE_VERSION"), "commit": package.get("BOARD_PACKAGE_COMMIT").filter(|c| !c.is_empty()) },
-        "update_methods": ["image-write"],
+        // A guest's OS and HeliOS are updated by the host's package manager.
+        "update_methods": if board.is_some() { vec!["image-write"] } else { vec!["host-package"] },
         "manage_url": serde_json::Value::Null,
         "macs": ethernet_macs(),
     })
@@ -186,6 +190,9 @@ pub struct Device {
     pub api: &'static str,
     pub orion: OrionStatus,
     pub clock: Option<serde_json::Value>,
+    /// The profile, the host and the features this device has (`capabilities.rs`).
+    #[serde(flatten)]
+    pub capabilities: capabilities::Capabilities,
 }
 
 pub async fn device(State(state): State<SharedState>) -> Json<Device> {
@@ -200,10 +207,12 @@ pub async fn device(State(state): State<SharedState>) -> Json<Device> {
         },
         Err(error) => OrionStatus { reachable: false, desired_revision: None, observed_revision: None, peers_ready: None, peers_configured: None, message: Some(error.message) },
     };
-    let clock = match state.orion.view().await {
+    let view = state.orion.view().await;
+    let clock = match &view {
         Ok(view) => view.nodes.get(&state.config.node_id).and_then(|node| node.clock.as_ref()).map(clock_json),
         Err(_) => None,
     };
+    let capabilities = capabilities::now(&state.config, view.as_ref().ok());
     Json(Device {
         node_id: state.config.node_id.clone(),
         hostname: hostname(),
@@ -216,6 +225,7 @@ pub async fn device(State(state): State<SharedState>) -> Json<Device> {
         api: VERSION,
         orion,
         clock,
+        capabilities,
     })
 }
 
@@ -424,9 +434,10 @@ pub async fn metrics(State(state): State<SharedState>) -> Json<Metrics> {
     Json(metrics_now(&state).await)
 }
 
-/// The full helios-diagnostics health report (`helios-diagnostics doctor`).
-pub async fn health_report() -> ApiResult<Json<serde_json::Value>> {
-    let report = tokio::task::spawn_blocking(|| helios_diagnostics::collect_health_report(&helios_diagnostics::config::DiagnosticsConfig::default()))
+/// The full helios-diagnostics health report (`helios-diagnostics doctor`), for this process's layout.
+pub async fn health_report(State(state): State<SharedState>) -> ApiResult<Json<serde_json::Value>> {
+    let config = helios_diagnostics::config::DiagnosticsConfig::from_layout(&state.config.layout);
+    let report = tokio::task::spawn_blocking(move || helios_diagnostics::collect_health_report(&config))
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?
         .map_err(|error| ApiError::internal(format!("health report failed: {error:#}")))?;
@@ -435,21 +446,21 @@ pub async fn health_report() -> ApiResult<Json<serde_json::Value>> {
 
 // --- services ------------------------------------------------------------------
 
-pub async fn services() -> ApiResult<Json<Vec<UnitStatus>>> {
+pub async fn services(State(state): State<SharedState>) -> ApiResult<Json<Vec<UnitStatus>>> {
     let mut out = Vec::new();
-    for unit in MANAGED_UNITS {
+    for unit in state.config.managed_units {
         out.push(host::unit_status(unit).await?);
     }
     Ok(Json(out))
 }
 
-fn managed_unit(name: &str) -> ApiResult<&'static str> {
+fn managed_unit(state: &SharedState, name: &str) -> ApiResult<&'static str> {
     let wanted = if name.ends_with(".service") { name.to_string() } else { format!("{name}.service") };
-    MANAGED_UNITS.iter().copied().find(|unit| *unit == wanted).ok_or_else(|| ApiError::not_found(format!("{name} is not a HeliOS service")))
+    state.config.managed_units.iter().copied().find(|unit| *unit == wanted).ok_or_else(|| ApiError::not_found(format!("{name} is not a HeliOS service")))
 }
 
-pub async fn restart_service(Path(unit): Path<String>) -> ApiResult<(StatusCode, Json<UnitStatus>)> {
-    let unit = managed_unit(&unit)?;
+pub async fn restart_service(State(state): State<SharedState>, Path(unit): Path<String>) -> ApiResult<(StatusCode, Json<UnitStatus>)> {
+    let unit = managed_unit(&state, &unit)?;
     if unit == "helios-api.service" {
         // Restarting ourselves: answer first.
         tokio::spawn(async {
@@ -468,17 +479,21 @@ pub struct Accepted {
     pub message: String,
 }
 
-pub async fn reboot() -> (StatusCode, Json<Accepted>) {
+pub async fn reboot(State(state): State<SharedState>) -> ApiResult<(StatusCode, Json<Accepted>)> {
+    capabilities::require(&state, feature::REBOOT).await?;
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         if let Err(error) = host::systemctl(&["reboot"]).await {
             tracing::error!(error = %error.message, "reboot failed");
         }
     });
-    (StatusCode::ACCEPTED, Json(Accepted { accepted: true, message: "rebooting".into() }))
+    Ok((StatusCode::ACCEPTED, Json(Accepted { accepted: true, message: "rebooting".into() })))
 }
 
-pub async fn safe_mode() -> ApiError {
+pub async fn safe_mode(State(state): State<SharedState>) -> ApiError {
+    if let Err(error) = capabilities::require(&state, feature::SAFE_MODE).await {
+        return error;
+    }
     ApiError::not_available(
         "safe mode is not available on this device",
         "a safe-mode target in the HeliOS image (stop helios-engine and helios-peripherals, keep orion-node, the updater and the API) plus a boot flag the updater honours",
