@@ -1,0 +1,18 @@
+[package]
+name = "helios-layout"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "helios_layout"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
