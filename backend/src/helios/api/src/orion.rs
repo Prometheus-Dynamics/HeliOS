@@ -66,6 +66,11 @@ impl Orion {
         }
     }
 
+    /// Orion's peer discovery: the robot's cluster and the peers discovery found (`docs/discovery.md`).
+    pub async fn discovery(&self) -> ApiResult<orion::control_plane::DiscoverySnapshot> {
+        self.raw_client()?.query_discovery().await.map_err(|error| unreachable(&self.socket, error))
+    }
+
     pub fn stream_socket(&self) -> &PathBuf {
         &self.stream_socket
     }

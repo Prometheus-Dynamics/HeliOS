@@ -22,7 +22,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{any, delete, get, post, put},
 };
 
 use crate::{SharedState, error::ApiError, events};
@@ -53,6 +53,9 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/device/leds/locate", post(leds::locate))
         .route("/v1/device/leds/preview", post(leds::preview))
         .route("/v1/nodes", get(system::nodes))
+        // The robot's other nodes: the list, and the gateway to each one's HeliOS API
+        .route("/v1/peers", get(crate::peers::list))
+        .route("/v1/peers/{node}/{*rest}", any(crate::peers::proxy))
         .route("/v1/metrics", get(system::metrics))
         .route("/v1/system/health", get(system::health_report))
         .route("/v1/system/services", get(system::services))
