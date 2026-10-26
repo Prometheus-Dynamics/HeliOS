@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -16,6 +16,7 @@ use chrono::Utc;
 
 use crate::{
     capture::{self, ClipRequest},
+    catalog,
     error::RecorderError,
     frames::{self, FrameSource},
     host::HostSender,
@@ -82,15 +83,19 @@ impl Recorder {
         }
         *active = None;
 
-        let settings = request.settings;
+        let mut settings = request.settings;
         let dir = storage::resolve_dir(&settings)?;
         let free = storage::check_reserve(&dir, settings.reserve_bytes)?;
+        let budget = storage::budget_for(&settings, &dir)?;
+        catalog::prune(&dir, budget, None)?;
+        settings.max_total_bytes = Some(budget);
         let stem = naming::session_stem(&request.board, &request.camera_label, Utc::now(), &request.commit);
         let stem = match request.label.as_deref().map(str::trim).filter(|label| !label.is_empty()) {
             Some(label) => format!("{stem}-{}", naming::sanitize(label)),
             None => stem,
         };
         let session = naming::unused_session_stem(&dir, &stem);
+        let claim = catalog::Claim::new(&session);
         let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
         let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
         let format = format!("{} {}x{}", delivered.format, delivered.size.0, delivered.size.1);
@@ -116,6 +121,7 @@ impl Recorder {
                 messages_dropped: 0,
                 free_bytes: Some(free),
                 reserve_bytes: settings.reserve_bytes,
+                max_total_bytes: budget,
                 max_fps: settings.max_fps,
                 frames: settings.frames,
                 format,
@@ -124,6 +130,7 @@ impl Recorder {
                 error: None,
             }),
             stop: AtomicBool::new(false),
+            max_total_bytes: AtomicU64::new(budget),
             host_dropped,
         });
         let status = shared.lock().clone();
@@ -134,6 +141,7 @@ impl Recorder {
             first,
             dir,
             session: session.clone(),
+            claim,
             camera: request.camera_id,
             header,
             options,
@@ -160,6 +168,15 @@ impl Recorder {
             status.state = RecordingState::Finishing;
         }
         Ok(status.clone())
+    }
+
+    /// Sets the recordings folder's budget for the running recording (it applies from the next
+    /// part on). Nothing is deleted here: the caller prunes the folder for the rest.
+    pub fn set_max_total_bytes(&self, bytes: u64) {
+        let active = self.active.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(current) = active.as_ref().filter(|current| current.shared.lock().state.is_active()) {
+            current.shared.max_total_bytes.store(bytes, Ordering::Relaxed);
+        }
     }
 
     /// The running recording, or the last one until the next starts.

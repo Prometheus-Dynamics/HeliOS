@@ -70,6 +70,8 @@ pub struct PartWriter {
     channels: HashMap<String, ChannelId>,
     frames_offered: u64,
     messages_offered: u64,
+    /// The session is not pruned while this part is open or being completed.
+    _claim: catalog::Claim,
 }
 
 /// A part's counts (see [`PartWriter::counts`]).
@@ -85,6 +87,7 @@ impl PartWriter {
     /// Opens part `index` of session `session` (its stem) in `dir`, with the start-time records of
     /// `info` and the camera's `header`.
     pub fn open(dir: &Path, session: &str, camera: &str, index: u32, header: &RecordingHeader, options: RecorderOptions, info: &RecordingInfo) -> Result<Self, RecorderError> {
+        let claim = catalog::Claim::new(session);
         let stem = naming::part_stem(session, index);
         let file = format!("{stem}.mcap");
         let started_at_ms = unix_ms();
@@ -102,6 +105,7 @@ impl PartWriter {
             channels: HashMap::new(),
             frames_offered: 0,
             messages_offered: 0,
+            _claim: claim,
         };
         part.write_start_records(info)?;
         Ok(part)

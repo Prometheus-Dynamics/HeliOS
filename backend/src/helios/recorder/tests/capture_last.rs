@@ -46,7 +46,17 @@ fn settings(dir: &Path) -> RecorderSettings {
 }
 
 fn clip(info: &RecordingInfo) -> ClipRequest<'_> {
-    ClipRequest { camera_id: "cam", board: "test-board", camera_label: "cam", commit: "abc1234", info, compression: true, queue_bytes: 64 * MIB as usize, max_fps: Some(30.0) }
+    ClipRequest {
+        camera_id: "cam",
+        board: "test-board",
+        camera_label: "cam",
+        commit: "abc1234",
+        info,
+        compression: true,
+        queue_bytes: 64 * MIB as usize,
+        max_fps: Some(30.0),
+        max_total_bytes: 1 << 40,
+    }
 }
 
 /// Frames and metadata names of an MCAP part.

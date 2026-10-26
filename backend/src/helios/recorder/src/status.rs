@@ -70,6 +70,8 @@ pub struct RecordingStatus {
     pub messages_dropped: u64,
     pub free_bytes: Option<u64>,
     pub reserve_bytes: u64,
+    /// The recordings folder's budget now (the effective `max_total_bytes`).
+    pub max_total_bytes: u64,
     pub max_fps: Option<f64>,
     /// What the frames are (`raw` or `luma`), and the delivered format and size (`BYR2 1280x800`).
     pub frames: RecordFrames,

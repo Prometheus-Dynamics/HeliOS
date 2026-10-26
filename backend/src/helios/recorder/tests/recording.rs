@@ -234,6 +234,36 @@ fn parts_rotate_at_the_size_cap_and_each_is_complete() {
 }
 
 #[test]
+fn a_new_part_makes_room_by_deleting_the_oldest_other_recording() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("cam.styx.sock");
+    let _camera = luma_camera(&socket);
+    let recordings = dir.path().join("rec");
+    std::fs::create_dir_all(&recordings).expect("recordings dir");
+    let old = recordings.join("raze-1-cam-20260101T000000Z-aaaaaaa.mcap");
+    std::fs::write(&old, vec![0u8; MIB as usize]).expect("an older recording");
+    std::fs::write(recordings.join("notes.txt"), b"not a recording").expect("a file of the user's");
+    let long_ago = std::time::UNIX_EPOCH + Duration::from_secs(1_000);
+    std::fs::File::options().write(true).open(&old).expect("open").set_modified(long_ago).expect("mtime");
+    let recorder = Recorder::default();
+    // 1.5 MiB for the folder: the older 1 MiB recording fits beside the first part until it grows.
+    let budgeted = RecorderSettings { compression: false, max_file_bytes: MIB, max_total_bytes: Some(MIB * 3 / 2), ..settings(&recordings) };
+    let started = recorder.start(request(&socket, budgeted)).expect("start");
+    assert_eq!(started.max_total_bytes, MIB * 3 / 2, "the budget is in the status");
+    assert!(old.exists(), "it fits the budget: nothing is deleted at the start");
+
+    std::thread::sleep(Duration::from_millis(2600));
+    recorder.stop(&started.id).expect("stop");
+    let done = wait_idle(&recorder, Duration::from_secs(30));
+    assert_eq!(done.state, RecordingState::Stopped, "{done:?}");
+    assert!(done.parts.len() >= 2, "rotated: {:?}", done.parts);
+    assert!(!old.exists(), "the first rotation deleted the older recording");
+    assert!(recordings.join("notes.txt").exists(), "a file that is not a recording is kept");
+    let files = mcaps(&recordings);
+    assert_eq!(files.len(), done.parts.len(), "every part of this recording is kept: {files:?}");
+}
+
+#[test]
 fn a_second_recording_is_refused_while_one_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let socket = dir.path().join("cam.styx.sock");

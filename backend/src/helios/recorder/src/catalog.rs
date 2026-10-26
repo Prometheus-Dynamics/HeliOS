@@ -1,10 +1,13 @@
 //! Stored recordings in the recordings directory: list them with their summaries, find one by
-//! id for download, delete one.
+//! id for download, delete one, and keep the folder within its budget by deleting whole
+//! recordings, oldest first.
 
 use std::{
-    fs,
+    collections::BTreeMap,
+    fs, io,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    sync::{Mutex, MutexGuard},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -13,6 +16,107 @@ use crate::{naming, status::PartSummary};
 
 const MCAP_EXT: &str = "mcap";
 const SUMMARY_SUFFIX: &str = ".summary.json";
+
+/// Sessions being written now (a recording's part, a clip), by session stem: never pruned.
+static WRITING: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
+fn writing() -> MutexGuard<'static, BTreeMap<String, usize>> {
+    WRITING.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Marks a session as being written until it is dropped.
+pub struct Claim(String);
+
+impl Claim {
+    pub fn new(session: &str) -> Self {
+        *writing().entry(session.to_string()).or_default() += 1;
+        Self(session.to_string())
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        let mut writing = writing();
+        if let Some(count) = writing.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                writing.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// One recording on disk: all its parts and their summaries.
+struct Session {
+    stem: String,
+    files: Vec<PathBuf>,
+    bytes: u64,
+    /// The last write to any of its files.
+    modified: SystemTime,
+}
+
+/// The HeliOS recordings in `dir` (files named as recordings are, see [`naming::session_of`]),
+/// grouped by session. Other files are not listed.
+fn sessions(dir: &Path) -> io::Result<Vec<Session>> {
+    let mut by_session: BTreeMap<String, Session> = BTreeMap::new();
+    for entry in fs::read_dir(dir)?.filter_map(Result::ok) {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else { continue };
+        let stem = match name.strip_suffix(SUMMARY_SUFFIX) {
+            Some(stem) => Some(stem),
+            None => name.strip_suffix(".mcap"),
+        };
+        let Some(session) = stem.and_then(naming::session_of) else { continue };
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = meta.modified().unwrap_or(UNIX_EPOCH);
+        let item = by_session.entry(session.to_string()).or_insert_with(|| Session { stem: session.to_string(), files: Vec::new(), bytes: 0, modified: UNIX_EPOCH });
+        item.files.push(path);
+        item.bytes += meta.len();
+        item.modified = item.modified.max(modified);
+    }
+    Ok(by_session.into_values().collect())
+}
+
+/// Bytes held by the HeliOS recordings in `dir`.
+pub fn recordings_bytes(dir: &Path) -> io::Result<u64> {
+    Ok(sessions(dir)?.iter().map(|session| session.bytes).sum())
+}
+
+/// What [`prune`] deleted: the sessions (whole recordings), and the bytes they held.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Pruned {
+    pub sessions: Vec<String>,
+    pub bytes: u64,
+}
+
+/// Deletes whole recordings, least recently written first, until the HeliOS recordings in `dir`
+/// hold at most `budget` bytes. The session `keep` and any session being written are never
+/// deleted, and files that are not HeliOS recordings are never touched. The folder stays above
+/// the budget when only those are left.
+pub fn prune(dir: &Path, budget: u64, keep: Option<&str>) -> io::Result<Pruned> {
+    let mut sessions = sessions(dir)?;
+    let mut total: u64 = sessions.iter().map(|session| session.bytes).sum();
+    sessions.sort_by(|a, b| a.modified.cmp(&b.modified).then_with(|| a.stem.cmp(&b.stem)));
+    let mut pruned = Pruned::default();
+    for session in sessions {
+        if total <= budget {
+            break;
+        }
+        if keep == Some(session.stem.as_str()) || writing().contains_key(&session.stem) {
+            continue;
+        }
+        for file in &session.files {
+            fs::remove_file(file)?;
+        }
+        total -= session.bytes;
+        pruned.bytes += session.bytes;
+        pruned.sessions.push(session.stem);
+    }
+    Ok(pruned)
+}
 
 /// One MCAP part on disk. `summary` is absent for a part that did not finish (power lost).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -94,6 +198,69 @@ mod tests {
             messages_dropped: 0,
             stop_reason: Some("requested".into()),
         }
+    }
+
+    /// A file of `bytes` bytes, last written `modified_s` seconds after the epoch.
+    fn file_at(dir: &Path, name: &str, bytes: usize, modified_s: u64) {
+        let path = dir.join(name);
+        fs::write(&path, vec![b'x'; bytes]).expect("write");
+        let at = UNIX_EPOCH + std::time::Duration::from_secs(modified_s);
+        fs::OpenOptions::new().write(true).open(&path).expect("open").set_modified(at).expect("mtime");
+    }
+
+    const OLD: &str = "raze-1-cam-20260101T000000Z-aaaaaaa";
+    const MIDDLE: &str = "raze-1-cam-20260102T000000Z-bbbbbbb";
+    const NEW: &str = "raze-1-cam-20260103T000000Z-ccccccc";
+
+    #[test]
+    fn prune_deletes_the_oldest_whole_recordings_until_the_budget_holds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path();
+        // OLD has two parts (both go together), MIDDLE and NEW one each.
+        file_at(path, &format!("{OLD}.mcap"), 100, 1_000);
+        file_at(path, &format!("{OLD}.summary.json"), 10, 1_000);
+        file_at(path, &format!("{OLD}-part2.mcap"), 100, 1_100);
+        file_at(path, &format!("{MIDDLE}.mcap"), 100, 2_000);
+        file_at(path, &format!("{NEW}.mcap"), 100, 3_000);
+        assert_eq!(recordings_bytes(path).expect("bytes"), 410);
+        let pruned = prune(path, 250, None).expect("prune");
+        assert_eq!(pruned, Pruned { sessions: vec![OLD.to_string()], bytes: 210 });
+        assert!(!path.join(format!("{OLD}-part2.mcap")).exists(), "the whole recording goes, not one part");
+        assert!(path.join(format!("{MIDDLE}.mcap")).exists());
+        assert_eq!(recordings_bytes(path).expect("bytes"), 200);
+        assert!(prune(path, 250, None).expect("prune again").sessions.is_empty(), "under the budget: nothing more");
+    }
+
+    #[test]
+    fn prune_keeps_the_recording_being_written_and_claimed_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path();
+        file_at(path, &format!("{OLD}.mcap"), 100, 1_000);
+        file_at(path, &format!("{MIDDLE}.mcap"), 100, 2_000);
+        file_at(path, &format!("{NEW}.mcap"), 100, 3_000);
+        let claim = Claim::new(OLD);
+        let pruned = prune(path, 100, Some(MIDDLE)).expect("prune");
+        assert_eq!(pruned.sessions, vec![NEW.to_string()], "OLD is claimed, MIDDLE is kept, so NEW goes");
+        drop(claim);
+        assert_eq!(prune(path, 100, Some(MIDDLE)).expect("prune").sessions, vec![OLD.to_string()], "released, OLD goes");
+        assert!(path.join(format!("{MIDDLE}.mcap")).exists());
+    }
+
+    #[test]
+    fn prune_never_touches_files_that_are_not_recordings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path();
+        file_at(path, "notes.txt", 500, 1_000);
+        file_at(path, "foreign-export.mcap", 500, 1_000);
+        file_at(path, "backup.summary.json", 500, 1_000);
+        file_at(path, &format!("{OLD}.mcap"), 100, 2_000);
+        fs::create_dir(path.join(format!("{MIDDLE}.mcap"))).expect("a directory with a recording's name");
+        let pruned = prune(path, 0, None).expect("prune");
+        assert_eq!(pruned.sessions, vec![OLD.to_string()]);
+        for kept in ["notes.txt", "foreign-export.mcap", "backup.summary.json"] {
+            assert!(path.join(kept).exists(), "{kept} is not a HeliOS recording");
+        }
+        assert!(path.join(format!("{MIDDLE}.mcap")).is_dir());
     }
 
     #[test]

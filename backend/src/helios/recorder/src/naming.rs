@@ -34,6 +34,29 @@ pub fn sanitize(part: &str) -> String {
     if cleaned.is_empty() { "x".into() } else { cleaned }
 }
 
+/// The session a stored file belongs to, from its stem: the stem without a `-partN` suffix. `None`
+/// when the stem is not a HeliOS recording's, which has the `<board>-<camera>-<UTC start>-<commit>`
+/// shape (a clip's `-last` and a label come after the commit).
+pub fn session_of(stem: &str) -> Option<&str> {
+    let session = match stem.rfind("-part") {
+        Some(at) if is_part_number(&stem[at + "-part".len()..]) => &stem[..at],
+        _ => stem,
+    };
+    let segments: Vec<&str> = session.split('-').collect();
+    let started = segments.iter().enumerate().any(|(index, segment)| index >= 1 && index + 1 < segments.len() && is_stamp(segment));
+    started.then_some(session)
+}
+
+fn is_part_number(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
+}
+
+/// `20261019T101530Z`.
+fn is_stamp(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    bytes.len() == 16 && bytes[8] == b'T' && bytes[15] == b'Z' && segment[..8].chars().all(|c| c.is_ascii_digit()) && segment[9..15].chars().all(|c| c.is_ascii_digit())
+}
+
 /// A recording id as the API takes it in paths: letters, digits, `_`, `-` and `.`, not starting
 /// with `.`, at most 160 characters.
 pub fn is_valid_id(id: &str) -> bool {
@@ -53,6 +76,20 @@ mod tests {
         assert_eq!(part_stem(&stem, 1), stem);
         assert_eq!(part_stem(&stem, 2), format!("{stem}-part2"));
         assert!(session_stem("b", "c", started, "").ends_with("-nocommit"));
+    }
+
+    #[test]
+    fn a_stored_file_is_a_recording_only_when_its_name_has_a_start() {
+        let stem = "raze-1-cam-20261019T101530Z-86f917e";
+        assert_eq!(session_of(stem), Some(stem));
+        assert_eq!(session_of(&format!("{stem}-part3")), Some(stem));
+        let clip = format!("{stem}-last");
+        assert_eq!(session_of(&clip), Some(clip.as_str()));
+        let second = format!("{stem}-2");
+        assert_eq!(session_of(&format!("{second}-part2")), Some(second.as_str()));
+        assert_eq!(session_of("notes"), None);
+        assert_eq!(session_of("raze-1-cam-20261019T101530Z"), None, "a commit is part of the name");
+        assert_eq!(session_of("raze-1-cam-2026-10-19-86f917e"), None);
     }
 
     #[test]

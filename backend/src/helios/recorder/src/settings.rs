@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use helios_layout::Layout;
+use helios_layout::{Layout, Profile};
 use serde::{Deserialize, Serialize};
 
 pub const GIB: u64 = 1 << 30;
@@ -33,6 +33,14 @@ pub struct RecorderSettings {
     pub fallback_dir: PathBuf,
     /// Free space kept on the volume: a recording is refused, or stopped, below it.
     pub reserve_bytes: u64,
+    /// Most the recordings folder may hold. Before a new part is started, the oldest finished
+    /// recordings are deleted until it fits (a recording being written is never deleted, so the
+    /// folder can exceed this by that one recording). `None`: the default for the medium, see
+    /// [`storage::default_budget`]; the effective value is in the recorder's status.
+    pub max_total_bytes: Option<u64>,
+    /// The device's own storage is a guest's (a small volume under the package's prefix), so its
+    /// default budget is smaller. Set from the layout.
+    pub guest_storage: bool,
     /// A part is closed and the next one started above this size.
     pub max_file_bytes: u64,
     /// ... or after this long.
@@ -78,6 +86,8 @@ impl RecorderSettings {
             usb_roots: layout.removable_media_roots(),
             fallback_dir: layout.fallback_recordings_dir(),
             reserve_bytes: 2 * GIB,
+            max_total_bytes: None,
+            guest_storage: layout.profile() == Profile::Guest,
             max_file_bytes: 2 * GIB,
             max_file_seconds: 600,
             max_fps: Some(30.0),
@@ -108,6 +118,9 @@ impl RecorderSettings {
         }
         if self.max_file_bytes < MIB {
             return Err("max_file_bytes must be at least 1 MiB".into());
+        }
+        if self.max_total_bytes.is_some_and(|bytes| bytes < MIB) {
+            return Err("max_total_bytes must be at least 1 MiB (or null for the device's default)".into());
         }
         if !(1..=86_400).contains(&self.max_file_seconds) {
             return Err("max_file_seconds must be 1 to 86400".into());
@@ -145,11 +158,21 @@ mod tests {
         assert!(settings.compression);
         assert!(settings.queue_bytes >= 64 * MIB as usize);
         assert_eq!(settings.reserve_bytes, 2 * GIB);
+        assert_eq!((settings.max_total_bytes, settings.guest_storage), (None, false));
+    }
+
+    #[test]
+    fn a_guest_layout_is_marked_as_guest_storage() {
+        let guest = RecorderSettings::for_layout(&Layout::guest("/usr/local"));
+        assert!(guest.guest_storage);
+        assert!(!RecorderSettings::for_layout(&Layout::image()).guest_storage);
     }
 
     #[test]
     fn out_of_range_values_are_refused() {
         assert!(RecorderSettings { max_fps: Some(0.0), ..RecorderSettings::default() }.validate().is_err());
+        assert!(RecorderSettings { max_total_bytes: Some(1024), ..RecorderSettings::default() }.validate().is_err());
+        assert!(RecorderSettings { max_total_bytes: Some(MIB), ..RecorderSettings::default() }.validate().is_ok());
         assert!(RecorderSettings { max_file_bytes: 1024, ..RecorderSettings::default() }.validate().is_err());
         assert!(RecorderSettings { storage_dir: Some("relative".into()), ..RecorderSettings::default() }.validate().is_err());
         assert!(RecorderSettings { imu_period_ms: 0, ..RecorderSettings::default() }.validate().is_err());
