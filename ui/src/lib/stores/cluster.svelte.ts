@@ -17,6 +17,7 @@ import { MOCK } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
 import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, PipelineInput, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
 import { toasts } from "./toasts.svelte";
+import { blockingStage } from "#lib/status/chain.js";
 
 interface FeedData {
   width: number;
@@ -271,6 +272,10 @@ class ClusterStore {
     const items: { tone: "error" | "warning"; text: string; href: string }[] = [];
     for (const w of this.workloads.filter((x) => x.state === "quarantined")) {
       items.push({ tone: "error", text: `${w.name} is quarantined after ${w.restarts} restarts`, href: `/pipelines/${w.id}` });
+    }
+    for (const c of this.cameras) {
+      const stop = blockingStage(c.status);
+      if (stop?.state === "blocked") items.push({ tone: "error", text: `${c.name}: ${stop.reason}`, href: `/cameras/${c.resourceId}` });
     }
     for (const n of this.nodes.filter((x) => x.health !== "online")) {
       items.push({ tone: n.health === "offline" ? "error" : "warning", text: `${n.name} is ${n.health}`, href: `/devices/${n.id}` });

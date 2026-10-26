@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusChain from "#lib/components/status/StatusChain.svelte";
   // A live camera frame fitted into its box (letterboxed, never cropped) with
   // detection overlays, an ROI you can draw and drag, a crosshair, a grid and
   // a luminance histogram. Overlays draw in sensor pixels via one SVG.
@@ -214,7 +215,11 @@
     {:else}
       <div class="no-preview">
         <b>No preview</b>
-        <span>{live ? "The camera's preview did not load. Is its camera service running?" : "This camera has no camera service to preview."}</span>
+        {#if camera.status?.blocking}
+          <StatusChain status={camera.status} variant="why" />
+        {:else}
+          <span>{live ? "The camera's preview did not load. Its camera service may still be starting." : "This camera has no camera service to preview."}</span>
+        {/if}
       </div>
     {/if}
     {#if overlays.depth && dense?.depth}

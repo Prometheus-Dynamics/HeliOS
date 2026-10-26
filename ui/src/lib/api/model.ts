@@ -3,6 +3,8 @@
 // resources; streams the workloads produce. Device-level facts (slots,
 // recovery, logs) come from each node's Atlas agent.
 
+import type { CameraStatus, StatusStage } from "./types";
+
 export type NodeKind = "raze" | "mcu" | "coprocessor" | "foreign";
 export type Health = "online" | "degraded" | "offline";
 export type Link = "ethernet" | "usb" | "can" | "uart";
@@ -143,6 +145,8 @@ export interface Camera {
   controls?: CameraControlInfo[];
   /** Live mode: why the controls could not be read. */
   controlsError?: string;
+  /** Live mode: the camera's status chain (why there are no tags, frames, calibration...). */
+  status?: CameraStatus | null;
 }
 
 export interface GraphNode {
@@ -209,6 +213,8 @@ export interface Workload {
   revision: number;
   state: WorkloadState;
   restarts: number;
+  /** Why the pipeline is not running (its graph, its errors), or that it is. Live mode only. */
+  status?: StatusStage;
   /** Each input's camera (`resource_id`); pipeline inputs have none. See `inputs` for everything. */
   bindings: Record<string, string>;
   inputs: Record<string, PipelineInput>;

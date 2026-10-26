@@ -179,6 +179,56 @@ export interface CaptureLive {
   analogue_gain: number | null;
   digital_gain: number | null;
   ae_state: string | null;
+  /** The capture's last error (a failed open or start, a busy device); null when it has none. */
+  last_error: string | null;
+}
+
+/** A stage's state: `off` does not apply, `waiting` is progress toward ok, `blocked` stops the stages after it. */
+export type StageState = "ok" | "waiting" | "blocked" | "off";
+
+/** One stage of a camera's status chain (helios-api `camera_status`): what it is doing, or why it is not working. */
+export interface StatusStage {
+  stage: "camera" | "service" | "frames" | "pipeline" | "detections" | "calibration" | "map" | "depth" | "features" | string;
+  label: string;
+  state: StageState;
+  reason: string;
+  hint: string | null;
+  progress: { value: number; target: number; unit: string } | null;
+}
+
+/** A camera's chain, from the camera to its map, depth and features, and the stage it stops at. */
+export interface CameraStatus {
+  stages: StatusStage[];
+  /** The first stage that is waiting or blocked; null when all that applies is ok. */
+  blocking: string | null;
+  summary: string;
+}
+
+/** One step of a pipeline's Daedalus plan (`GET /v1/pipelines/{id}/plan`, `helios.engine.plan.v1`). */
+export interface PlanEdge {
+  index: number;
+  from_node_id: string;
+  from_port: string;
+  to_node_id: string;
+  to_port: string;
+  transport: string;
+  copies_frame: boolean;
+  crosses_residency: boolean;
+  /** Adapter steps on the edge (for a device transfer, a DeviceUpload or DeviceDownload). */
+  adapter_steps: unknown[];
+  handoff_reason?: string | null;
+}
+
+export interface PipelinePlan {
+  format: string;
+  plan: { nodes: PipelinePlanNode[]; edges: PlanEdge[] };
+}
+
+export interface PipelinePlanNode {
+  index: number;
+  id: string;
+  label: string;
+  compute: string;
 }
 
 export interface Camera {
@@ -199,6 +249,8 @@ export interface Camera {
   service_online: boolean | null;
   settings_writable: boolean;
   preview_available: boolean;
+  /** The camera's status chain; null only when the list was read without it. */
+  status: CameraStatus | null;
 }
 
 /** Styx's standard camera controls, by the API's key (same units whatever the camera). */
@@ -464,6 +516,8 @@ export interface Pipeline {
   cpu: number | null;
   pose: PoseSummary | null;
   managed: boolean;
+  /** This pipeline's line of the status chain: why it is not running, or that it is. */
+  status: StatusStage;
 }
 
 export interface Revision {

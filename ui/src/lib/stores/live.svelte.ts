@@ -189,7 +189,7 @@ export class LiveCluster {
     );
     this.unsubscribers.push(api.followLogs({}, (line) => this.appendLog(toLogLine(line, this.nodeId))));
     this.timers.push(window.setInterval(() => void this.refreshDevice(), 10_000));
-    this.timers.push(window.setInterval(() => void this.refreshCameras(), 15_000));
+    this.timers.push(window.setInterval(() => void this.refreshCameras(), 5_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
     this.timers.push(
       window.setInterval(() => {

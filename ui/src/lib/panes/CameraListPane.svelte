@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { blockingStage } from "#lib/status/chain.js";
   // Every camera on the robot in one dense list: colour, name, host, live
   // rate and tags. Click selects (everything following the selection
   // switches); right-click for actions.
@@ -44,6 +45,7 @@
     {#each g.cams as c (c.resourceId)}
       {@const sel = selection.current?.kind === "camera" ? selection.is("camera", c.resourceId) : selection.last.camera?.id === c.resourceId}
       {@const tags = cluster.detectionsFor(c).length}
+      {@const stop = blockingStage(c.status)}
       <button
         type="button"
         class="row"
@@ -56,6 +58,7 @@
         <span class="name">
           <b>{identity.name(c.resourceId, c.name)}</b>
           <span class="sub">{c.settings.width}×{c.settings.height} · {c.settings.format}{c.foreign ? ` · ${c.foreign}` : ""}</span>
+          {#if stop}<span class="sub" data-stage={stop.stage} style:color={stop.state === "blocked" ? "var(--err)" : "var(--info)"}>{stop.label}: {stop.reason}</span>{/if}
         </span>
         <span class="num" class:dim={!tags} data-tip="Tags this frame"><Icon name="target" size={11} />{tags}</span>
         <span class="num fps" class:bad={c.stats.fps < c.settings.fps * 0.9}>{c.stats.fps.toFixed(0)}</span>

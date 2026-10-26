@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StatusChain from "#lib/components/status/StatusChain.svelte";
   // Guided calibration: pick the camera and board, capture views until the
   // coverage map is full, solve, check the error per view, save. Every step
   // shows what "good" looks like so nobody needs to know the maths.
@@ -67,6 +68,7 @@
     ontogglepin={() => target.toggle()}
   />
   <span class="sep"></span>
+  <StatusChain status={camera?.status} only={["calibration"]} variant="why" />
   <div class="steps">
     {#each STEPS as s, i (s.id)}
       <span class="step" class:on={i === stepIndex} class:done={i < stepIndex}>

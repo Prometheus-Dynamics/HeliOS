@@ -265,6 +265,7 @@ export function toCamera(camera: W.Camera): Camera {
     // The camera service's low-priority JPEG preview; without a camera service the feed
     // shows a placeholder.
     feed: { base: "", offset: 0, live: camera.preview_available ? previewUrl(camera.id) : undefined },
+    status: camera.status ?? null,
   };
 }
 
@@ -390,6 +391,7 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): 
     fullSearchEvery: p.full_search_every ?? null,
     graph,
     outputs: p.outputs.map((o) => outputStreamId(p.id, o.port)),
+    status: p.status,
     cpu: p.cpu ?? null,
     cpuApplied: typeof p.telemetry?.cpu === "number" ? p.telemetry.cpu : null,
     cpuError: p.telemetry?.cpu_error ?? null,

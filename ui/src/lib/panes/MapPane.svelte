@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { visibleStages } from "#lib/status/chain.js";
+  import StatusChain from "#lib/components/status/StatusChain.svelte";
   // The 3D scene of a live map: a pipeline running Eidos's live mapper and dense mapper. Field view:
   // the field's tags, the robot and camera on the field, the map's points, path, keyframes and the
   // dense mesh. Camera view: the same scene from the camera's own pose, with its lens. Layers toggle
@@ -186,7 +188,13 @@
       {#if failed}
         <div class="fallback">WebGL is not available in this browser, so the scene cannot be drawn.</div>
       {:else if !view}
-        <div class="waiting">Waiting for the first pose from the mapper…</div>
+        <div class="waiting">
+          {#if visibleStages(camera?.status, ["calibration", "map"]).some((s) => s.state !== "ok")}
+            <StatusChain status={camera?.status} only={["calibration", "map"]} variant="why" />
+          {:else}
+            Waiting for the first pose from the mapper…
+          {/if}
+        </div>
       {/if}
       {#if mode === "camera" && !cameraPose}
         <div class="note centre">The camera view stands at the camera's pose, which the mapper has not found yet.</div>

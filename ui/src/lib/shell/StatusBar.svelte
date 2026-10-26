@@ -55,6 +55,11 @@
   <button type="button" class:bad={issues.length > 0} onclick={() => shell.go("overview")}>
     <Icon name={issues.length ? "alert-triangle" : "circle-check"} size={11} />{issues.length ? `${issues.length} problem${issues.length > 1 ? "s" : ""}` : "OK"}
   </button>
+  {#if cluster.live && !liveState.connected}
+    <button type="button" class="bad" onclick={() => shell.go("overview")} data-tip={liveState.error ?? "The device's event stream is not connected. The page retries on its own."}>
+      <Icon name="alert-triangle" size={11} />Device link lost
+    </button>
+  {/if}
   {#if nt}
     <button type="button" class="nt {nt.tone}" onclick={() => shell.go("settings")} data-tip={nt.tip}><Icon name="plug" size={11} />{nt.text}</button>
   {/if}
