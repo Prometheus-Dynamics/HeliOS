@@ -6,13 +6,18 @@
 #
 # - The node id is unique to this board. Two boards both called node-local would be one node
 #   to Orion, and HeliOS names its camera resources after the node id.
-# - The robot is the controller's team: Orion's cluster is robot-<team>, so discovery and sync
-#   see only this robot's boards, even on a field network shared with other robots. No team
-#   means no robot: discovery stays off.
+# - The robot is the controller's team: Orion's cluster is robot-<team>. No team means no robot.
 # - The networks a peer is reached over are the USB link to the controller and the robot's own
 #   network, 10.TE.AM.0/24 (FRC's convention for the team's radio and roboRIO subnet).
-# - The enrollment key, when the robot has one provisioned: automatic enrollment (docs/discovery.md).
-#   Without it peers are found but stay unenrolled until an operator enrolls them.
+# - Secured (the robot has its enrollment key): Orion discovers the robot's peers and enrolls them
+#   with the key. Orion refuses mdns discovery unless peer auth is required, so the two lines are
+#   written together or not at all.
+# - Open (no key, the FRC default): Orion does not discover. HeliOS finds its peers itself, on the
+#   robot's networks (helios-api, peer_scan.rs).
+# - The file is checked against those rules before it is installed. A file that fails the check
+#   becomes the single-node profile (no discovery), so orion-node always starts.
+#
+# Test: tools/test_robot_env.py.
 
 set -eu
 
@@ -44,6 +49,7 @@ team_in() {
 }
 
 team=
+key=
 oldifs=$IFS
 IFS=:
 for file in $team_files; do
@@ -54,32 +60,58 @@ for file in $team_files; do
         break
     fi
 done
+for file in $key_files; do
+    if [ -r "$file" ]; then
+        key=$file
+        break
+    fi
+done
 IFS=$oldifs
 
 # The board's serial (the last four characters), or the machine id when it has none.
 serial=$(tr -cd '0-9a-zA-Z' 2>/dev/null </proc/device-tree/serial-number | tail -c 4 || true)
 [ -n "$serial" ] || serial=$(head -c 4 /etc/machine-id 2>/dev/null || echo 0000)
 
-tmp="$out.tmp"
-mkdir -p "$(dirname "$out")"
-{
-    echo "ORION_NODE_ID=$kind-$serial"
-    echo "HELIOS_NODE_ID=$kind-$serial"
-    if [ -n "$team" ]; then
-        echo "ORION_NODE_CLUSTER=robot-$team"
-        echo "ORION_NODE_DISCOVERY=mdns"
-        echo "HELIOS_API_PEER_NETS=$link_net,10.$((team / 100)).$((team % 100)).0/24"
-    else
-        echo "ORION_NODE_DISCOVERY=off"
-        echo "HELIOS_API_PEER_NETS="
+# Orion's rule (docs/node-env.md): mdns discovery needs required peer auth. A file that breaks it
+# is refused, and the node runs single-node.
+valid() {
+    if grep -q '^ORION_NODE_DISCOVERY=mdns$' "$1"; then
+        grep -q '^ORION_NODE_PEER_AUTH=required$' "$1" || return 1
     fi
-    IFS=:
-    for key in $key_files; do
-        if [ -r "$key" ]; then
-            echo "ORION_NODE_ENROLLMENT_KEY_FILE=$key"
-            break
+    return 0
+}
+
+write() {
+    tmp="$out.tmp"
+    mkdir -p "$(dirname "$out")"
+    {
+        echo "ORION_NODE_ID=$kind-$serial"
+        echo "HELIOS_NODE_ID=$kind-$serial"
+        if [ -n "$team" ]; then
+            echo "ORION_NODE_CLUSTER=robot-$team"
+            echo "HELIOS_API_PEER_NETS=$link_net,10.$((team / 100)).$((team % 100)).0/24"
+        else
+            echo "HELIOS_API_PEER_NETS="
         fi
-    done
-    IFS=$oldifs
-} >"$tmp"
-mv "$tmp" "$out"
+        if [ -n "$team" ] && [ -n "$key" ]; then
+            echo "ORION_NODE_DISCOVERY=mdns"
+            echo "ORION_NODE_PEER_AUTH=required"
+            echo "ORION_NODE_ENROLLMENT_KEY_FILE=$key"
+        else
+            echo "ORION_NODE_DISCOVERY=off"
+        fi
+    } >"$tmp"
+    if ! valid "$tmp"; then
+        # The single-node profile: the same identity, no discovery.
+        {
+            echo "ORION_NODE_ID=$kind-$serial"
+            echo "HELIOS_NODE_ID=$kind-$serial"
+            echo "HELIOS_API_PEER_NETS="
+            echo "ORION_NODE_DISCOVERY=off"
+        } >"$tmp"
+        echo "robot-env: settings failed Orion's rule; single-node profile" >&2
+    fi
+    mv "$tmp" "$out"
+}
+
+write
