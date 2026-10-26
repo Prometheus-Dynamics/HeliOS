@@ -9,7 +9,7 @@ import type { Peer } from "./types";
 
 /** A peer's node as the UI shows it, from what the peer's device answered. */
 export function peerNode(peer: Peer, snapshot: DeviceSnapshot, previous?: ClusterNode): ClusterNode {
-  return { ...toNode(snapshot, previous), id: peer.node_id, address: peer.address ?? "", peer: { routed: peer.routed, state: peer.state } };
+  return { ...toNode(snapshot, previous), id: peer.node_id, address: peer.address ?? "", peer: { routed: peer.routed, state: peer.state, needsEnrollment: peer.needs_enrollment, keyFingerprint: peer.key_fingerprint } };
 }
 
 /**
@@ -17,7 +17,7 @@ export function peerNode(peer: Peer, snapshot: DeviceSnapshot, previous?: Cluste
  * state yet, so its node is empty apart from its id, its address and that it is offline.
  */
 export function unreachableNode(peer: Peer, previous?: ClusterNode): ClusterNode {
-  const state = { routed: peer.routed, state: peer.state };
+  const state = { routed: peer.routed, state: peer.state, needsEnrollment: peer.needs_enrollment, keyFingerprint: peer.key_fingerprint };
   if (previous) return { ...previous, health: "offline", address: peer.address ?? previous.address, peer: state };
   return {
     id: peer.node_id,

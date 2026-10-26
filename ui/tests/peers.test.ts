@@ -29,7 +29,7 @@ function deviceOf(node: string, kind: string): Device {
 }
 
 function peerOf(node: string, overrides: Partial<Peer> = {}): Peer {
-  return { node_id: node, state: "enrolled", address: "172.27.0.1", api_port: 5800, routed: true, ...overrides };
+  return { node_id: node, state: "enrolled", address: "172.27.0.1", api_port: 5800, key_fingerprint: "sha256:x", needs_enrollment: false, routed: true, ...overrides };
 }
 
 const snapshot = (device: Device) => ({ device, identity: null, metrics: null, services: [], update: null });
@@ -75,7 +75,7 @@ describe("a peer's node", () => {
     expect(node.address).toBe("172.27.0.1");
     expect(node.os).toEqual({ name: "LIMELIGHTOS_SYSTEMCORE", version: "2027.0.0" });
     expect(node.health).toBe("online");
-    expect(node.peer).toEqual({ routed: true, state: "enrolled" });
+    expect(node.peer).toEqual({ routed: true, state: "enrolled", needsEnrollment: false, keyFingerprint: "sha256:x" });
   });
 
   test("with no address, the node has an empty one", () => {
@@ -93,7 +93,7 @@ describe("a peer that does not answer", () => {
     expect(node.name).toBe(previous.name);
     expect(node.os).toEqual(previous.os);
     expect(node.address).toBe("172.27.0.9");
-    expect(node.peer).toEqual({ routed: true, state: "enrolled" });
+    expect(node.peer).toEqual({ routed: true, state: "enrolled", needsEnrollment: false, keyFingerprint: "sha256:x" });
   });
 
   test("never read, it is an empty offline node with its id", () => {

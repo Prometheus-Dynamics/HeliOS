@@ -114,11 +114,16 @@ export interface Peer {
   address: string | null;
   api_port: number | null;
   routed: boolean;
+  /** Security is on and the peer is not enrolled: its key must be enrolled first. */
+  needs_enrollment: boolean;
+  key_fingerprint: string;
 }
 
 /** The robot's peers: `cluster` is its Orion cluster (`robot-<team>`), null when discovery is off. */
 export interface PeerList {
   cluster: string | null;
+  /** Whether security is on (the peers then need enrollment). */
+  security: "open" | "secured";
   peers: Peer[];
 }
 

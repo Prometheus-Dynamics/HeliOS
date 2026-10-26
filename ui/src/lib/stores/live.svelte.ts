@@ -426,7 +426,7 @@ export class LiveCluster {
       list = await api.peers();
     } catch {
       // An older device has no peer list: it has no peers.
-      list = { cluster: null, peers: [] };
+      list = { cluster: null, peers: [], security: "open" };
     }
     if (seq !== this.refreshSeq.peers) return;
     const listed = list.peers.filter((p) => p.node_id !== this.nodeId);

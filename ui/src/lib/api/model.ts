@@ -53,7 +53,7 @@ export interface ClusterNode {
   services: Service[];
   foreignSystem?: string;
   /** Another HeliOS device on this robot, reached through the gateway (`GET /v1/peers`); unset on this device. */
-  peer?: { routed: boolean; state: PeerState };
+  peer?: { routed: boolean; state: PeerState; needsEnrollment?: boolean; keyFingerprint?: string };
 }
 
 export interface Service {

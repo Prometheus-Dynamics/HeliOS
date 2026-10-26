@@ -27,5 +27,6 @@ export function isReachable(node: ClusterNode): boolean {
 export function placeOf(node: ClusterNode): { text: string; tone: "ok" | "info" | "warn" } {
   if (!node.peer) return { text: "this device", tone: "ok" };
   if (node.peer.routed) return { text: "peer · routed", tone: "info" };
+  if (node.peer.needsEnrollment) return { text: `needs enrollment · ${node.peer.keyFingerprint ?? ""}`.trim(), tone: "warn" };
   return { text: node.peer.state === "discovered" ? "found, not enrolled" : `peer · ${node.peer.state.replace(/_/g, " ")}`, tone: "warn" };
 }

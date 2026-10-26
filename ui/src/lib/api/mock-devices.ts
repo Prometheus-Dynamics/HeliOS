@@ -49,5 +49,5 @@ export const MOCK_PEER_CAPABILITIES: Record<string, Capabilities> = { [MOCK_SYST
 /** What `GET /v1/peers` lists from the Raze's side of the simulated robot: the SystemCore, enrolled and routed. */
 export const MOCK_PEERS: PeerList = {
   cluster: "robot-1234",
-  peers: [{ node_id: MOCK_SYSTEMCORE_PEER, state: "enrolled", address: "172.27.0.1", api_port: 5800, routed: true }],
+  peers: [{ node_id: MOCK_SYSTEMCORE_PEER, state: "enrolled", address: "172.27.0.1", api_port: 5800, key_fingerprint: "sha256:mock", needs_enrollment: false, routed: true }], security: "open",
 };
