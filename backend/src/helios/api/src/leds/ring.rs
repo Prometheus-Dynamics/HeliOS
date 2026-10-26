@@ -33,7 +33,10 @@ pub const DIRECTOR_PRIORITY: u8 = 160;
 const CLIENT_NAME: &str = "helios-leds";
 /// The Raze's status ring, as the board definition names it.
 pub const RING_DEVICE: &str = "status-ring";
+/// The first wait after a failed connection; each further failure doubles it, up to the max. A
+/// device with no lemnosd (or no status ring) is then tried about once a minute.
 const RECONNECT_MS: u64 = 2000;
+const RECONNECT_MAX_MS: u64 = 60_000;
 const FRAME_MS: u64 = 33;
 const TICK_MS: u64 = 100;
 const EVENT_MS: u64 = 100;
@@ -159,6 +162,8 @@ struct Sink {
     leds: Option<LedClient>,
     devices: Option<DeviceClient>,
     retry_at: u64,
+    /// Failed connections in a row (the retry wait doubles with each).
+    failures: u32,
     /// Until this time, the tags show their frame (a lemnosd refused the spots).
     native_retry_at: u64,
     applied: Option<Applied>,
@@ -179,11 +184,17 @@ struct Applied {
 
 impl Sink {
     fn new(socket: PathBuf) -> Self {
-        Self { socket, leds: None, devices: None, retry_at: 0, native_retry_at: 0, applied: None, brightness: None, last_frame_at: 0, error: None }
+        Self { socket, leds: None, devices: None, retry_at: 0, failures: 0, native_retry_at: 0, applied: None, brightness: None, last_frame_at: 0, error: None }
     }
 
     fn reachable(&self) -> bool {
         self.leds.is_some()
+    }
+
+    /// The wait before the next attempt, after one more failure.
+    fn next_retry_ms(&mut self) -> u64 {
+        self.failures = self.failures.saturating_add(1);
+        (RECONNECT_MS << (self.failures - 1).min(5)).min(RECONNECT_MAX_MS)
     }
 
     fn error(&self) -> Option<String> {
@@ -200,10 +211,11 @@ impl Sink {
                     self.leds = Some(leds);
                     self.applied = None;
                     self.error = None;
+                    self.failures = 0;
                 }
                 Err(error) => {
                     self.error = Some(error.to_string());
-                    self.retry_at = now + RECONNECT_MS;
+                    self.retry_at = now + self.next_retry_ms();
                 }
             }
         }
@@ -212,7 +224,7 @@ impl Sink {
                 Ok(devices) => self.devices = Some(devices),
                 Err(error) => {
                     self.error.get_or_insert_with(|| error.to_string());
-                    self.retry_at = now + RECONNECT_MS;
+                    self.retry_at = now + self.next_retry_ms();
                 }
             }
         }
@@ -227,7 +239,7 @@ impl Sink {
                 Err(error) => {
                     self.error = Some(error.to_string());
                     self.applied = None;
-                    self.retry_at = now + RECONNECT_MS;
+                    self.retry_at = now + self.next_retry_ms();
                 }
             }
         }
