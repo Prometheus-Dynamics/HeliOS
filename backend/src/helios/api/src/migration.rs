@@ -12,6 +12,12 @@
 //! first time it is rewritten. A marker file (`node-id-migration.json`) records the migration, so a
 //! later start does nothing. The marker is written only after the Orion part succeeded; until then
 //! the migration retries in the background with a capped backoff.
+//!
+//! Orion keeps what the old id published: the providers and executors of `node-local`, and the
+//! resources those providers published. Nothing publishes under the old id again, so
+//! [`spawn_retire`] removes them, once the new id's own provider is live, and on every start until
+//! none are left (the marker does not cover them: a board migrated before this ran still has them).
+//! Removing a provider drops the resources it published (Orion prunes them with it).
 
 use std::{
     collections::BTreeMap,
@@ -21,8 +27,8 @@ use std::{
 };
 
 use orion::{
-    control_plane::{ArtifactRecord, DesiredStateMutation, TypedConfigValue, WorkloadRecord},
-    core::{NodeId, ResourceId},
+    control_plane::{ArtifactRecord, DesiredClusterState, DesiredStateMutation, TypedConfigValue, WorkloadRecord},
+    core::{ExecutorId, NodeId, ProviderId, ResourceId},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -300,6 +306,73 @@ pub fn spawn(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
     }))
 }
 
+/// How often the old id's records are looked for again while any are left.
+const RETIRE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// The desired records of the old id `from` that this board owns, to remove once its new id `to` is
+/// live: the providers and executors that node id published, and the desired resources of those
+/// providers. Empty while `to` has no provider yet, and while a peer of the robot (`peers`, its node
+/// ids) still answers as `from`: that node's records are its own, never this board's.
+pub fn legacy_removals(desired: &DesiredClusterState, from: &str, to: &str, peers: &[String]) -> Vec<DesiredStateMutation> {
+    if from == to || !new_id_live(desired, to) || peers.iter().any(|peer| peer == from) {
+        return Vec::new();
+    }
+    let providers: Vec<ProviderId> = desired.providers.values().filter(|provider| provider.node_id.as_str() == from).map(|provider| provider.provider_id.clone()).collect();
+    let executors: Vec<ExecutorId> = desired.executors.values().filter(|executor| executor.node_id.as_str() == from).map(|executor| executor.executor_id.clone()).collect();
+    let mut removals: Vec<DesiredStateMutation> = desired.resources.values().filter(|resource| providers.contains(&resource.provider_id)).map(|resource| DesiredStateMutation::RemoveResource(resource.resource_id.clone())).collect();
+    removals.extend(providers.into_iter().map(DesiredStateMutation::RemoveProvider));
+    removals.extend(executors.into_iter().map(DesiredStateMutation::RemoveExecutor));
+    removals
+}
+
+/// Whether the old id `from` still has a provider or an executor in the desired state.
+fn legacy_left(desired: &DesiredClusterState, from: &str) -> bool {
+    desired.providers.values().any(|provider| provider.node_id.as_str() == from) || desired.executors.values().any(|executor| executor.node_id.as_str() == from)
+}
+
+/// Whether this board's new id has a provider in the desired state (its peripherals have published).
+fn new_id_live(desired: &DesiredClusterState, to: &str) -> bool {
+    desired.providers.values().any(|provider| provider.node_id.as_str() == to)
+}
+
+/// One pass of the cleanup: the old id's records are removed, when the new id is live. `true` when
+/// the old id has nothing left, so the task can stop.
+async fn retire_once(state: &SharedState, from: &str, to: &str) -> ApiResult<bool> {
+    if !legacy_left(&state.orion.snapshot().await?.state.desired, from) {
+        return Ok(true);
+    }
+    // The peers come before the deploy lock: the gateway may probe the network to name them.
+    let peers: Vec<String> = crate::peers::robot(state).await?.peers.into_iter().map(|peer| peer.node_id).collect();
+    let _deploys = state.deploys.lock().await;
+    let snapshot = state.orion.snapshot().await?;
+    let desired = &snapshot.state.desired;
+    let mutations = legacy_removals(desired, from, to, &peers);
+    if !mutations.is_empty() {
+        info!(from, %to, removed = mutations.len(), "records of the old node id removed");
+        state.orion.apply(mutations).await?;
+    }
+    Ok(!legacy_left(desired, from))
+}
+
+/// Removes the old id's leftovers in Orion (see the module doc), until none are left. Nothing to do
+/// when this board never had another id. Safe to repeat: a removed record is not removed again.
+pub fn spawn_retire(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
+    let to = state.config.node_id.clone();
+    if to == LEGACY_NODE_ID {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        loop {
+            match retire_once(&state, LEGACY_NODE_ID, &to).await {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => warn!(%error, "records of the old node id not removed yet; retrying"),
+            }
+            tokio::time::sleep(RETIRE_INTERVAL).await;
+        }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +515,75 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         write(&dir.path().join(MARKER_FILE), "{");
         assert!(!is_done(dir.path(), OLD, NEW));
+    }
+
+    /// The old board's provider, executor and camera; the new id's provider and camera; a peer's.
+    fn robot_state() -> DesiredClusterState {
+        use orion::control_plane::{ExecutorRecord, ProviderRecord, ResourceRecord};
+        let mut desired = DesiredClusterState::default();
+        desired.put_provider(ProviderRecord::builder(ProviderId::new("provider.peripherals.node-local"), NodeId::new(OLD)).build());
+        desired.put_provider(ProviderRecord::builder(ProviderId::new("provider.peripherals.raze-2c206880"), NodeId::new(NEW)).build());
+        desired.put_provider(ProviderRecord::builder(ProviderId::new("provider.peripherals.systemcore-3c99"), NodeId::new("systemcore-3c99")).build());
+        desired.put_executor(ExecutorRecord::builder(ExecutorId::new("executor.peripherals.node-local"), NodeId::new(OLD)).build());
+        desired.put_executor(ExecutorRecord::builder(ExecutorId::new("executor.peripherals.raze-2c206880"), NodeId::new(NEW)).build());
+        for (resource, provider) in [
+            ("capture_device_node-local_camera-2c206880", "provider.peripherals.node-local"),
+            ("capture_device_raze-2c206880_camera-2c206880", "provider.peripherals.raze-2c206880"),
+            ("capture_device_systemcore-3c99_camera-3c99", "provider.peripherals.systemcore-3c99"),
+        ] {
+            desired.put_resource(ResourceRecord::builder(ResourceId::new(resource), "camera.device", ProviderId::new(provider)).build());
+        }
+        desired
+    }
+
+    /// Applies the mutations to the desired state as Orion does (plain writes, for the test).
+    fn apply_plain(desired: &mut DesiredClusterState, mutations: Vec<DesiredStateMutation>) {
+        for mutation in mutations {
+            match mutation {
+                DesiredStateMutation::RemoveResource(id) => drop(desired.remove_resource(&id)),
+                DesiredStateMutation::RemoveProvider(id) => drop(desired.remove_provider(&id)),
+                DesiredStateMutation::RemoveExecutor(id) => drop(desired.remove_executor(&id)),
+                other => panic!("unexpected cleanup mutation: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_ids_records_go_once_the_new_id_is_live() {
+        let mut desired = robot_state();
+        let mutations = legacy_removals(&desired, LEGACY_NODE_ID, NEW, &[]);
+        assert_eq!(mutations.len(), 3, "the old camera, provider and executor");
+        assert!(mutations.iter().any(|m| matches!(m, DesiredStateMutation::RemoveResource(id) if id.as_str() == "capture_device_node-local_camera-2c206880")));
+        assert!(mutations.iter().any(|m| matches!(m, DesiredStateMutation::RemoveProvider(id) if id.as_str() == "provider.peripherals.node-local")));
+        assert!(mutations.iter().any(|m| matches!(m, DesiredStateMutation::RemoveExecutor(id) if id.as_str() == "executor.peripherals.node-local")));
+
+        apply_plain(&mut desired, mutations);
+        assert!(legacy_removals(&desired, LEGACY_NODE_ID, NEW, &[]).is_empty(), "a second pass finds nothing");
+        assert!(!legacy_left(&desired, LEGACY_NODE_ID));
+        assert!(desired.resources.contains_key(&ResourceId::new("capture_device_raze-2c206880_camera-2c206880")), "the new camera stays");
+        assert!(desired.resources.contains_key(&ResourceId::new("capture_device_systemcore-3c99_camera-3c99")), "a peer's camera stays");
+        assert!(desired.providers.contains_key(&ProviderId::new("provider.peripherals.systemcore-3c99")), "a peer's provider stays");
+    }
+
+    #[test]
+    fn nothing_is_removed_before_the_new_id_is_live() {
+        let mut desired = robot_state();
+        desired.providers.remove(&ProviderId::new("provider.peripherals.raze-2c206880"));
+        assert!(legacy_removals(&desired, LEGACY_NODE_ID, NEW, &[]).is_empty());
+        assert!(legacy_left(&desired, LEGACY_NODE_ID), "the old records wait for the new ones");
+    }
+
+    #[test]
+    fn a_peer_still_on_the_old_id_keeps_its_records() {
+        let desired = robot_state();
+        assert!(legacy_removals(&desired, LEGACY_NODE_ID, NEW, &[LEGACY_NODE_ID.to_string()]).is_empty(), "another board on the old id is not this board's");
+        assert!(legacy_removals(&desired, LEGACY_NODE_ID, NEW, &["systemcore-3c99".to_string()]).len() == 3, "other peers do not block it");
+    }
+
+    #[test]
+    fn the_same_or_no_old_id_removes_nothing() {
+        let desired = robot_state();
+        assert!(legacy_removals(&desired, NEW, NEW, &[]).is_empty());
+        assert_eq!(legacy_removals(&desired, "systemcore-3c99", NEW, &[]).len(), 2, "its provider and camera: whichever id is the old one");
     }
 }
