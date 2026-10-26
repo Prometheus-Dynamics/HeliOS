@@ -4,9 +4,11 @@
   import "@xyflow/svelte/dist/style.css";
   import Toasts from "#lib/components/shell/Toasts.svelte";
   import { commands } from "#lib/core/commands.svelte.js";
+  import { identity } from "#lib/core/identity.svelte.js";
   import { prefs } from "#lib/core/prefs.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
+  import { team } from "#lib/core/team.svelte.js";
   import { workspaces } from "#lib/core/workspace.svelte.js";
   import "#lib/panes/index.js";
   import { registerScreens } from "#lib/screens.js";
@@ -25,6 +27,7 @@
   import SignIn from "#lib/shell/SignIn.svelte";
   import { auth } from "#lib/stores/auth.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { field } from "#lib/stores/field.svelte.js";
   import { system } from "#lib/stores/system.svelte.js";
   import Workspace from "#lib/workspace/Workspace.svelte";
 
@@ -56,6 +59,13 @@
   // arrives, and restarting the stores on every change would refetch in a loop.
   $effect(() => {
     if (!auth.ready) return;
+    // The device's own settings (identities, team, field, setup): loaded once, then followed.
+    untrack(() => {
+      identity.start();
+      team.start();
+      field.start();
+      help.followSetup();
+    });
     const stopCluster = untrack(() => cluster.start());
     const stopSystem = untrack(() => system.start());
     return () => {

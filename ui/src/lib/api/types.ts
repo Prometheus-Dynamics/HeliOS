@@ -671,12 +671,70 @@ export interface Nt4Settings {
   prefix: string;
 }
 
+/** Where a robot fact came from: the user's setting on this device, the robot controller, or nothing. */
+export type FactSource = "user" | "controller" | "none";
+
+export interface Fact<T> {
+  value: T | null;
+  source: FactSource;
+}
+
+/** The robot controller HeliOS found (`GET /v1/device/nt4` `controller`). */
+export interface ControllerFacts {
+  kind: string;
+  name: string;
+  team: number | null;
+  nt4_server: string | null;
+  /** `local` (HeliOS runs on it) or `usb` (its peer on the board's USB link). */
+  via: string;
+  seen_at_ms: number;
+}
+
 export interface Nt4State {
   settings: Nt4Settings;
-  /** Where publishing goes (`null`: off, or no team number or server). */
+  /** The team and the server robot code is at, each with where it came from. */
+  effective: { team: Fact<number>; nt4_server: Fact<string> };
+  controller: ControllerFacts | null;
+  /** Where publishing goes (`null`: off, or none known); `effective.nt4_server.value`. */
   server: string | null;
   connected: boolean;
   engine_reporting: boolean;
+}
+
+/** A user-chosen name, icon and colour for an object (`/v1/device/identities`). */
+export interface StoredIdentity {
+  name?: string;
+  icon?: string;
+  /** 1..12, an index into the theme's palette. */
+  color: number;
+}
+
+/** `GET`/`PUT /v1/device/setup`: first-time setup. */
+export interface SetupRecord {
+  onboarded: boolean;
+}
+
+/** `GET /v1/field-layouts`: the layouts and the one the pipelines without their own use. */
+export interface FieldLayoutList {
+  selected: string;
+  layouts: { id: string; name: string; builtin: boolean; selected: boolean; [key: string]: unknown }[];
+}
+
+/** `GET /v1/field-layouts/{id}`: a layout with every tag, in WPILib's tag frame. */
+export interface FieldLayoutDocument {
+  id: string;
+  name: string;
+  layout: {
+    length_m: number;
+    width_m: number;
+    tags: { id: number; side_m: number; field_from_tag: { translation: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } }[];
+  };
+}
+
+/** The `settings` event: a setting of the device changed; clients refetch that domain. */
+export interface SettingsChange {
+  domain: string;
+  key: string;
 }
 
 /** Playback (`/v1/playback`): a recording or an image folder, replayed as a camera. */

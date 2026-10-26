@@ -2,8 +2,12 @@
 // pipeline, device, layout). The colour follows the object everywhere: list
 // badges, graph headers, 3D frustums, overlays, chart lines, log tags.
 
+import { api, errorText } from "#lib/api/client.js";
+import type { StoredIdentity } from "#lib/api/types.js";
+import { onSettingsChange } from "#lib/core/sync.js";
 import type { IconName } from "#lib/ui/icons.js";
-import { loadRaw, save } from "./persist";
+import { toasts } from "#lib/stores/toasts.svelte.js";
+import { forget, loadRaw } from "./persist";
 
 export interface Identity {
   name?: string;
@@ -36,8 +40,38 @@ const DEFAULTS: Record<string, Identity> = {
   "tags-left-exp": { color: 11, icon: "flask" },
 };
 
+/** The identities live on the device (`/v1/device/identities`); every open tab follows them. */
 class IdentityStore {
-  #overrides = $state<Record<string, Identity>>(loadRaw("identities", {}));
+  #overrides = $state<Record<string, Identity>>({});
+  #started = false;
+
+  /** Load the device's identities and follow their changes (once). */
+  start() {
+    if (this.#started) return;
+    this.#started = true;
+    onSettingsChange("identities", () => void this.load());
+    void this.#migrate().then(() => this.load());
+  }
+
+  async load() {
+    try {
+      this.#overrides = (await api.identities()) as Record<string, Identity>;
+    } catch {
+      // The device is not answering: the defaults stand until it does.
+    }
+  }
+
+  /** Identities kept in this browser before the device kept them move to the device, once. */
+  async #migrate() {
+    const legacy = loadRaw<Record<string, Identity> | null>("identities", null);
+    if (!legacy) return;
+    try {
+      for (const [id, identity] of Object.entries(legacy)) await api.putIdentity(id, identity as StoredIdentity);
+      forget("identities");
+    } catch {
+      // Kept in the browser until the device answers.
+    }
+  }
 
   get(id: string): Identity {
     return this.#overrides[id] ?? DEFAULTS[id] ?? { color: hashColor(id) };
@@ -52,22 +86,36 @@ class IdentityStore {
   }
 
   set(id: string, patch: Partial<Identity>) {
-    this.#overrides[id] = { ...this.get(id), ...patch };
-    save("identities", this.#overrides);
+    const next = { ...this.get(id), ...patch };
+    this.#overrides[id] = next;
+    void this.#send(() => api.putIdentity(id, next as StoredIdentity));
   }
 
   reset(id: string) {
     delete this.#overrides[id];
-    save("identities", this.#overrides);
+    void this.#send(() => api.deleteIdentity(id));
   }
 
   export(): Record<string, Identity> {
     return JSON.parse(JSON.stringify(this.#overrides));
   }
 
+  /** Replace every identity with `all` (an imported file). */
   import(all: Record<string, Identity>) {
+    const removed = Object.keys(this.#overrides).filter((id) => !(id in all));
     this.#overrides = all;
-    save("identities", this.#overrides);
+    void this.#send(async () => {
+      for (const [id, identity] of Object.entries(all)) await api.putIdentity(id, identity as StoredIdentity);
+      for (const id of removed) await api.deleteIdentity(id);
+    });
+  }
+
+  async #send(run: () => Promise<unknown>) {
+    try {
+      await run();
+    } catch (error) {
+      toasts.error(`Identity not saved: ${errorText(error)}`);
+    }
   }
 }
 

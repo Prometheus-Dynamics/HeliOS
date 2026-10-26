@@ -9,6 +9,7 @@
   import { offeredTemplates } from "#lib/core/templates.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { team } from "#lib/core/team.svelte.js";
+  import { roborioAddress } from "#lib/core/robot-facts.js";
   import { workspaces } from "#lib/core/workspace.svelte.js";
   import SecureForm from "#lib/components/security/SecureForm.svelte";
   import { auth } from "#lib/stores/auth.svelte.js";
@@ -19,14 +20,21 @@
 
   let step = $state(0);
   let simple = $state(true);
-  let teamText = $state(team.number ? String(team.number) : "");
+  let teamText = $state("");
+  let overriding = $state(false);
+  // A team the robot controller gives is shown, not asked again, unless the user overrides it.
+  const fromController = $derived(team.source === "controller" && !overriding);
+  const teamNumber = $derived(fromController ? (team.number ?? 0) : Number(teamText));
+  $effect(() => {
+    if (!teamText && team.number) teamText = String(team.number);
+  });
   const STEPS = ["Team", "Cameras", "Screens", "Security", "Done"];
   const SECURITY = 3;
   const LAST = STEPS.length - 1;
   // FRC robots run open; anything else is offered a password first. The
   // choice is explicit either way, and the top bar always shows the result.
   let secureChoice = $state<"open" | "secure" | null>(null);
-  const choice = $derived(secureChoice ?? (Number(teamText) > 0 ? "open" : "secure"));
+  const choice = $derived(secureChoice ?? (teamNumber > 0 ? "open" : "secure"));
   const blocked = $derived(step === SECURITY && choice === "secure" && auth.open);
   const overlays = { ...DEFAULT_OVERLAYS, histogram: false, hud: false };
   $effect(() => {
@@ -37,8 +45,11 @@
   const SIMPLE_SCREENS = ["start", "cameras", "calibration", "settings"];
 
   function finish(tour: boolean) {
-    const n = Number(teamText);
-    team.number = Number.isInteger(n) && n > 0 && n < 100000 ? n : null;
+    // The controller's team is already the device's answer; only a team the user typed is saved.
+    if (!fromController) {
+      const n = Number(teamText);
+      team.number = Number.isInteger(n) && n > 0 && n < 100000 ? n : null;
+    }
     // The names shown here were confirmed, so they count as chosen.
     for (const c of cluster.cameras) if (!identity.get(c.resourceId).name) identity.set(c.resourceId, { name: c.name });
     workspaces.setVisible(simple ? SIMPLE_SCREENS : null);
@@ -76,11 +87,19 @@
       {#if step === 0}
         <h2>Welcome to HeliOS</h2>
         <p>HeliOS runs the robot's cameras and vision: it finds AprilTags and other targets, works out where the robot is, and sends the results to robot code. This sets the basics; everything can be changed later.</p>
-        <label class="field">
-          <span>Team number</span>
-          <input inputmode="numeric" bind:value={teamText} placeholder="e.g. 1234" />
-          <em>Robot code is expected at <code>{Number(teamText) > 0 ? `10.${Math.floor(Number(teamText) / 100)}.${Number(teamText) % 100}.2` : "10.TE.AM.2"}</code></em>
-        </label>
+        {#if fromController}
+          <div class="field">
+            <span>Team number</span>
+            <div class="from"><Icon name="circle-check" size={14} /> Team {team.number} from {team.controllerName ?? "the robot controller"}</div>
+            <button type="button" class="link" onclick={() => { overriding = true; teamText = team.number ? String(team.number) : ""; }}>Use a different team</button>
+          </div>
+        {:else}
+          <label class="field">
+            <span>Team number</span>
+            <input inputmode="numeric" bind:value={teamText} placeholder="e.g. 1234" />
+            <em>Robot code is expected at <code>{roborioAddress(teamNumber) ?? "10.TE.AM.2"}</code></em>
+          </label>
+        {/if}
         <div class="found">
           <Icon name="circle-check" size={14} />
           Found {cluster.nodes.length} {cluster.nodes.length === 1 ? "device" : "devices"} and {cluster.cameras.length} {cluster.cameras.length === 1 ? "camera" : "cameras"} on this robot.
@@ -207,6 +226,23 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--r-3);
     box-shadow: var(--shadow);
+  }
+  .from {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .link {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent, var(--text));
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
   }
   .steps {
     display: flex;

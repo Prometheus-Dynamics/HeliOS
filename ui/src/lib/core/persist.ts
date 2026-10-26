@@ -19,6 +19,15 @@ export function loadRaw<T>(key: string, fallback: T): T {
   }
 }
 
+/** Drop a stored value (after it moved to the device). */
+export function forget(key: string) {
+  try {
+    localStorage.removeItem(`helios:${key}`);
+  } catch {
+    // storage unavailable: nothing to forget
+  }
+}
+
 export function save(key: string, value: unknown) {
   try {
     localStorage.setItem(`helios:${key}`, JSON.stringify(value));
