@@ -13,12 +13,16 @@ const GIB = 1 << 30;
 const MOCK_RATE_BYTES = 52 * MIB;
 const MOCK_FPS = 30;
 const MOCK_STORAGE_DIR = "/media/sozo/HELIOS-USB/helios/recordings";
+/** The mock USB drive's capacity; the device's default budget on a drive is 80% of it. */
+const MOCK_VOLUME = 256 * GIB;
 
 const DEFAULT_SETTINGS: RecorderSettings = {
   storage_dir: null,
   usb_roots: ["/media", "/run/media"],
   fallback_dir: "/var/lib/helios/recordings",
   reserve_bytes: 2 * GIB,
+  max_total_bytes: null,
+  guest_storage: false,
   max_file_bytes: 4 * GIB,
   max_file_seconds: 600,
   max_fps: 30,
@@ -64,6 +68,9 @@ function seedStored(now: number): StoredRecording[] {
   ];
 }
 
+/** The budget the mock folder has now: the setting, or the USB default. */
+const budgetOf = (settings: RecorderSettings): number => settings.max_total_bytes ?? Math.floor((MOCK_VOLUME / 5) * 4);
+
 /** A simulated recorder. `emit` receives every status change (start, each second, stop). */
 export function createMockRecorder(emit: (status: RecordingStatus) => void): RecorderBackend {
   let settings: RecorderSettings = structuredClone(DEFAULT_SETTINGS);
@@ -73,6 +80,19 @@ export function createMockRecorder(emit: (status: RecordingStatus) => void): Rec
   let freeBytes = 180 * GIB;
   let seq = 0;
   const ringStart = Date.now();
+
+  /** Like the device: the oldest finished recordings go while the folder is over its budget. */
+  const enforceBudget = () => {
+    const budget = budgetOf(settings);
+    const oldestFirst = [...stored].sort((a, b) => a.modified_at_ms - b.modified_at_ms);
+    let total = stored.reduce((sum, s) => sum + s.bytes, 0);
+    for (const entry of oldestFirst) {
+      if (total <= budget) break;
+      if (entry.id === active?.id) continue;
+      total -= entry.bytes;
+      stored = stored.filter((s) => s.id !== entry.id);
+    }
+  };
 
   const rings = (): RingStatus[] =>
     settings.capture_last_cameras.map((camera) => {
@@ -108,6 +128,7 @@ export function createMockRecorder(emit: (status: RecordingStatus) => void): Rec
       messages_dropped: 0,
       free_bytes: freeBytes,
       reserve_bytes: settings.reserve_bytes,
+      max_total_bytes: budgetOf(settings),
       max_fps: settings.max_fps,
       frames: settings.frames,
       format: "BYR2 1280x800",
@@ -136,7 +157,13 @@ export function createMockRecorder(emit: (status: RecordingStatus) => void): Rec
       return {
         active: active ? status("recording") : null,
         stored: structuredClone(stored),
-        storage: { dir: MOCK_STORAGE_DIR, free_bytes: freeBytes, reserve_bytes: settings.reserve_bytes },
+        storage: {
+          dir: MOCK_STORAGE_DIR,
+          free_bytes: freeBytes,
+          reserve_bytes: settings.reserve_bytes,
+          max_total_bytes: budgetOf(settings),
+          recordings_bytes: stored.reduce((sum, s) => sum + s.bytes, 0),
+        },
         storage_error: null,
         rings: rings(),
       };
@@ -144,6 +171,7 @@ export function createMockRecorder(emit: (status: RecordingStatus) => void): Rec
     async start(camera) {
       if (active) throw new ApiError(409, "conflict", "A recording is already running");
       if (freeBytes <= settings.reserve_bytes) throw new ApiError(507, "internal", "Not enough free space above the reserve");
+      enforceBudget();
       seq += 1;
       const started = Date.now();
       active = {
@@ -217,6 +245,7 @@ export function createMockRecorder(emit: (status: RecordingStatus) => void): Rec
     },
     async saveSettings(next) {
       settings = structuredClone(next);
+      enforceBudget();
       return structuredClone(settings);
     },
     downloadUrl: () => null,

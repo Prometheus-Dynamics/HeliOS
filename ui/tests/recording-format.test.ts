@@ -22,6 +22,7 @@ function status(overrides: Partial<RecordingStatus> = {}): RecordingStatus {
     messages_dropped: 0,
     free_bytes: 100 * GIB,
     reserve_bytes: 2 * GIB,
+    max_total_bytes: 50 * GIB,
     max_fps: 30,
     frames: "raw",
     format: "BYR2 1280x800",
@@ -112,7 +113,7 @@ test("free space is past the reserve, low within twice it, or ok", () => {
 test("the storage line names the error first, then the room left", () => {
   expect(storageText(null, "The recordings directory is not writable")).toEqual({ tone: "err", text: "The recordings directory is not writable" });
   expect(storageText(null, null).text).toBe("No storage yet");
-  const roomy = storageText({ dir: "/x", free_bytes: 100 * GIB, reserve_bytes: 2 * GIB }, null);
+  const roomy = storageText({ dir: "/x", free_bytes: 100 * GIB, reserve_bytes: 2 * GIB, max_total_bytes: 50 * GIB, recordings_bytes: 0 }, null);
   expect(roomy.tone).toBe("ok");
   expect(roomy.text).toBe("100 GiB free, 2.0 GiB kept in reserve");
 });

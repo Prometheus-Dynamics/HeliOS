@@ -41,6 +41,8 @@ export interface RecordingStatus {
   messages_dropped: number;
   free_bytes: number | null;
   reserve_bytes: number;
+  /** The recordings folder's budget now (the effective `max_total_bytes`). */
+  max_total_bytes: number;
   max_fps: number | null;
   frames: RecordFrames;
   /** The delivered format and size, for example `BYR2 1280x800`. */
@@ -66,6 +68,10 @@ export interface StorageFacts {
   dir: string;
   free_bytes: number | null;
   reserve_bytes: number;
+  /** The budget the folder has now: the setting, or the device's default for its volume. */
+  max_total_bytes: number;
+  /** Bytes the HeliOS recordings in the folder hold now. */
+  recordings_bytes: number;
 }
 
 /** A capture-last ring's state: its configured seconds, and what it holds now. */
@@ -97,6 +103,10 @@ export interface RecorderSettings {
   usb_roots: string[];
   fallback_dir: string;
   reserve_bytes: number;
+  /** `null`: the device's default for the volume the folder is on. */
+  max_total_bytes: number | null;
+  /** The device's own storage is a guest's (small): set by the device, not chosen. */
+  guest_storage: boolean;
   max_file_bytes: number;
   max_file_seconds: number;
   /** `null`: as the camera delivers. */
