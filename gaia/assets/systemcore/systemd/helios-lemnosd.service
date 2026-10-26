@@ -1,0 +1,57 @@
+# lemnosd on SystemCore: Lemnos's hardware service for the board definition of the unit
+# (/usr/local/share/lemnos/boards/systemcore.toml). Every device it lists is host-owned: Limelight's
+# own services drive the SoC, the CAN buses and the rest, so lemnosd only reads them and never
+# writes, claims or raw-accesses one. helios-peripherals reads it at /run/lemnos/lemnosd.sock.
+[Unit]
+Description=Lemnos hardware service (SystemCore, host-owned devices)
+Documentation=https://github.com/Prometheus-Dynamics/Lemnos/blob/dev/docs/board-definition.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+Slice=vision.slice
+ExecStart=/usr/local/bin/lemnosd
+Environment=LEMNOSD_BOARD=/usr/local/share/lemnos/boards/systemcore.toml
+Environment=LEMNOSD_SOCKET=/run/lemnos/lemnosd.sock
+# No state (no lemnos-owned device to remember), no look files on this host.
+Environment=LEMNOSD_STATE_DIR=off
+Environment=LEMNOSD_LOOKS_DIR=off
+Environment=LEMNOSD_LOOKS_OVERRIDE_DIR=off
+WatchdogSec=10s
+TimeoutStartSec=60s
+TimeoutStopSec=10s
+Restart=always
+RestartSec=1s
+
+# A dynamic user: reading sysfs and the device tree needs no group. The socket is
+# group-readable; the root-run HeliOS services connect to it.
+DynamicUser=yes
+RuntimeDirectory=lemnos
+RuntimeDirectoryMode=0750
+UMask=0007
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
