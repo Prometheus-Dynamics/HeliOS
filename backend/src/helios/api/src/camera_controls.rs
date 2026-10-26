@@ -48,7 +48,7 @@ use crate::{
 
 pub use json::{AppliedCameraControl, CameraControl, control_event_json, value_json};
 pub use values::standard_key;
-use values::{MODES_FIRST, STANDARD, backend_value, standard_value};
+use values::{MODES_FIRST, STANDARD, backend_value, default_value, standard_value};
 
 /// How long one connection attempt to the camera service, or one control request, may take.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -252,7 +252,7 @@ impl CameraClient {
             .map(|descriptor| ControlChange {
                 key: descriptor.standard.map_or_else(|| descriptor.meta.name.clone(), |standard| standard_key(standard).to_string()),
                 target: ControlTarget::Id(descriptor.meta.id),
-                value: descriptor.meta.default.clone(),
+                value: default_value(&descriptor.meta),
                 standard: descriptor.standard,
                 persist_as: None,
                 forget: false,

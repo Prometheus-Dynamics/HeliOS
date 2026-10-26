@@ -3,7 +3,7 @@
 
 use styx::{
     ipc::StandardControl,
-    prelude::{ControlRect, ControlValue},
+    prelude::{ControlKind, ControlMeta, ControlRect, ControlValue},
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -88,6 +88,15 @@ pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlV
         });
     }
     Ok(ControlValue::Float(number(key, value)? as f32))
+}
+
+/// A control's default as the control takes it. The camera reports a menu's default as an unsigned
+/// number, but a menu takes its index as an integer and refuses the other (a reset would fail on it).
+pub fn default_value(meta: &ControlMeta) -> ControlValue {
+    match (&meta.kind, &meta.default) {
+        (ControlKind::Menu | ControlKind::IntMenu, ControlValue::Uint(index)) => ControlValue::Int(*index as i32),
+        (_, default) => default.clone(),
+    }
 }
 
 /// A rectangle `{x, y, width, height}` in pixels (`x`, `y` signed, `width`, `height` not negative).

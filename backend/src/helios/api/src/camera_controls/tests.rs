@@ -5,6 +5,14 @@ use styx::{
 };
 
 #[test]
+fn a_menu_default_is_sent_as_its_index() {
+    let auto = meta(0xF400_0020, "Auto Exposure", ControlKind::Menu, Access::ReadWrite, ControlValue::Uint(0), ControlValue::Uint(3), ControlValue::Uint(3));
+    assert_eq!(values::default_value(&auto), ControlValue::Int(3));
+    let exposure = meta(0xF400_0021, "Exposure Time, Absolute", ControlKind::Uint, Access::ReadWrite, ControlValue::Uint(1), ControlValue::Uint(10_000), ControlValue::Uint(166));
+    assert_eq!(values::default_value(&exposure), ControlValue::Uint(166));
+}
+
+#[test]
 fn standard_values_take_their_types() {
     assert_eq!(standard_value(StandardControl::ExposureUs, &serde_json::json!(8000)).unwrap(), ControlValue::Uint(8000));
     assert_eq!(standard_value(StandardControl::Gain, &serde_json::json!(2.5)).unwrap(), ControlValue::Float(2.5));
