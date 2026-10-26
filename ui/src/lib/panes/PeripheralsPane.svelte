@@ -2,6 +2,7 @@
   // A device's hardware: fan and curve, LEDs, GPIO pins, IMU and power rails.
   import { identity } from "#lib/core/identity.svelte.js";
   import { isReachable } from "#lib/devices.js";
+  import { formatReading, statusTone } from "#lib/api/lemnos-devices.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import Badge from "#lib/kit/Badge.svelte";
   import CurveEditor from "#lib/kit/CurveEditor.svelte";
@@ -29,7 +30,7 @@
   // A section shows only for a feature the device has (`device.hasOn`), so the pane is empty when
   // none of them is there.
   const empty = $derived(
-    hw && !(device.hasOn(target.id, "fan") && hw.fan) && !(device.hasOn(target.id, "leds") && hw.leds.length) && !hw.gpio.length && !(device.hasOn(target.id, "imu") && hw.imu) && !(device.hasOn(target.id, "power") && hw.power.length) && !(device.hasOn(target.id, "usb_power") && hw.switches?.length),
+    hw && !(device.hasOn(target.id, "fan") && hw.fan) && !(device.hasOn(target.id, "leds") && hw.leds.length) && !hw.gpio.length && !(device.hasOn(target.id, "imu") && hw.imu) && !(device.hasOn(target.id, "power") && hw.power.length) && !(device.hasOn(target.id, "usb_power") && hw.switches?.length) && !hw.lemnos?.length,
   );
   // Live readings at 4 Hz while this pane is open.
   $effect(() => system.watchPeripherals());
@@ -140,6 +141,20 @@
           {/each}
         </Prop>
         {/if}
+      </Section>
+    {/if}
+
+    {#if hw.lemnos?.length}
+      <Section title="Devices" key="hw-lemnos" count={hw.lemnos.length}>
+        {#each hw.lemnos as d (d.id)}
+          <Prop label={d.name}>
+            <Badge tone={statusTone(d.status)} text={d.status} />
+            {#each d.readings as r (r.channel)}
+              <span class="mono" title={r.channel}>{formatReading(r.channel, r.value)}</span>
+            {/each}
+          </Prop>
+        {/each}
+        <p class="hint">Read only: lemnosd's devices, each written by its owner.</p>
       </Section>
     {/if}
 
