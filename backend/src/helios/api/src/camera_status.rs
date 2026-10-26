@@ -149,8 +149,11 @@ pub struct PipelineFacts<'a> {
     pub dictionary: Option<&'a str>,
     /// Whether the pipeline's multi-tag pose solves against a field layout.
     pub field_layout: bool,
-    /// The pyramid level the camera's input takes (the detector reads that level of the frame).
-    pub pyramid: Option<u8>,
+    /// The pyramid level the tag detector reads (`pyramid_level`: 1 is a half-size frame).
+    pub detector_level: Option<u64>,
+    /// The smallest tag outline the detector keeps, in thousandths of the image's perimeter at
+    /// that level (`min_perimeter_permille`).
+    pub min_perimeter_permille: Option<u64>,
     /// The pose status (`calibrated`, `uncalibrated`, `image_size_mismatch`).
     pub pose_status: Option<&'a str>,
     /// The latest value of each host output, by port.
@@ -168,6 +171,7 @@ impl<'a> PipelineFacts<'a> {
     pub fn of(pipeline: &'a Pipeline) -> Self {
         let graph = pipeline.graph.as_ref();
         let node = |id: &str| graph_node(graph, id);
+        let detector = DETECTOR_NODES.iter().find_map(|id| node(id));
         Self {
             name: &pipeline.name,
             enabled: pipeline.enabled,
@@ -177,7 +181,8 @@ impl<'a> PipelineFacts<'a> {
             telemetry: pipeline.telemetry.as_ref(),
             dictionary: pipeline.dictionary.as_deref(),
             field_layout: pipeline.field_layout.is_some(),
-            pyramid: pipeline.bindings.values().filter_map(|b| b.pyramid).max(),
+            detector_level: detector.and_then(|n| const_int(n, "pyramid_level")),
+            min_perimeter_permille: detector.and_then(|n| const_int(n, "min_perimeter_permille")),
             pose_status: pipeline.pose.as_ref().and_then(|p| p.get("status")).and_then(|s| s.as_str()),
             outputs: pipeline.outputs.iter().map(|o| (o.port.as_str(), &o.value)).collect(),
             live_map: node(crate::field_layouts::LIVE_MAP_NODE).is_some(),
@@ -197,6 +202,9 @@ impl<'a> PipelineFacts<'a> {
 }
 
 const DENSE_NODE: &str = "eidos:dense.map";
+/// The tag detector nodes whose limits the tags stage explains: the tracked group and the
+/// one-shot detectors.
+const DETECTOR_NODES: [&str; 3] = ["eidos:detectors.tracked_detect", "eidos:detectors.apriltag", "eidos:detectors.aruco"];
 const FEATURES_NODE: &str = "eidos:features.track";
 
 /// The node of a graph document whose id is `id`.
@@ -209,6 +217,21 @@ fn const_int(node: &serde_json::Value, name: &str) -> Option<u64> {
     let consts = node.get("const_inputs")?.as_array()?;
     let value = consts.iter().find(|entry| entry.get(0).and_then(|n| n.as_str()) == Some(name))?.get(1)?.get("value")?;
     value.as_u64()
+}
+
+/// The frame size of a capture mode (`MJPG 1280x960`).
+fn frame_size(mode: &str) -> Option<(u32, u32)> {
+    let size = mode.split_whitespace().find(|part| part.contains('x'))?;
+    let (width, height) = size.split_once('x')?;
+    Some((width.parse().ok()?, height.parse().ok()?))
+}
+
+/// The side, in full-frame pixels, of the smallest square tag whose outline the detector keeps:
+/// `permille` of the perimeter of the frame at pyramid `level`, scaled back to the full frame.
+fn smallest_tag_side(width: u32, height: u32, level: u64, permille: u64) -> u32 {
+    let scale = 1u64 << level.min(8);
+    let perimeter = 2 * (u64::from(width) + u64::from(height)) / scale;
+    (perimeter * permille / 1000 / 4 * scale) as u32
 }
 
 /// The length of a list in an output's value: the value itself, or its `key` member.
@@ -419,8 +442,10 @@ fn detections_stage(camera: &CameraFacts, pipelines: &[PipelineFacts]) -> Stage 
     if searching {
         return stage.hint("The exposure is still adjusting. Hold a tag in view for a moment.");
     }
-    if first.pyramid.is_some_and(|level| level > 0) {
-        return stage.hint(format!("The detector reads pyramid level {}, a 1/{} scale of the frame. A tag must still span several cells at that size.", first.pyramid.unwrap_or(0), 1u32 << first.pyramid.unwrap_or(0)));
+    let frame = camera.capture.as_ref().and_then(|c| frame_size(&c.mode));
+    if let (Some((width, height)), Some(permille)) = (frame, first.min_perimeter_permille) {
+        let side = smallest_tag_side(width, height, first.detector_level.unwrap_or(0), permille);
+        return stage.hint(format!("Tags smaller than about {side} px across are not looked at: at {width}x{height} the detector keeps outlines of at least {permille}\u{2030} of the image. Move closer, or use larger tags."));
     }
     stage.hint(format!("Point the camera at a tag, and check it is the {dictionary} family. Tags must be printed with a black border."))
 }
@@ -656,13 +681,24 @@ mod tests {
             state: "running",
             telemetry: Some(&telemetry),
             dictionary: Some("apriltag_36h11"),
-            pyramid: Some(3),
+            detector_level: Some(1),
+            min_perimeter_permille: Some(30),
             outputs: BTreeMap::from([("rejected", &rejected)]),
             ..PipelineFacts::default()
         };
         let tags = stage(&derive(&served(Some(capture(Some(24.0), 1, None))), std::slice::from_ref(&p)), "detections").clone();
         assert_eq!(tags.state, StageState::Waiting);
         assert!(tags.hint.unwrap_or_default().starts_with("2 outlines were found and rejected"));
+    }
+
+    #[test]
+    fn no_tags_says_how_small_a_tag_the_detector_ignores() {
+        // The SystemCore's C270 at 1280x960, the detector on the half-size frame keeping outlines
+        // of 3% of its perimeter (67 px, a 16 px square at half size): tags under ~32 px across
+        // the full frame are never decoded.
+        assert_eq!(smallest_tag_side(1280, 960, 1, 30), 32);
+        assert_eq!(frame_size("MJPG 1280x960"), Some((1280, 960)));
+        assert_eq!(frame_size("YUYV"), None);
     }
 
     #[test]

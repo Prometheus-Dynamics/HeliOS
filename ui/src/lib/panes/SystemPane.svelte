@@ -2,7 +2,7 @@
   // One device's software: boot slots and updates, services, recovery
   // guarantees, and its whole configuration as a file.
   import Icon from "#lib/components/common/Icon.svelte";
-  import { duration } from "#lib/format.js";
+  import { bytes, duration } from "#lib/format.js";
   import { identity } from "#lib/core/identity.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { RECOVERY } from "#lib/devices.js";
@@ -164,7 +164,7 @@
       <Prop label="Clock source"><span class="mono">{node.clock.source}</span></Prop>
       <Prop label="Offset"><span class="mono">{node.clock.offsetUs} µs</span></Prop>
       <Prop label="Link"><span class="mono">{node.link} · {node.address}</span></Prop>
-      <Prop label="Disk"><span class="mono">{node.diskUsedMiB.toFixed(1)} / {node.diskTotalMiB} MiB</span></Prop>
+      <Prop label="Disk"><span class="mono">{bytes(node.diskUsedMiB * 1024 * 1024)} / {bytes(node.diskTotalMiB * 1024 * 1024)}</span></Prop>
     </Section>
   </div>
 {/if}
