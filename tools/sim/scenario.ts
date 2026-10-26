@@ -158,6 +158,8 @@ console.log(`[scenario] ${NAME}: ${TEMPLATE_ID} on ${camera.id} with layout ${LA
 const lines: string[] = [];
 const timingLines: string[] = [];
 const denseLines: string[] = [];
+/** The dense outputs that arrived (counted, not kept: a mesh can be megabytes). */
+const denseOutputs = { mesh: 0, depth: 0, lastVertices: 0, lastTriangles: 0, lastDepth: "" };
 // SIM_SCENARIO_S of scene time: the frames' own timestamps (under Styx's lockstep clock the sim
 // runs slower than wall time), with a wall-clock cap of SIM_SCENARIO_WALL_S (default 20x).
 const WALL_S = Number(process.env.SIM_SCENARIO_WALL_S ?? SECONDS * 20);
@@ -165,7 +167,7 @@ let firstTs: number | undefined;
 let wallStopped = false;
 await new Promise<void>((resolve, reject) => {
   // The mapper's outputs under Eidos's template names (map_pose, map_timing) and the older ones.
-  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=map_pose,map_timing,pose,timing,dense_timing`);
+  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=map_pose,map_timing,pose,timing,dense_timing,dense_mesh,dense_depth`);
   const finish = () => {
     clearTimeout(timer);
     socket.close();
@@ -178,6 +180,19 @@ await new Promise<void>((resolve, reject) => {
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     for (const line of event.data.split("\n").filter(Boolean)) {
+      if (line.includes('"port":"dense_mesh"') || line.includes('"port":"dense_depth"')) {
+        const value = JSON.parse(line).value;
+        if (!value) continue;
+        if (line.includes('"port":"dense_mesh"')) {
+          denseOutputs.mesh += 1;
+          denseOutputs.lastVertices = Number(value.vertices ?? 0);
+          denseOutputs.lastTriangles = Number(value.triangles ?? 0);
+        } else {
+          denseOutputs.depth += 1;
+          denseOutputs.lastDepth = `${value.width}x${value.height}`;
+        }
+        continue;
+      }
       if (line.includes('"port":"dense_timing"')) {
         denseLines.push(line);
         continue;
@@ -199,6 +214,8 @@ const telemetry = (await api("GET", `/v1/pipelines/${PIPELINE_ID}`)).telemetry ?
 await Bun.write(`${OUT}/poses.jsonl`, lines.join("\n") + "\n");
 await Bun.write(`${OUT}/timing.jsonl`, timingLines.join("\n") + "\n");
 if (denseLines.length) {
+  // `processed` is per tick (non-zero only on the tick a keyframe finishes): what came out is the measure.
+  console.log(`[scenario] dense outputs: ${denseOutputs.mesh} meshes (last ${denseOutputs.lastVertices} vertices, ${denseOutputs.lastTriangles} triangles), ${denseOutputs.depth} depth images${denseOutputs.lastDepth ? ` (${denseOutputs.lastDepth})` : ""}`);
   await Bun.write(`${OUT}/dense_timing.jsonl`, denseLines.join("\n") + "\n");
   // The dense mapper's progress: its state and counters at a few points of the run.
   const samples = denseLines.map((line) => JSON.parse(line).value).filter(Boolean);
