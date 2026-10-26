@@ -110,9 +110,13 @@ console.log(`[scenario] camera frame rate ${FPS} fps: ${JSON.stringify(settings?
 const layoutText = await Bun.file(`${DIR}layout.json`).text();
 await fetch(`${BASE}/v1/field-layouts/${LAYOUT_ID}`, { method: "DELETE" });
 await api("POST", `/v1/field-layouts?id=${LAYOUT_ID}&name=${encodeURIComponent(`Sim ${NAME}`)}`, layoutText);
+// SIM_SCENARIO_TEMPLATE: the template to run (default live-map); any template with the live mapper
+// works (apriltag-36h11-map, dense-map, apriltag-36h11-map-dense). With the dense mapper its
+// dense_timing samples are recorded and summarised too.
+const TEMPLATE_ID = process.env.SIM_SCENARIO_TEMPLATE ?? "live-map";
 const templates: any[] = await api("GET", "/v1/pipelines/templates");
-const template = templates.find((t) => t.id === "live-map");
-if (!template) throw new Error("no live-map template");
+const template = templates.find((t) => t.id === TEMPLATE_ID);
+if (!template) throw new Error(`no ${TEMPLATE_ID} template`);
 // The live mapper's settings: scenario.json's "live_map" object (e.g. {"calibration_frames": 2400})
 // plus SIM_SCENARIO_LIVE_MAP ("calibration_frames=2400,..."), and lens_model above. Integers are
 // Int, other numbers Float, lens_model an enum, other text String.
@@ -124,7 +128,7 @@ for (const pair of (process.env.SIM_SCENARIO_LIVE_MAP ?? "").split(",").filter(B
 if (LENS_MODEL) liveMapConfig.lens_model = LENS_MODEL;
 if (Object.keys(liveMapConfig).length) {
   const mapper = template.graph.graph.nodes.find((n: any) => n.bundle === "eidos:mapping.live_map");
-  if (!mapper) throw new Error("the live-map template has no eidos:mapping.live_map node");
+  if (!mapper) throw new Error(`the ${TEMPLATE_ID} template has no eidos:mapping.live_map node`);
   for (const [key, value] of Object.entries(liveMapConfig)) {
     const typed =
       key === "lens_model"
@@ -147,19 +151,21 @@ await api("POST", "/v1/pipelines", {
   field_layout: LAYOUT_ID,
   enabled: true,
 });
-console.log(`[scenario] ${NAME}: live-map on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}${Object.keys(liveMapConfig).length ? `, live_map ${JSON.stringify(liveMapConfig)}` : ""}, recording ${SECONDS} s`);
+console.log(`[scenario] ${NAME}: ${TEMPLATE_ID} on ${camera.id} with layout ${LAYOUT_ID}, ${CALIBRATED ? "calibrated from the file" : "uncalibrated (the mapper estimates it)"}${Object.keys(liveMapConfig).length ? `, live_map ${JSON.stringify(liveMapConfig)}` : ""}, recording ${SECONDS} s`);
 
 // --- Record -----------------------------------------------------------------------------------
 
 const lines: string[] = [];
 const timingLines: string[] = [];
+const denseLines: string[] = [];
 // SIM_SCENARIO_S of scene time: the frames' own timestamps (under Styx's lockstep clock the sim
 // runs slower than wall time), with a wall-clock cap of SIM_SCENARIO_WALL_S (default 20x).
 const WALL_S = Number(process.env.SIM_SCENARIO_WALL_S ?? SECONDS * 20);
 let firstTs: number | undefined;
 let wallStopped = false;
 await new Promise<void>((resolve, reject) => {
-  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=pose,timing`);
+  // The mapper's outputs under Eidos's template names (map_pose, map_timing) and the older ones.
+  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=map_pose,map_timing,pose,timing,dense_timing`);
   const finish = () => {
     clearTimeout(timer);
     socket.close();
@@ -172,7 +178,11 @@ await new Promise<void>((resolve, reject) => {
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     for (const line of event.data.split("\n").filter(Boolean)) {
-      (line.includes('"port":"timing"') ? timingLines : lines).push(line);
+      if (line.includes('"port":"dense_timing"')) {
+        denseLines.push(line);
+        continue;
+      }
+      (line.includes('"port":"timing"') || line.includes('"port":"map_timing"') ? timingLines : lines).push(line);
       const ts = Number(/"frame_ts_ns":(\d+)/.exec(line)?.[1]);
       if (!Number.isFinite(ts)) continue;
       firstTs ??= ts;
@@ -188,6 +198,16 @@ if (wallStopped) console.log(`[scenario] stopped at the wall-clock cap (${WALL_S
 const telemetry = (await api("GET", `/v1/pipelines/${PIPELINE_ID}`)).telemetry ?? {};
 await Bun.write(`${OUT}/poses.jsonl`, lines.join("\n") + "\n");
 await Bun.write(`${OUT}/timing.jsonl`, timingLines.join("\n") + "\n");
+if (denseLines.length) {
+  await Bun.write(`${OUT}/dense_timing.jsonl`, denseLines.join("\n") + "\n");
+  // The dense mapper's progress: its state and counters at a few points of the run.
+  const samples = denseLines.map((line) => JSON.parse(line).value).filter(Boolean);
+  const keys = ["state", "arrived", "pending", "processed", "keyframes", "dropped_keyframes", "dropped_no_neighbour", "budget_ms", "spacing", "sweep_ms", "integrate_ms"];
+  for (const at of [0, 0.25, 0.5, 0.75, 1]) {
+    const sample = samples[Math.min(samples.length - 1, Math.floor(at * (samples.length - 1)))] ?? {};
+    console.log(`[scenario] dense_timing at ${Math.round(at * 100)}%: ${JSON.stringify(Object.fromEntries(keys.filter((k) => k in sample).map((k) => [k, sample[k]])))}`);
+  }
+}
 
 // --- Truth ------------------------------------------------------------------------------------
 
