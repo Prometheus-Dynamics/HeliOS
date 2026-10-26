@@ -1,0 +1,16 @@
+# HeliOS robot settings: the node id, the Orion cluster (robot-<team>) and the networks peers
+# are reached over, written to /run/helios/robot.env before orion-node starts (docs/device-profiles.md,
+# "One robot"; the script is robot-env).
+[Unit]
+Description=HeliOS robot settings
+Before=orion-node.service helios-api.service helios-engine.service helios-peripherals.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=helios
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/lib/helios/robot-env raze
+
+[Install]
+WantedBy=multi-user.target

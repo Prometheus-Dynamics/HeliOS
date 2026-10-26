@@ -12,6 +12,7 @@ Type=simple
 Slice=vision.slice
 EnvironmentFile=/usr/local/etc/helios/helios.env
 EnvironmentFile=-/usr/local/etc/helios/local.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/local/bin/helios-peripherals
 Restart=always
 RestartSec=2

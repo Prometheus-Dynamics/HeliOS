@@ -2,7 +2,8 @@
 # own vision servers), so HeliOS never takes CPU from the robot's control and safety services.
 [Unit]
 Description=HeliOS Orion node
-After=network.target
+After=network.target helios-robot.service
+Wants=helios-robot.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -10,6 +11,7 @@ Type=notify
 NotifyAccess=main
 Slice=vision.slice
 EnvironmentFile=/usr/local/etc/helios/orion-node.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios/orion
 ExecStart=/usr/local/bin/orion-node
 WatchdogSec=30s

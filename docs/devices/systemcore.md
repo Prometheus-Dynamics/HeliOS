@@ -36,6 +36,8 @@ profile bound to the gadget's host-side MAC with `ipv4.never-default yes` fixes 
 
 Ports in use by the host: 22, 53, 67, 1110/1115/1136 (udp), 1740/1741, 5800-5837 (Limelight
 services, Elastic on 5803), 5808/5809 (udp), 9001 (Blocks). HeliOS must pick a port outside these.
+HeliOS uses 5880 (its API and UI, `helios.api_port`) and 9200 (Orion's peer listener, signed
+requests only). Discovery runs on `ethadapt0` (the Raze) and `eth0` (the robot network).
 
 ## Hardware HeliOS may see
 

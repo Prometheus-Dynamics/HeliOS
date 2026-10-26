@@ -1,0 +1,85 @@
+#!/bin/sh
+# robot-env: what a HeliOS node shares with the rest of its robot, written to
+# /run/helios/robot.env before orion-node and the HeliOS services start. Each unit reads that
+# file after its own environment files, so these settings win (docs/device-profiles.md, "One
+# robot"). Usage: robot-env <systemcore|raze>
+#
+# - The node id is unique to this board. Two boards both called node-local would be one node
+#   to Orion, and HeliOS names its camera resources after the node id.
+# - The robot is the controller's team: Orion's cluster is robot-<team>, so discovery and sync
+#   see only this robot's boards, even on a field network shared with other robots. No team
+#   means no robot: discovery stays off.
+# - The networks a peer is reached over are the USB link to the controller and the robot's own
+#   network, 10.TE.AM.0/24 (FRC's convention for the team's radio and roboRIO subnet).
+# - The enrollment key, when the robot has one provisioned: automatic enrollment (docs/discovery.md).
+#   Without it peers are found but stay unenrolled until an operator enrolls them.
+
+set -eu
+
+kind=${1:?usage: robot-env <systemcore|raze>}
+out=${HELIOS_ROBOT_ENV:-/run/helios/robot.env}
+link_net=${HELIOS_ROBOT_LINK_NET:-172.31.12.80/29}
+
+case $kind in
+systemcore)
+    team_files=${HELIOS_ROBOT_TEAM_FILES:-/etc/team_number.txt:/usr/local/var/lib/helios/api/controller.json}
+    key_files=${HELIOS_ROBOT_KEY_FILES:-/usr/local/etc/helios/robot-enrollment.key}
+    ;;
+raze)
+    team_files=${HELIOS_ROBOT_TEAM_FILES:-/var/lib/helios/api/controller.json}
+    key_files=${HELIOS_ROBOT_KEY_FILES:-/etc/helios/robot-enrollment.key}
+    ;;
+*)
+    echo "robot-env: unknown board kind '$kind'" >&2
+    exit 2
+    ;;
+esac
+
+# The team a file gives: a team number file, or the team of a controller document.
+team_in() {
+    case $1 in
+    *.json) sed -n 's/.*"team" *: *\([0-9][0-9]*\).*/\1/p' "$1" 2>/dev/null | head -n 1 ;;
+    *) tr -cd '0-9' <"$1" 2>/dev/null | head -c 6 ;;
+    esac
+}
+
+team=
+oldifs=$IFS
+IFS=:
+for file in $team_files; do
+    [ -r "$file" ] || continue
+    candidate=$(team_in "$file")
+    if [ -n "$candidate" ] && [ "$candidate" -ge 1 ] && [ "$candidate" -le 25599 ] 2>/dev/null; then
+        team=$candidate
+        break
+    fi
+done
+IFS=$oldifs
+
+# The board's serial (the last four characters), or the machine id when it has none.
+serial=$(tr -cd '0-9a-zA-Z' 2>/dev/null </proc/device-tree/serial-number | tail -c 4 || true)
+[ -n "$serial" ] || serial=$(head -c 4 /etc/machine-id 2>/dev/null || echo 0000)
+
+tmp="$out.tmp"
+mkdir -p "$(dirname "$out")"
+{
+    echo "ORION_NODE_ID=$kind-$serial"
+    echo "HELIOS_NODE_ID=$kind-$serial"
+    if [ -n "$team" ]; then
+        echo "ORION_NODE_CLUSTER=robot-$team"
+        echo "ORION_NODE_DISCOVERY=mdns"
+        echo "HELIOS_API_PEER_NETS=$link_net,10.$((team / 100)).$((team % 100)).0/24"
+    else
+        echo "ORION_NODE_DISCOVERY=off"
+        echo "HELIOS_API_PEER_NETS="
+    fi
+    IFS=:
+    for key in $key_files; do
+        if [ -r "$key" ]; then
+            echo "ORION_NODE_ENROLLMENT_KEY_FILE=$key"
+            break
+        fi
+    done
+    IFS=$oldifs
+} >"$tmp"
+mv "$tmp" "$out"

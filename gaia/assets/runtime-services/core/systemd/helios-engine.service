@@ -28,6 +28,7 @@ Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
 # default; without this wgpu may pick a GL backend).
 Environment=WGPU_BACKEND=vulkan
 EnvironmentFile=-/etc/default/helios-engine.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-engine
 Restart=always
 RestartSec=2

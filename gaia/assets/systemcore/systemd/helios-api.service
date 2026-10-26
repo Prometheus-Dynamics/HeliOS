@@ -12,6 +12,7 @@ Slice=vision.slice
 EnvironmentFile=/usr/local/etc/helios/helios.env
 Environment=HELIOS_API_BIND=0.0.0.0:5880
 EnvironmentFile=-/usr/local/etc/helios/local.env
+EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/local/bin/helios-api
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

@@ -41,6 +41,25 @@ id = "helios-engine-socket"
 name = "helios-engine.socket"
 unit_path = "@assets/runtime-services/core/systemd/helios-engine.socket"
 
+[[stage.files]]
+id = "helios-robot-env"
+src = "@assets/robot/robot-env"
+dest = "/usr/lib/helios/robot-env"
+mode = 493
+origin = "static-asset"
+
+[[stage.files]]
+id = "orion-node-robot-dropin"
+src = "@assets/runtime-services/core/systemd/orion-node.service.d/20-helios-robot.conf"
+dest = "/etc/systemd/system/orion-node.service.d/20-helios-robot.conf"
+mode = 420
+origin = "static-asset"
+
+[[stage.services]]
+id = "helios-robot-service"
+name = "helios-robot.service"
+unit_path = "@assets/runtime-services/core/systemd/helios-robot.service"
+
 [image]
 kind = "buildroot"
 # orion-node.service runs as the `orion` user. The root filesystem is a
@@ -56,9 +75,12 @@ config_overrides = [
 [image.feed]
 stage_files = [
   "runtime-api-startup",
+  "helios-robot-env",
+  "orion-node-robot-dropin",
   "helios-data-owners",
 ]
 stage_services = [
+  "helios-robot-service",
   "helios-api-service",
   "helios-engine-service",
   "helios-engine-socket",

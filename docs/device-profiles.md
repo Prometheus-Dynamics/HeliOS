@@ -58,6 +58,37 @@ The API refuses a request for a feature the device lacks with 404 `not on this d
 reads the same map: `device.has("leds")` where a control is drawn, and `requires` on panes, palette
 commands and intents. Nothing device-specific is drawn until the device has answered.
 
+## One robot
+
+A robot can run HeliOS on several of its devices (a SystemCore, and a Raze on its USB link). They
+are one robot to the user: any one HeliOS UI shows and controls all of them.
+
+- **Who is in the robot.** The controller's team names the Orion cluster, `robot-<team>`
+  (`helios-robot`, `robot-env`). Orion discovers and syncs only within a cluster
+  ([Orion discovery](https://github.com/Prometheus-Dynamics/Orion/blob/main/docs/discovery.md)),
+  so a board never sees another robot's boards, even on a shared field network (Orion's
+  `docs/discovery.md`). No team, no robot: discovery stays off.
+- **Finding each other.** Orion's mDNS discovery runs on the links the board shares with its
+  robot (`ORION_NODE_DISCOVERY_INTERFACES`: the USB bridge and the robot network, never the PC's
+  USB link). Each board publishes its HeliOS API port as the label `helios.api_port`, and the
+  board's `orion+tcp` listener is `:9200`. Peers are enrolled by Orion: with the robot's enrollment
+  key (`/usr/local/etc/helios/robot-enrollment.key` on a SystemCore, `/etc/helios/...` on a Raze),
+  automatically; without it, an operator approves each peer.
+- **Per-board settings.** `robot-env` writes `/run/helios/robot.env` before Orion starts: a node id
+  unique to the board (`systemcore-<serial>`, `raze-<serial>`), the cluster, discovery, the peer
+  networks (the USB link and `10.TE.AM.0/24`) and the enrollment key. Every HeliOS unit reads it
+  last.
+- **The gateway.** helios-api routes `/v1/peers/<node>/<path>` to the peer's own API at
+  `/v1/<path>` over the link (`peers.rs`). A peer is reached only when Orion has enrolled it, it
+  is on one of the robot's networks and it names its API port. Only HeliOS's `/v1` paths are passed,
+  with the caller's bearer token and no cookies. WebSocket routes are not relayed (a peer's camera
+  uses its MJPEG preview).
+- **Features stay per node.** Each node answers its own `GET /v1/device`; the UI gates a control on
+  the node it is drawn for (the Raze's LEDs show for the Raze only).
+
+The controller's firewall is never edited: the driver station reaches the SystemCore, and the
+SystemCore reaches the Raze over the link it already shares.
+
 ## The install layout
 
 Every path HeliOS uses comes from one layout, never a literal in the code:
