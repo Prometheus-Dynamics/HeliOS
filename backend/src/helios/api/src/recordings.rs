@@ -6,7 +6,7 @@
 use std::{path::Path, time::Duration};
 
 use helios_recorder::{
-    Attachment, ClipRequest, LemnosSource, PartSummary, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus,
+    Attachment, ClipRequest, LemnosSource, PartSummary, RecorderError, RecorderSettings, RecordingInfo, RecordingRequest, RecordingStatus, catalog,
     host::{self, HostSender, TOPIC_EVENTS},
     info::{ATTACHMENT_FIELD, ATTACHMENT_PIPELINE_PREFIX},
     storage,
@@ -271,6 +271,18 @@ pub async fn stop_recording(state: &SharedState, id: &str) -> ApiResult<Recordin
     Ok(status)
 }
 
+/// Applies the recordings folder's budget now: a running recording takes it from its next part,
+/// and the oldest finished recordings go while the folder is over it. `None` when no recordings
+/// folder can be used now (nothing to apply to).
+pub async fn apply_budget(state: &SharedState) -> ApiResult<Option<u64>> {
+    let settings = state.store.recording_settings().await?;
+    let Ok(dir) = storage::resolve_dir(&settings) else { return Ok(None) };
+    let budget = storage::budget_for(&settings, &dir).map_err(|error| api_error(RecorderError::Storage(error)))?;
+    state.recorder.set_max_total_bytes(budget);
+    tokio::task::spawn_blocking(move || catalog::prune(&dir, budget, None)).await.map_err(|error| ApiError::internal(error.to_string()))?.map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(Some(budget))
+}
+
 /// The camera a recording made from the robot (NetworkTables, auto-record) uses: the lowest camera
 /// id present.
 pub async fn default_camera(state: &SharedState) -> ApiResult<String> {
@@ -305,6 +317,7 @@ pub async fn capture_clip(state: &SharedState, camera: Option<String>, seconds: 
     let info = recording_info(state, &camera, &socket, &view).await;
     let (board, camera_label, commit) = file_names(state, &camera, &record);
     let dir = storage::resolve_dir(&settings).map_err(|error| api_error(RecorderError::Storage(error)))?;
+    let max_total_bytes = storage::budget_for(&settings, &dir).map_err(|error| api_error(RecorderError::Storage(error)))?;
     let last = seconds.map(|seconds| Duration::from_secs(u64::from(seconds)));
     let state = state.clone();
     tokio::task::spawn_blocking(move || {
@@ -317,6 +330,7 @@ pub async fn capture_clip(state: &SharedState, camera: Option<String>, seconds: 
             compression: settings.compression,
             queue_bytes: settings.queue_bytes,
             max_fps: settings.max_fps,
+            max_total_bytes,
         };
         state.recorder.capture_last(last, &clip, &dir)
     })
