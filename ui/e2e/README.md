@@ -63,6 +63,14 @@ with polls. Mock tests check the screen only.
   waiting to be sent). A page closed with a PUT in flight once cut the device's handler off between
   its Orion write and its revision record, and the next test's deploy showed no revision change.
   `settleWrites(page)` (in `fixtures.ts`) is the same wait for a test that reloads or navigates.
+- **The device as found (sim).** The automatic `deviceAsFound` fixture runs for every sim test. Before
+  the test it waits for each frame camera to be ready (its service online, its frames flowing or
+  not yet asked for; up to 3 minutes, failing with the stage that holds it up, so a device that has
+  just booted is not tested too early), then snapshots the setup flag, every pipeline's spec, and each
+  frame camera's kept settings and mode. After the page's last write it puts them back (`restoreDevice`
+  in `device.ts`): a pipeline is rewritten, recreated or removed as needed, a camera's kept settings
+  are reset and re-applied, and the restore waits until the device shows them. A camera that was
+  delivering frames must deliver them again. A test does not clean up after itself for these.
 
 ## Not automated
 
