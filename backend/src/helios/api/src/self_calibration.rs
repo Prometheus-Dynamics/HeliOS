@@ -189,6 +189,26 @@ impl Handled {
     }
 }
 
+/// Why each camera's last fit was not stored, for the camera's status chain: the reason a fit was
+/// refused, cleared when one is stored. In memory: a restart starts without notes.
+#[derive(Debug, Default)]
+pub struct Notes(std::sync::Mutex<BTreeMap<String, String>>);
+
+impl Notes {
+    /// Sets (or with `None`, clears) the camera's note.
+    pub fn set(&self, camera: &str, reason: Option<String>) {
+        let mut notes = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match reason {
+            Some(reason) => notes.insert(camera.to_string(), reason),
+            None => notes.remove(camera),
+        };
+    }
+
+    pub fn get(&self, camera: &str) -> Option<String> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(camera).cloned()
+    }
+}
+
 /// The task: looks up the live mappers every few seconds, holds the relay's subscription while
 /// there are any, and stores their converged fits.
 pub fn spawn(state: SharedState) -> tokio::task::JoinHandle<()> {
@@ -254,7 +274,9 @@ pub async fn handle_chunk(state: &SharedState, mappers: &BTreeMap<String, LiveMa
 /// older Eidos), if the rules allow it, and hands the camera's inputs to its pipelines.
 async fn store(state: &SharedState, pipeline: &str, mapper: &LiveMapper, fit: &Fit) -> crate::error::ApiResult<()> {
     let Some((width, height)) = fit_size(fit).or(mapper.size) else {
-        tracing::info!(pipeline, camera = %mapper.camera, "self-calibration not stored: neither the fit nor the mapper's input says the frame size");
+        let reason = "neither the fit nor the mapper's input says the frame size";
+        tracing::info!(pipeline, camera = %mapper.camera, reason, "self-calibration not stored");
+        state.self_calibration_notes.set(&mapper.camera, Some(reason.into()));
         return Ok(());
     };
     let orientation = Orientation::from_settings(&state.store.camera_settings(&mapper.camera).await?);
@@ -262,6 +284,7 @@ async fn store(state: &SharedState, pipeline: &str, mapper: &LiveMapper, fit: &F
         Ok(calibration) => calibration,
         Err(reason) => {
             tracing::warn!(pipeline, camera = %mapper.camera, reason, "self-calibration not stored");
+            state.self_calibration_notes.set(&mapper.camera, Some(reason));
             return Ok(());
         }
     };
@@ -270,10 +293,12 @@ async fn store(state: &SharedState, pipeline: &str, mapper: &LiveMapper, fit: &F
     match decide(at_size, &calibration) {
         Decision::Keep(reason) => {
             tracing::info!(pipeline, camera = %mapper.camera, reason, "self-calibration kept out");
+            state.self_calibration_notes.set(&mapper.camera, Some(reason));
             return Ok(());
         }
         Decision::Store => {}
     }
+    state.self_calibration_notes.set(&mapper.camera, None);
     calibration.saved_at_ms = host::now_ms();
     state.store.put_calibration(&mapper.camera, calibration.clone()).await?;
     state.events.publish("camera", serde_json::json!({ "id": mapper.camera, "change": "self_calibration", "pipeline": pipeline, "calibration": calibration }));

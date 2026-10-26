@@ -23,8 +23,10 @@ use crate::{
     calibration_capture::{CaptureRequest, CaptureResult, SolveRequest, SolveResult},
     camera_context::{self, CameraCalibration},
     camera_controls::{AppliedCameraControl, CameraClient, CameraControl},
+    camera_status::{self, CalibrationFact, CameraFacts, CameraStatus, PipelineFacts},
     error::{ApiError, ApiResult},
     orion::{StateView, enum_name, label_map},
+    self_calibration,
     store::CameraMount,
 };
 
@@ -60,6 +62,8 @@ pub struct CaptureLive {
     pub analogue_gain: Option<f64>,
     pub digital_gain: Option<f64>,
     pub ae_state: Option<String>,
+    /// The capture's last error (a failed open or start, a busy device); `null` when it has none.
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -98,6 +102,9 @@ pub struct Camera {
     pub settings_writable: bool,
     /// Whether `GET /v1/cameras/{id}/preview` can serve it: the camera has a Styx camera service.
     pub preview_available: bool,
+    /// The camera's status chain (`camera_status`): each stage from the camera to its map, depth
+    /// and features, and the stage it stops at. Set by the list and by `GET /v1/cameras/{id}`.
+    pub status: Option<CameraStatus>,
 }
 
 pub fn frames_socket(endpoints: &[String]) -> Option<PathBuf> {
@@ -140,8 +147,14 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         live: None,
         live_error: None,
         service_online: None,
+        status: None,
         id,
     }
+}
+
+/// The device node a camera's `dev` endpoint names (`dev:///dev/video0`).
+fn device_node(record: &orion::control_plane::ResourceRecord) -> Option<PathBuf> {
+    record.endpoints.iter().find_map(|endpoint| endpoint.strip_prefix("dev://")).map(PathBuf::from)
 }
 
 /// Ask a camera service for its sources and metrics (blocking IPC, so off the async runtime).
@@ -174,6 +187,7 @@ pub async fn live_facts(socket: PathBuf) -> Result<CameraLive, String> {
                     analogue_gain: c.aaa.as_ref().and_then(|a| a.analogue_gain),
                     digital_gain: c.aaa.as_ref().and_then(|a| a.digital_gain),
                     ae_state: c.aaa.and_then(|a| a.ae_state),
+                    last_error: c.restarts.last_error,
                 })
                 .collect(),
         })
@@ -197,11 +211,77 @@ async fn with_live(state: &SharedState, mut camera: Camera, record: &orion::cont
     camera
 }
 
+/// The camera's status chain: its service and device facts, the pipelines that take it, and the
+/// calibration stored for their frame size. The device is only looked at for other holders while
+/// no frames flow (a scan of `/proc`, off the async runtime).
+async fn chain_of(state: &SharedState, view: &StateView, camera: &Camera, record: &orion::control_plane::ResourceRecord) -> CameraStatus {
+    let pipelines = pipelines::pipelines_using_dto(view, &camera.id);
+    let pipeline_facts: Vec<PipelineFacts> = pipelines.iter().map(PipelineFacts::of).collect();
+    let capture = camera.live.as_ref().and_then(|live| live.captures.first().cloned());
+    let flowing = capture.as_ref().is_some_and(|c| c.fps_measured.is_some_and(|fps| fps > 0.0) || c.frames_delivered > 0);
+    let device = device_node(record);
+    let holders = match &device {
+        Some(node) if !flowing && camera.frames_endpoint.is_some() => {
+            let node = node.clone();
+            tokio::task::spawn_blocking(move || camera_status::device_holders(&node)).await.unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    let calibration = match calibration_fact(state, &camera.id, &pipelines).await {
+        Ok(calibration) => calibration,
+        Err(error) => {
+            tracing::warn!(camera = %camera.id, error = %error.message, "camera calibration not read for its status");
+            None
+        }
+    };
+    let camera_facts = CameraFacts {
+        service: camera.frames_endpoint.is_some(),
+        service_online: camera.service_online,
+        live_error: camera.live_error.clone(),
+        capture,
+        device,
+        holders,
+        calibration,
+        calibration_note: state.self_calibration_notes.get(&camera.id),
+    };
+    camera_status::derive(&camera_facts, &pipeline_facts)
+}
+
+/// A camera's calibration for the frame size its pipelines take: the user's or a self-calibration,
+/// whichever `match_calibration` picks (`None`: no calibration usable at that size).
+async fn calibration_fact(state: &SharedState, camera: &str, pipelines: &[pipelines::Pipeline]) -> ApiResult<Option<CalibrationFact>> {
+    let stored = state.store.calibrations().await?.remove(camera).unwrap_or_default();
+    let size = pipelines.iter().flat_map(|p| p.bindings.values()).find(|b| b.resource_id == camera).and_then(|b| b.output_width.zip(b.output_height));
+    let matched = camera_context::match_calibration(&stored, size);
+    Ok(matched.calibration().map(|c| CalibrationFact {
+        self_calibrated: c.provenance.as_ref().is_some_and(|p| p.method == self_calibration::METHOD),
+        rms_px: c.rms_px,
+        views: c.provenance.as_ref().map(|p| p.views),
+        width: c.width,
+        height: c.height,
+    }))
+}
+
+/// A camera as the list and its own route show it: its live facts and its status chain.
+async fn camera_view(state: &SharedState, view: &StateView, mounts: &BTreeMap<String, CameraMount>, record: &orion::control_plane::ResourceRecord) -> Camera {
+    let camera = with_live(state, base_camera(record, view, &state.config.node_id, mounts), record).await;
+    let status = chain_of(state, view, &camera, record).await;
+    Camera { status: Some(status), ..camera }
+}
+
 pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Vec<Camera>>> {
     let view = state.orion.view().await?;
     let mounts = state.store.mounts().await?;
-    let futures = camera_records(&view).map(|record| with_live(&state, base_camera(record, &view, &state.config.node_id, &mounts), record));
+    let futures = camera_records(&view).map(|record| camera_view(&state, &view, &mounts, record));
     Ok(Json(futures_util::future::join_all(futures).await))
+}
+
+/// `GET /v1/cameras/{id}/status`: the camera's status chain, for the UI's "why" (see `camera_status`).
+pub async fn get_status(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<CameraStatus>> {
+    let (view, record) = find(&state, &id).await?;
+    let mounts = state.store.mounts().await?;
+    let camera = with_live(&state, base_camera(&record, &view, &state.config.node_id, &mounts), &record).await;
+    Ok(Json(chain_of(&state, &view, &camera, &record).await))
 }
 
 pub(crate) async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView, orion::control_plane::ResourceRecord)> {
@@ -214,7 +294,7 @@ pub(crate) async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView,
 pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Camera>> {
     let (view, record) = find(&state, &id).await?;
     let mounts = state.store.mounts().await?;
-    Ok(Json(with_live(&state, base_camera(&record, &view, &state.config.node_id, &mounts), &record).await))
+    Ok(Json(camera_view(&state, &view, &mounts, &record).await))
 }
 
 /// A camera's settings: its controls as the camera service lists them (range, default, value
