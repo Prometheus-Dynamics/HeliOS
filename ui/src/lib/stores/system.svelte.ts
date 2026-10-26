@@ -151,15 +151,17 @@ function defaultHw(nodeId: string): DeviceHw {
   const n = CORES[node.kind] ?? 4;
   const cores = Array.from({ length: n }, (_, i) => (i === 3 && node.runsPipelines ? 0.06 : node.cpu * (0.6 + Math.random() * 0.8)));
   const raze = node.runsPipelines;
+  // The Raze image owns the board: its fan, LED ring, GPIO and rails (a SystemCore has none of them).
+  const owner = node.kind === "raze";
   return {
     cores,
     coreHistory: cores.map((c) => Array.from({ length: 40 }, () => jitter(c, c * 0.4))),
     freqMHz: cores.map(() => (raze ? 2400 : node.kind === "mcu" ? 150 : 3200)),
     procs: procsFor(nodeId),
-    fan: raze
+    fan: owner
       ? { mode: "auto", duty: 0.32, rpm: 3100, curve: [[40, 0.2], [55, 0.35], [65, 0.6], [75, 1]] }
       : null,
-    leds: raze
+    leds: owner
       ? [{ id: "status", name: "Status LED", count: 1, color: "#22c55e", pattern: "status", brightness: 0.6 }]
       : nodeId === "mcu-leds"
         ? [
@@ -169,7 +171,7 @@ function defaultHw(nodeId: string): DeviceHw {
             { id: "strip-d", name: "Strip D · rear", count: 30, color: "#da77f2", pattern: "blink", brightness: 0.5 },
           ]
         : [],
-    gpio: raze
+    gpio: owner
       ? [
           { pin: 4, name: "FLASH_SYNC", mode: "out", value: 0, owner: "helios-io" },
           { pin: 17, name: "IR_LED", mode: "pwm", value: 0.4, owner: null },
@@ -180,7 +182,7 @@ function defaultHw(nodeId: string): DeviceHw {
         ]
       : [],
     imu: nodeId === "mcu-imu" ? { yaw: 12.5, pitch: 0.4, roll: -0.2, rateHz: 1000, gyroRange: 2000, accelRange: 24, lpfHz: 116, mount: [0, 0, 0], gyroBias: [0.012, -0.004, 0.021], temperatureC: 38.5 } : null,
-    power: raze
+    power: owner
       ? [
           { rail: "5V in", volts: 5.08, amps: 1.42 },
           { rail: "3V3", volts: 3.31, amps: 0.21 },

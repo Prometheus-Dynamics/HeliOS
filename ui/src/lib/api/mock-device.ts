@@ -8,6 +8,8 @@
 import { DEFAULT_NT4, roborioAddress } from "#lib/core/robot-facts.js";
 import { dispatchSettings } from "#lib/core/sync.js";
 import { demoDocument, documentFromWpilib, type WpilibFieldLayout } from "#lib/stores/field-layout.js";
+import { MOCK_DEVICE } from "./mode";
+import { MOCK_PEERS } from "./mock-devices";
 import type { FieldLayoutDocument, FieldLayoutList, Nt4Settings, SettingsChange, SetupRecord, StoredIdentity } from "./types";
 
 const KEY = "helios:mock-device";
@@ -86,10 +88,46 @@ export interface MockAnswer {
   value: unknown;
 }
 
+const PEERS_KEY = "helios:mock-peers";
+
+/**
+ * A request the simulated robot's peer got through the gateway (`/v1/peers/{id}/...`), kept in this
+ * browser so a test can see it reach the peer: the mock peer has no device behind it.
+ */
+interface PeerRequest {
+  peer: string;
+  method: string;
+  path: string;
+  body: unknown;
+}
+
+function recordPeerRequest(request: PeerRequest) {
+  try {
+    const raw = localStorage.getItem(PEERS_KEY);
+    const doc = raw ? (JSON.parse(raw) as { requests?: PeerRequest[] }) : {};
+    const requests = [...(doc.requests ?? []), request].slice(-100);
+    localStorage.setItem(PEERS_KEY, JSON.stringify({ requests }));
+  } catch {
+    // Not kept: the request still happened on the simulated robot.
+  }
+}
+
 /** The simulated device's answer to a request, or `null` when the simulated robot has no such route. */
 export async function mockDevice(method: string, path: string, options: { query?: Record<string, unknown>; body?: unknown; raw?: BodyInit }): Promise<MockAnswer | null> {
   const device = read();
   const answer = (value: unknown): MockAnswer => ({ value });
+
+  // The robot's peers (the gateway's list, from the Raze's side) and a request routed to one of them.
+  if (path === "/v1/peers") return method === "GET" ? answer(MOCK_DEVICE === "robot" ? MOCK_PEERS : { cluster: null, peers: [] }) : null;
+  const peer = /^\/v1\/peers\/([^/]+)\/(.+)$/.exec(path);
+  if (peer) {
+    const id = decodeURIComponent(peer[1]);
+    const routed = MOCK_DEVICE === "robot" && MOCK_PEERS.peers.some((p) => p.node_id === id && p.routed);
+    if (!routed) throw new Error(`peer ${id} is not routed`);
+    if (method === "GET") return null;
+    recordPeerRequest({ peer: id, method, path: `/v1/${peer[2]}`, body: options.body ?? null });
+    return answer(undefined);
+  }
 
   if (path === "/v1/device/nt4") {
     if (method === "GET") return answer(nt4State(device.nt4));

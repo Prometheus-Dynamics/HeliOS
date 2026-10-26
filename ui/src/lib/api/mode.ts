@@ -5,16 +5,18 @@
 //
 // The simulated device is the Raze image by default (`?mock=1`, an owner with
 // all its hardware). `?mock=systemcore` simulates a SystemCore guest: no
-// updates, reboot, security or LED ring (see mock-devices.ts).
+// updates, reboot, security or LED ring (see mock-devices.ts). `?mock=robot` is one robot with two
+// HeliOS devices: the Raze image (this device) and a SystemCore on its USB link (a routed peer).
 
 const KEY = "helios.mock";
 
-/** The simulated devices: the Raze image (owner) and a SystemCore guest. */
-export type MockDevice = "raze" | "systemcore";
+/** The simulated devices: the Raze image (owner), a SystemCore guest, and a robot with both. */
+export type MockDevice = "raze" | "systemcore" | "robot";
 
 /** The device a mock param or a stored choice names; `1` (the older form) is the Raze. */
 function mockDevice(value: string | null): MockDevice | null {
   if (value === "1" || value === "true" || value === "raze") return "raze";
+  if (value === "robot") return "robot";
   return value === "systemcore" ? "systemcore" : null;
 }
 
