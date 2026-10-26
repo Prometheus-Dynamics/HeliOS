@@ -5,7 +5,7 @@ import type { Health, NodeKind, ResourceType, WorkloadState } from "#lib/api/mod
 import type { IconName } from "#lib/ui/icons.js";
 
 export function nodeIcon(kind: NodeKind): IconName {
-  return { raze: "camera", mcu: "circuit-cell", coprocessor: "device-laptop", foreign: "box-multiple" }[kind] as IconName;
+  return ({ raze: "camera", systemcore: "cpu", mcu: "circuit-cell", coprocessor: "device-laptop", foreign: "box-multiple" } as Record<string, IconName>)[kind] ?? "cpu";
 }
 
 export function healthDot(health: Health): DotState {

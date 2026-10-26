@@ -3,7 +3,8 @@
 // resources; streams the workloads produce. Device-level facts (slots,
 // recovery, logs) come from each node's Atlas agent.
 
-export type NodeKind = "raze" | "mcu" | "coprocessor" | "foreign";
+/** A node's kind: a HeliOS device's host (`raze`, `systemcore`, `linux`, from `GET /v1/device`), or a cluster peer's (`mcu`, `coprocessor`, `foreign`). */
+export type NodeKind = string;
 export type Health = "online" | "degraded" | "offline";
 export type Link = "ethernet" | "usb" | "can" | "uart";
 export type RecoveryLevel = "R1" | "R2" | "R3" | "R4";
@@ -26,6 +27,8 @@ export interface ClusterNode {
   id: string;
   name: string;
   kind: NodeKind;
+  /** Runs HeliOS pipelines (a device's own HeliOS, not a microcontroller or a foreign system). */
+  runsPipelines: boolean;
   model: string;
   role: string;
   health: Health;

@@ -7,13 +7,13 @@ import { tableFor } from "#lib/graph/graph.js";
 import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
-import { CAMERAS, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
+import { CAMERAS, GUEST_NODES, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
 import type { DenseView } from "#lib/vision/dense.js";
 import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
 import { BUILT_IN, type DefaultTemplate } from "#lib/core/defaults.js";
 import type { CameraFeatures } from "#lib/vision/features.js";
 import type { MapView } from "#lib/vision/map.js";
-import { MOCK } from "#lib/api/mode.js";
+import { MOCK, MOCK_DEVICE } from "#lib/api/mode.js";
 import { LiveCluster } from "./live.svelte";
 import type { Camera, CameraSettings, ClusterNode, ControlWrite, Detection, GraphDocument, LogLine, PipelineInput, Resource, Stream, TagPose, Workload } from "#lib/api/model.js";
 import { toasts } from "./toasts.svelte";
@@ -77,12 +77,14 @@ function push(history: number[], value: number, cap = 60) {
 class ClusterStore {
   /** True while running the simulated robot (`?mock=1`). */
   readonly mock = MOCK;
-  nodes = $state<ClusterNode[]>(MOCK ? clone(NODES) : []);
-  cameras = $state<Camera[]>(MOCK ? clone(CAMERAS) : []);
-  workloads = $state<Workload[]>(MOCK ? clone(WORKLOADS) : []);
-  streams = $state<Stream[]>(MOCK ? clone(STREAMS) : []);
-  resources = $state<Resource[]>(MOCK ? clone(RESOURCES) : []);
-  logs = $state<LogLine[]>(MOCK ? clone(LOGS) : []);
+  /** The simulated Raze cluster; a simulated SystemCore is one guest node with nothing else on it. */
+  private readonly razeMock = MOCK && MOCK_DEVICE === "raze";
+  nodes = $state<ClusterNode[]>(MOCK ? clone(this.razeMock ? NODES : GUEST_NODES) : []);
+  cameras = $state<Camera[]>(this.razeMock ? clone(CAMERAS) : []);
+  workloads = $state<Workload[]>(this.razeMock ? clone(WORKLOADS) : []);
+  streams = $state<Stream[]>(this.razeMock ? clone(STREAMS) : []);
+  resources = $state<Resource[]>(this.razeMock ? clone(RESOURCES) : []);
+  logs = $state<LogLine[]>(this.razeMock ? clone(LOGS) : []);
   /** Advances FEED_FPS times a second; every camera view follows it. */
   frame = $state(0);
   playing = $state(true);

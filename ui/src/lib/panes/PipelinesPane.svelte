@@ -27,7 +27,7 @@
       { label: "Restart", icon: "refresh" as const, run: () => cluster.restartWorkload(w.id) },
       { label: `Roll back to r${w.revision - 1}`, icon: "history" as const, disabled: !cluster.canRollBack(w.id), run: () => drafts.get(w.id).rollBack() },
       { separator: true as const },
-      { label: "Move to device", icon: "server" as const, items: cluster.nodes.filter((n) => n.kind === "raze").map((n) => ({ label: n.name, checked: n.id === w.nodeId, run: () => (w.nodeId = n.id) })) },
+      { label: "Move to device", icon: "server" as const, items: cluster.nodes.filter((n) => n.runsPipelines).map((n) => ({ label: n.name, checked: n.id === w.nodeId, run: () => (w.nodeId = n.id) })) },
       { label: "Camera input", icon: "camera" as const, items: cluster.cameras.map((c) => ({ label: identity.name(c.resourceId, c.name), color: colorVar(identity.get(c.resourceId).color), run: () => cluster.bindInput(w.id, "camera", c.resourceId) })) },
     ];
   }

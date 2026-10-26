@@ -13,7 +13,7 @@
 
   const list = $derived(problems());
   const running = $derived(cluster.workloads.filter((w) => w.state === "running").length);
-  const memMiB = $derived(cluster.nodes.filter((n) => n.kind === "raze").reduce((a, n) => a + n.memMiB, 0));
+  const memMiB = $derived(cluster.nodes.filter((n) => n.runsPipelines).reduce((a, n) => a + n.memMiB, 0));
 </script>
 
 <div class="status">

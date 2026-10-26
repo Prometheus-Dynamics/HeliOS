@@ -69,7 +69,25 @@ export interface ClockFacts {
   timebase: string | null;
 }
 
-export interface Device {
+/** A device feature, by the name helios-api reports (`features` of `GET /v1/device`; `capabilities.rs`). */
+export type FeatureName = "updates" | "slots" | "reboot" | "safe_mode" | "recovery_ladder" | "leds" | "fan" | "imu" | "power" | "usb_power" | "security" | "console";
+
+/** The host HeliOS runs on: the owner's board, SystemCore, or another OS. */
+export interface DeviceHost {
+  kind: string;
+  name: string | null;
+  release: string | null;
+}
+
+/** What this device is and which features it has (`profile`, `host`, `features`, and `reasons` for each feature that is off). */
+export interface Capabilities {
+  profile: "owner" | "guest";
+  host: DeviceHost;
+  features: Record<FeatureName, boolean>;
+  reasons: Partial<Record<FeatureName, string>>;
+}
+
+export interface Device extends Capabilities {
   node_id: string;
   hostname: string | null;
   model: string | null;

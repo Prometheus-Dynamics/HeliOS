@@ -62,7 +62,7 @@
 
   const producers = $derived(cluster.workloads.filter((x) => x.id !== w.id));
   /** Devices a pipeline can run on; with one device there is nothing to choose. */
-  const hosts = $derived(cluster.nodes.filter((n) => n.kind === "raze" || n.id === w.nodeId));
+  const hosts = $derived(cluster.nodes.filter((n) => n.runsPipelines || n.id === w.nodeId));
   const portsOf = (id: string | undefined) => (cluster.workload(id ?? "")?.outputs ?? []).map((o) => o.split(".").at(-1) ?? o);
 </script>
 

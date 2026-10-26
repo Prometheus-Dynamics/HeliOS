@@ -187,14 +187,19 @@ export function toNode(snapshot: DeviceSnapshot, previous?: ClusterNode): Cluste
   const tempC = metrics?.temperature_c ?? previous?.tempC ?? 0;
   const push = (history: number[] | undefined, value: number) => [...(history ?? []), value].slice(-60);
   const version = device.os.version ?? identity?.os.version ?? "unknown";
-  const recovery: ClusterNode["recovery"] = ["R1"];
-  if (identity?.update_methods.includes("ab-tryboot") || update?.slots.active) recovery.push("R2");
-  recovery.push("R4");
+  // The recovery ladder is the device's own: a guest has none (its host reflashes it).
+  const recovery: ClusterNode["recovery"] = [];
+  if (device.features.recovery_ladder) {
+    recovery.push("R1");
+    if (identity?.update_methods.includes("ab-tryboot") || update?.slots.active) recovery.push("R2");
+    recovery.push("R4");
+  }
   const total = metrics?.memory_total_bytes ?? 0;
   return {
     id: device.node_id,
     name: device.hostname ?? identity?.hostname ?? device.node_id,
-    kind: "raze",
+    kind: device.host.kind,
+    runsPipelines: true,
     model: device.model ?? identity?.model ?? "HeliOS device",
     role: "HeliOS",
     health: device.orion.reachable ? "online" : "degraded",
@@ -213,7 +218,7 @@ export function toNode(snapshot: DeviceSnapshot, previous?: ClusterNode): Cluste
     clock: { source: clockSource(device.clock?.source), offsetUs: Math.abs(Math.round(device.clock?.offset_us ?? 0)) },
     agent: { version: device.api, reachable: true },
     recovery,
-    slots: slotsFrom(update, version),
+    slots: device.features.slots ? slotsFrom(update, version) : [],
     services: services.map(toService),
   };
 }

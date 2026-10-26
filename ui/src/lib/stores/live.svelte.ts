@@ -28,6 +28,7 @@ import { parseFieldPose, parseTagPoses, type Intrinsics, type PoseView } from "#
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
 import { toasts } from "./toasts.svelte";
+import { device as deviceStore } from "./device.svelte";
 import { recordings } from "./recordings.svelte";
 import { emitPeripheral, type PeripheralEvent } from "./peripheral-events";
 import type { RecorderSettings, RecordingStatus } from "#lib/api/recording-types.js";
@@ -180,6 +181,8 @@ export class LiveCluster {
         onOpen: () => {
           liveState.connected = true;
           liveState.error = null;
+          // The device may have changed while the stream was down (a feature, a host).
+          void deviceStore.load();
         },
         onError: () => {
           liveState.connected = false;
@@ -227,6 +230,7 @@ export class LiveCluster {
     const device = await this.guard("device", () => api.device());
     if (!device) return;
     this.snapshot.device = device;
+    deviceStore.apply(device);
     void this.refreshNt4();
     if (!this.snapshot.identity) this.snapshot.identity = (await this.guard("identity", () => api.identity())) ?? undefined;
     liveState.identity = this.snapshot.identity ?? null;

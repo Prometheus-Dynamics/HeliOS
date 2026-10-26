@@ -112,7 +112,7 @@ function livePeripherals(resources: W.Resource[]) {
   return { fan, leds, imu, power: rails, switches, fanResource };
 }
 
-const CORES: Record<string, number> = { raze: 4, mcu: 2, foreign: 8, coprocessor: 8 };
+const CORES: Record<string, number> = { raze: 4, systemcore: 4, mcu: 2, foreign: 8, coprocessor: 8 };
 
 function jitter(v: number, s: number, min = 0, max = Infinity) {
   return Math.min(max, Math.max(min, v + (Math.random() - 0.5) * s));
@@ -142,15 +142,15 @@ function procsFor(nodeId: string): Proc[] {
     if (w.state === "stopped") continue;
     add(`runner:${w.name}`, { kind: "workload", id: w.id }, w.state === "running" ? (w.perf.tickP50Ms * w.perf.fps) / 1000 : 0, w.perf.memMiB, 1, 3, -2);
   }
-  if (node.kind !== "raze") add("chrome", { kind: "user", id: "user" }, 0.06, 420, 24);
+  if (!node.runsPipelines) add("chrome", { kind: "user", id: "user" }, 0.06, 420, 24);
   return list;
 }
 
 function defaultHw(nodeId: string): DeviceHw {
   const node = cluster.node(nodeId)!;
   const n = CORES[node.kind] ?? 4;
-  const cores = Array.from({ length: n }, (_, i) => (i === 3 && node.kind === "raze" ? 0.06 : node.cpu * (0.6 + Math.random() * 0.8)));
-  const raze = node.kind === "raze";
+  const cores = Array.from({ length: n }, (_, i) => (i === 3 && node.runsPipelines ? 0.06 : node.cpu * (0.6 + Math.random() * 0.8)));
+  const raze = node.runsPipelines;
   return {
     cores,
     coreHistory: cores.map((c) => Array.from({ length: 40 }, () => jitter(c, c * 0.4))),
