@@ -1,5 +1,5 @@
 // The setup checklist, and the first-run wizard.
-import { expect, test } from "./fixtures";
+import { expect, setOnboarded, test } from "./fixtures";
 import { openScreen } from "./nav";
 
 test.describe("setup", () => {
@@ -11,12 +11,10 @@ test.describe("setup", () => {
     await expect(page.getByRole("radiogroup", { name: "Tags" }).first()).toBeVisible();
   });
 
-  test("the first-run wizard shows once and can be skipped", async ({ page }) => {
-    // Clear the flag the fixture sets, and stop it setting it again: the wizard is what this tests.
-    await page.evaluate(() => {
-      sessionStorage.setItem("e2e:no-onboarding-seed", "1");
-      localStorage.removeItem("helios:onboarded");
-    });
+  test("the first-run wizard shows once and can be skipped", async ({ page, target }) => {
+    // Setup not done on the device, and the fixture stops seeding it again: the wizard is what this tests.
+    await page.evaluate(() => sessionStorage.setItem("e2e:no-onboarding-seed", "1"));
+    await setOnboarded(page, target, false);
     await page.reload();
     const wizard = page.getByRole("dialog", { name: "Set up HeliOS" });
     await expect(wizard).toBeVisible();
