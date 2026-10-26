@@ -1397,7 +1397,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-api"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "helios-diagnostics"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "helios-eidos-plugin"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "daedalus-rs",
  "eidos-daedalus",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "helios-engine"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "daedalus-rs",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "helios-field"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "eidos-calibration",
  "serde",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "helios-layout"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "tempfile",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "helios-peripherals"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "helios-recorder"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "chrono",
  "helios-field",
@@ -1551,14 +1551,14 @@ dependencies = [
 
 [[package]]
 name = "helios-robot"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "helios-sim-scene"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "clap",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vision-probe"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "daedalus-rs",
  "helios-layout",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "lib-schema-migration"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "futures",
  "serde_json",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0"
+version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "chrono",

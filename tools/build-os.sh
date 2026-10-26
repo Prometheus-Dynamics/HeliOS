@@ -78,9 +78,14 @@ case "${1:-}" in
       ensure_ui_build
       stage_ui_build
     fi
-    # The slot id carries this checkout's commit (input defaults can't use project tokens).
+    # The version (`<year>.<major>.<minor>-dev-<commit>`) and the slot id carry this checkout's
+    # commit (input defaults can't use project tokens).
     commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
-    exec gaia run "$build_file" --set "input.profile=$profile" \
-      --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit" "$@"
+    args=(--set "input.commit=${commit:0:8}")
+    # Image builds (profile and slot inputs); a package build such as systemcore has neither.
+    if grep -q '^\[inputs.profile\]' "$build_file"; then
+      args+=(--set "input.profile=$profile" --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit")
+    fi
+    exec gaia run "$build_file" "${args[@]}" "$@"
     ;;
 esac
