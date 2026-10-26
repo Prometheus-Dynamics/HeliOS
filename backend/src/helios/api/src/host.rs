@@ -148,7 +148,32 @@ pub fn parse_journal_line(line: &str) -> Option<LogLine> {
     let unit = text("_SYSTEMD_UNIT").or_else(|| text("SYSLOG_IDENTIFIER")).unwrap_or_else(|| "kernel".into());
     let priority = text("PRIORITY").and_then(|p| p.parse().ok());
     let pid = text("_PID").and_then(|p| p.parse().ok());
-    Some(LogLine { at_ms, level: level_for(priority), unit: unit.trim_end_matches(".service").to_string(), message, pid })
+    Some(LogLine { at_ms, level: level_for(priority), unit: unit.trim_end_matches(".service").to_string(), message: strip_ansi(&message), pid })
+}
+
+/// Removes the ANSI escape sequences (colour and cursor codes) a log message carries. HeliOS
+/// binaries used to write colour into the journal, and those lines are still there.
+pub fn strip_ansi(text: &str) -> String {
+    if !text.contains('\u{1b}') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        // A control sequence (`ESC [`) runs to its final byte; any other escape is two bytes.
+        if chars.next() == Some('[') {
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Default)]
@@ -305,6 +330,15 @@ mod tests {
         assert_eq!(parsed.pid, Some(42));
         let bytes = r#"{"__REALTIME_TIMESTAMP":"1","SYSLOG_IDENTIFIER":"kernel","MESSAGE":[104,105]}"#;
         assert_eq!(parse_journal_line(bytes).expect("bytes").message, "hi");
+        let coloured = "{\"__REALTIME_TIMESTAMP\":\"1\",\"SYSLOG_IDENTIFIER\":\"helios-api\",\"MESSAGE\":\"\\u001b[2m2025-10-13T18:16:52Z\\u001b[0m \\u001b[32m INFO\\u001b[0m started\"}";
+        assert_eq!(parse_journal_line(coloured).expect("coloured").message, "2025-10-13T18:16:52Z  INFO started");
+    }
+
+    #[test]
+    fn strip_ansi_keeps_plain_text_and_drops_escapes() {
+        assert_eq!(strip_ansi("plain [text]"), "plain [text]");
+        assert_eq!(strip_ansi("\u{1b}[1;31merror\u{1b}[0m: \u{1b}[2Kdone"), "error: done");
+        assert_eq!(strip_ansi("a\u{1b}c b"), "a b");
     }
 
     #[test]

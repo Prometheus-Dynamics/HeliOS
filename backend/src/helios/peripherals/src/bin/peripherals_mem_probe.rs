@@ -18,7 +18,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = fmt().finish().with(log_filter()).try_init();
+    let _ = fmt().with_ansi(ansi_for_terminal()).finish().with(log_filter()).try_init();
 
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "idle".to_string());
@@ -193,6 +193,13 @@ async fn wait_frame(handle: &styx::prelude::CaptureHandle) -> Result<styx::core:
         }
     }
     Err("timed out waiting for frame".into())
+}
+
+/// Colour codes only for a terminal: journald keeps them as raw escape bytes (`JOURNAL_STREAM` is set
+/// when the journal is stdout or stderr), and `NO_COLOR` asks for none.
+fn ansi_for_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stderr().is_terminal() && std::env::var_os("JOURNAL_STREAM").is_none() && std::env::var_os("NO_COLOR").is_none()
 }
 
 /// Log filter: `RUST_LOG` as `target=level,...` (`filter::Targets`: no regex in the binary), else
