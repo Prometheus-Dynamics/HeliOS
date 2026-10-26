@@ -9,12 +9,16 @@ import type { RecorderSettings, RecordFrames, StoredRecording } from "../api/rec
 const MIB = 1 << 20;
 export const CAPTURE_LAST_RANGE = { min: 1, max: 600 } as const;
 export const MAX_FPS_RANGE = { min: 1, max: 240 } as const;
+/** The smallest budget the device takes for the recordings folder (its `max_total_bytes`). */
+export const MIN_TOTAL_MIB = 1;
 
 export interface RecordingForm {
   /** Empty: the device picks a mounted USB drive, else its fallback directory. */
   storageDir: string;
   /** The free space the recorder keeps, in MiB (fractions allowed; a MiB is exact in bytes). */
   reserveMiB: number;
+  /** The most the recordings folder may hold, in MiB; `null`: the device's default for its volume. */
+  maxTotalMiB: number | null;
   frames: RecordFrames;
   /** `null`: as the camera delivers. */
   maxFps: number | null;
@@ -30,6 +34,7 @@ export function formFromSettings(s: RecorderSettings): RecordingForm {
   return {
     storageDir: s.storage_dir ?? "",
     reserveMiB: s.reserve_bytes / MIB,
+    maxTotalMiB: s.max_total_bytes === null ? null : s.max_total_bytes / MIB,
     frames: s.frames,
     maxFps: s.max_fps,
     captureLastSeconds: s.capture_last_seconds,
@@ -46,6 +51,7 @@ export function settingsFromForm(form: RecordingForm, base: RecorderSettings): R
     ...base,
     storage_dir: storageDir === "" ? null : storageDir,
     reserve_bytes: Math.round(form.reserveMiB * MIB),
+    max_total_bytes: form.maxTotalMiB === null ? null : Math.round(form.maxTotalMiB * MIB),
     frames: form.frames,
     max_fps: form.maxFps === null || form.maxFps <= 0 ? null : form.maxFps,
     capture_last_seconds: form.captureLastSeconds,
@@ -61,6 +67,8 @@ export function validateForm(form: RecordingForm): FormErrors {
   const dir = form.storageDir.trim();
   if (dir !== "" && !dir.startsWith("/")) errors.storageDir = "Use an absolute path, such as /media/usb/helios";
   if (!Number.isFinite(form.reserveMiB) || form.reserveMiB < 0) errors.reserveMiB = "Enter a size of 0 MiB or more";
+  if (form.maxTotalMiB !== null && (!Number.isFinite(form.maxTotalMiB) || form.maxTotalMiB < MIN_TOTAL_MIB))
+    errors.maxTotalMiB = `Enter a size of ${MIN_TOTAL_MIB} MiB or more, or use the device's default`;
   if (form.maxFps !== null && (!Number.isFinite(form.maxFps) || form.maxFps < MAX_FPS_RANGE.min || form.maxFps > MAX_FPS_RANGE.max))
     errors.maxFps = `Between ${MAX_FPS_RANGE.min} and ${MAX_FPS_RANGE.max} frames per second, or as the camera delivers`;
   const seconds = form.captureLastSeconds;

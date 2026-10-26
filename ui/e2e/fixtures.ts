@@ -4,6 +4,7 @@
 //   console error or uncaught page error (the allow-list below is the only exception).
 // - `target` is "mock" or "sim", from the project. Sim tests check the device with `device.ts`.
 import { expect, test as base, type ConsoleMessage, type Page } from "@playwright/test";
+import { device, restoreDevice, snapshotDevice, waitForCameraReady } from "./device";
 
 export type Target = "mock" | "sim";
 
@@ -57,6 +58,8 @@ export const test = base.extend<{
   target: Target;
   /** Per test: console errors a test expects (a device condition it waits out), on top of the allow-list. */
   allowConsole: RegExp[];
+  /** Sim only, automatic: the device as the test found it, put back after the test (see `device.ts`). */
+  deviceAsFound: void;
 }>({
   allowConsole: [[], { option: true }],
 
@@ -64,7 +67,26 @@ export const test = base.extend<{
     await use(testInfo.project.name === "sim" ? "sim" : "mock");
   },
 
-  page: async ({ page, target, allowConsole }, use) => {
+  // Set up before the page and torn down after it, so the restore follows the page's last write.
+  deviceAsFound: [
+    async ({ target, request }, use) => {
+      if (target !== "sim") {
+        await use();
+        return;
+      }
+      // A device that has just booted: its cameras are not ready until their services are. Waits for
+      // each frame camera (up to 3 minutes, with the stage that holds it), so the test starts on a device.
+      for (const camera of (await device.cameras(request)).filter((c) => c.frames_endpoint)) {
+        await waitForCameraReady(request, camera);
+      }
+      const before = await snapshotDevice(request);
+      await use();
+      await restoreDevice(request, before);
+    },
+    { auto: true },
+  ],
+
+  page: async ({ page, target, allowConsole, deviceAsFound: _asFound }, use) => {
     const problems: string[] = [];
     const permitted = (text: string) => allowed(text) || allowConsole.some((pattern) => pattern.test(text));
     page.on("console", (message: ConsoleMessage) => {

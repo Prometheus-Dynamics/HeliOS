@@ -11,15 +11,19 @@
   import Switch from "#lib/kit/Switch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { recordings } from "#lib/stores/recordings.svelte.js";
-  import { CAPTURE_LAST_RANGE, MAX_FPS_RANGE, formFromSettings, isUnchanged, settingsFromForm, toggleInList, validateForm, type RecordingForm } from "#lib/recording/mapping.js";
+  import { CAPTURE_LAST_RANGE, MAX_FPS_RANGE, MIN_TOTAL_MIB, formFromSettings, isUnchanged, settingsFromForm, toggleInList, validateForm, type RecordingForm } from "#lib/recording/mapping.js";
 
-  const DEFAULT_FORM: RecordingForm = { storageDir: "", reserveMiB: 2048, frames: "raw", maxFps: 30, captureLastSeconds: 10, captureLastCameras: [], autoRecord: false, ntControl: true };
+  const DEFAULT_FORM: RecordingForm = { storageDir: "", reserveMiB: 2048, maxTotalMiB: null, frames: "raw", maxFps: 30, captureLastSeconds: 10, captureLastCameras: [], autoRecord: false, ntControl: true };
+  const GIB = 1 << 30;
 
   /** The form being edited; it follows the device's settings until the first edit. */
   let form = $state<RecordingForm>(DEFAULT_FORM);
   let loaded = $state(false);
   const saved = $derived(recordings.settings ? formFromSettings(recordings.settings) : null);
   const errors = $derived(validateForm(form));
+  /** The budget the folder has now (the saved settings', or the device's default), from the listing. */
+  const budgetNow = $derived(recordings.listing?.storage?.max_total_bytes ?? null);
+  const holdingNow = $derived(recordings.listing?.storage?.recordings_bytes ?? null);
   const invalid = $derived(Object.keys(errors).length > 0);
   const dirty = $derived(recordings.settings !== null && !isUnchanged(form, recordings.settings));
   const saving = $derived(recordings.busy === "save");
@@ -70,6 +74,19 @@
     </span>
   </Prop>
   {#if errors.reserveMiB}<p class="field-err">{errors.reserveMiB}</p>{/if}
+
+  <Prop label="Keep at most" help="The most the recordings folder holds. Before a new part starts, the oldest finished recordings are deleted to fit. The recording being written is never deleted." changed={changed("maxTotalMiB")} onreset={() => reset("maxTotalMiB")}>
+    <span class="num">
+      <Switch checked={form.maxTotalMiB !== null} label="Set a size limit for the recordings folder" onchange={(on) => (form.maxTotalMiB = on ? (saved?.maxTotalMiB ?? 1024) : null)} />
+      {#if form.maxTotalMiB !== null}
+        <Num value={form.maxTotalMiB} min={MIN_TOTAL_MIB} max={1_000_000} step={1} width={90} unit="MiB" label="Recordings folder size limit, MiB" onchange={(v) => (form.maxTotalMiB = v)} />
+      {/if}
+      {#if budgetNow !== null}
+        <span class="small dim">{(budgetNow / GIB).toFixed(1)} GiB in effect{form.maxTotalMiB === null ? ", the device's default" : ""}{holdingNow !== null ? `, ${(holdingNow / GIB).toFixed(2)} GiB held` : ""}</span>
+      {/if}
+    </span>
+  </Prop>
+  {#if errors.maxTotalMiB}<p class="field-err">{errors.maxTotalMiB}</p>{/if}
 
   <Prop label="Frames" help="Raw keeps the sensor's 16-bit frames exactly. Luma keeps the image processor's 8-bit picture: about half the size." changed={changed("frames")} onreset={() => reset("frames")}>
     <Seg

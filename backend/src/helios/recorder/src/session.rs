@@ -18,6 +18,7 @@ use std::{
 use styx::replay::{RecorderOptions, RecordingHeader};
 
 use crate::{
+    catalog,
     error::RecorderError,
     frames::FrameSource,
     host::HostMessage,
@@ -41,6 +42,8 @@ const HOST_PER_PASS: usize = 1000;
 pub struct Shared {
     pub status: Mutex<RecordingStatus>,
     pub stop: AtomicBool,
+    /// The recordings folder's budget, read before each new part (see `Recorder::set_max_total_bytes`).
+    pub max_total_bytes: AtomicU64,
     /// Host messages the senders dropped (channel full).
     pub host_dropped: Arc<AtomicU64>,
 }
@@ -59,6 +62,8 @@ pub struct SessionRun {
     pub first: PartWriter,
     pub dir: PathBuf,
     pub session: String,
+    /// Keeps every part of the session from being pruned while the recording runs.
+    pub claim: catalog::Claim,
     pub camera: String,
     pub header: RecordingHeader,
     pub options: RecorderOptions,
@@ -84,6 +89,8 @@ struct Loop {
     host_rx: Receiver<HostMessage>,
     dir: PathBuf,
     session: String,
+    /// Held until the recording ends: the session is not pruned while it runs.
+    _claim: catalog::Claim,
     camera: String,
     header: RecordingHeader,
     options: RecorderOptions,
@@ -111,6 +118,7 @@ fn run_loop(mut run: SessionRun) {
         host_rx: run.host_rx,
         dir: run.dir,
         session: run.session,
+        _claim: run.claim,
         camera: run.camera,
         header: run.header,
         options: run.options,
@@ -210,14 +218,26 @@ impl Loop {
         None
     }
 
-    /// Completes the current part on a finisher thread and opens the next one.
+    /// Completes the current part on a finisher thread and opens the next one, after the oldest
+    /// finished recordings have made room for it.
     fn rotate(&mut self) {
         let index = self.current.as_ref().map(PartWriter::index).unwrap_or(0);
         self.close_current(Some("cap"));
+        if let Err(error) = self.make_room() {
+            self.error = Some(format!("pruning the recordings folder: {error}"));
+            return;
+        }
         match PartWriter::open(&self.dir, &self.session, &self.camera, index + 1, &self.header, self.options.clone(), &self.info) {
             Ok(writer) => self.current = Some(writer),
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    /// Deletes the oldest finished recordings while the folder is over its budget. This recording
+    /// is kept whole.
+    fn make_room(&self) -> std::io::Result<()> {
+        let budget = self.shared.max_total_bytes.load(Ordering::Relaxed);
+        catalog::prune(&self.dir, budget, Some(&self.session)).map(|_| ())
     }
 
     /// Hands the current part to a finisher thread (no-op without one).
@@ -266,6 +286,7 @@ impl Loop {
         status.messages_dropped = finished.3 + messages_dropped + unreported;
         status.bytes = finished.4 + bytes;
         status.free_bytes = self.free.or(status.free_bytes);
+        status.max_total_bytes = self.shared.max_total_bytes.load(Ordering::Relaxed);
         status.duration_ms = self.started.elapsed().as_millis() as u64;
     }
 

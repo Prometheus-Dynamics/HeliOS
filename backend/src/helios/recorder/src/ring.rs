@@ -20,12 +20,14 @@ use styx::{
     prelude::MediaFormat,
 };
 
-use crate::{error::RecorderError, frames::FrameSource, pace::Pacer};
+use crate::{error::RecorderError, frames::FrameSource, pace::Pacer, settings::MIB};
 
 /// How long the ring loop waits for a frame before it checks whether it is to stop.
 const POLL: Duration = Duration::from_millis(50);
 /// Share of the memory available that a ring may take at most.
 const MEMORY_SHARE: u64 = 4;
+/// Most a ring may hold, whatever the memory: a ring is a copy of the camera's frames in RAM.
+const MAX_RING_BYTES: u64 = 512 * MIB;
 /// Compression assumed when sizing a ring (lz4 on 16-bit Bayer measured 2.24:1 on the CM5).
 const ASSUMED_RATIO: f64 = 2.0;
 
@@ -118,11 +120,11 @@ impl Ring {
 }
 
 /// The bytes a ring may hold for `seconds` of frames at `fps`: their size compressed, but at most a
-/// quarter of the memory available now. Refused when that is not two frames.
+/// quarter of the memory available now and [`MAX_RING_BYTES`]. Refused when that is not two frames.
 pub fn budget_bytes(seconds: u32, fps: f64, frame_bytes: u64, available: Option<u64>) -> Result<usize, RecorderError> {
     let wanted = (f64::from(seconds) * fps * frame_bytes as f64 / ASSUMED_RATIO) as u64;
     // Without a reading of the memory, assume 1 GiB free: the quarter is a conservative 256 MiB.
-    let cap = available.unwrap_or(1 << 30) / MEMORY_SHARE;
+    let cap = (available.unwrap_or(1 << 30) / MEMORY_SHARE).min(MAX_RING_BYTES);
     let budget = wanted.min(cap);
     if (budget as f64) < 2.0 * frame_bytes as f64 / ASSUMED_RATIO {
         return Err(RecorderError::Settings(format!("not enough free memory for a capture-last ring: {} MiB free", available.unwrap_or(0) >> 20)));
@@ -265,6 +267,8 @@ mod tests {
         assert_eq!(budget_bytes(10, 30.0, frame, Some(4 << 30)).unwrap(), 307_200_000);
         // With 800 MiB free the ring is trimmed to a quarter of that.
         assert_eq!(budget_bytes(10, 30.0, frame, Some(800 << 20)).unwrap(), (200 << 20) as usize);
+        // However much memory there is, a ring stops at 512 MiB.
+        assert_eq!(budget_bytes(60, 120.0, 3_000_000, Some(16 << 30)).unwrap(), (512 << 20) as usize);
         // Not even two frames fit: refused, and the message names the memory.
         let refused = budget_bytes(10, 30.0, frame, Some(4 << 20)).unwrap_err();
         assert!(refused.to_string().contains("free memory"), "{refused}");

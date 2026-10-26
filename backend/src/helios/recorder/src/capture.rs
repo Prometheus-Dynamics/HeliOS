@@ -6,6 +6,7 @@ use std::{path::Path, sync::Arc};
 use chrono::Utc;
 
 use crate::{
+    catalog,
     error::RecorderError,
     info::RecordingInfo,
     naming,
@@ -30,12 +31,15 @@ pub struct ClipRequest<'a> {
     pub queue_bytes: usize,
     /// The recording rate the ring runs at (the clip's interval).
     pub max_fps: Option<f64>,
+    /// The recordings folder's budget: the oldest recordings go to make room for the clip.
+    pub max_total_bytes: u64,
 }
 
 /// Writes `frames` (oldest first) as a new stored recording in `dir`, named
 /// `<session>-last.mcap`, and returns its summary.
 pub fn write_clip(frames: &[Arc<RingFrame>], dir: &Path, clip: &ClipRequest<'_>) -> Result<PartSummary, RecorderError> {
     let first = frames.first().ok_or_else(|| RecorderError::NotFound("the ring holds no frames yet".into()))?;
+    catalog::prune(dir, clip.max_total_bytes, None)?;
     let stem = naming::session_stem(clip.board, clip.camera_label, Utc::now(), clip.commit);
     let session = naming::unused_session_stem(dir, &format!("{stem}-last"));
     let size = (first.format.resolution.width.get(), first.format.resolution.height.get());

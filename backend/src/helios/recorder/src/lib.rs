@@ -8,7 +8,9 @@
 //! `helios.versions`, attachments `helios.field` and `helios.pipeline.<id>`). The output is MCAP
 //! (Styx's `StreamRecorder`, lz4 chunks by default), written in parts that rotate at their size or
 //! duration caps. Storage is a mounted USB drive when one is writable, else the fallback
-//! directory; a recording is refused, or stops cleanly, below the free-space reserve.
+//! directory; a recording is refused, or stops cleanly, below the free-space reserve. The folder
+//! holds at most its budget (`max_total_bytes`): before each new part, the oldest finished
+//! recordings are deleted to fit (see [`catalog::prune`]).
 //!
 //! Frames are `FrameLease`s all the way: the recorder copies each one into the MCAP message on
 //! the recording thread and never holds a lease across the disk. By default a recording stores

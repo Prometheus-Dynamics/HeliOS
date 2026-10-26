@@ -9,6 +9,8 @@ const base: RecorderSettings = {
   usb_roots: ["/media"],
   fallback_dir: "/var/lib/helios/recordings",
   reserve_bytes: 2048 * MIB,
+  max_total_bytes: null,
+  guest_storage: false,
   max_file_bytes: 4096 * MIB,
   max_file_seconds: 600,
   max_fps: 30,
@@ -29,6 +31,7 @@ test("settings become a form in MiB, with the rest of the form's fields", () => 
   expect(form).toEqual({
     storageDir: "",
     reserveMiB: 2048,
+    maxTotalMiB: null,
     frames: "raw",
     maxFps: 30,
     captureLastSeconds: 10,
@@ -73,6 +76,15 @@ test("the form is checked field by field before it is sent", () => {
   expect(validateForm({ ...formFromSettings(base), captureLastSeconds: 601 }).captureLastSeconds).toBeDefined();
   expect(validateForm({ ...formFromSettings(base), captureLastSeconds: 2.5 }).captureLastSeconds).toBeDefined();
   expect(validateForm({ ...formFromSettings(base), maxFps: null })).toEqual({});
+});
+
+test("the folder's budget is a MiB figure, and null is the device's default", () => {
+  expect(formFromSettings({ ...base, max_total_bytes: 50 * 1024 * MIB }).maxTotalMiB).toBe(50 * 1024);
+  expect(settingsFromForm({ ...formFromSettings(base), maxTotalMiB: 1536 }, base).max_total_bytes).toBe(1536 * MIB);
+  expect(settingsFromForm({ ...formFromSettings(base), maxTotalMiB: null }, { ...base, max_total_bytes: 1536 * MIB }).max_total_bytes).toBeNull();
+  expect(validateForm({ ...formFromSettings(base), maxTotalMiB: 0 }).maxTotalMiB).toBeDefined();
+  expect(validateForm({ ...formFromSettings(base), maxTotalMiB: 1 })).toEqual({});
+  expect(validateForm({ ...formFromSettings(base), maxTotalMiB: null })).toEqual({});
 });
 
 test("a form that changes nothing is not dirty", () => {

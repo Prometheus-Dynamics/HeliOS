@@ -15,7 +15,13 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
         state_dir: dir.join("state"),
-        board: Some(helios_layout::BoardContract { identity_file: dir.join("identity.json"), update_tool: dir.join("no-board-update"), update_status: dir.join("update.json"), update_progress: dir.join("update-progress"), ..helios_layout::BoardContract::image() }),
+        board: Some(helios_layout::BoardContract {
+            identity_file: dir.join("identity.json"),
+            update_tool: dir.join("no-board-update"),
+            update_status: dir.join("update.json"),
+            update_progress: dir.join("update-progress"),
+            ..helios_layout::BoardContract::image()
+        }),
         board_update_systemd_run: false,
         ui_dir: None,
         upload_dir: dir.join("uploads"),
@@ -85,6 +91,45 @@ async fn listing_shows_no_recording_and_the_storage() {
     assert_eq!(body["storage"]["dir"], dir.path().join("rec").display().to_string());
     assert_eq!(body["storage"]["reserve_bytes"], 0);
     assert!(body["storage_error"].is_null());
+}
+
+#[tokio::test]
+async fn a_lower_budget_applies_at_once_to_the_oldest_recordings() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    call(&state, "PUT", "/v1/recordings/settings", Some(with_storage(dir.path()))).await;
+    let rec = dir.path().join("rec");
+    std::fs::create_dir_all(&rec).expect("dir");
+    let stems = ["board-cam-20261019T101530Z-abc", "board-cam-20261020T101530Z-abc", "board-cam-20261021T101530Z-abc"];
+    for (age, stem) in stems.iter().enumerate() {
+        let path = rec.join(format!("{stem}.mcap"));
+        std::fs::write(&path, vec![0u8; 1 << 20]).expect("a 1 MiB recording");
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + age as u64 * 100);
+        std::fs::File::options().write(true).open(&path).expect("open").set_modified(at).expect("mtime");
+    }
+    std::fs::write(rec.join("notes.txt"), b"kept").expect("a file that is not a recording");
+
+    let (status, body) = call(&state, "GET", "/v1/recordings", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let total = helios_recorder::storage::total_bytes(&rec).expect("volume");
+    assert_eq!(body["storage"]["max_total_bytes"], total / 2, "the default for the device's own storage: half the volume");
+    assert_eq!(body["storage"]["recordings_bytes"], 3 << 20);
+
+    // A PUT is the whole settings object: the folder is repeated with the new budget.
+    let mut budget = with_storage(dir.path());
+    budget["max_total_bytes"] = serde_json::json!(100);
+    let (status, body) = call(&state, "PUT", "/v1/recordings/settings", Some(budget.clone())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "under 1 MiB is refused: {body}");
+    budget["max_total_bytes"] = serde_json::json!(2 << 20);
+    let (status, body) = call(&state, "PUT", "/v1/recordings/settings", Some(budget)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (_, listing) = call(&state, "GET", "/v1/recordings", None).await;
+    let ids: Vec<&str> = listing["stored"].as_array().expect("stored").iter().filter_map(|stored| stored["id"].as_str()).collect();
+    assert_eq!(ids.len(), 2, "the oldest recording went: {ids:?}");
+    assert!(!ids.contains(&stems[0]), "{ids:?}");
+    assert_eq!((listing["storage"]["max_total_bytes"].clone(), listing["storage"]["recordings_bytes"].clone()), (serde_json::json!(2 << 20), serde_json::json!(2 << 20)));
+    assert_eq!(std::fs::read(rec.join("notes.txt")).expect("notes"), b"kept");
 }
 
 #[tokio::test]

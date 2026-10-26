@@ -29,6 +29,10 @@ pub struct StorageFacts {
     pub dir: String,
     pub free_bytes: Option<u64>,
     pub reserve_bytes: u64,
+    /// The budget the folder has now: `max_total_bytes`, or the device's default for its volume.
+    pub max_total_bytes: u64,
+    /// Bytes the HeliOS recordings in the folder hold now.
+    pub recordings_bytes: u64,
 }
 
 /// `GET /v1/recordings`: the running recording (if any), the stored parts, and the storage.
@@ -56,7 +60,10 @@ pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Listing>> 
         Ok(dir) => {
             let free_bytes = storage::free_bytes(&dir).ok();
             let stored = catalog::list(&dir).map_err(|error| ApiError::internal(error.to_string()))?;
-            (Some(StorageFacts { dir: dir.display().to_string(), free_bytes, reserve_bytes: settings.reserve_bytes }), None, stored)
+            let max_total_bytes = storage::budget_for(&settings, &dir).map_err(|error| recordings::api_error(helios_recorder::RecorderError::Storage(error)))?;
+            let recordings_bytes = catalog::recordings_bytes(&dir).map_err(|error| ApiError::internal(error.to_string()))?;
+            let facts = StorageFacts { dir: dir.display().to_string(), free_bytes, reserve_bytes: settings.reserve_bytes, max_total_bytes, recordings_bytes };
+            (Some(facts), None, stored)
         }
         Err(error) => (None, Some(error.to_string()), Vec::new()),
     };
@@ -133,6 +140,7 @@ pub async fn put_settings(State(state): State<SharedState>, Json(body): Json<ser
     settings.validate().map_err(ApiError::unprocessable)?;
     state.store.put_recording_settings(&settings).await?;
     state.events.publish("recording_settings", serde_json::to_value(&settings).unwrap_or_default());
+    recordings::apply_budget(&state).await?;
     crate::recording_rings::sync_in_background(state.clone());
     Ok(Json(settings))
 }
