@@ -84,11 +84,19 @@ impl CameraMount {
 pub struct Store {
     dir: PathBuf,
     lock: Mutex<()>,
+    /// The recording settings until they are saved: the defaults of this device.
+    recording_defaults: helios_recorder::RecorderSettings,
 }
 
 impl Store {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into(), lock: Mutex::new(()) }
+        Self { dir: dir.into(), lock: Mutex::new(()), recording_defaults: helios_recorder::RecorderSettings::default() }
+    }
+
+    /// The recording settings a device without saved ones starts with (its layout's folders).
+    pub fn with_recording_defaults(mut self, defaults: helios_recorder::RecorderSettings) -> Self {
+        self.recording_defaults = defaults;
+        self
     }
 
     fn pipeline_path(&self, id: &str) -> PathBuf {
@@ -128,7 +136,19 @@ impl Store {
     /// Session recording settings (helios-recorder's, `recording.json`); the defaults until saved.
     pub async fn recording_settings(&self) -> ApiResult<helios_recorder::RecorderSettings> {
         let _guard = self.lock.lock().await;
-        read_json(&self.recording_settings_path()).await.map(Option::unwrap_or_default)
+        match read_json::<serde_json::Value>(&self.recording_settings_path()).await? {
+            Some(stored) => self.recording_settings_from(stored).map_err(|error| ApiError::internal(format!("recording.json: {error}"))),
+            None => Ok(self.recording_defaults.clone()),
+        }
+    }
+
+    /// Recording settings from a partial object: the fields it leaves out take this device's
+    /// defaults (its layout's folders), not the image's.
+    pub fn recording_settings_from(&self, partial: serde_json::Value) -> Result<helios_recorder::RecorderSettings, String> {
+        let serde_json::Value::Object(fields) = partial else { return Err("recording settings must be an object".into()) };
+        let mut merged = serde_json::to_value(&self.recording_defaults).map_err(|error| error.to_string())?;
+        merged.as_object_mut().expect("settings serialize to an object").extend(fields);
+        serde_json::from_value(merged).map_err(|error| error.to_string())
     }
 
     pub async fn put_recording_settings(&self, settings: &helios_recorder::RecorderSettings) -> ApiResult<()> {
@@ -459,6 +479,23 @@ mod tests {
         store.record_default_pipeline(true, 7).await.expect("record");
         let store = Store::new(dir.path());
         assert_eq!(store.default_pipeline_record().await.expect("read"), Some(DefaultPipelineRecord { created: true, decided_at_ms: 7 }));
+    }
+
+    #[tokio::test]
+    async fn recording_settings_fill_missing_fields_from_the_device_layout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let guest = helios_layout::Layout::guest("/usr/local");
+        let store = Store::new(dir.path()).with_recording_defaults(helios_recorder::RecorderSettings::for_layout(&guest));
+        let settings = store.recording_settings_from(serde_json::json!({"max_fps": 15.0})).expect("partial settings");
+        assert_eq!(settings.max_fps, Some(15.0));
+        assert_eq!(settings.fallback_dir, guest.fallback_recordings_dir(), "a guest never falls back to the image's /data");
+        assert_eq!(settings.usb_roots, guest.removable_media_roots());
+        // A stored file written before a field existed reads the same way.
+        tokio::fs::write(dir.path().join("recording.json"), r#"{"compression": false}"#).await.expect("write");
+        let stored = store.recording_settings().await.expect("read");
+        assert!(!stored.compression);
+        assert_eq!(stored.fallback_dir, guest.fallback_recordings_dir());
+        assert!(store.recording_settings_from(serde_json::json!({"no_such_field": 1})).is_err(), "unknown fields are still refused");
     }
 
     #[tokio::test]

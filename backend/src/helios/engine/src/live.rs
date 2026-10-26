@@ -2,7 +2,7 @@
 //! on a local Unix socket as they are produced, instead of waiting for the next Orion publish
 //! (`HELIOS_ENGINE_PUBLISH_INTERVAL_MS`, 250 ms). Tag overlays and values then follow the frames.
 //!
-//! The socket (`HELIOS_ENGINE_LIVE_SOCKET`, [`DEFAULT_SOCKET`]) carries newline-delimited JSON,
+//! The socket (`HELIOS_ENGINE_LIVE_SOCKET`, the layout's `engine_live_socket`) carries newline-delimited JSON,
 //! one line per output and tick: `{"pipeline", "port", "observed_at_ms", "frame_ts_ns",
 //! "value"}`, the value being the same JSON `GET /v1/outputs` shows and `frame_ts_ns` the capture
 //! time of the frame the tick ran on (the preview's frames carry the same clock), so a viewer can
@@ -31,8 +31,6 @@ use tracing::{info, warn};
 
 use crate::execution::outputs::payload_message;
 
-/// Where helios-api finds the live outputs.
-pub const DEFAULT_SOCKET: &str = "/run/helios/engine-live.sock";
 /// Ticks waiting to be serialized; more are dropped (the newest tick matters, not every tick).
 const QUEUE: usize = 32;
 /// Serialized outputs waiting for the subscribers' flushes.

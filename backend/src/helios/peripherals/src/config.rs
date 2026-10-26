@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
+
+use anyhow::Result;
+use helios_layout::Layout;
 
 pub const DEFAULT_NODE_ID: &str = "node-local";
 pub const DEFAULT_IPC_DIR_ENV: &str = "HELIOS_IPC_DIR";
-pub const DEFAULT_IPC_DIR_NAME: &str = "helios-ipc";
-const DEFAULT_ORION_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
-const DEFAULT_ORION_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
 /// The client name HeliOS gives lemnosd. The fan's board `writers` must list it (Atlas's Raze
 /// board.toml does).
 pub const LEMNOSD_CLIENT_NAME: &str = "helios";
@@ -38,16 +38,24 @@ pub struct PeripheralConfig {
 }
 
 impl Default for PeripheralConfig {
+    /// The image's configuration.
     fn default() -> Self {
-        let ipc_dir = default_ipc_dir();
+        Self::from_layout(&Layout::image())
+    }
+}
+
+impl PeripheralConfig {
+    /// The defaults on the device whose layout this is.
+    pub fn from_layout(layout: &Layout) -> Self {
+        let ipc_dir = layout.ipc_dir();
         Self {
             node_id: DEFAULT_NODE_ID.to_string(),
             stream_dir: default_stream_dir_for(&ipc_dir),
             ipc_dir,
-            orion_ipc_socket_path: PathBuf::from(DEFAULT_ORION_IPC_SOCKET_PATH),
-            orion_ipc_stream_socket_path: PathBuf::from(DEFAULT_ORION_IPC_STREAM_SOCKET_PATH),
+            orion_ipc_socket_path: layout.orion_socket(),
+            orion_ipc_stream_socket_path: layout.orion_stream_socket(),
             enable_linux_probes: true,
-            lemnosd_socket_path: PathBuf::from(lemnos_ipc::DEFAULT_SOCKET),
+            lemnosd_socket_path: layout.lemnos_socket(),
             lemnosd_reading_interval_ms: 250,
             lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,
@@ -56,21 +64,20 @@ impl Default for PeripheralConfig {
             camera_spare_clients: 4,
         }
     }
-}
 
-impl PeripheralConfig {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self> {
         Self::from_env_iter(std::env::vars())
     }
 
-    fn from_env_iter<I, K, V>(iter: I) -> Self
+    fn from_env_iter<I, K, V>(iter: I) -> Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
         K: Into<String>,
         V: Into<String>,
     {
-        let env = iter.into_iter().map(|(k, v)| (k.into(), v.into())).collect::<std::collections::BTreeMap<String, String>>();
-        let mut config = Self { node_id: env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string()), ..Self::default() };
+        let env = iter.into_iter().map(|(k, v)| (k.into(), v.into())).collect::<BTreeMap<String, String>>();
+        let layout = Layout::from_vars(env.iter())?;
+        let mut config = Self { node_id: env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string()), ..Self::from_layout(&layout) };
         if let Some(ipc_dir) = env.get(DEFAULT_IPC_DIR_ENV) {
             config.ipc_dir = PathBuf::from(ipc_dir);
             config.stream_dir = default_stream_dir_for(&config.ipc_dir);
@@ -108,12 +115,8 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_CAMERA_SPARE_CLIENTS").and_then(|v| v.parse::<usize>().ok()) {
             config.camera_spare_clients = value;
         }
-        config
+        Ok(config)
     }
-}
-
-fn default_ipc_dir() -> PathBuf {
-    std::env::temp_dir().join(DEFAULT_IPC_DIR_NAME)
 }
 
 fn default_stream_dir_for(root: impl Into<PathBuf>) -> PathBuf {
@@ -140,7 +143,8 @@ mod tests {
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
             ("HELIOS_CAMERA_SENSOR_RAW", "0"),
             ("HELIOS_CAMERA_SPARE_CLIENTS", "6"),
-        ]);
+        ])
+        .expect("config");
         assert_eq!(config.node_id, "node-a");
         assert_eq!(config.ipc_dir, PathBuf::from("/tmp/helios-peripherals"));
         assert_eq!(config.stream_dir, PathBuf::from("/tmp/helios-peripherals/streams-alt"));
@@ -158,16 +162,30 @@ mod tests {
 
     #[test]
     fn camera_raw_is_on_and_four_spare_clients_by_default() {
-        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]);
+        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
         assert!(config.camera_sensor_raw);
         assert_eq!(config.camera_spare_clients, 4);
     }
 
     #[test]
     fn config_defaults_stream_dir_from_ipc_dir_and_lemnosd_to_its_socket() {
-        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]);
+        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
         assert_eq!(config.stream_dir, PathBuf::from("/tmp/helios-peripherals/streams"));
         assert_eq!(config.lemnosd_socket_path, PathBuf::from("/run/lemnos/lemnosd.sock"));
         assert_eq!(config.lemnosd_reading_interval_ms, 250);
+    }
+
+    #[test]
+    fn the_image_lemnosd_socket_is_the_lemnos_client_default() {
+        // The layout pins the path (`helios-layout`); this keeps it equal to lemnos's own default.
+        assert_eq!(Layout::image().lemnos_socket(), PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
+    }
+
+    #[test]
+    fn a_guest_layout_keeps_the_host_sockets_and_drops_nothing_else() {
+        let config = PeripheralConfig::from_env_iter([("HELIOS_LAYOUT_PROFILE", "guest")]).expect("config");
+        assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/run/orion/control.sock"));
+        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/run/lemnos/lemnosd.sock"));
+        assert_eq!(config.camera_spare_clients, 4);
     }
 }

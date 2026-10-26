@@ -252,7 +252,7 @@ impl Watch {
                 if !apply_host_change(&mut self.host, change) || !active {
                     return;
                 }
-                if let Ok(metrics) = serde_json::to_value(metrics_from(Some(&HostSample::from_status(&self.host)))) {
+                if let Ok(metrics) = serde_json::to_value(metrics_from(Some(&HostSample::from_status(&self.host)), state.config.layout.state_dir())) {
                     state.events.publish("metrics", metrics);
                 }
             }
@@ -274,7 +274,7 @@ impl Watch {
         // itself (throttling, disk).
         if self.seen.orion_up == Some(false)
             && self.ticks.is_multiple_of(METRICS_WHILE_DOWN_EVERY)
-            && let Ok(metrics) = serde_json::to_value(metrics_from(None))
+            && let Ok(metrics) = serde_json::to_value(metrics_from(None, state.config.layout.state_dir()))
         {
             state.events.publish("metrics", metrics);
         }
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(sample.cpu_busy_milli, Some(250));
         assert_eq!(sample.cpu_core_busy_milli, vec![100, 500]);
         assert_eq!(sample.load_milli, Some([1500, 1000, 500]));
-        let metrics = metrics_from(Some(&sample));
+        let metrics = metrics_from(Some(&sample), std::path::Path::new("/"));
         assert_eq!(metrics.cpu, Some(0.25));
         assert_eq!(metrics.cpu_cores, vec![0.1, 0.5]);
         assert_eq!(metrics.temperature_c, Some(52.5));
@@ -474,7 +474,7 @@ mod tests {
             expired: vec![StatusKey { subject: node.clone(), key: "host.temperature.cpu-thermal".into() }],
         };
         assert!(apply_host_change(&mut host, expire));
-        let metrics = metrics_from(Some(&HostSample::from_status(&host)));
+        let metrics = metrics_from(Some(&HostSample::from_status(&host)), std::path::Path::new("/"));
         assert_eq!(metrics.cpu, Some(0.9));
         assert_eq!(metrics.temperature_c, Some(48.0));
         assert!(!apply_host_change(&mut host, StatusChange { bootstrap: false, updated: Vec::new(), expired: Vec::new() }));

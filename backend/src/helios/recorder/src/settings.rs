@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use helios_layout::Layout;
 use serde::{Deserialize, Serialize};
 
 pub const GIB: u64 = 1 << 30;
@@ -62,11 +63,20 @@ pub struct RecorderSettings {
 }
 
 impl Default for RecorderSettings {
+    /// The image's defaults.
     fn default() -> Self {
+        Self::for_layout(&Layout::image())
+    }
+}
+
+impl RecorderSettings {
+    /// The defaults on the device whose layout this is: its removable media and its fallback
+    /// folder for recordings.
+    pub fn for_layout(layout: &Layout) -> Self {
         Self {
             storage_dir: None,
-            usb_roots: vec!["/media".into(), "/run/media".into()],
-            fallback_dir: "/data/helios/recordings".into(),
+            usb_roots: layout.removable_media_roots(),
+            fallback_dir: layout.fallback_recordings_dir(),
             reserve_bytes: 2 * GIB,
             max_file_bytes: 2 * GIB,
             max_file_seconds: 600,

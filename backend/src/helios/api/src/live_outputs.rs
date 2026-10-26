@@ -26,15 +26,14 @@ use tokio::{
 
 use crate::SharedState;
 
-/// The engine's socket when `HELIOS_ENGINE_LIVE_SOCKET` does not say.
-pub const DEFAULT_SOCKET: &str = "/run/helios/engine-live.sock";
 /// Wait between connection attempts while the engine is not there.
 const RETRY: Duration = Duration::from_secs(1);
 /// Chunks waiting for slow clients; beyond this a client skips ahead.
 const FANOUT: usize = 1024;
 
-pub fn socket_path() -> PathBuf {
-    std::env::var_os("HELIOS_ENGINE_LIVE_SOCKET").map_or_else(|| PathBuf::from(DEFAULT_SOCKET), PathBuf::from)
+/// The socket from `HELIOS_ENGINE_LIVE_SOCKET`, or the layout's engine live socket.
+pub fn socket_path(layout: &helios_layout::Layout) -> PathBuf {
+    std::env::var_os("HELIOS_ENGINE_LIVE_SOCKET").map_or_else(|| layout.engine_live_socket(), PathBuf::from)
 }
 
 /// The relay: whole lines read from the engine, fanned out to every client.

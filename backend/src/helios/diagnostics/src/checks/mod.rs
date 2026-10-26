@@ -8,20 +8,16 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use chrono::Utc;
 
+use helios_layout::BoardContract;
+
 use crate::config::DiagnosticsConfig;
 use crate::model::{
     CameraReport, DynamicLinkReport, ExecutableFileReport, HealthReport, HealthStatus, IdentityReport, JournalReport, LoadAverageReport, MemoryReport, MountReport, OrionReport, PluginReport,
     ProcessRuntimeReport, RuntimeReport, ServiceReport, UpdateReport,
 };
 
-/// Service binaries on the read-only root.
-const EXPECTED_BINARIES: &[&str] = &["/usr/bin/orion-node", "/usr/bin/orionctl", "/usr/bin/helios-engine", "/usr/bin/helios-peripherals", "/usr/bin/helios-api"];
-
 const EXPECTED_SERVICES: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
 
-const EXPECTED_EXECUTABLE_FILES: &[&str] = &["/usr/lib/helios/data-setup", "/opt/set-governor.sh", "/opt/helios-update-issue.sh", "/etc/board/update-health", "/etc/board/update.d/pre-reboot"];
-const BOARD_UPDATE_TOOL: &str = "/usr/lib/board/update";
-const BOARD_UPDATE_HEALTH: &str = "/etc/board/update-health";
 const SSH_HOST_KEYS: &[&str] = &["ssh_host_ecdsa_key", "ssh_host_ed25519_key", "ssh_host_rsa_key"];
 
 pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport> {
@@ -32,11 +28,11 @@ pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport>
     let identity = collect_identity_report(config);
     let camera = collect_camera_report(config)?;
     let runtime = collect_runtime_report()?;
-    let executable_files = collect_executable_files();
-    let dynamic_links = EXPECTED_BINARIES.iter().map(|binary| inspect_dynamic_links(Path::new(binary))).collect::<Vec<_>>();
+    let executable_files = collect_executable_files(config);
+    let dynamic_links = config.expected_binaries.iter().map(|binary| inspect_dynamic_links(binary)).collect::<Vec<_>>();
     let plugins = collect_plugins(&config.plugin_dir)?;
     let orion = collect_orion(&config.orion_run_dir);
-    let update = collect_update_report(&config.update_status_path);
+    let update = collect_update_report(config.board.as_ref());
     let services = collect_services()?;
     let data_is_tmpfs = data.fs_type.as_deref() == Some("tmpfs");
     let store_on_data = on_mount(&writable_store, &data);
@@ -296,11 +292,12 @@ fn count_camera_resources(orion_run_dir: &Path) -> Result<usize> {
     Ok(stdout.lines().filter(|line| line.contains(" type=camera.device") || line.contains("type: camera.device")).count())
 }
 
-fn collect_executable_files() -> Vec<ExecutableFileReport> {
-    EXPECTED_EXECUTABLE_FILES
+fn collect_executable_files(config: &DiagnosticsConfig) -> Vec<ExecutableFileReport> {
+    config
+        .expected_executables
         .iter()
         .map(|path| {
-            let path = Path::new(path);
+            let path = path.as_path();
             let metadata = fs::metadata(path).ok();
             ExecutableFileReport {
                 path: path.display().to_string(),
@@ -358,12 +355,18 @@ fn collect_orion(path: &Path) -> OrionReport {
     OrionReport { run_dir: path.display().to_string(), control_socket: path.join("control.sock").exists(), control_stream_socket: path.join("control-stream.sock").exists() }
 }
 
-fn collect_update_report(status_path: &Path) -> UpdateReport {
-    let status = fs::read_to_string(status_path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next().unwrap_or_default()).ok());
+/// The device package's updater. Without a board contract (a guest) there is no updater to check,
+/// so the report says the feature is absent (`available: false`, no issues) rather than listing its
+/// parts as missing.
+fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
+    let Some(board) = board else {
+        return UpdateReport::default();
+    };
+    let status = fs::read_to_string(&board.update_status).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next().unwrap_or_default()).ok());
     let field = |key: &str| status.as_ref().and_then(|s| s.get(key)).and_then(|v| v.as_str()).map(str::to_string).filter(|v| !v.is_empty());
-    let tool_installed = is_executable(Path::new(BOARD_UPDATE_TOOL));
+    let tool_installed = is_executable(&board.update_tool);
     let confirm_service_loaded = systemd_unit_load_state("board-update-confirm.service").is_some_and(|state| state == "loaded");
-    let health_check_installed = is_executable(Path::new(BOARD_UPDATE_HEALTH));
+    let health_check_installed = is_executable(&board.update_health);
     let slot_active = field("slot_active");
     let ab_layout = matches!(slot_active.as_deref(), Some("A" | "B"));
     let state = field("state");
@@ -386,6 +389,7 @@ fn collect_update_report(status_path: &Path) -> UpdateReport {
         issues.push(format!("last_update_{}", state.as_deref().unwrap_or_default()));
     }
     UpdateReport {
+        available: true,
         tool_installed,
         confirm_service_loaded,
         health_check_installed,

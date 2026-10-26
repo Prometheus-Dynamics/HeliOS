@@ -84,7 +84,7 @@ pub type SharedState = Arc<AppState>;
 
 impl AppState {
     pub fn new(config: ApiConfig) -> SharedState {
-        let store = Arc::new(store::Store::new(config.state_dir.clone()));
+        let store = Arc::new(store::Store::new(config.state_dir.clone()).with_recording_defaults(helios_recorder::RecorderSettings::for_layout(&config.layout)));
         let events = Arc::new(events::EventHub::new(256));
         let orion_link = orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone());
         Arc::new(Self {

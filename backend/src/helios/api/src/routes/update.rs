@@ -241,14 +241,20 @@ pub fn version_for(upload: &Upload, requested: Option<String>) -> String {
         .unwrap_or_else(|| format!("upload-{}", &upload.sha256[..12]))
 }
 
+/// The device package's updater is installed and runnable. A device without a device package (a
+/// guest) has none.
 fn tool_installed(config: &ApiConfig) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(&config.board_update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    config.board.as_ref().is_some_and(|board| std::fs::metadata(&board.update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
 /// `update <args>`, through `systemd-run` on the device so the command lives in its own unit.
-/// `wait`: block until it ends (stage); otherwise only start it (apply, which reboots).
-fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> tokio::process::Command {
+/// `wait`: block until it ends (stage); otherwise only start it (apply, which reboots). Without a
+/// device package this is an error: there is no updater to run.
+fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> std::io::Result<tokio::process::Command> {
+    let Some(board) = config.board.as_ref() else {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "the device package updater is not available on this device"));
+    };
     let mut command;
     if config.board_update_systemd_run {
         command = tokio::process::Command::new("systemd-run");
@@ -256,12 +262,12 @@ fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> tokio:
         if wait {
             command.args(["--wait", "--pipe"]);
         }
-        command.arg("--").arg(&config.board_update_tool);
+        command.arg("--").arg(&board.update_tool);
     } else {
-        command = tokio::process::Command::new(&config.board_update_tool);
+        command = tokio::process::Command::new(&board.update_tool);
     }
     command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(false);
-    command
+    Ok(command)
 }
 
 /// The writer's last words on stderr (it logs `update: <reason>`), else the exit status.
@@ -291,7 +297,10 @@ fn publish_status(state: &SharedState, change: &str) {
 
 async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTask, _guard: tokio::sync::OwnedMutexGuard<()>) {
     let image = upload.path(&state.config).display().to_string();
-    let result = board_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true).output().await;
+    let result = match board_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true) {
+        Ok(mut command) => command.output().await,
+        Err(error) => Err(error),
+    };
     match result {
         Ok(output) if output.status.success() => {
             tracing::info!(version = %task.version, "update staged");
@@ -318,7 +327,11 @@ async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTas
     }
     // `update apply` runs the pre-reboot hook (which stops helios-api, among others) and
     // reboots into the staged slot on trial; it is started in its own unit and not awaited.
-    match board_update_command(&state.config, &["apply"], false).output().await {
+    let result = match board_update_command(&state.config, &["apply"], false) {
+        Ok(mut command) => command.output().await,
+        Err(error) => Err(error),
+    };
+    match result {
         Ok(output) if output.status.success() => tracing::info!(version = %task.version, "update applied; rebooting into the staged slot on trial"),
         Ok(output) => {
             task.step = "failed".into();
@@ -342,10 +355,13 @@ async fn apply_upload(state: &SharedState, upload: Upload, version: Option<Strin
         return Err(ApiError::unprocessable(format!("checksum mismatch: expected {expected}, upload has {}", upload.sha256)));
     }
     if !tool_installed(&state.config) {
-        return Err(ApiError::not_available(
-            format!("the device package updater ({}) is not installed", state.config.board_update_tool.display()),
-            "the Raze board package's A/B writer (/usr/lib/board/update, Atlas devices/raze at 3c97fa0 or newer) and an A/B disk layout",
-        ));
+        return Err(match state.config.board.as_ref() {
+            Some(board) => ApiError::not_available(
+                format!("the device package updater ({}) is not installed", board.update_tool.display()),
+                "the Raze board package's A/B writer (/usr/lib/board/update, Atlas devices/raze at 3c97fa0 or newer) and an A/B disk layout",
+            ),
+            None => ApiError::not_available("device updates are not available on this device", "a device package with an update writer (the owner image)"),
+        });
     }
     if let Some(current) = read_board_status(&state.config) {
         if current.state == "trying" {
@@ -441,7 +457,8 @@ pub struct UpdateStatus {
 }
 
 fn read_board_status(config: &ApiConfig) -> Option<BoardUpdateStatus> {
-    board_update::read_status_at(&config.board_update_status, &config.board_update_progress)
+    let board = config.board.as_ref()?;
+    board_update::read_status_at(&board.update_status, &board.update_progress)
 }
 
 fn current_task(state: &SharedState) -> Option<UpdateTask> {
@@ -486,10 +503,13 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
 /// Before the writer has run on this boot `/run/board/update.json` may be missing;
 /// `update status` writes it (it reads the state kept on p1).
 async fn ensure_board_status(config: &ApiConfig) {
-    if config.board_update_status.exists() || !tool_installed(config) {
+    let Some(board) = config.board.as_ref() else {
+        return;
+    };
+    if board.update_status.exists() || !tool_installed(config) {
         return;
     }
-    let mut command = tokio::process::Command::new(&config.board_update_tool);
+    let mut command = tokio::process::Command::new(&board.update_tool);
     command.arg("status").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command.status()).await;
 }
@@ -594,16 +614,12 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn config(dir: &std::path::Path) -> ApiConfig {
-        ApiConfig {
-            upload_dir: dir.join("uploads"),
-            board_update_tool: dir.join("board-update"),
-            board_update_status: dir.join("update.json"),
-            board_update_progress: dir.join("progress"),
-            board_update_systemd_run: false,
-            ui_dir: None,
-            max_upload_bytes: 64,
-            ..ApiConfig::default()
-        }
+        ApiConfig { upload_dir: dir.join("uploads"), board: Some(test_board(dir)), board_update_systemd_run: false, ui_dir: None, max_upload_bytes: 64, ..ApiConfig::default() }
+    }
+
+    /// The image's board contract, with the updater's files in `dir`.
+    fn test_board(dir: &std::path::Path) -> helios_layout::BoardContract {
+        helios_layout::BoardContract { update_tool: dir.join("board-update"), update_status: dir.join("update.json"), update_progress: dir.join("progress"), ..helios_layout::BoardContract::image() }
     }
 
     fn chunks(parts: &[&'static [u8]]) -> impl Stream<Item = Result<Bytes, Infallible>> + Unpin {
@@ -643,8 +659,12 @@ mod tests {
     fn status_follows_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
-        std::fs::write(&config.board_update_status, r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#).expect("write");
-        std::fs::write(&config.board_update_progress, "1000").expect("write");
+        std::fs::write(
+            &config.board.as_ref().expect("board").update_status,
+            r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#,
+        )
+        .expect("write");
+        std::fs::write(&config.board.as_ref().expect("board").update_progress, "1000").expect("write");
         let status = status_from(&config, None);
         assert_eq!(status.phase, "staging");
         assert_eq!(status.stage, "installing");
@@ -652,7 +672,7 @@ mod tests {
         assert_eq!(status.slots.staged.as_deref(), Some("B"));
 
         std::fs::write(
-            &config.board_update_status,
+            &config.board.as_ref().expect("board").update_status,
             r#"{"state":"rolled-back","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":"the health check failed on v2"}"#,
         )
         .expect("write");
@@ -699,7 +719,7 @@ mod tests {
     async fn apply_stages_then_applies_through_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = config(dir.path());
-        config.board_update_tool = fake_writer(dir.path(), true);
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), true);
         let state = crate::AppState::new(config.clone());
         let upload = store_upload(&config, "helios-full-raze-v2.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
         let response = apply_upload(&state, upload.clone(), None, Some(upload.sha256.clone()), true).await.expect("apply");
@@ -724,7 +744,7 @@ mod tests {
     async fn a_failed_stage_is_reported_and_not_applied() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = config(dir.path());
-        config.board_update_tool = fake_writer(dir.path(), false);
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), false);
         let state = crate::AppState::new(config.clone());
         let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
         apply_upload(&state, upload.clone(), None, None, true).await.expect("apply");
@@ -746,8 +766,12 @@ mod tests {
         assert_eq!(error.code, crate::error::ErrorCode::NotAvailable);
 
         let mut config = config.clone();
-        config.board_update_tool = fake_writer(dir.path(), true);
-        std::fs::write(&config.board_update_status, r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#).expect("write");
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), true);
+        std::fs::write(
+            &config.board.as_ref().expect("board").update_status,
+            r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#,
+        )
+        .expect("write");
         let state = crate::AppState::new(config);
         let error = apply_upload(&state, upload, None, None, true).await.expect_err("on trial");
         assert_eq!(error.code, crate::error::ErrorCode::Conflict);

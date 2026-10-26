@@ -28,11 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match mode.as_str() {
         "idle" => {}
         "config" => {
-            let config = PeripheralConfig::from_env();
+            let config = PeripheralConfig::from_env()?;
             println!("node_id={} stream_dir={}", config.node_id, config.stream_dir.display());
         }
         "orion-snapshot" => {
-            let config = PeripheralConfig::from_env();
+            let config = PeripheralConfig::from_env()?;
             let runtime = LocalNodeRuntime::new(config.orion_ipc_socket_path, config.orion_ipc_stream_socket_path);
             let snapshot = runtime.control_plane("peripherals-mem-probe")?.fetch_state_snapshot().await?;
             println!(
@@ -43,33 +43,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "inventory-linux-off" => {
-            let mut config = PeripheralConfig::from_env();
+            let mut config = PeripheralConfig::from_env()?;
             config.enable_linux_probes = false;
             let service = build_inventory_service(&config)?;
             let report = service.refresh_report(now_ms());
             println!("resources={} probes={}", report.snapshot.resources.len(), report.probe_reports.len());
         }
         "inventory-build-linux-off" => {
-            let mut config = PeripheralConfig::from_env();
+            let mut config = PeripheralConfig::from_env()?;
             config.enable_linux_probes = false;
             let service = build_inventory_service(&config)?;
             println!("probe_names={}", service.probe_names().join(","));
         }
         "inventory-linux-on" => {
-            let mut config = PeripheralConfig::from_env();
+            let mut config = PeripheralConfig::from_env()?;
             config.enable_linux_probes = true;
             let service = build_inventory_service(&config)?;
             let report = service.refresh_report(now_ms());
             println!("resources={} probes={}", report.snapshot.resources.len(), report.probe_reports.len());
         }
         "inventory-build-linux-on" => {
-            let mut config = PeripheralConfig::from_env();
+            let mut config = PeripheralConfig::from_env()?;
             config.enable_linux_probes = true;
             let service = build_inventory_service(&config)?;
             println!("probe_names={}", service.probe_names().join(","));
         }
         "lemnosd-list" => {
-            let config = PeripheralConfig::from_env();
+            let config = PeripheralConfig::from_env()?;
             let mut client = lemnos_ipc::DeviceClient::connect(&config.lemnosd_socket_path, helios_peripherals::config::LEMNOSD_CLIENT_NAME)?;
             let devices = client.list()?;
             println!("lemnosd_board={} devices={}", client.board(), devices.len());
@@ -78,18 +78,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "orion-publisher-new" => {
-            let config = PeripheralConfig::from_env();
+            let config = PeripheralConfig::from_env()?;
             let _publisher = OrionPeripheralPublisher::from_config(&config);
             println!("orion_publisher=initialized");
         }
         "orion-publisher-register" => {
-            let config = PeripheralConfig::from_env();
+            let config = PeripheralConfig::from_env()?;
             let publisher = OrionPeripheralPublisher::from_config(&config);
             publisher.register_identities().await?;
             println!("orion_publisher=registered");
         }
         "inventory-publish-linux-on" => {
-            let mut config = PeripheralConfig::from_env();
+            let mut config = PeripheralConfig::from_env()?;
             config.enable_linux_probes = true;
             let service = build_inventory_service(&config)?;
             let report = service.refresh_report(now_ms());
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("codec_registry=initialized");
         }
         "camera-service" => {
-            let path = PathBuf::from("/tmp/helios-peripherals-mem-probe/probe.styx.sock");
+            let path = std::env::temp_dir().join("helios-peripherals-mem-probe").join("probe.styx.sock");
             std::fs::create_dir_all(path.parent().ok_or("socket path has no parent")?)?;
             let handle = CameraService::new(first_capture_device()?).serve(&path)?;
             println!("camera_service=serving path={}", handle.path().display());

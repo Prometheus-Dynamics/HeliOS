@@ -1,21 +1,14 @@
 //! Runtime configuration from the environment (`/etc/default/helios-api.env` on the device).
+//!
+//! Paths come from the install layout (`helios-layout`): the image's by default, a guest's when
+//! the layout says so. The variables here override single paths after the layout is read.
 
 use std::{collections::BTreeMap, net::SocketAddr, path::PathBuf};
 
+use helios_layout::{BoardContract, Layout};
+
 pub const DEFAULT_BIND: &str = "127.0.0.1:5800";
 pub const DEFAULT_NODE_ID: &str = "node-local";
-pub const DEFAULT_ORION_SOCKET: &str = "/run/orion/control.sock";
-pub const DEFAULT_ORION_STREAM_SOCKET: &str = "/run/orion/control-stream.sock";
-pub const DEFAULT_STATE_DIR: &str = "/var/lib/helios/api";
-/// OTA uploads: on the data partition (`/var/lib/helios` is bind-mounted from `/data/helios`),
-/// since `/run` is RAM and the device package's writer reads the image from a file.
-pub const DEFAULT_UPLOAD_DIR: &str = "/var/lib/helios/updates";
-/// The UI's static build (`ui/`), served next to the API on the same port.
-pub const DEFAULT_UI_DIR: &str = "/usr/share/helios/ui";
-/// Written by the Raze device package (`/usr/lib/board/identity --write`).
-pub const DEFAULT_BOARD_IDENTITY_PATH: &str = "/run/board/identity.json";
-/// The first-boot startup file (staged by gaia): the default pipeline helios-api creates once.
-pub const DEFAULT_STARTUP_FILE: &str = "/etc/helios/startup.toml";
 
 /// systemd units the API reports and may restart.
 pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
@@ -24,24 +17,24 @@ pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.servic
 pub struct ApiConfig {
     pub bind: SocketAddr,
     pub node_id: String,
+    /// The install layout every path here came from.
+    pub layout: Layout,
     pub orion_socket: PathBuf,
     pub orion_stream_socket: PathBuf,
     /// Pipeline revision history and camera mounts.
     pub state_dir: PathBuf,
-    /// Where OTA uploads are kept until they are staged.
+    /// Where OTA uploads are kept until they are staged. On the data partition (the layout's
+    /// state is bind-mounted from it), since `/run` is RAM and the device package's writer reads
+    /// the image from a file.
     pub upload_dir: PathBuf,
-    /// The device package's update CLI (`/usr/lib/board/update`).
-    pub board_update_tool: PathBuf,
-    /// Its state file (`/run/board/update.json`).
-    pub board_update_status: PathBuf,
-    /// Its live copy progress while staging (`/run/board/update/progress`).
-    pub board_update_progress: PathBuf,
     /// Run the update CLI through `systemd-run`, outside helios-api's cgroup, so that stopping
     /// helios-api (the pre-reboot hook does) cannot kill it. Off runs it directly (tests).
     pub board_update_systemd_run: bool,
     /// The UI's static files; `None` (or a missing directory) serves the API only.
     pub ui_dir: Option<PathBuf>,
-    pub board_identity_path: PathBuf,
+    /// The device package's files (identity, update writer, camera description). `None` on a
+    /// guest, which has none: the features that need them report that they are not available.
+    pub board: Option<BoardContract>,
     /// `Access-Control-Allow-Origin` value; `None` sends no CORS headers.
     pub cors_origin: Option<String>,
     /// Largest accepted OTA upload.
@@ -61,33 +54,37 @@ pub struct ApiConfig {
 }
 
 impl Default for ApiConfig {
+    /// The image's configuration.
     fn default() -> Self {
-        Self {
-            bind: DEFAULT_BIND.parse().expect("default bind address"),
-            node_id: DEFAULT_NODE_ID.into(),
-            orion_socket: DEFAULT_ORION_SOCKET.into(),
-            orion_stream_socket: DEFAULT_ORION_STREAM_SOCKET.into(),
-            state_dir: DEFAULT_STATE_DIR.into(),
-            upload_dir: DEFAULT_UPLOAD_DIR.into(),
-            board_update_tool: crate::board_update::BOARD_UPDATE_TOOL.into(),
-            board_update_status: crate::board_update::BOARD_UPDATE_STATUS.into(),
-            board_update_progress: crate::board_update::BOARD_UPDATE_COPY_PROGRESS.into(),
-            board_update_systemd_run: true,
-            ui_dir: Some(DEFAULT_UI_DIR.into()),
-            board_identity_path: DEFAULT_BOARD_IDENTITY_PATH.into(),
-            cors_origin: None,
-            max_upload_bytes: 8 << 30,
-            auth_file: crate::auth_state::DEFAULT_AUTH_FILE.into(),
-            preview: crate::camera_preview::PreviewSettings::default(),
-            startup_file: DEFAULT_STARTUP_FILE.into(),
-            lemnos_socket: helios_recorder::lemnos::DEFAULT_SOCKET.into(),
-            playback: crate::playback::PlaybackSettings::default(),
-            live_streams: crate::live_streams::LiveStreamSettings::default(),
-        }
+        Self::from_layout(&Layout::image())
     }
 }
 
 impl ApiConfig {
+    /// The configuration of the device whose layout this is, before the environment overrides it.
+    pub fn from_layout(layout: &Layout) -> Self {
+        Self {
+            bind: DEFAULT_BIND.parse().expect("default bind address"),
+            node_id: DEFAULT_NODE_ID.into(),
+            layout: layout.clone(),
+            orion_socket: layout.orion_socket(),
+            orion_stream_socket: layout.orion_stream_socket(),
+            state_dir: layout.api_state_dir(),
+            upload_dir: layout.upload_dir(),
+            board_update_systemd_run: true,
+            ui_dir: Some(layout.ui_dir()),
+            board: layout.board().cloned(),
+            cors_origin: None,
+            max_upload_bytes: 8 << 30,
+            auth_file: layout.auth_file(),
+            preview: crate::camera_preview::PreviewSettings::default(),
+            startup_file: layout.startup_file(),
+            lemnos_socket: layout.lemnos_socket(),
+            playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
+            live_streams: crate::live_streams::LiveStreamSettings::default(),
+        }
+    }
+
     pub fn from_env() -> anyhow::Result<Self> {
         Self::from_vars(std::env::vars())
     }
@@ -99,7 +96,8 @@ impl ApiConfig {
         V: Into<String>,
     {
         let env: BTreeMap<String, String> = vars.into_iter().map(|(k, v)| (k.into(), v.into())).filter(|(_, v)| !v.trim().is_empty()).collect();
-        let mut config = Self::default();
+        let layout = Layout::from_vars(env.iter())?;
+        let mut config = Self::from_layout(&layout);
         if let Some(bind) = env.get("HELIOS_API_BIND_ADDR").or_else(|| env.get("HELIOS_API_BIND")) {
             config.bind = bind.parse()?;
         }
@@ -118,14 +116,17 @@ impl ApiConfig {
         if let Some(value) = env.get("HELIOS_API_UPLOAD_DIR") {
             config.upload_dir = value.into();
         }
-        if let Some(value) = env.get("HELIOS_BOARD_UPDATE_TOOL") {
-            config.board_update_tool = value.into();
+        // The board's own files exist on the image only; on a guest these have nothing to override.
+        if let Some(board) = config.board.as_mut() {
+            if let Some(value) = env.get("HELIOS_BOARD_UPDATE_TOOL") {
+                board.update_tool = value.into();
+            }
+            if let Some(value) = env.get("HELIOS_BOARD_IDENTITY_PATH") {
+                board.identity_file = value.into();
+            }
         }
         if let Some(value) = env.get("HELIOS_API_UI_DIR") {
             config.ui_dir = if value == "off" { None } else { Some(value.into()) };
-        }
-        if let Some(value) = env.get("HELIOS_BOARD_IDENTITY_PATH") {
-            config.board_identity_path = value.into();
         }
         if let Some(value) = env.get("HELIOS_API_CORS_ORIGIN") {
             config.cors_origin = Some(value.clone());
@@ -201,6 +202,41 @@ mod tests {
         assert_eq!(config.ui_dir, None);
         assert_eq!(config.startup_file, PathBuf::from("/data/startup.toml"));
         assert_eq!(config.preview, crate::camera_preview::PreviewSettings::default());
+    }
+
+    #[test]
+    fn the_defaults_are_the_image_paths() {
+        let config = ApiConfig::from_vars(std::iter::empty::<(String, String)>()).expect("config");
+        assert_eq!(config.state_dir, PathBuf::from("/var/lib/helios/api"));
+        assert_eq!(config.upload_dir, PathBuf::from("/var/lib/helios/updates"));
+        assert_eq!(config.ui_dir, Some(PathBuf::from("/usr/share/helios/ui")));
+        assert_eq!(config.startup_file, PathBuf::from("/etc/helios/startup.toml"));
+        assert_eq!(config.auth_file, PathBuf::from("/var/lib/helios/auth/auth.json"));
+        assert_eq!(config.orion_socket, PathBuf::from("/run/orion/control.sock"));
+        assert_eq!(config.lemnos_socket, PathBuf::from("/run/lemnos/lemnosd.sock"));
+        assert_eq!(config.playback.stream_dir, PathBuf::from("/run/helios/streams"));
+        let board = config.board.as_ref().expect("the image has a board contract");
+        assert_eq!(board.update_tool, PathBuf::from("/usr/lib/board/update"));
+        assert_eq!(board.identity_file, PathBuf::from("/run/board/identity.json"));
+    }
+
+    #[test]
+    fn a_guest_has_no_board_and_its_paths_under_the_prefix() {
+        let config = ApiConfig::from_vars([("HELIOS_LAYOUT_PROFILE", "guest")]).expect("config");
+        assert!(config.board.is_none());
+        assert_eq!(config.state_dir, PathBuf::from("/usr/local/var/lib/helios/api"));
+        assert_eq!(config.upload_dir, PathBuf::from("/usr/local/var/lib/helios/updates"));
+        assert_eq!(config.ui_dir, Some(PathBuf::from("/usr/local/share/helios/ui")));
+        assert_eq!(config.startup_file, PathBuf::from("/usr/local/etc/helios/startup.toml"));
+        assert_eq!(config.layout.plans_dir(), PathBuf::from("/usr/local/var/lib/helios/state/plans"));
+    }
+
+    #[test]
+    fn board_overrides_apply_on_the_image_only() {
+        let image = ApiConfig::from_vars([("HELIOS_BOARD_IDENTITY_PATH", "/tmp/identity.json")]).expect("config");
+        assert_eq!(image.board.map(|board| board.identity_file), Some(PathBuf::from("/tmp/identity.json")));
+        let guest = ApiConfig::from_vars([("HELIOS_LAYOUT_PROFILE", "guest"), ("HELIOS_BOARD_IDENTITY_PATH", "/tmp/identity.json")]).expect("config");
+        assert!(guest.board.is_none());
     }
 
     #[test]

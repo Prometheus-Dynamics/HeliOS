@@ -33,11 +33,10 @@ pub async fn health() -> Json<Health> {
 
 // --- identity ----------------------------------------------------------------
 
-const DEVICE_PACKAGE_ENV: &str = "/usr/lib/board/board-package.env";
-
-/// The device package's facts (`BOARD_PACKAGE_VERSION`, `BOARD_PACKAGE_COMMIT`, ...); empty off the device.
-pub fn device_package_facts() -> std::collections::BTreeMap<String, String> {
-    std::fs::read_to_string(DEVICE_PACKAGE_ENV).map(|text| host::parse_env(&text)).unwrap_or_default()
+/// The device package's facts (`BOARD_PACKAGE_VERSION`, `BOARD_PACKAGE_COMMIT`, ...); empty without
+/// a device package (a guest has none).
+pub fn device_package_facts(board: Option<&helios_layout::BoardContract>) -> std::collections::BTreeMap<String, String> {
+    board.and_then(|board| std::fs::read_to_string(&board.device_package_env).ok()).map(|text| host::parse_env(&text)).unwrap_or_default()
 }
 
 /// The device identity: the Raze device package's identity document (the same JSON as
@@ -47,9 +46,10 @@ pub fn device_package_facts() -> std::collections::BTreeMap<String, String> {
 /// Identity is public so Atlas can discover the device. On a secured device a caller that is not
 /// signed in gets only [`PUBLIC_IDENTITY_FIELDS`]; `helios.auth.mode` tells it to bring a token.
 pub async fn identity(State(state): State<SharedState>, caller: Option<Extension<Caller>>) -> Json<serde_json::Value> {
-    let path = state.config.board_identity_path.clone();
+    let board = state.config.board.clone();
+    let layout = state.config.layout.clone();
     let node_id = state.config.node_id.clone();
-    let mut doc = tokio::task::spawn_blocking(move || identity_document(&path, &node_id)).await.unwrap_or_else(|_| serde_json::json!({}));
+    let mut doc = tokio::task::spawn_blocking(move || identity_document(board.as_ref(), &layout, &node_id)).await.unwrap_or_else(|_| serde_json::json!({}));
     let mode = state.auth.mode();
     let authenticated = caller.is_some_and(|Extension(caller)| caller.is_authenticated());
     if let Some(object) = doc.as_object_mut() {
@@ -67,10 +67,13 @@ pub async fn identity(State(state): State<SharedState>, caller: Option<Extension
 /// model, the OS and the update methods. MACs, endpoints and actions are left out.
 pub const PUBLIC_IDENTITY_FIELDS: &[&str] = &["contract", "model", "rev", "serial", "hostname", "os", "device_package", "update_methods", "manage_url", "helios"];
 
-pub fn identity_document(board_identity_path: &std::path::Path, node_id: &str) -> serde_json::Value {
-    let (mut doc, source) = match std::fs::read_to_string(board_identity_path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).filter(|v| v.is_object()) {
+/// The identity document: the board's (written by the device package), else synthesized from the
+/// host (a guest, or a board that has not written it yet).
+pub fn identity_document(board: Option<&helios_layout::BoardContract>, layout: &helios_layout::Layout, node_id: &str) -> serde_json::Value {
+    let from_board = board.and_then(|board| std::fs::read_to_string(&board.identity_file).ok()).and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).filter(|v| v.is_object());
+    let (mut doc, source) = match from_board {
         Some(doc) => (doc, "board"),
-        None => (synthesized_identity(), "helios-api"),
+        None => (synthesized_identity(board, layout), "helios-api"),
     };
     if let Some(object) = doc.as_object_mut() {
         if let Some(methods) = object.get_mut("update_methods").and_then(|m| m.as_array_mut())
@@ -101,9 +104,9 @@ pub fn identity_document(board_identity_path: &std::path::Path, node_id: &str) -
     doc
 }
 
-fn synthesized_identity() -> serde_json::Value {
-    let package = std::fs::read_to_string(DEVICE_PACKAGE_ENV).map(|text| host::parse_env(&text)).unwrap_or_default();
-    let os = host::os_release();
+fn synthesized_identity(board: Option<&helios_layout::BoardContract>, layout: &helios_layout::Layout) -> serde_json::Value {
+    let package = device_package_facts(board);
+    let os = host::os_release(&layout.os_release_file());
     let serial = read_trimmed("/proc/device-tree/serial-number").map(|s| s.to_ascii_lowercase()).filter(|s| s.chars().all(|c| c.is_ascii_hexdigit()));
     let model = package.get("BOARD_DEVICE_MODEL").cloned().or_else(|| read_trimmed("/proc/device-tree/model"));
     serde_json::json!({
@@ -145,19 +148,19 @@ pub struct DeviceOs {
     pub kernel: Option<String>,
 }
 
-fn device_os_now() -> DeviceOs {
-    let os = host::os_release();
+fn device_os_now(layout: &helios_layout::Layout) -> DeviceOs {
+    let os = host::os_release(&layout.os_release_file());
     DeviceOs {
         name: os.get("NAME").cloned(),
-        version: os.get("VERSION_ID").or_else(|| os.get("VERSION")).cloned().or_else(|| read_trimmed("/etc/helios/version")),
+        version: os.get("VERSION_ID").or_else(|| os.get("VERSION")).cloned().or_else(|| read_trimmed(layout.version_file())),
         pretty_name: os.get("PRETTY_NAME").cloned(),
-        build_id: read_trimmed("/etc/helios/build-id"),
+        build_id: read_trimmed(layout.build_id_file()),
         kernel: read_trimmed("/proc/sys/kernel/osrelease"),
     }
 }
 
-pub async fn device_os() -> Json<DeviceOs> {
-    Json(device_os_now())
+pub async fn device_os(State(state): State<SharedState>) -> Json<DeviceOs> {
+    Json(device_os_now(&state.config.layout))
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -207,7 +210,7 @@ pub async fn device(State(state): State<SharedState>) -> Json<Device> {
         model: read_trimmed("/proc/device-tree/model"),
         serial: read_trimmed("/proc/device-tree/serial-number").map(|s| s.to_ascii_lowercase()),
         architecture: std::env::consts::ARCH.to_string(),
-        os: device_os_now(),
+        os: device_os_now(&state.config.layout),
         uptime_s: read_trimmed("/proc/uptime").and_then(|text| text.split_whitespace().next().and_then(|v| v.parse().ok())),
         api_version: API_VERSION,
         api: VERSION,
@@ -371,11 +374,12 @@ impl HostSample {
 /// throttle flags and disk usage, which HeliOS reads itself.
 pub async fn metrics_now(state: &SharedState) -> Metrics {
     let host = state.orion.observability().await.ok().map(|snapshot| HostSample::from_snapshot(&snapshot.host));
-    metrics_from(host.as_ref())
+    metrics_from(host.as_ref(), state.config.layout.state_dir())
 }
 
-/// The metrics object for a host sample (`None` when Orion is not reachable).
-pub fn metrics_from(host: Option<&HostSample>) -> Metrics {
+/// The metrics object for a host sample (`None` when Orion is not reachable). The disk is the one
+/// holding the layout's state (`/var/lib/helios` on the image).
+pub fn metrics_from(host: Option<&HostSample>, state_dir: &std::path::Path) -> Metrics {
     let cpu = host.and_then(|h| h.cpu_busy_milli).map(|milli| f64::from(milli) / 1000.0);
     let cpu_cores = host.map(|h| h.cpu_core_busy_milli.iter().map(|milli| f64::from(*milli) / 1000.0).collect()).unwrap_or_default();
     let load = host.and_then(|h| h.load_milli).map(|load| load.map(|milli| milli as f64 / 1000.0));
@@ -384,7 +388,7 @@ pub fn metrics_from(host: Option<&HostSample>) -> Metrics {
     let uptime_s = host.and_then(|h| h.uptime_seconds);
     // The hottest sensor.
     let temperature_c = host.and_then(|h| h.temperatures_milli_c.iter().copied().max()).map(|milli| f64::from(milli) / 1000.0);
-    let disk = host::disk_usage("/var/lib/helios").or_else(|| host::disk_usage("/"));
+    let disk = host::disk_usage(state_dir).or_else(|| host::disk_usage(std::path::Path::new("/")));
     let mut readings = Vec::new();
     if let Some(cpu) = cpu {
         readings.push(Reading { id: "cpu", label: "CPU", value: (cpu * 1000.0).round() / 10.0, unit: Some("%"), warn_above: Some(90.0) });

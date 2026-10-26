@@ -15,13 +15,12 @@ use std::{
 
 use anyhow::{Context, Result};
 
-pub const DEFAULT_AUTH_FILE: &str = "/var/lib/helios/auth/auth.json";
-/// Overrides [`DEFAULT_AUTH_FILE`] for the server and `helios-api auth` alike.
+/// Overrides the layout's auth file for the server and `helios-api auth` alike.
 pub const AUTH_FILE_ENV: &str = "HELIOS_API_AUTH_FILE";
 
-/// The auth file from `HELIOS_API_AUTH_FILE`, or the default.
-pub fn auth_file_from_env() -> PathBuf {
-    std::env::var_os(AUTH_FILE_ENV).filter(|value| !value.is_empty()).map_or_else(|| PathBuf::from(DEFAULT_AUTH_FILE), PathBuf::from)
+/// The auth file from `HELIOS_API_AUTH_FILE`, or the layout's.
+pub fn auth_file_from_env(layout: &helios_layout::Layout) -> PathBuf {
+    std::env::var_os(AUTH_FILE_ENV).filter(|value| !value.is_empty()).map_or_else(|| layout.auth_file(), PathBuf::from)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

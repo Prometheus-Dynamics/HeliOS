@@ -38,7 +38,6 @@ use std::path::PathBuf;
 pub use registry::Players;
 
 /// Where players' sockets go: the peripherals' stream directory, which the engine reaches.
-pub const DEFAULT_STREAM_DIR: &str = "/run/helios/streams";
 /// How many players may be open at once.
 pub const DEFAULT_MAX_PLAYERS: usize = 2;
 /// The resource id prefix of a player (`camera.playback.<token>`).
@@ -58,7 +57,9 @@ pub struct PlaybackSettings {
 
 impl Default for PlaybackSettings {
     fn default() -> Self {
-        Self { max_players: DEFAULT_MAX_PLAYERS, stream_dir: DEFAULT_STREAM_DIR.into(), roots: Vec::new() }
+        // The image's stream directory (`ApiConfig::from_layout` takes the configured layout's): the
+        // peripherals' stream directory, which the engine reaches.
+        Self { max_players: DEFAULT_MAX_PLAYERS, stream_dir: helios_layout::Layout::image().streams_dir(), roots: Vec::new() }
     }
 }
 

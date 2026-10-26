@@ -137,7 +137,7 @@ impl EngineApp {
         let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level })
             .with_nt4(nt4)
             .with_live(crate::live::spawn(self.config.live_socket_path.clone()))
-            .with_plan_dir(self.config.catalog_path.parent().map_or_else(|| std::path::PathBuf::from("/var/lib/helios/state"), std::path::Path::to_path_buf).join("plans"));
+            .with_plan_dir(self.config.plan_dir.clone());
         // Graphs run on their own threads when their input arrives; they signal here when they
         // produced something, and what they produced is published at most once per interval.
         let outputs_ready = execution_sessions.outputs_ready();

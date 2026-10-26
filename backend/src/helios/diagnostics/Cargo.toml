@@ -30,3 +30,5 @@ chrono = { workspace = true, features = ["serde"] }
 glob = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
+# Where every path lives (the image or a guest prefix): `config.rs`.
+helios-layout = { path = "../layout" }

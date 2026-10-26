@@ -23,6 +23,9 @@ plugins = []
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+# Where every path lives (the image or a guest prefix): `config.rs`.
+helios-layout = { path = "../layout" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

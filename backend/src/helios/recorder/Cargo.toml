@@ -19,6 +19,8 @@ workspace = true
 
 [dependencies]
 chrono = { workspace = true }
+# Where removable media mount and where recordings fall back to (`settings.rs`).
+helios-layout = { path = "../layout" }
 lemnos-ipc = { workspace = true }
 nix = { workspace = true, features = ["fs", "time"] }
 serde = { workspace = true, features = ["derive"] }

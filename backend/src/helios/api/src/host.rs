@@ -31,8 +31,9 @@ pub fn parse_env(text: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-pub fn os_release() -> BTreeMap<String, String> {
-    std::fs::read_to_string("/etc/os-release").map(|text| parse_env(&text)).unwrap_or_default()
+/// The host's release (`os-release`, from the layout).
+pub fn os_release(file: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(file).map(|text| parse_env(&text)).unwrap_or_default()
 }
 
 /// Raspberry Pi firmware throttle flags (`get_throttled`), when the firmware exposes them.
@@ -49,8 +50,8 @@ pub struct DiskUsage {
     pub available_bytes: u64,
 }
 
-pub fn disk_usage(path: &str) -> Option<DiskUsage> {
-    let c_path = std::ffi::CString::new(path).ok()?;
+pub fn disk_usage(path: &Path) -> Option<DiskUsage> {
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
     let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: `c_path` is a valid NUL-terminated string and `stat` is a properly sized buffer
     // that statvfs fully initialises when it returns 0.
@@ -64,7 +65,7 @@ pub fn disk_usage(path: &str) -> Option<DiskUsage> {
     let block = stat.f_frsize as u64;
     let total = stat.f_blocks as u64 * block;
     let free = stat.f_bfree as u64 * block;
-    Some(DiskUsage { path: path.to_string(), total_bytes: total, used_bytes: total.saturating_sub(free), available_bytes: stat.f_bavail as u64 * block })
+    Some(DiskUsage { path: path.display().to_string(), total_bytes: total, used_bytes: total.saturating_sub(free), available_bytes: stat.f_bavail as u64 * block })
 }
 
 // --- systemd ---------------------------------------------------------------

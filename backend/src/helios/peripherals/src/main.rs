@@ -5,7 +5,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fmt().finish().with(log_filter()).init();
 
-    let runtime = PeripheralRuntime::from_config(PeripheralConfig::from_env())?;
+    let runtime = PeripheralRuntime::from_config(PeripheralConfig::from_env()?)?;
     runtime.run_until_stopped().await?;
     Ok(())
 }
