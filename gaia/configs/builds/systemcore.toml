@@ -187,58 +187,11 @@ src = "${workspace.out_dir}/artifacts/libhelios_eidos_plugin.so"
 dest = "usr/local/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
 mode = "0755"
 
-# The UI's static build (tools/build-os.sh writes gaia/build/ui, without the offline demo's frames):
-# one flat glob per SvelteKit output directory (the names inside change every build, the
-# directories do not). One entry once Gaia's assembly files copy a directory tree.
+# The UI's static build (tools/build-os.sh writes gaia/build/ui, without the offline demo's frames).
 [[image.assembly.files]]
 tree = "pkg-root"
-src_glob = "gaia/build/ui/*"
+src_dir = "gaia/build/ui"
 dest = "usr/local/share/helios/ui/"
-exclude = ["_app", "models"]                # directories: their own entries below
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/*"
-dest = "usr/local/share/helios/ui/_app/"
-exclude = ["immutable"]
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/immutable/*"
-dest = "usr/local/share/helios/ui/_app/immutable/"
-exclude = ["assets", "chunks", "entry", "nodes"]
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/immutable/assets/*"
-dest = "usr/local/share/helios/ui/_app/immutable/assets/"
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/immutable/chunks/*"
-dest = "usr/local/share/helios/ui/_app/immutable/chunks/"
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/immutable/entry/*"
-dest = "usr/local/share/helios/ui/_app/immutable/entry/"
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/_app/immutable/nodes/*"
-dest = "usr/local/share/helios/ui/_app/immutable/nodes/"
-optional = true
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src_glob = "gaia/build/ui/models/*"
-dest = "usr/local/share/helios/ui/models/"
-optional = true
 
 [[image.assembly.files]]
 tree = "pkg-root"
