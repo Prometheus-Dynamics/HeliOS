@@ -12,15 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::host::read_trimmed;
 
-/// The device package's update CLI.
-pub const BOARD_UPDATE_TOOL: &str = "/usr/lib/board/update";
-/// `{"state", "slot_active", "slot_staged", "version_active", "version_staged", "progress", "error"}`,
-/// rewritten by every update command (and at boot by `board-update-confirm.service`).
-pub const BOARD_UPDATE_STATUS: &str = "/run/board/update.json";
-/// While an image is copied into the inactive slot: `board-image-slots`' own progress, 0..1000.
-pub const BOARD_UPDATE_COPY_PROGRESS: &str = "/run/board/update/progress";
-
-/// The updater's state, as `update status` prints it. `progress` is 0..1000.
+/// The updater's state, as `update status` prints it: `{"state", "slot_active", "slot_staged",
+/// "version_active", "version_staged", "progress", "error"}`, rewritten by every update command
+/// (and at boot by `board-update-confirm.service`). `progress` is 0..1000; while an image is
+/// copied into the inactive slot it is the copy's own progress (`read_status_at`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardUpdateStatus {
     /// idle, staging, staged, trying, confirmed, rolled-back or error.

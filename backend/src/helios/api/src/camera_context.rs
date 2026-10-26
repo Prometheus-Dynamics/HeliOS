@@ -299,10 +299,6 @@ pub fn context_fields(calibration: Option<&CameraCalibration>, mount: Option<&Ca
 /// The `camera.lens` of an uncalibrated camera whose lens the board doesn't say: Eidos's
 /// self-calibration then chooses the model from the tag views.
 pub const UNKNOWN_LENS: &str = "unknown";
-/// The board's camera description (Atlas's device package; the Raze's names its camera module's
-/// lens), unless `HELIOS_BOARD_CAMERA_FILE` names another.
-pub const DEFAULT_BOARD_CAMERA_FILE: &str = "/usr/share/board/raze/camera.toml";
-
 /// The board's camera module lens: its model, and one module's fit as a self-calibration prior
 /// (`[camera.lens.hint]`), never applied as a calibration.
 #[derive(Debug, Clone, PartialEq)]
@@ -359,12 +355,15 @@ impl LensPrior {
     }
 }
 
-/// The board's camera module lens, read once from `HELIOS_BOARD_CAMERA_FILE` or
-/// [`DEFAULT_BOARD_CAMERA_FILE`]; `None` without the file or a model this crate knows.
+/// The board's camera module lens, read once from `HELIOS_BOARD_CAMERA_FILE` or the layout's board
+/// camera file; `None` without the file (a guest has no board file), or a model this crate knows.
 pub fn board_lens() -> Option<&'static BoardLens> {
     static LENS: OnceLock<Option<BoardLens>> = OnceLock::new();
     LENS.get_or_init(|| {
-        let path = std::env::var_os("HELIOS_BOARD_CAMERA_FILE").map_or_else(|| PathBuf::from(DEFAULT_BOARD_CAMERA_FILE), PathBuf::from);
+        let path = std::env::var_os("HELIOS_BOARD_CAMERA_FILE").map(PathBuf::from).or_else(|| {
+            let layout = helios_layout::Layout::load().ok()?;
+            layout.board().map(|board| board.camera_file.clone())
+        })?;
         std::fs::read_to_string(path).ok().and_then(|text| lens_of_camera_toml(&text))
     })
     .as_ref()

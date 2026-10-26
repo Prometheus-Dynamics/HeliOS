@@ -84,11 +84,19 @@ impl CameraMount {
 pub struct Store {
     dir: PathBuf,
     lock: Mutex<()>,
+    /// The recording settings until they are saved: the defaults of this device.
+    recording_defaults: helios_recorder::RecorderSettings,
 }
 
 impl Store {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into(), lock: Mutex::new(()) }
+        Self { dir: dir.into(), lock: Mutex::new(()), recording_defaults: helios_recorder::RecorderSettings::default() }
+    }
+
+    /// The recording settings a device without saved ones starts with (its layout's folders).
+    pub fn with_recording_defaults(mut self, defaults: helios_recorder::RecorderSettings) -> Self {
+        self.recording_defaults = defaults;
+        self
     }
 
     fn pipeline_path(&self, id: &str) -> PathBuf {
@@ -128,7 +136,7 @@ impl Store {
     /// Session recording settings (helios-recorder's, `recording.json`); the defaults until saved.
     pub async fn recording_settings(&self) -> ApiResult<helios_recorder::RecorderSettings> {
         let _guard = self.lock.lock().await;
-        read_json(&self.recording_settings_path()).await.map(Option::unwrap_or_default)
+        read_json(&self.recording_settings_path()).await.map(|stored| stored.unwrap_or_else(|| self.recording_defaults.clone()))
     }
 
     pub async fn put_recording_settings(&self, settings: &helios_recorder::RecorderSettings) -> ApiResult<()> {

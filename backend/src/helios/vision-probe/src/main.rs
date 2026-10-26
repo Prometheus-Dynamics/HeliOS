@@ -42,7 +42,6 @@ const ARUCO_DOCUMENT: &str = include_str!("../../engine/graphs/aruco-4x4_50.grap
 const FRAME_INPUT: &str = "frame";
 const DETECTIONS_OUTPUT: &str = "detections";
 const PLUGIN_FILE: &str = "libhelios_eidos_plugin.so";
-const PLUGIN_DIR: &str = "/usr/lib/helios/plugins/daedalus";
 const USAGE: &str =
     "usage: helios-vision-probe [--dict 36h11|4x4_50 | --graph FILE] [--plugin LIB] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--no-pyramid] [--metrics LEVEL] [--frame-overhead TICKS]";
 
@@ -65,7 +64,8 @@ fn default_plugin() -> PathBuf {
         return PathBuf::from(path);
     }
     let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join(PLUGIN_FILE)));
-    beside.filter(|path| path.is_file()).unwrap_or_else(|| PathBuf::from(PLUGIN_DIR).join(PLUGIN_FILE))
+    // The shipped plugin of this device's layout (the image, unless the layout file says otherwise).
+    beside.filter(|path| path.is_file()).unwrap_or_else(|| helios_layout::Layout::load().unwrap_or_else(|_| helios_layout::Layout::image()).shipped_plugin_dir().join(PLUGIN_FILE))
 }
 
 fn parse_metrics(value: &str) -> Result<MetricsLevel, String> {

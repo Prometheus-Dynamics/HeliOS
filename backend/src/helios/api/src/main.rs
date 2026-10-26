@@ -27,7 +27,7 @@ enum Command {
 enum AuthCommand {
     /// Show whether the device is open or secured.
     Status {
-        /// The auth file (default: $HELIOS_API_AUTH_FILE or /var/lib/helios/auth/auth.json).
+        /// The auth file (default: $HELIOS_API_AUTH_FILE, else the layout's auth file).
         #[arg(long)]
         file: Option<PathBuf>,
     },
@@ -35,7 +35,7 @@ enum AuthCommand {
     /// Recovery for a lost password; run it from a root shell on the device. The running
     /// server notices on its next request.
     Reset {
-        /// The auth file (default: $HELIOS_API_AUTH_FILE or /var/lib/helios/auth/auth.json).
+        /// The auth file (default: $HELIOS_API_AUTH_FILE, else the layout's auth file).
         #[arg(long)]
         file: Option<PathBuf>,
     },
@@ -49,9 +49,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn auth(command: AuthCommand) -> anyhow::Result<()> {
+    let layout = helios_layout::Layout::load()?;
     match command {
         AuthCommand::Status { file } => {
-            let path = file.unwrap_or_else(auth_state::auth_file_from_env);
+            let path = file.unwrap_or_else(|| auth_state::auth_file_from_env(&layout));
             let summary = auth_state::summary(&path)?;
             println!("mode: {}", summary.mode.as_str());
             if summary.mode == auth_state::AuthMode::Secured {
@@ -62,7 +63,7 @@ fn auth(command: AuthCommand) -> anyhow::Result<()> {
             }
         }
         AuthCommand::Reset { file } => {
-            let path = file.unwrap_or_else(auth_state::auth_file_from_env);
+            let path = file.unwrap_or_else(|| auth_state::auth_file_from_env(&layout));
             if auth_state::reset(&path)? {
                 println!("Device security reset: the device is open again. The password, API tokens and sessions are gone.");
                 println!("Secure it again from the HeliOS UI (Settings, Security) or POST /v1/auth/enable.");
@@ -82,13 +83,13 @@ async fn serve() -> anyhow::Result<()> {
     let state = AppState::new(config);
     let _watcher = events::spawn_state_watcher(state.clone());
     // Pipeline outputs every tick from helios-engine, while anyone follows the event stream.
-    let _live_outputs = helios_api::live_outputs::spawn(state.live.clone(), helios_api::live_outputs::socket_path());
+    let _live_outputs = helios_api::live_outputs::spawn(state.live.clone(), helios_api::live_outputs::socket_path(&state.config.layout));
     // The LED director: HeliOS's state on the status ring, through lemnosd.
-    helios_api::leds::start(&state, PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
+    helios_api::leds::start(&state, state.config.layout.lemnos_socket());
     // Stored camera settings are applied whenever a camera service appears.
     let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
     // Each camera's preview in the board's stream list, for Atlas.
-    let _camera_streams = helios_api::camera_streams::spawn(state.clone(), helios_api::camera_streams::path());
+    let _camera_streams = state.config.board.as_ref().map(|board| helios_api::camera_streams::spawn(state.clone(), helios_api::camera_streams::path(board)));
     // A live mapper's converged self-calibration of an uncalibrated camera is kept as its calibration.
     let _self_calibration = helios_api::self_calibration::spawn(state.clone());
     // Playback players left by an earlier helios-api are gone: their resources are cleared.

@@ -76,8 +76,8 @@ pub async fn recording_info(state: &SharedState, camera: &str, socket: &Path, vi
 
     let session = map([("board", json!(state.config.node_id)), ("camera", json!(camera)), ("api_version", json!(API_VERSION))]);
     let camera_facts = map([("calibration", json!(calibrations)), ("mount", json!(mount)), ("mode", mode), ("fps", fps), ("controls", controls), ("stored_settings", json!(persisted))]);
-    let package = device_package_facts();
-    let os = api_host::os_release();
+    let package = device_package_facts(state.config.board.as_ref());
+    let os = api_host::os_release(&state.config.layout.os_release_file());
     let versions = map([
         ("helios_api", json!(VERSION)),
         ("os", json!(os.get("PRETTY_NAME"))),
@@ -129,7 +129,7 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
         frames_socket: socket,
         board: board_name(&state.config.node_id),
         camera_label: camera_label(crate::orion::label_map(&record.labels).get("helios.display_name").map_or("", String::as_str), camera),
-        commit: image_commit(),
+        commit: image_commit(&state.config.layout),
         label,
         settings: settings.clone(),
         info,
@@ -146,11 +146,8 @@ pub async fn request_for(state: &SharedState, camera: &str, settings: RecorderSe
 /// The board, camera label and commit a recording's file is named with (as `request_for` names it).
 pub fn file_names(state: &SharedState, camera: &str, record: &orion::control_plane::ResourceRecord) -> (String, String, String) {
     let display = crate::orion::label_map(&record.labels).get("helios.display_name").cloned().unwrap_or_default();
-    (board_name(&state.config.node_id), camera_label(&display, camera), image_commit())
+    (board_name(&state.config.node_id), camera_label(&display, camera), image_commit(&state.config.layout))
 }
-
-/// The image's description (`HELIOS_COMMIT`, `IMAGE_VERSION`, ...), written at build time.
-const IMAGE_ENV: &str = "/etc/default/helios-image.env";
 
 /// The board in a recording's name: its hostname (`helios-b00a37bc`), else the node id.
 fn board_name(node_id: &str) -> String {
@@ -164,9 +161,10 @@ fn camera_label(name: &str, id: &str) -> String {
     if word.chars().any(|c| c.is_ascii_alphanumeric()) { word } else { id.rsplit(['-', '_', '/']).next().unwrap_or(id).to_string() }
 }
 
-/// The HeliOS commit the image was built from, shortened to 8 characters ("" when unknown).
-fn image_commit() -> String {
-    let facts = std::fs::read_to_string(IMAGE_ENV).map(|text| api_host::parse_env(&text)).unwrap_or_default();
+/// The HeliOS commit the image was built from, shortened to 8 characters ("" when unknown). The
+/// image's description (`HELIOS_COMMIT`, `IMAGE_VERSION`, ...) is written at build time.
+fn image_commit(layout: &helios_layout::Layout) -> String {
+    let facts = std::fs::read_to_string(layout.image_env_file()).map(|text| api_host::parse_env(&text)).unwrap_or_default();
     facts.get("HELIOS_COMMIT").map(|commit| commit.chars().take(8).collect()).unwrap_or_default()
 }
 

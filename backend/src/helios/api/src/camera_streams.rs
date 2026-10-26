@@ -13,8 +13,6 @@ use serde::Serialize;
 
 use crate::{SharedState, routes::cameras};
 
-/// Where the board reads the stream list (`HELIOS_CAMERA_STREAMS_FILE` overrides it).
-const DEFAULT_PATH: &str = "/run/board/camera-streams.json";
 /// How often the cameras are looked up in Orion.
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -26,8 +24,8 @@ pub struct CameraStream {
 }
 
 /// The stream file's path: `HELIOS_CAMERA_STREAMS_FILE`, else the board's.
-pub fn path() -> PathBuf {
-    std::env::var_os("HELIOS_CAMERA_STREAMS_FILE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_PATH))
+pub fn path(board: &helios_layout::BoardContract) -> PathBuf {
+    std::env::var_os("HELIOS_CAMERA_STREAMS_FILE").map_or_else(|| board.camera_streams_file.clone(), PathBuf::from)
 }
 
 /// The stream of each `(id, name)` camera on the API's `port`.
