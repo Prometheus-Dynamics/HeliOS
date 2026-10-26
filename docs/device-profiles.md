@@ -86,6 +86,26 @@ are one robot to the user: any one HeliOS UI shows and controls all of them.
 - **Features stay per node.** Each node answers its own `GET /v1/device`; the UI gates a control on
   the node it is drawn for (the Raze's LEDs show for the Raze only).
 
+### Atlas's routes to a peer
+
+Atlas manages a board behind its controller through the same gateway. Both routes take a peer's
+`<node>` from `GET /v1/peers`, and both reach only a peer the gateway routes: enrolled, or
+discovered while security is open, with a link address on `HELIOS_API_PEER_NETS`. Otherwise they
+answer as the rest of the gateway does: 404 for a node that is not a peer of this robot, 409 with
+the reason for a peer that is not routed.
+
+| Route | What it is | Errors |
+|---|---|---|
+| `GET /v1/peers/<node>/board/identity` | The peer board's identity document, read from its board agent (`http://<address>:5899/.well-known/pd-device`). The JSON is passed through unchanged; Atlas names the board `raze:<serial8>` from it, seen over USB or behind the controller. | 404 `has no board agent on port P` (no agent: a SystemCore guest refuses the connection), or `has no identity document`; 503 when the agent answers an error or does not answer; 400 for a method other than GET. |
+| `GET /v1/peers/<node>/orion` with `Connection: Upgrade` and `Upgrade: orion` | A TCP tunnel to the peer's Orion listener. It answers `101 Switching Protocols` (`Upgrade: orion`) once the listener accepts, then carries the bytes both ways unchanged. Orion's own enrollment and auth run end to end inside it; HeliOS adds no framing. | 403 while device security is on; 400 without the upgrade headers; 503 when the listener does not accept; 429 when the peer already has four tunnels open. |
+
+- The board agent's port is `HELIOS_BOARD_AGENT_PORT` (default 5899). The Orion port is the one the
+  peer advertises on its link address (its `orion+tcp` record: the listener in its robot env,
+  9200 by default), else `HELIOS_ORION_PEER_PORT` (default 9200).
+- A tunnel is closed when either side closes it, or when a direction moves no bytes for 120 s. Each
+  peer holds at most four tunnels. The gateway logs the open and the close (node, target, bytes
+  each way, seconds).
+
 The controller's firewall is never edited: the driver station reaches the SystemCore, and the
 SystemCore reaches the Raze over the link it already shares.
 
