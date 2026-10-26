@@ -19,7 +19,7 @@ use std::time::Duration;
 use helios_recorder::RecordingStatus;
 use orion_nt4::{Client, ClientConfig, ClientEvent, ClientHandle, Publisher, SubscribeOptions, Subscription, TopicEvent, Value};
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     SharedState,
@@ -215,11 +215,21 @@ impl Link {
         let mut config = ClientConfig::new(connection.host.clone(), "helios-api-recording");
         config.port = connection.port;
         let (handle, mut events) = Client::start(config).split();
+        // A lost connection is worth a warning; a server that is not up yet (no robot program
+        // running) is retried every few seconds and only logged at debug, so it does not flood the log.
         let events = tokio::spawn(async move {
+            let mut connected = false;
             while let Some(event) = events.recv().await {
                 match event {
-                    ClientEvent::Connected => info!("recording NT: connected"),
-                    ClientEvent::Disconnected { reason } => warn!(%reason, "recording NT: disconnected"),
+                    ClientEvent::Connected => {
+                        connected = true;
+                        info!("recording NT: connected");
+                    }
+                    ClientEvent::Disconnected { reason } if connected => {
+                        connected = false;
+                        warn!(%reason, "recording NT: disconnected");
+                    }
+                    ClientEvent::Disconnected { reason } => debug!(%reason, "recording NT: server not reachable yet"),
                     _ => {}
                 }
             }
