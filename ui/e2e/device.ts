@@ -42,6 +42,8 @@ export interface DeviceCamera {
   id: string;
   name: string;
   settings_writable: boolean;
+  /** The Styx frames socket, when the camera serves frames. */
+  frames_endpoint?: string | null;
 }
 export interface CameraControl {
   name: string;
@@ -106,10 +108,17 @@ export async function waitForCameraService(api: APIRequestContext, cameraId: str
     .toBe(true);
 }
 
-/** The sim's camera: the one simulated sensor the sim serves (helios-peripherals' OV9782). */
+/**
+ * The camera the device tests drive: `HELIOS_E2E_CAMERA` (an id, or part of a name) when set, else
+ * the sim's simulated sensor, else the first camera that serves frames (a real board's own
+ * camera), so the `sim` project runs against the simulator and against a real device alike.
+ */
 export async function simCamera(api: APIRequestContext): Promise<DeviceCamera> {
   const cameras = await device.cameras(api);
-  const camera = cameras.find((c) => c.name.includes("simulated"));
-  expect(camera, "the sim's simulated camera is listed").toBeTruthy();
+  const wanted = process.env.HELIOS_E2E_CAMERA;
+  const camera = wanted
+    ? cameras.find((c) => c.id === wanted || c.name.includes(wanted))
+    : (cameras.find((c) => c.name.includes("simulated")) ?? cameras.find((c) => c.frames_endpoint));
+  expect(camera, wanted ? `camera ${wanted} is listed` : "the device lists a camera that serves frames").toBeTruthy();
   return camera!;
 }

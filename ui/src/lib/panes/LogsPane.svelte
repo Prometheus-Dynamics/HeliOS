@@ -63,7 +63,8 @@
     follow = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
   }}
 >
-  {#each shown as l (l.ts + l.unit + l.text)}
+  <!-- Keyed by the line itself: a device can log the same text in the same millisecond twice. -->
+  {#each shown as l (l)}
     <div class="line lv-{l.level}">
       <span class="t">{clockTime(l.ts)}</span>
       <span class="dev" style:--c={colorVar(identity.get(l.nodeId).color)}>{identity.name(l.nodeId, cluster.node(l.nodeId)?.name ?? l.nodeId)}</span>

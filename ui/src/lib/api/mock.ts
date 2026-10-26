@@ -531,11 +531,13 @@ const logTemplates: [string, LogLine["level"], string][] = [
   ["photonvision-adapter", "warn", "PhotonVision clock offset 2.4 ms; detections timestamped with declared offset"],
 ];
 
-export const LOGS: LogLine[] = Array.from({ length: 40 }, (_, i) => {
+const mockLogs: LogLine[] = Array.from({ length: 40 }, (_, i) => {
   const [unit, level, text] = logTemplates[i % logTemplates.length];
   const nodeId = unit === "photonvision-adapter" ? "pv-coproc" : unit.includes("left") || text.includes("left") ? "raze-left" : NODES[i % 4].id;
   return { ts: now - (40 - i) * 47_000, nodeId, unit, level, text };
 });
+// As on a real board: systemd logs the same line twice in one millisecond (two units starting).
+export const LOGS: LogLine[] = [...mockLogs, { ...mockLogs[mockLogs.length - 1] }];
 
 // --- The live map (`eidos:mapping.live_map`), simulated -----------------------------------------
 // A 5 x 3.6 m room: points on its walls and floor, a camera looping through it, six tags on the

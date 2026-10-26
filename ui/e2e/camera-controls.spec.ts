@@ -36,11 +36,13 @@ test.describe("camera controls", () => {
     await search.fill("");
     await expect(page.getByRole("slider", { name: "Exposure", exact: true })).toBeVisible();
 
-    // Exposure in ms and gain as a factor, typed.
+    // Exposure in ms and gain as a factor, typed. 1.20 ms fits under every cap a camera may have
+    // (the AprilTag preset caps exposure at 1.5 ms on a real board), so the camera takes it as typed.
     await exposure.click();
-    await exposure.fill("3.00");
+    await exposure.fill("1.20");
     await exposure.press("Enter");
-    await expect(exposure).toHaveValue("3.00");
+    // The field shows short exposures with more decimals ("1.200"): compare the number.
+    await expect.poll(async () => Math.abs(parseFloat(await exposure.inputValue()) - 1.2) < 0.005).toBe(true);
     await gain.click();
     await gain.fill("2.00");
     await gain.press("Enter");
@@ -57,21 +59,21 @@ test.describe("camera controls", () => {
     await expect(changedOnly).toHaveAttribute("aria-pressed", "false");
 
     if (camera) {
-      // The sensor quantises its exposure line time: 3.00 ms reads back within a few microseconds.
+      // The sensor quantises its exposure line time: 1.20 ms reads back within a few microseconds.
       await expect
         .poll(async () => {
           const s = await device.cameraSettings(api, camera.id);
-          return { exposureNearOk: Math.abs((s.exposure_us ?? -1e9) - 3000) <= 30, gainOk: Math.abs((s.analogue_gain ?? -1) - 2) <= 0.01 };
+          return { exposureNearOk: Math.abs((s.exposure_us ?? -1e9) - 1200) <= 30, gainOk: Math.abs((s.analogue_gain ?? -1) - 2) <= 0.01 };
         })
         .toEqual({ exposureNearOk: true, gainOk: true });
     }
 
     // Reset puts the defaults back on the camera and forgets what was kept.
     await reset.click();
-    await expect(exposure).not.toHaveValue("3.00");
+    await expect.poll(async () => Math.abs(parseFloat(await exposure.inputValue()) - 1.2) < 0.005).toBe(false);
     if (camera) {
       await expect.poll(async () => (await device.cameraSettings(api, camera.id)).persisted).toEqual({});
-      await expect.poll(async () => Math.round((await device.cameraSettings(api, camera.id)).exposure_us ?? -1)).not.toBe(3000);
+      await expect.poll(async () => Math.round((await device.cameraSettings(api, camera.id)).exposure_us ?? -1)).not.toBe(1200);
     }
   });
 });
