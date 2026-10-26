@@ -136,6 +136,9 @@ pub struct OrionReport {
 /// The device package's A/B updater (`/usr/lib/board/update`).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateReport {
+    /// The device has a device package with an updater (the image). A guest has none: the other
+    /// fields are then false or empty and `issues` stays empty, since nothing is missing.
+    pub available: bool,
     pub tool_installed: bool,
     pub confirm_service_loaded: bool,
     pub health_check_installed: bool,

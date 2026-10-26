@@ -252,7 +252,7 @@ impl Watch {
                 if !apply_host_change(&mut self.host, change) || !active {
                     return;
                 }
-                if let Ok(metrics) = serde_json::to_value(metrics_from(Some(&HostSample::from_status(&self.host)), &state.config.state_dir)) {
+                if let Ok(metrics) = serde_json::to_value(metrics_from(Some(&HostSample::from_status(&self.host)), state.config.layout.state_dir())) {
                     state.events.publish("metrics", metrics);
                 }
             }
@@ -274,7 +274,7 @@ impl Watch {
         // itself (throttling, disk).
         if self.seen.orion_up == Some(false)
             && self.ticks.is_multiple_of(METRICS_WHILE_DOWN_EVERY)
-            && let Ok(metrics) = serde_json::to_value(metrics_from(None, &state.config.state_dir))
+            && let Ok(metrics) = serde_json::to_value(metrics_from(None, state.config.layout.state_dir()))
         {
             state.events.publish("metrics", metrics);
         }

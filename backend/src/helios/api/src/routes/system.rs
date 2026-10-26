@@ -374,11 +374,11 @@ impl HostSample {
 /// throttle flags and disk usage, which HeliOS reads itself.
 pub async fn metrics_now(state: &SharedState) -> Metrics {
     let host = state.orion.observability().await.ok().map(|snapshot| HostSample::from_snapshot(&snapshot.host));
-    metrics_from(host.as_ref(), &state.config.state_dir)
+    metrics_from(host.as_ref(), state.config.layout.state_dir())
 }
 
 /// The metrics object for a host sample (`None` when Orion is not reachable). The disk is the one
-/// holding `state_dir`.
+/// holding the layout's state (`/var/lib/helios` on the image).
 pub fn metrics_from(host: Option<&HostSample>, state_dir: &std::path::Path) -> Metrics {
     let cpu = host.and_then(|h| h.cpu_busy_milli).map(|milli| f64::from(milli) / 1000.0);
     let cpu_cores = host.map(|h| h.cpu_core_busy_milli.iter().map(|milli| f64::from(*milli) / 1000.0).collect()).unwrap_or_default();

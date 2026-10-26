@@ -356,10 +356,11 @@ fn collect_orion(path: &Path) -> OrionReport {
 }
 
 /// The device package's updater. Without a board contract (a guest) there is no updater to check,
-/// so the report says the feature is absent rather than listing its parts as missing.
+/// so the report says the feature is absent (`available: false`, no issues) rather than listing its
+/// parts as missing.
 fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
     let Some(board) = board else {
-        return UpdateReport { issues: vec!["update_not_available_on_this_device".to_string()], ..UpdateReport::default() };
+        return UpdateReport::default();
     };
     let status = fs::read_to_string(&board.update_status).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next().unwrap_or_default()).ok());
     let field = |key: &str| status.as_ref().and_then(|s| s.get(key)).and_then(|v| v.as_str()).map(str::to_string).filter(|v| !v.is_empty());
@@ -388,6 +389,7 @@ fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
         issues.push(format!("last_update_{}", state.as_deref().unwrap_or_default()));
     }
     UpdateReport {
+        available: true,
         tool_installed,
         confirm_service_loaded,
         health_check_installed,
