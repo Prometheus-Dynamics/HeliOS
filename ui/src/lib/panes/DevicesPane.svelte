@@ -5,8 +5,9 @@
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
-  import { LINK_ICON } from "#lib/devices.js";
+  import { LINK_ICON, placeOf } from "#lib/devices.js";
   import { nodeIcon } from "#lib/present.js";
+  import Badge from "#lib/kit/Badge.svelte";
   import Swatch from "#lib/kit/Swatch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { device } from "#lib/stores/device.svelte.js";
@@ -15,14 +16,16 @@
 
   const HEALTH = { online: "var(--ok)", degraded: "var(--warn)", offline: "var(--err)" };
 
+  // A peer the gateway does not reach gets no request, so it has no actions here.
   function actions(n: ClusterNode) {
+    const reachable = n.peer?.routed !== false;
     return menu.context(() => [
       { heading: identity.name(n.id, n.name) },
-      ...(device.has("reboot") ? [{ label: "Reboot", icon: "power" as const, run: () => cluster.reboot(n.id) }] : []),
-      ...(device.has("safe_mode") ? [{ label: "Safe mode", icon: "lifebuoy" as const, hint: "Stop applications; keep the agent and control plane", run: () => cluster.safeMode(n.id) }] : []),
-      ...(device.has("slots") ? [{ label: "Switch boot slot", icon: "versions" as const, disabled: n.slots.length < 2, run: () => cluster.switchSlot(n.id) }] : []),
-      { separator: true },
-      ...n.services.map((s) => ({ label: `Restart ${s.name}`, icon: "refresh" as const, run: () => cluster.restartService(n.id, s.name) })),
+      ...(reachable && device.hasOn(n.id, "reboot") ? [{ label: "Reboot", icon: "power" as const, run: () => cluster.reboot(n.id) }] : []),
+      ...(reachable && device.hasOn(n.id, "safe_mode") ? [{ label: "Safe mode", icon: "lifebuoy" as const, hint: "Stop applications; keep the agent and control plane", run: () => cluster.safeMode(n.id) }] : []),
+      ...(reachable && device.hasOn(n.id, "slots") ? [{ label: "Switch boot slot", icon: "versions" as const, disabled: n.slots.length < 2, run: () => cluster.switchSlot(n.id) }] : []),
+      ...(reachable ? [{ separator: true as const }] : []),
+      ...(reachable ? n.services.map((s) => ({ label: `Restart ${s.name}`, icon: "refresh" as const, run: () => cluster.restartService(n.id, s.name) })) : []),
     ]);
   }
   const heat = (t: number) => (t > 70 ? "var(--err)" : t > 60 ? "var(--warn)" : "var(--fg-2)");
@@ -53,6 +56,10 @@
           <b>{identity.name(n.id, n.name)}</b>
           <i>{n.model}</i>
         </span>
+        <span class="tags">
+          <Badge tone={placeOf(n).tone} text={placeOf(n).text} />
+          <Badge tone="neutral" text={n.kind} mono />
+        </span>
       </span>
       <span class="link" data-tip="{n.link} · {n.address}"><Icon name={LINK_ICON[n.link]} size={12} /><span>{n.address}</span></span>
       <span class="cpu">
@@ -67,7 +74,7 @@
       </span>
       <span class="r mono" style:color={heat(n.tempC)}>{n.tempC.toFixed(0)}°</span>
       <span class="r mono" class:warn={n.clock.offsetUs > 1000} data-tip="{n.clock.source} offset">{n.clock.offsetUs >= 1000 ? `${(n.clock.offsetUs / 1000).toFixed(1)}ms` : `${n.clock.offsetUs}µs`}</span>
-      {#if device.has("recovery_ladder")}
+      {#if device.hasOn(n.id, "recovery_ladder")}
         <span class="rec">{#each ["R1", "R2", "R3", "R4"] as r (r)}<i class:on={n.recovery.includes(r as never)}>{r}</i>{/each}</span>
       {/if}
     </div>
@@ -140,6 +147,12 @@
     flex-direction: column;
     min-width: 0;
     line-height: 1.25;
+  }
+  .tags {
+    display: flex;
+    flex-shrink: 0;
+    gap: 4px;
+    margin-left: auto;
   }
   .nm b {
     font-weight: 600;

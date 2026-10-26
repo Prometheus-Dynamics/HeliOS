@@ -5,7 +5,7 @@
   import { bytes, duration } from "#lib/format.js";
   import { identity } from "#lib/core/identity.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
-  import { RECOVERY } from "#lib/devices.js";
+  import { RECOVERY, isReachable } from "#lib/devices.js";
   import { device } from "#lib/stores/device.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
   import Badge from "#lib/kit/Badge.svelte";
@@ -57,7 +57,7 @@
     label="Device"
     icon="cpu"
     value={node?.id}
-    options={cluster.nodes.map((n) => ({ id: n.id, name: identity.name(n.id, n.name) }))}
+    options={cluster.nodes.filter(isReachable).map((n) => ({ id: n.id, name: identity.name(n.id, n.name) }))}
     onpick={(id) => (target.pinned ? target.pin(id) : selection.select({ kind: "device", id }))}
     pinned={target.pinned}
     ontogglepin={() => target.toggle()}
@@ -74,10 +74,10 @@
         <b>{node.os.name} {node.os.version}</b>
         <span>agent {node.agent.version} · up {duration(node.uptimeS)}</span>
       </div>
-      {#if device.has("reboot")}
+      {#if device.hasOn(node.id, "reboot")}
         <IconButton icon="power" label="Reboot" text="Reboot" size={26} onclick={() => cluster.reboot(node.id)} />
       {/if}
-      {#if device.has("safe_mode")}
+      {#if device.hasOn(node.id, "safe_mode")}
         {#if confirmSafe}
           <IconButton icon="lifebuoy" label="Confirm safe mode" text="Stop apps?" tone="accent" size={26} onclick={() => { confirmSafe = false; cluster.safeMode(node.id); }} />
         {:else}
@@ -86,7 +86,7 @@
       {/if}
     </div>
 
-    {#if device.has("slots") && node.slots.length}
+    {#if device.hasOn(node.id, "slots") && node.slots.length}
       <Section title="Boot slots" key="sys-slots">
         <div class="slots">
           {#each node.slots as s (s.name)}
@@ -147,7 +147,7 @@
       {/each}
     </Section>
 
-    {#if device.has("recovery_ladder")}
+    {#if device.hasOn(node.id, "recovery_ladder")}
       <Section title="Recovery" key="sys-recovery">
         {#each Object.entries(RECOVERY) as [level, r] (level)}
           {@const ok = node.recovery.includes(level as never)}

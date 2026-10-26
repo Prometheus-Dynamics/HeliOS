@@ -63,6 +63,9 @@
       onkeydown={(e) => e.key === "Enter" && selection.select({ kind: "camera", id: c.resourceId })}
     >
       <Feed camera={c} {overlays} compact />
+      {#if cluster.node(c.nodeId)?.peer}
+        <span class="node-tag">{identity.name(c.nodeId, cluster.node(c.nodeId)?.name ?? c.nodeId)}</span>
+      {/if}
     </div>
   {/each}
 </div>
@@ -85,6 +88,20 @@
     overflow: hidden;
     box-shadow: inset 0 0 0 1px transparent;
     position: relative;
+  }
+  /* A peer's camera says which device it is on (the mosaic tiles them all together). */
+  .node-tag {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 1;
+    padding: 1px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--info);
+    background: var(--s1);
+    border-radius: var(--r-1);
+    pointer-events: none;
   }
   .tile.sel::after {
     content: "";
