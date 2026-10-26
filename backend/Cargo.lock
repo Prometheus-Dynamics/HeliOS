@@ -1432,6 +1432,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml",
  "tower",
  "tracing",
@@ -3564,6 +3565,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]

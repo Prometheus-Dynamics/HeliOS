@@ -535,7 +535,7 @@ pub async fn status(State(state): State<SharedState>) -> Json<UpdateStatus> {
 pub async fn events(State(state): State<SharedState>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.events.subscribe();
     let first = ApiEvent { kind: "update".into(), at_ms: now_ms(), data: serde_json::to_value(current_status(&state).await).unwrap_or_default() };
-    Sse::new(sse_stream(receiver, Some(["update".to_string()].into()), vec![first])).keep_alive(KeepAlive::default())
+    Sse::new(sse_stream(receiver, Some(["update".to_string()].into()), vec![first]).take_until(state.shutdown.clone().cancelled_owned())).keep_alive(KeepAlive::default())
 }
 
 // --- Atlas's HTTP OTA client -----------------------------------------------------

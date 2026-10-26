@@ -33,6 +33,7 @@ pub mod recording_rings;
 pub mod recordings;
 pub mod routes;
 pub mod self_calibration;
+pub mod server;
 pub mod startup;
 pub mod store;
 pub mod ui;
@@ -84,6 +85,8 @@ pub struct AppState {
     pub live_streams: Arc<live_streams::LiveStreams>,
     /// Why each camera's last self-calibration fit was not stored (`camera_status`).
     pub self_calibration_notes: self_calibration::Notes,
+    /// Cancelled when the service is asked to stop: the long-lived streams end (`server`).
+    pub shutdown: tokio_util::sync::CancellationToken,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -96,6 +99,7 @@ impl AppState {
         Arc::new(Self {
             live_streams: live_streams::LiveStreams::new(config.live_streams.clone(), orion_link.clone()),
             self_calibration_notes: self_calibration::Notes::default(),
+            shutdown: tokio_util::sync::CancellationToken::new(),
             orion: orion_link,
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),

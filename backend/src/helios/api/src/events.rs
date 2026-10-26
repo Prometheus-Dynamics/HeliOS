@@ -417,7 +417,7 @@ pub fn to_sse(event: &ApiEvent) -> Event {
 pub async fn events(State(state): State<SharedState>, Query(filter): Query<EventFilter>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.events.subscribe();
     let hello = ApiEvent { kind: "hello".into(), at_ms: now_ms(), data: serde_json::json!({ "api_version": crate::API_VERSION, "version": crate::VERSION }) };
-    Sse::new(sse_stream(receiver, filter.kinds(), vec![hello])).keep_alive(KeepAlive::default())
+    Sse::new(sse_stream(receiver, filter.kinds(), vec![hello]).take_until(state.shutdown.clone().cancelled_owned())).keep_alive(KeepAlive::default())
 }
 
 #[cfg(test)]

@@ -103,7 +103,7 @@ pub async fn stream(State(state): State<SharedState>, Query(params): Query<LogPa
             }
         }
     });
-    Ok(Sse::new(backlog.chain(live)).keep_alive(KeepAlive::default()))
+    Ok(Sse::new(backlog.chain(live).take_until(state.shutdown.clone().cancelled_owned())).keep_alive(KeepAlive::default()))
 }
 
 /// One `journalctl -f` per distinct filter, shared by everyone following with it.

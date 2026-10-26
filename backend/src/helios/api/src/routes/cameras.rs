@@ -450,7 +450,7 @@ async fn camera_preview(state: &SharedState, id: &str) -> ApiResult<std::sync::A
 /// reads it, also while the camera service is down (frames resume when it is back).
 pub async fn preview(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     let preview = camera_preview(&state, &id).await?;
-    let body = Body::from_stream(preview.mjpeg().fallible());
+    let body = Body::from_stream(preview.mjpeg().fallible().take_until(state.shutdown.clone().cancelled_owned()));
     Ok(([(header::CONTENT_TYPE, MJPEG_CONTENT_TYPE), (header::CACHE_CONTROL, "no-cache, no-store"), (header::HeaderName::from_static("x-accel-buffering"), "no")], body).into_response())
 }
 
@@ -458,16 +458,18 @@ pub async fn preview(State(state): State<SharedState>, Path(id): Path<String>) -
 /// with the sequence, capture timestamp and size, then the JPEG; Styx `docs/preview.md`).
 pub async fn preview_ws(State(state): State<SharedState>, Path(id): Path<String>, upgrade: WebSocketUpgrade) -> ApiResult<Response> {
     let preview = camera_preview(&state, &id).await?;
-    Ok(upgrade.on_upgrade(move |socket| send_preview(socket, preview)))
+    let shutdown = state.shutdown.clone();
+    Ok(upgrade.on_upgrade(move |socket| send_preview(socket, preview, shutdown)))
 }
 
 /// Each frame as a binary message (Styx's header, with the frame's sequence and capture time,
 /// then the JPEG). A viewer draws each frame with the pipeline outputs of the same capture time
 /// from `GET /v1/live/ws`.
-async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::preview::Preview>) {
+async fn send_preview(mut socket: WebSocket, preview: std::sync::Arc<styx::preview::Preview>, shutdown: tokio_util::sync::CancellationToken) {
     let mut viewer = preview.subscribe();
     loop {
         tokio::select! {
+            _ = shutdown.cancelled() => break,
             frame = viewer.next() => {
                 let Some(frame) = frame else { break };
                 if socket.send(Message::Binary(ws_message(&frame))).await.is_err() {

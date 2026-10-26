@@ -142,12 +142,14 @@ struct LineHead {
 /// "frame_ts_ns", "value"}` per line).
 pub async fn live_ws(State(state): State<SharedState>, Query(filter): Query<LiveFilter>, upgrade: WebSocketUpgrade) -> Response {
     let rx = state.live.subscribe();
-    upgrade.on_upgrade(move |socket| relay_to(socket, rx, filter))
+    let shutdown = state.shutdown.clone();
+    upgrade.on_upgrade(move |socket| relay_to(socket, rx, filter, shutdown))
 }
 
-async fn relay_to(mut socket: WebSocket, mut rx: broadcast::Receiver<Arc<str>>, filter: LiveFilter) {
+async fn relay_to(mut socket: WebSocket, mut rx: broadcast::Receiver<Arc<str>>, filter: LiveFilter, shutdown: tokio_util::sync::CancellationToken) {
     loop {
         tokio::select! {
+            _ = shutdown.cancelled() => return,
             chunk = rx.recv() => match chunk {
                 Ok(chunk) => {
                     let text = match filter.keep(&chunk) {

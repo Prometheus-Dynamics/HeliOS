@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use helios_api::{ApiConfig, AppState, auth_state, events, playback, router, routes, startup};
+use helios_api::{ApiConfig, AppState, auth_state, events, playback, routes, server, startup};
 use tracing::info;
 
 /// The HeliOS application API. Without a subcommand it serves `/v1` and the UI.
@@ -75,12 +75,20 @@ fn auth(command: AuthCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn serve() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt().finish().with(log_filter()).try_init();
+fn serve() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new().context("failed to start the async runtime")?;
+    let result = runtime.block_on(run());
+    // Blocking work still in flight must not hold the stop: its threads end with the process.
+    runtime.shutdown_timeout(server::BLOCKING_GRACE);
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt().with_ansi(ansi_for_terminal()).finish().with(log_filter()).try_init();
     let config = ApiConfig::from_env().context("invalid helios-api configuration")?;
     let bind = config.bind;
     let state = AppState::new(config);
+    let _stop = server::stop_on_signal(state.shutdown.clone());
     let _watcher = events::spawn_state_watcher(state.clone());
     // The robot controller's team and NetworkTables server, kept current (`host_facts`).
     let _controller = helios_api::host_facts::spawn_refresh(state.clone());
@@ -105,25 +113,17 @@ async fn serve() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("failed to bind {bind}"))?;
     info!(%bind, "helios-api listening");
     info!(mode = state.auth.mode().as_str(), "device security");
-    // Peer addresses feed the per-client sign-in rate limit.
-    axum::serve(listener, router(state).into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(shutdown_requested()).await.context("helios-api server failed")?;
+    // Peer addresses feed the per-client sign-in rate limit. A stop (SIGTERM from systemd) ends it.
+    server::serve(listener, state).await.context("helios-api server failed")?;
+    info!("helios-api stopped");
     Ok(())
 }
 
-/// SIGINT or SIGTERM (what `systemctl stop` sends).
-async fn shutdown_requested() {
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut stream) => {
-                stream.recv().await;
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
-    };
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = terminate => {}
-    }
+/// Colour codes only for a terminal: journald keeps them as raw escape bytes (`JOURNAL_STREAM` is set
+/// when the journal is stdout or stderr), and `NO_COLOR` asks for none.
+fn ansi_for_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stderr().is_terminal() && std::env::var_os("JOURNAL_STREAM").is_none() && std::env::var_os("NO_COLOR").is_none()
 }
 
 /// Log filter: `RUST_LOG` as `target=level,...` (`filter::Targets`: no regex in the binary), else

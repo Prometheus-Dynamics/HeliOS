@@ -19,7 +19,8 @@ use crate::{
 pub async fn ws(State(state): State<SharedState>, upgrade: WebSocketUpgrade) -> Response {
     // Subscribed before the upgrade completes, so nothing sent from here on is missed.
     let subscription = state.live_streams.subscribe();
-    upgrade.on_upgrade(move |socket| serve(socket, subscription))
+    let shutdown = state.shutdown.clone();
+    upgrade.on_upgrade(move |socket| serve(socket, subscription, shutdown))
 }
 
 /// What the loop has to do next: a message for the client, or the client's own frame.
@@ -28,7 +29,7 @@ enum Next {
     Incoming(Option<Result<Message, axum::Error>>),
 }
 
-async fn serve(mut socket: WebSocket, mut subscription: Subscription) {
+async fn serve(mut socket: WebSocket, mut subscription: Subscription, shutdown: tokio_util::sync::CancellationToken) {
     for message in std::mem::take(&mut subscription.initial) {
         if !send(&mut socket, message).await {
             return;
@@ -38,6 +39,7 @@ async fn serve(mut socket: WebSocket, mut subscription: Subscription) {
         let next = tokio::select! {
             received = subscription.messages.recv() => Next::Message(received),
             incoming = socket.next() => Next::Incoming(incoming),
+            _ = shutdown.cancelled() => return,
         };
         match next {
             Next::Message(Ok(message)) => {
