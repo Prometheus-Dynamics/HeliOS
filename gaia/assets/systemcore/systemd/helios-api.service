@@ -1,0 +1,25 @@
+# The HeliOS API and UI on SystemCore, on port 5880 (Limelight's services use 5800-5837).
+[Unit]
+Description=HeliOS API
+After=network.target helios-orion.service
+Wants=network.target helios-orion.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Slice=vision.slice
+EnvironmentFile=/usr/local/etc/helios/helios.env
+Environment=HELIOS_API_BIND=0.0.0.0:5880
+EnvironmentFile=-/usr/local/etc/helios/local.env
+ExecStart=/usr/local/bin/helios-api
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios /usr/local/var/log/helios
+WorkingDirectory=-/usr/local/var/lib/helios
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

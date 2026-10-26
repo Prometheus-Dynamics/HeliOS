@@ -1,0 +1,27 @@
+# orion-node for HeliOS on SystemCore. In vision.slice (CPUWeight=idle, the host's slice for its
+# own vision servers), so HeliOS never takes CPU from the robot's control and safety services.
+[Unit]
+Description=HeliOS Orion node
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+Slice=vision.slice
+EnvironmentFile=/usr/local/etc/helios/orion-node.env
+ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios/orion
+ExecStart=/usr/local/bin/orion-node
+WatchdogSec=30s
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+Restart=always
+RestartSec=1s
+RuntimeDirectory=orion
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0007
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

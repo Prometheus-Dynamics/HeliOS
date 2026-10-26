@@ -1,0 +1,24 @@
+# HeliOS cameras and peripherals on SystemCore. USB cameras only: the host's own vision servers
+# keep the ports they claim. No lemnosd dependency: every SystemCore device is host-owned.
+[Unit]
+Description=HeliOS peripherals
+After=network.target helios-orion.service
+Wants=network.target helios-orion.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Slice=vision.slice
+EnvironmentFile=/usr/local/etc/helios/helios.env
+EnvironmentFile=-/usr/local/etc/helios/local.env
+ExecStart=/usr/local/bin/helios-peripherals
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios /usr/local/var/log/helios
+WorkingDirectory=-/usr/local/var/lib/helios
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

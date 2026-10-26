@@ -1,0 +1,29 @@
+# The HeliOS engine on SystemCore: in vision.slice, below the host's control paths.
+[Unit]
+Description=HeliOS engine
+After=network.target helios-orion.service
+Wants=network.target helios-orion.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Slice=vision.slice
+EnvironmentFile=/usr/local/etc/helios/helios.env
+EnvironmentFile=-/usr/local/etc/helios/local.env
+Environment=ENGINE_SOCKET=/run/helios/engine.sock
+Environment=HELIOS_ENGINE_CACHE_NODE_REGISTRY=0
+Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=1
+Environment=HELIOS_STREAM_PREVIEW_ENCODE_INTERVAL_MS=4
+Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
+Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
+ExecStart=/usr/local/bin/helios-engine
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios /usr/local/var/log/helios
+WorkingDirectory=-/usr/local/var/lib/helios
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

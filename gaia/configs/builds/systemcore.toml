@@ -1,0 +1,324 @@
+gaia_version = ">=2.0.0"
+build_name = "helios-systemcore"
+version = "2026.2.0"
+description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine and its Eidos plugin, helios-peripherals, helios-diagnostics, orion-node, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
+profile = "release"
+target = "systemcore"
+
+# The device facts behind every choice here (ports, slices, opkg conventions, what the host owns)
+# are in docs/devices/systemcore.md. Lemnos joins when its SystemCore board definition lands;
+# every SystemCore device is host-owned on alpha18, so nothing on the board needs it yet.
+imports = ["../workspace/base.toml"]
+
+# The cargo profile of the backend binaries, as in raze.toml.
+[inputs.cargo_profile]
+kind = "enum"
+default = "release"
+choices = ["release", "dev-image"]
+
+[providers.rust]
+allow_nested_build = true
+timeout_seconds = 7200
+
+[providers.archive]
+timeout_seconds = 3600                      # the SDK is 1.75 GB
+
+# Limelight SystemCore ALPHA 18 SDK (limelightosr-2027.0.0-alpha18-410), pinned by GitHub's
+# published asset digest: glibc 2.42, aarch64-buildroot-linux-gnu.
+[[sources]]
+id = "systemcore-sdk"
+kind = "archive"
+url = "https://github.com/LimelightVision/systemcore-os-public/releases/download/limelightosr-2027.0.0-alpha18-410/systemcore-aarch64-toolchain.tar.gz"
+sha256 = "5d0fb541ed1873cda4aba7f449d96c46c5e1ea074f752619cfe735f5333aa653"
+strip_components = 1
+allow_absolute_symlinks = true
+refresh = "never"
+pin = "locked"
+
+[[toolchains]]
+id = "systemcore"
+kind = "buildroot-sdk"
+source = "systemcore-sdk"
+relocate = true
+triple = "aarch64-buildroot-linux-gnu"
+sysroot = "aarch64-buildroot-linux-gnu/sysroot"
+rust_target = "aarch64-unknown-linux-gnu"
+page_size = 16384                           # SystemCore's kernel runs 16 KiB pages
+
+[[sources]]
+id = "backend-workspace"
+kind = "path"
+path = "backend"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+# Eidos, a private repository: fetched on the host, served to cargo from Gaia's mirror.
+[[sources]]
+id = "eidos"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
+branch = "dev"
+
+# Orion at the commit raze.toml pins.
+[[sources]]
+id = "orion"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Orion.git"
+rev = "0653560deba9c5e2b8745cd66de8c2fa33a6525d"
+
+[[artifacts]]
+id = "helios-api"
+kind = "rust"
+package = "helios-api"
+source = "backend-workspace"
+build_group = "helios-backend"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+toolchain = "systemcore"
+profile = "${input.cargo_profile}"
+output_path = "${workspace.out_dir}/artifacts/helios-api"
+
+[[artifacts]]
+id = "helios-engine"
+kind = "rust"
+package = "helios-engine"
+source = "backend-workspace"
+build_group = "helios-backend"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+toolchain = "systemcore"
+profile = "${input.cargo_profile}"
+output_path = "${workspace.out_dir}/artifacts/helios-engine"
+
+[[artifacts]]
+id = "helios-diagnostics"
+kind = "rust"
+package = "helios-diagnostics"
+source = "backend-workspace"
+build_group = "helios-backend"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+toolchain = "systemcore"
+profile = "${input.cargo_profile}"
+output_path = "${workspace.out_dir}/artifacts/helios-diagnostics"
+
+# The Eidos Daedalus plugin, in the engine's build group so both share one Daedalus build
+# fingerprint (the Rust-ABI plugin path needs it).
+[[artifacts]]
+id = "helios-eidos-plugin"
+kind = "rust"
+package = "helios-eidos-plugin"
+source = "backend-workspace"
+build_group = "helios-backend"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+toolchain = "systemcore"
+profile = "${input.cargo_profile}"
+target_name = "libhelios_eidos_plugin.so"
+output_path = "${workspace.out_dir}/artifacts/libhelios_eidos_plugin.so"
+
+[[artifacts]]
+id = "helios-peripherals"
+kind = "rust"
+package = "helios-peripherals"
+source = "backend-workspace"
+build_group = "helios-backend"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+toolchain = "systemcore"
+profile = "${input.cargo_profile}"
+output_path = "${workspace.out_dir}/artifacts/helios-peripherals"
+
+# orion-node's appliance build (Orion packaging/gaia/orion-node.toml): IPC control plane, peer
+# sync, mDNS discovery, sd_notify and the watchdog.
+[[artifacts]]
+id = "orion-node"
+kind = "rust"
+package = "orion-node"
+source = "orion"
+toolchain = "systemcore"
+profile = "release"
+no_default_features = true
+features = ["peer-tcp", "discovery-mdns", "systemd-notify"]
+output_path = "${workspace.out_dir}/artifacts/orion-node"
+
+[image]
+kind = "none"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${workspace.out_dir}"
+
+# The package's files as installed: the guest layout (docs/device-profiles.md, "The install
+# layout") and the units in /etc/systemd/system, as SystemCore's own packages do.
+[[image.assembly.trees]]
+id = "pkg-root"
+path = "$assembly.work/pkg-root"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/helios-api"
+dest = "usr/local/bin/helios-api"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/helios-engine"
+dest = "usr/local/bin/helios-engine"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/helios-diagnostics"
+dest = "usr/local/bin/helios-diagnostics"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/helios-peripherals"
+dest = "usr/local/bin/helios-peripherals"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/orion-node"
+dest = "usr/local/bin/orion-node"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/libhelios_eidos_plugin.so"
+dest = "usr/local/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
+mode = "0755"
+
+# The UI's static build (tools/build-os.sh writes gaia/build/ui, without the offline demo's frames):
+# one flat glob per SvelteKit output directory (the names inside change every build, the
+# directories do not). One entry once Gaia's assembly files copy a directory tree.
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/*"
+dest = "usr/local/share/helios/ui/"
+exclude = ["_app", "models"]                # directories: their own entries below
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/*"
+dest = "usr/local/share/helios/ui/_app/"
+exclude = ["immutable"]
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/immutable/*"
+dest = "usr/local/share/helios/ui/_app/immutable/"
+exclude = ["assets", "chunks", "entry", "nodes"]
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/immutable/assets/*"
+dest = "usr/local/share/helios/ui/_app/immutable/assets/"
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/immutable/chunks/*"
+dest = "usr/local/share/helios/ui/_app/immutable/chunks/"
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/immutable/entry/*"
+dest = "usr/local/share/helios/ui/_app/immutable/entry/"
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/_app/immutable/nodes/*"
+dest = "usr/local/share/helios/ui/_app/immutable/nodes/"
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src_glob = "gaia/build/ui/models/*"
+dest = "usr/local/share/helios/ui/models/"
+optional = true
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/helios.png"
+dest = "usr/local/share/helios/helios.png"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/runtime-services/core/etc/helios/startup.toml"
+dest = "usr/local/etc/helios/startup.toml"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/etc/layout.env"
+dest = "usr/local/etc/helios/layout.env"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/etc/helios.env"
+dest = "usr/local/etc/helios/helios.env"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/etc/orion-node.env"
+dest = "usr/local/etc/helios/orion-node.env"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-orion.service"
+dest = "etc/systemd/system/helios-orion.service"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-engine.socket"
+dest = "etc/systemd/system/helios-engine.socket"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-engine.service"
+dest = "etc/systemd/system/helios-engine.service"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-peripherals.service"
+dest = "etc/systemd/system/helios-peripherals.service"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "@assets/systemcore/systemd/helios-api.service"
+dest = "etc/systemd/system/helios-api.service"
+
+[[image.assembly.packages]]
+id = "helios"
+format = "ipk"
+tree = "pkg-root"
+dest = "$assembly.out/"
+debian_binary = false                       # the layout of Limelight's own packages
+allowed_prefixes = ["/usr/local", "/etc/systemd/system"]
+
+[image.assembly.packages.control]
+Package = "helios"
+Version = "${build.version}"
+Architecture = "aarch64"
+Maintainer = "Prometheus Dynamics"
+Description = "HeliOS vision: AprilTag localization, 3D mapping and depth on SystemCore's USB cameras."
+Section = "vision"
+Priority = "optional"
+
+# SystemCore's package manager: an app tile in its UI that opens HeliOS's UI.
+[image.assembly.packages.control.extra]
+X-Port = "5880"
+X-Display-Name = "HeliOS"
+X-Has-UI = "true"
+X-Auto-Start = "true"
+X-Icon-Path = "/usr/local/share/helios/helios.png"
+
+[image.assembly.packages.scripts]
+services = ["helios-orion.service", "helios-engine.socket", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
+conffiles = ["/usr/local/etc/helios/startup.toml", "/usr/local/etc/helios/orion-node.env"]
+
+# Every ELF against the SDK's sysroot: glibc symbol versions, 16 KiB segments, libraries present.
+[image.assembly.packages.device]
+toolchain = "systemcore"
