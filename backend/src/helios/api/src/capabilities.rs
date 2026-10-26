@@ -162,6 +162,7 @@ pub fn lemnos_classes_in(view: &StateView) -> BTreeSet<String> {
 
 /// The lemnosd device classes given Orion's view (`None` when it could not be read). Unit tests have
 /// no Orion: their stand-in classes win.
+#[cfg_attr(not(test), allow(unused_variables))]
 fn lemnos_classes_at(config: &ApiConfig, view: Option<&StateView>) -> BTreeSet<String> {
     #[cfg(test)]
     if let Some(classes) = &config.test_lemnos_classes {
