@@ -21,12 +21,15 @@ use tokio::{
 
 use crate::{
     SharedState,
+    capabilities,
     error::{ApiError, ApiResult},
     host::{self, LogLine, LogQuery},
 };
 
 const DEFAULT_LINES: usize = 200;
 const MAX_LINES: usize = 5000;
+/// HeliOS's own units, by glob (`journalctl -u` takes it): a guest's default log scope.
+const GUEST_LOG_UNITS: &str = "helios-*.service";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct LogParams {
@@ -62,9 +65,19 @@ pub struct LogPage {
     pub lines: Vec<LogLine>,
 }
 
-pub async fn query(Query(params): Query<LogParams>) -> ApiResult<Json<LogPage>> {
-    let query = params.to_query()?;
+pub async fn query(State(state): State<SharedState>, Query(params): Query<LogParams>) -> ApiResult<Json<LogPage>> {
+    let query = scoped(&state, &params)?;
     Ok(Json(LogPage { lines: host::journal(&query).await? }))
+}
+
+/// The query for `params`. On a guest the journal is the host's (its own services and logs), so
+/// without a unit only HeliOS's units are read; a named unit is read as asked.
+fn scoped(state: &SharedState, params: &LogParams) -> ApiResult<LogQuery> {
+    let mut query = params.to_query()?;
+    if params.unit.is_none() && !capabilities::is_owner(&state.config) {
+        query.unit = Some(GUEST_LOG_UNITS.to_string());
+    }
+    Ok(query)
 }
 
 /// Live tail as Server-Sent Events (`event: log`), starting with the last `lines` lines.
@@ -73,7 +86,7 @@ pub async fn query(Query(params): Query<LogParams>) -> ApiResult<Json<LogPage>> 
 /// runs while anyone follows and stops with the last one. Each viewer first gets its backlog
 /// from a one-shot read.
 pub async fn stream(State(state): State<SharedState>, Query(params): Query<LogParams>) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let mut query = params.to_query()?;
+    let mut query = scoped(&state, &params)?;
     if params.lines.is_none() {
         query.lines = 50;
     }
@@ -182,5 +195,17 @@ mod tests {
         assert_eq!(query.max_priority, Some(4));
         assert!(LogParams { unit: Some("x; rm -rf /".into()), ..LogParams::default() }.to_query().is_err());
         assert!(LogParams { level: Some("loud".into()), ..LogParams::default() }.to_query().is_err());
+    }
+
+    #[test]
+    fn a_guest_reads_its_own_units_unless_a_unit_is_named() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let guest = crate::AppState::new(crate::ApiConfig { state_dir: dir.path().join("state"), ..crate::ApiConfig::from_vars([("HELIOS_LAYOUT_PROFILE", "guest")]).expect("guest config") });
+        let all = scoped(&guest, &LogParams::default()).expect("query");
+        assert_eq!(all.unit.as_deref(), Some(GUEST_LOG_UNITS));
+        let named = scoped(&guest, &LogParams { unit: Some("limelight_visionserver".into()), ..LogParams::default() }).expect("query");
+        assert_eq!(named.unit.as_deref(), Some("limelight_visionserver.service"), "a named unit is read as asked");
+        let owner = crate::AppState::new(crate::ApiConfig { state_dir: dir.path().join("state"), ..crate::ApiConfig::default() });
+        assert_eq!(scoped(&owner, &LogParams::default()).expect("query").unit, None, "the owner reads the whole journal");
     }
 }
