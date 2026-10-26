@@ -30,12 +30,12 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use daedalus::{runtime::host_bridge::ValueSerializerMap, transport::Payload};
+use helios_robot::{ControllerFacts, Nt4Settings, resolve};
 use orion_nt4::{Client, ClientConfig, ClientEvent, ClientHandle, Publisher, Value};
-use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -46,51 +46,6 @@ use robot_pose::{RobotPose, RobotPoseTopics, WeakPoseTopics};
 const SETTINGS_CHECK: Duration = Duration::from_secs(2);
 /// Ticks waiting to be published; more are dropped (the newest tick matters, not every tick).
 const QUEUE: usize = 8;
-pub const DEFAULT_PREFIX: &str = "/helios";
-const DEFAULT_PORT: u16 = 5810;
-
-/// helios-api's NT4 settings (`nt4.json`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default)]
-pub struct Nt4Settings {
-    pub enabled: bool,
-    /// FRC team number: the server is the roboRIO at `10.TE.AM.2`.
-    pub team: Option<u32>,
-    /// A server host instead of the team's roboRIO.
-    pub server: Option<String>,
-    pub port: u16,
-    pub prefix: String,
-}
-
-impl Default for Nt4Settings {
-    fn default() -> Self {
-        Self { enabled: true, team: None, server: None, port: DEFAULT_PORT, prefix: DEFAULT_PREFIX.into() }
-    }
-}
-
-impl Nt4Settings {
-    /// The server to connect to, when publishing is on and there is one.
-    pub fn host(&self) -> Option<String> {
-        if !self.enabled {
-            return None;
-        }
-        if let Some(server) = self.server.as_deref().map(str::trim).filter(|server| !server.is_empty()) {
-            return Some(server.to_string());
-        }
-        self.team.filter(|team| (1..=25_599).contains(team)).map(|team| format!("10.{}.{}.2", team / 100, team % 100))
-    }
-
-    fn prefix(&self) -> String {
-        let prefix = self.prefix.trim().trim_end_matches('/');
-        if prefix.is_empty() {
-            DEFAULT_PREFIX.into()
-        } else if prefix.starts_with('/') {
-            prefix.into()
-        } else {
-            format!("/{prefix}")
-        }
-    }
-}
 
 /// One graph tick's outputs.
 pub struct Nt4Tick {
@@ -139,11 +94,11 @@ pub struct Nt4Status {
 
 /// Start the publisher on the current Tokio runtime; returns the sink graph threads use and the
 /// connection status.
-pub fn spawn(settings_path: PathBuf, client_name: String) -> (Nt4Sink, Arc<std::sync::Mutex<Nt4Status>>) {
+pub fn spawn(settings_path: PathBuf, facts_path: PathBuf, client_name: String) -> (Nt4Sink, Arc<std::sync::Mutex<Nt4Status>>) {
     let (tx, rx) = mpsc::channel(QUEUE);
     let inner = Arc::new(SinkInner { tx, active: AtomicBool::new(false) });
     let status = Arc::new(std::sync::Mutex::new(Nt4Status::default()));
-    tokio::spawn(run(settings_path, client_name, rx, inner.clone(), status.clone()));
+    tokio::spawn(run(settings_path, facts_path, client_name, rx, inner.clone(), status.clone()));
     (Nt4Sink { inner: Some(inner) }, status)
 }
 
@@ -259,35 +214,32 @@ impl Connection {
     }
 }
 
-async fn run(path: PathBuf, client_name: String, mut rx: mpsc::Receiver<Nt4Tick>, sink: Arc<SinkInner>, status: Arc<std::sync::Mutex<Nt4Status>>) {
+async fn run(path: PathBuf, facts_path: PathBuf, client_name: String, mut rx: mpsc::Receiver<Nt4Tick>, sink: Arc<SinkInner>, status: Arc<std::sync::Mutex<Nt4Status>>) {
     let mut check = tokio::time::interval(SETTINGS_CHECK);
-    let mut seen: Option<(Option<SystemTime>, Nt4Settings)> = None;
+    let mut seen: Option<(Nt4Settings, Option<ControllerFacts>)> = None;
     let mut connection: Option<Connection> = None;
     loop {
         tokio::select! {
             _ = check.tick() => {
-                let modified = std::fs::metadata(&path).and_then(|meta| meta.modified()).ok();
-                if seen.as_ref().is_some_and(|(at, _)| *at == modified) {
-                    continue;
-                }
                 let settings = read_settings(&path);
-                if seen.as_ref().is_some_and(|(_, before)| *before == settings) {
-                    seen = Some((modified, settings));
+                let facts = read_controller_facts(&facts_path);
+                if seen.as_ref().is_some_and(|(before, before_facts)| *before == settings && *before_facts == facts) {
                     continue;
                 }
-                connection = settings.host().map(|host| {
-                    info!(%host, port = settings.port, prefix = %settings.prefix(), "NT4 publishing");
+                let server = resolve(&settings, facts.as_ref()).nt4_server.value;
+                connection = server.clone().map(|host| {
+                    info!(%host, port = settings.port, prefix = %settings.topic_prefix(), "NT4 publishing");
                     let mut config = ClientConfig::new(host, client_name.clone());
                     config.port = settings.port;
                     let client = Client::start(config);
-                    Connection { handle: client.handle(), client, prefix: settings.prefix(), publishers: HashMap::new() }
+                    Connection { handle: client.handle(), client, prefix: settings.topic_prefix(), publishers: HashMap::new() }
                 });
                 if connection.is_none() {
-                    info!("NT4 publishing off (disabled, or no team number or server)");
+                    info!("NT4 publishing off (disabled, or no team or server known)");
                 }
                 sink.active.store(false, Ordering::Relaxed);
-                *status.lock().unwrap_or_else(|poison| poison.into_inner()) = Nt4Status { server: settings.host(), connected: false };
-                seen = Some((modified, settings));
+                *status.lock().unwrap_or_else(|poison| poison.into_inner()) = Nt4Status { server, connected: false };
+                seen = Some((settings, facts));
             }
             Some(event) = async { match connection.as_mut() { Some(c) => c.client.next_event().await, None => std::future::pending().await } } => {
                 let connected = match event {
@@ -317,6 +269,12 @@ fn read_settings(path: &Path) -> Nt4Settings {
     }
 }
 
+/// The robot controller's facts helios-api keeps; `None` when it has not found one.
+fn read_controller_facts(path: &Path) -> Option<ControllerFacts> {
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).map_err(|error| warn!(path = %path.display(), %error, "controller facts are not valid; ignoring them")).ok()
+}
+
 /// A topic path segment: letters, digits, `_`, `-` and `.`; anything else becomes `_`.
 fn topic_segment(name: &str) -> String {
     let segment: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect();
@@ -330,12 +288,26 @@ mod tests {
     #[test]
     fn settings_pick_the_server() {
         let team = Nt4Settings { team: Some(6390), ..Nt4Settings::default() };
-        assert_eq!(team.host().as_deref(), Some("10.63.90.2"));
-        assert_eq!(Nt4Settings { server: Some(" 10.0.0.5 ".into()), ..team.clone() }.host().as_deref(), Some("10.0.0.5"));
-        assert_eq!(Nt4Settings { enabled: false, ..team.clone() }.host(), None);
-        assert_eq!(Nt4Settings::default().host(), None);
-        assert_eq!(Nt4Settings { prefix: "cams/front/".into(), ..team }.prefix(), "/cams/front");
+        assert_eq!(resolve(&team, None).nt4_server.value.as_deref(), Some("10.63.90.2"));
+        assert_eq!(resolve(&Nt4Settings { server: Some(" 10.0.0.5 ".into()), ..team.clone() }, None).nt4_server.value.as_deref(), Some("10.0.0.5"));
+        assert_eq!(resolve(&Nt4Settings { enabled: false, ..team.clone() }, None).nt4_server.value, None);
+        assert_eq!(resolve(&Nt4Settings::default(), None).nt4_server.value, None);
+        assert_eq!(Nt4Settings { prefix: "cams/front/".into(), ..team }.topic_prefix(), "/cams/front");
         assert_eq!(topic_segment("AprilTag front"), "AprilTag_front");
+    }
+
+    #[test]
+    fn the_controller_facts_file_is_read_when_it_is_valid() {
+        let dir = std::env::temp_dir().join(format!("helios-facts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("controller.json");
+        assert_eq!(read_controller_facts(&path), None);
+        std::fs::write(&path, r#"{"kind":"systemcore","name":"SystemCore","team":1234,"nt4_server":"127.0.0.1","via":"local","seen_at_ms":1}"#).unwrap();
+        let facts = read_controller_facts(&path).expect("facts");
+        assert_eq!(resolve(&Nt4Settings::default(), Some(&facts)).nt4_server.value.as_deref(), Some("127.0.0.1"));
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(read_controller_facts(&path), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -345,7 +317,7 @@ mod tests {
         let path = dir.join("nt4.json");
         assert_eq!(read_settings(&path), Nt4Settings::default());
         std::fs::write(&path, r#"{"team": 254}"#).unwrap();
-        assert_eq!(read_settings(&path).host().as_deref(), Some("10.2.54.2"));
+        assert_eq!(resolve(&read_settings(&path), None).nt4_server.value.as_deref(), Some("10.2.54.2"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -358,7 +330,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
         std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
-        let (sink, status) = spawn(path, "helios-test".into());
+        let (sink, status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
             assert!(tokio::time::Instant::now() < deadline, "never connected");
@@ -386,7 +358,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
         std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
-        let (sink, _status) = spawn(path, "helios-test".into());
+        let (sink, _status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
             assert!(tokio::time::Instant::now() < deadline, "never connected");
@@ -448,7 +420,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
         std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
-        let (sink, _status) = spawn(path, "helios-test".into());
+        let (sink, _status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
             assert!(tokio::time::Instant::now() < deadline, "never connected");

@@ -256,12 +256,10 @@ pub fn spawn(state: SharedState) -> JoinHandle<()> {
 /// The connection the settings ask for (none with `nt_control` off or no NT4 server).
 async fn wanted(state: &SharedState) -> Option<Connection> {
     let nt4 = state.store.nt4_settings().await.unwrap_or_default();
+    let controller = state.store.controller_facts().await.unwrap_or_default();
     let recorder = state.store.recording_settings().await.unwrap_or_default();
-    let prefix = match nt4.prefix.trim().trim_matches('/') {
-        "" => crate::routes::nt4::DEFAULT_PREFIX.to_string(),
-        trimmed => format!("/{trimmed}"),
-    };
-    (recorder.nt_control).then(|| nt4.host().map(|host| Connection { host, port: nt4.port, prefix })).flatten()
+    let host = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value?;
+    (recorder.nt_control).then(|| Connection { host, port: nt4.port, prefix: nt4.topic_prefix() })
 }
 
 async fn run(state: SharedState, jobs: mpsc::UnboundedSender<Job>) {

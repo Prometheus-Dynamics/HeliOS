@@ -1,0 +1,15 @@
+[package]
+name = "helios-robot"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "helios_robot"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }

@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod cameras;
+pub mod device_documents;
 pub mod field_layouts;
 pub mod leds;
 pub mod logs;
@@ -45,6 +46,9 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/device", get(system::device))
         .route("/v1/device/os", get(system::device_os))
         .route("/v1/device/nt4", get(nt4::get_nt4).put(nt4::put_nt4))
+        .route("/v1/device/identities", get(device_documents::list_identities))
+        .route("/v1/device/identities/{id}", put(device_documents::put_identity).delete(device_documents::delete_identity))
+        .route("/v1/device/setup", get(device_documents::get_setup).put(device_documents::put_setup))
         .route("/v1/device/leds", get(leds::get_leds).put(leds::put_leds))
         .route("/v1/device/leds/locate", post(leds::locate))
         .route("/v1/device/leds/preview", post(leds::preview))

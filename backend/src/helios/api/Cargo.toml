@@ -50,6 +50,7 @@ daedalus-data = { workspace = true }
 helios-field = { path = "../field" }
 # Where every path lives (the image or a guest prefix): `config.rs`.
 helios-layout = { path = "../layout" }
+helios-robot = { path = "../robot" }
 # Session recordings of a camera (MCAP, `routes/recordings.rs`).
 helios-recorder = { path = "../recorder" }
 # Orion is the device's state store: resources, workloads, the updater and host facts.

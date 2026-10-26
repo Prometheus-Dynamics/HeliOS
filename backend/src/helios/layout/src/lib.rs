@@ -450,6 +450,11 @@ impl Layout {
         self.api_state_dir().join("nt4.json")
     }
 
+    /// The robot controller's facts HeliOS found (written by helios-api, read by helios-engine).
+    pub fn controller_facts_file(&self) -> PathBuf {
+        self.api_state_dir().join("controller.json")
+    }
+
     pub fn diagnostics_dir(&self) -> PathBuf {
         self.state_dir.join("diagnostics")
     }
