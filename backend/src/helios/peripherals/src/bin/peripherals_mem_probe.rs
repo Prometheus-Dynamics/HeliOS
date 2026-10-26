@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use helios_peripherals::{
     config::PeripheralConfig,
