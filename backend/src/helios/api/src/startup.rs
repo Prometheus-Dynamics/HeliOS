@@ -98,6 +98,7 @@ impl DefaultPipeline {
         let graph = serde_json::from_str(self.graph_json()?).context("embedded graph is not JSON")?;
         let binding = Binding { resource_id: camera.to_string(), pyramid: self.pyramid, ..Binding::default() };
         Ok(PipelineSpec {
+            map: None,
             name: self.name.clone(),
             graph,
             bindings: BTreeMap::from([(FRAME_INPUT.to_string(), binding)]),

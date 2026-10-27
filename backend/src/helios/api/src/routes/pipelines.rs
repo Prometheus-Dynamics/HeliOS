@@ -4,7 +4,10 @@
 //! inline. Names and revisions travel as labels on the pipeline's Orion artifact; earlier
 //! revisions are kept by the API for rollback.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use axum::{
     Json,
@@ -23,7 +26,7 @@ use crate::{
     camera_context::{self, CalibrationMatch},
     camera_controls::standard_key,
     camera_status::{self, PipelineFacts, Stage},
-    error::{ApiError, ApiResult},
+    error::{ApiError, ApiResult, ErrorCode},
     field_layouts::{self, StoredLayout},
     host::now_ms,
     orion::{StateView, enum_name, label_map, label_values},
@@ -47,6 +50,10 @@ const ARTIFACT_TYPE: &str = "execution.artifact";
 const TELEMETRY_KIND: &str = "execution.telemetry";
 const METRICS_KIND: &str = "execution.metrics";
 const HOST_OUTPUT_PREFIX: &str = "host_output:";
+/// The workload config keys of a pipeline's saved map (see `write_map`).
+const MAP_ID_KEY: &str = "map.id";
+const MAP_PATH_KEY: &str = "map.path";
+const MAP_SAVE_KEY: &str = "map.save";
 
 /// What a graph input takes: a resource (a camera's frames, by default) or another pipeline's
 /// host output (`source: "pipeline"`, see `pipeline_bindings`). Camera options apply to a camera.
@@ -115,6 +122,10 @@ pub struct PipelineSpec {
     /// uses the selected layout, and follows it when the selection changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field_layout: Option<String>,
+    /// The saved map (`/v1/maps`) the graph's live mapper starts from, when the pipeline starts or
+    /// restarts; unset starts the mapper with no map. Needs a live mapper in the graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<String>,
     /// The tag family the graph's Eidos detector groups decode (Eidos's dictionary names, such as
     /// `apriltag_36h11`, `apriltag_16h5` or `aruco_4x4_50`); unset keeps the graph's. A family
     /// other than the tags' own finds nothing: no detections and no rejections.
@@ -499,6 +510,8 @@ pub struct Pipeline {
     pub pose: Option<serde_json::Value>,
     /// The field layout the graph's multi-tag pose solves against; `null` without one.
     pub field_layout: Option<String>,
+    /// The saved map the live mapper starts from (the spec's `map`); `null` for none.
+    pub map: Option<String>,
     /// The tag family the graph's detector group decodes; `null` without an Eidos detector group.
     pub dictionary: Option<String>,
     /// The CPU core the graph thread is pinned to (the spec's `cpu`); `null` for the scheduler's.
@@ -607,7 +620,7 @@ fn engine_workloads(view: &StateView) -> impl Iterator<Item = &WorkloadRecord> {
     view.workloads.values().filter(|w| w.runtime_type.as_str() == ENGINE_RUNTIME)
 }
 
-fn find_workload<'a>(view: &'a StateView, id: &str) -> Option<&'a WorkloadRecord> {
+pub(crate) fn find_workload<'a>(view: &'a StateView, id: &str) -> Option<&'a WorkloadRecord> {
     view.workloads.get(&format!("{WORKLOAD_PREFIX}{id}")).or_else(|| view.workloads.get(id)).filter(|w| w.runtime_type.as_str() == ENGINE_RUNTIME)
 }
 
@@ -725,6 +738,7 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         name: labels.get(NAME_LABEL).cloned().unwrap_or_else(|| pipeline_id(&workload_id)),
         revision: labels.get(REVISION_LABEL).and_then(|r| r.parse().ok()),
         field_layout: labels.get(FIELD_LAYOUT_LABEL).cloned(),
+        map: config_string(workload, MAP_ID_KEY),
         managed: workload_id.starts_with(WORKLOAD_PREFIX),
         node_id: workload.assigned_node_id.as_ref().map(ToString::to_string),
         enabled: workload.desired_state == DesiredState::Running,
@@ -807,6 +821,8 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
         return Err(ApiError::unprocessable("name must be 1 to 120 characters"));
     }
     let mut graph = effective_graph(spec, view)?;
+    // A live mapper takes a saved map and saves one: its host ports (see `helios_maps`).
+    helios_maps::wire_map_ports(&mut graph);
     if let Some(layout) = layout {
         field_layouts::apply_layout(&mut graph, &layout.layout)?;
     }
@@ -913,10 +929,55 @@ async fn spec_layout(state: &SharedState, spec: &PipelineSpec) -> ApiResult<Opti
 /// Write `spec` to Orion as revision `revision` (camera context and field layout as stored now).
 async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &PipelineSpec, revision: u64) -> ApiResult<()> {
     let layout = spec_layout(state, spec).await?;
+    let map = spec_map(state, spec).await?;
     let document = validate_spec(spec, view, &state.config.node_id, layout.as_ref())?;
     let inputs = camera_inputs_for(&state.store, view, spec.bindings.iter()).await?;
-    let (artifact, workload) = records_for(id, spec, &document, revision, &state.config.node_id, &inputs, layout.as_ref().map(|l| l.id.as_str()))?;
+    let (artifact, mut workload) = records_for(id, spec, &document, revision, &state.config.node_id, &inputs, layout.as_ref().map(|l| l.id.as_str()))?;
+    let saves = find_workload(view, id).map_or(0, map_saves);
+    write_map(&mut workload, map.as_deref().map(|map| (map, state.maps.file_path(map))), saves);
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await
+}
+
+/// The saved map a spec starts from, checked: it is stored, and the graph has a live mapper to
+/// take it. `None` for no map.
+async fn spec_map(state: &SharedState, spec: &PipelineSpec) -> ApiResult<Option<String>> {
+    let Some(map) = &spec.map else { return Ok(None) };
+    state.maps.get(map).await.map_err(|error| if error.code == ErrorCode::NotFound { ApiError::unprocessable(format!("no map {map}")) } else { error })?;
+    if !helios_maps::has_live_map(&spec.graph) {
+        return Err(ApiError::unprocessable("a map needs a live map graph (eidos:mapping.live_map)"));
+    }
+    Ok(Some(map.clone()))
+}
+
+/// Writes a pipeline's map into its workload config: `map.id` and `map.path` for the map it starts
+/// from (none without one), and `map.save`, the save requests so far, which is always there: a
+/// deploy keeps it (`saves`), so each save request stays new to the engine.
+pub fn write_map(record: &mut WorkloadRecord, map: Option<(&str, PathBuf)>, saves: u64) {
+    let Some(config) = record.config.as_mut() else { return };
+    config.payload.remove(MAP_ID_KEY);
+    config.payload.remove(MAP_PATH_KEY);
+    if let Some((id, path)) = map {
+        config.payload.insert(MAP_ID_KEY.into(), TypedConfigValue::String(id.into()));
+        config.payload.insert(MAP_PATH_KEY.into(), TypedConfigValue::String(path.to_string_lossy().into_owned()));
+    }
+    config.payload.insert(MAP_SAVE_KEY.into(), TypedConfigValue::Int(saves as i64));
+}
+
+/// The save requests a pipeline's workload has had (`map.save`).
+pub fn map_saves(workload: &WorkloadRecord) -> u64 {
+    config_u64(workload, MAP_SAVE_KEY).unwrap_or(0)
+}
+
+/// Sets a pipeline's save requests (`map.save`) in its workload.
+pub fn set_map_saves(record: &mut WorkloadRecord, saves: u64) {
+    if let Some(config) = record.config.as_mut() {
+        config.payload.insert(MAP_SAVE_KEY.into(), TypedConfigValue::Int(saves as i64));
+    }
+}
+
+/// The pipelines that start from saved map `id`.
+pub fn pipelines_using_map(view: &StateView, id: &str) -> Vec<String> {
+    engine_workloads(view).filter(|w| config_string(w, MAP_ID_KEY).as_deref() == Some(id)).map(|w| pipeline_id(w.workload_id.as_str())).collect()
 }
 
 /// The revision label Orion holds for pipeline `id` (what the device reports), if any.
@@ -1111,6 +1172,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
             // A pipeline written by another tool: start from what Orion has.
             let pipeline = fetch(&state, &id).await?;
             PipelineSpec {
+                map: None,
                 name: pipeline.name,
                 graph: pipeline.graph.ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?,
                 bindings: pipeline.bindings,
@@ -1334,6 +1396,7 @@ mod tests {
     fn spec_round_trips_through_orion_records() {
         let view = view_with_camera();
         let spec = PipelineSpec {
+            map: None,
             name: "Tags front".into(),
             graph: sample_document(),
             bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None, ..Binding::default() })]),
@@ -1414,6 +1477,7 @@ mod tests {
 
     fn camera_spec() -> PipelineSpec {
         PipelineSpec {
+            map: None,
             name: "Tags front".into(),
             graph: sample_document(),
             bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]),
@@ -1496,6 +1560,7 @@ mod tests {
         let view = view_with_camera();
         let camera = BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]);
         let mut spec = PipelineSpec {
+            map: None,
             name: "x".into(),
             graph: group_document("eidos:detectors.apriltag"),
             bindings: camera,
@@ -1540,6 +1605,7 @@ mod tests {
         assert_eq!(search_mode_of(&tracked), Some((SearchMode::Tracked, Some(4))));
         let camera = BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]);
         let mut spec = PipelineSpec {
+            map: None,
             name: "x".into(),
             graph: tracked.clone(),
             bindings: camera.clone(),
@@ -1594,6 +1660,7 @@ mod tests {
         assert_eq!(dictionary_of(&graph), None);
         assert_eq!(search_mode_of(&graph), None);
         let spec = PipelineSpec {
+            map: None,
             name: "Feature tracks".into(),
             graph,
             bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]),
@@ -1630,6 +1697,7 @@ mod tests {
             let graph: serde_json::Value = serde_json::from_str(crate::startup::GRAPHS.iter().find(|(g, _)| *g == id).expect("graph").1).expect("json");
             assert!(field_layouts::has_multi_tag_pose(&graph), "{id} takes the field layout");
             let spec = PipelineSpec {
+                map: None,
                 name: id.into(),
                 graph,
                 bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), pyramid: Some(3), ..Binding::default() })]),
@@ -1648,12 +1716,60 @@ mod tests {
     }
 
     #[test]
+    fn a_live_map_pipeline_takes_a_map_and_keeps_its_saves_across_deploys() {
+        let view = view_with_camera();
+        let json = crate::startup::GRAPHS.iter().find(|(id, _)| *id == "live-map").map(|(_, json)| *json).expect("live map template");
+        let graph: serde_json::Value = serde_json::from_str(json).expect("template");
+        let spec = PipelineSpec {
+            map: None,
+            name: "Live map".into(),
+            graph,
+            bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), ..Binding::default() })]),
+            enabled: true,
+            search_mode: None,
+            full_search_every: None,
+            loss_full_search_after: None,
+            margin_growth_misses: None,
+            field_layout: None,
+            dictionary: None,
+            cpu: None,
+            nice: None,
+        };
+        // The deployed graph has the map and save inputs and the saved map output, wired to the mapper.
+        let document = validate_spec(&spec, &view, "node-local", None).expect("deploys");
+        assert!(document.to_json().expect("json").contains("saved_map"), "the live map's host ports are wired");
+
+        let inputs = CameraInputs::default();
+        let (_, mut workload) = records_for("live-map", &spec, &document, 1, "node-local", &inputs, None).expect("records");
+        let path = PathBuf::from("/data/maps/map-abc.eidmap");
+        write_map(&mut workload, Some(("map-abc", path.clone())), 0);
+        let payload = &workload.config.as_ref().expect("config").payload;
+        assert_eq!(payload.get("map.id"), Some(&TypedConfigValue::String("map-abc".into())));
+        assert_eq!(payload.get("map.path"), Some(&TypedConfigValue::String(path.to_string_lossy().into_owned())));
+        assert_eq!(pipeline_dto(&view, &workload).map.as_deref(), Some("map-abc"), "the pipeline shows the map it starts from");
+
+        // Save requests are counted in the workload; a deploy writes the map again and keeps the count.
+        set_map_saves(&mut workload, 3);
+        let saves = map_saves(&workload);
+        write_map(&mut workload, Some(("map-abc", path.clone())), saves);
+        assert_eq!(map_saves(&workload), 3, "a redeploy keeps the save count");
+
+        // Without a map the map fields go, and the count stays so a later save is still new.
+        write_map(&mut workload, None, saves);
+        let payload = &workload.config.as_ref().expect("config").payload;
+        assert!(!payload.contains_key("map.id") && !payload.contains_key("map.path"));
+        assert_eq!(map_saves(&workload), 3);
+        assert_eq!(pipeline_dto(&view, &workload).map, None);
+    }
+
+    #[test]
     fn live_map_template_is_a_deployable_mapping_pipeline() {
         assert_eq!(template_family("live-map").expect("family"), "mapping");
         let json = crate::startup::GRAPHS.iter().find(|(id, _)| *id == "live-map").map(|(_, json)| *json).expect("live map template");
         let graph: serde_json::Value = serde_json::from_str(json).expect("template");
         assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_36h11"));
         let spec = PipelineSpec {
+            map: None,
             name: "Live map".into(),
             graph,
             bindings: BTreeMap::from([("frame".to_string(), Binding { resource_id: "camera.front".into(), pyramid: Some(3), ..Binding::default() })]),
@@ -1705,6 +1821,7 @@ mod tests {
     fn bare_or_unversioned_graphs_are_rejected() {
         let view = view_with_camera();
         let mut spec = PipelineSpec {
+            map: None,
             name: "x".into(),
             graph: serde_json::json!({ "nodes": [], "edges": [] }),
             bindings: BTreeMap::new(),
@@ -1731,6 +1848,7 @@ mod tests {
         let runtime = ResourceRecord::builder("engine.runtime.node-local", "execution.runtime", "provider.engine.node-local").label("helios.plugin.loaded=styx.frames").build();
         view.resources.insert("engine.runtime.node-local".into(), runtime);
         let spec = PipelineSpec {
+            map: None,
             name: "x".into(),
             graph: sample_document(),
             bindings: BTreeMap::new(),
@@ -1752,6 +1870,7 @@ mod tests {
     fn bindings_must_name_known_resources() {
         let view = view_with_camera();
         let spec = PipelineSpec {
+            map: None,
             name: "x".into(),
             graph: sample_document(),
             bindings: BTreeMap::from([("camera".into(), Binding { resource_id: "camera.nope".into(), ..Binding::default() })]),

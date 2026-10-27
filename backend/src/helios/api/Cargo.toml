@@ -56,6 +56,9 @@ daedalus-data = { workspace = true }
 helios-field = { path = "../field" }
 # Where every path lives (the image or a guest prefix): `config.rs`.
 helios-layout = { path = "../layout" }
+# Saved maps: Eidos's map file header and the live map's host ports (`maps.rs`).
+helios-maps = { path = "../maps" }
+base64 = { workspace = true }
 helios-robot = { path = "../robot" }
 # Session recordings of a camera (MCAP, `routes/recordings.rs`).
 helios-recorder = { path = "../recorder" }

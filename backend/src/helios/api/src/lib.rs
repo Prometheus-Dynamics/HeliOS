@@ -24,6 +24,7 @@ pub mod field_layouts;
 pub mod host;
 pub mod host_facts;
 pub mod leds;
+pub mod maps;
 pub mod migration;
 pub mod live_outputs;
 pub mod live_streams;
@@ -88,6 +89,8 @@ pub struct AppState {
     pub leds: leds::LedHandle,
     /// Every pipeline output of every tick, relayed from helios-engine (`GET /v1/live/ws`).
     pub live: Arc<live_outputs::LiveRelay>,
+    /// Saved maps (`maps`): the map files a live mapper saved, and the ones pipelines start from.
+    pub maps: maps::MapStore,
     /// The open playback players (recordings and image folders served as cameras).
     pub playback: playback::Players,
     /// The node's live streams for the UI (`/v1/streams/ws`): one subscription, shared.
@@ -125,6 +128,7 @@ impl AppState {
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
             live: live_outputs::LiveRelay::new(),
+            maps: maps::MapStore::new(config.layout.data_dir().join("maps")),
             playback: playback::Players::new(::orion::client::LocalNodeRuntime::new(config.orion_socket.clone(), config.orion_stream_socket.clone()), &config.node_id, config.playback.clone()),
             config,
         })

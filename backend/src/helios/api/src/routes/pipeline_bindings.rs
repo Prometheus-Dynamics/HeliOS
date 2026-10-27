@@ -157,6 +157,7 @@ mod tests {
     #[test]
     fn a_pipeline_cannot_feed_itself() {
         let spec = PipelineSpec {
+            map: None,
             name: "loop".into(),
             graph: serde_json::json!({}),
             bindings: std::collections::BTreeMap::from([("pose".to_string(), Binding { source: BindingSource::Pipeline, pipeline: Some("loop".into()), port: Some("pose".into()), ..Binding::default() })]),

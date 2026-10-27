@@ -6,6 +6,7 @@ pub mod device_documents;
 pub mod field_layouts;
 pub mod leds;
 pub mod logs;
+pub mod maps;
 pub mod nt4;
 pub mod pipeline_bindings;
 pub mod pipelines;
@@ -90,6 +91,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/field-layouts", get(field_layouts::list).post(field_layouts::upload))
         .route("/v1/field-layouts/selected", get(field_layouts::get_selected).put(field_layouts::put_selected))
         .route("/v1/field-layouts/{id}", get(field_layouts::get_one).delete(field_layouts::remove))
+        .route("/v1/maps", get(maps::list).post(maps::upload).layer(DefaultBodyLimit::max(crate::maps::MAX_MAP_BYTES + 1)))
+        .route("/v1/maps/{id}", get(maps::download).delete(maps::remove))
         // Session recordings (helios-recorder): one at a time, from a camera's frames
         .route("/v1/recordings", get(recordings::list).post(recordings::start))
         .route("/v1/recordings/settings", get(recordings::get_settings).put(recordings::put_settings))
@@ -114,6 +117,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/pipelines/{id}/rollback", post(pipelines::rollback))
         .route("/v1/pipelines/{id}/revisions", get(pipelines::revisions))
         .route("/v1/pipelines/{id}/bindings/{input}", put(pipelines::bind_input))
+        .route("/v1/pipelines/{id}/map/save", post(maps::save_pipeline_map))
         .route("/v1/pipelines/{id}/outputs", get(pipelines::pipeline_outputs))
         .route("/v1/pipelines/{id}/plan", get(pipelines::pipeline_plan))
         .route("/v1/outputs", get(pipelines::outputs))
