@@ -6,7 +6,6 @@
   import { team } from "#lib/core/team.svelte.js";
   import { roborioAddress } from "#lib/core/robot-facts.js";
   import Badge from "#lib/kit/Badge.svelte";
-  import Num from "#lib/kit/Num.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Switch from "#lib/kit/Switch.svelte";
 
@@ -19,6 +18,9 @@
   });
 
   const SOURCE_TEXT: Record<FactSource, string> = { user: "Set here", controller: "From the robot controller", none: "Not set" };
+
+  /** A typed team: a number, or `null` (empty) to give the choice back to the robot controller. */
+  const teamOf = (text: string): number | null => (text.trim() === "" ? null : Number(text));
 
   const status = $derived(
     !nt
@@ -35,7 +37,7 @@
 
 {#if nt}
   <Prop label="Team number" help="Robot code is on the team's roboRIO (10.TE.AM.2). Leave it empty to use the team the robot controller reports.">
-    <Num value={nt.settings.team ?? 0} min={0} max={25599} width={90} label="Team number" onchange={(v) => team.save({ team: v || null })} />
+    <input class="text team mono" type="number" min="0" max="25599" placeholder="none" value={team.number ?? ""} onchange={(e) => team.save({ team: teamOf(e.currentTarget.value) })} aria-label="Team number" />
     <Badge tone={team.source === "controller" ? "ok" : team.source === "user" ? "neutral" : "warn"} text={team.source === "controller" && team.controllerName ? `${team.number} from ${team.controllerName}` : SOURCE_TEXT[team.source]} />
   </Prop>
   <Prop label="NetworkTables" help="Every frame's pipeline outputs, latency and fps, for robot code.">
@@ -47,7 +49,7 @@
     <Badge tone="neutral" text={SOURCE_TEXT[nt.effective.nt4_server.source]} />
   </Prop>
   <Prop label="Server" help="Set a host for a simulator or another server.">
-    <input class="text mono" type="text" placeholder={roborioAddress(nt.settings.team ?? 0) ?? "roboRIO"} value={nt.settings.server ?? ""} onchange={(e) => team.save({ server: e.currentTarget.value.trim() || null })} aria-label="NetworkTables server" />
+    <input class="text mono" type="text" placeholder={roborioAddress(team.number ?? 0) ?? "roboRIO"} value={nt.settings.server ?? ""} onchange={(e) => team.save({ server: e.currentTarget.value.trim() || null })} aria-label="NetworkTables server" />
   </Prop>
   <Prop label="Topics" help="Each pipeline publishes <prefix>/<pipeline>/<output> (JSON), plus latency_ms, fps and capture_time_us.">
     <input class="text mono" type="text" value={nt.settings.prefix} onchange={(e) => team.save({ prefix: e.currentTarget.value.trim() || "/helios" })} aria-label="NetworkTables topic prefix" />
@@ -66,6 +68,9 @@
     background: var(--bg-1);
     color: var(--text);
     font-size: 12px;
+  }
+  .team {
+    width: 90px;
   }
   .small {
     font-size: 11px;
