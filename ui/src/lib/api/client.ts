@@ -52,6 +52,8 @@ import type {
   SetupRecord,
   StoredIdentity,
   PeerList,
+  MapEntry,
+  MapList,
 } from "./types";
 import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
@@ -110,6 +112,11 @@ export function previewUrl(cameraId: string, nodeId?: string): string {
 /** A stored recording's MCAP download (`GET /v1/recordings/{id}`), for a link. */
 export function recordingDownloadUrl(id: string): string {
   return url(`/v1/recordings/${enc(id)}`);
+}
+
+/** A saved map's file (`GET /v1/maps/{id}`), for a link: a peer's map through the gateway when `nodeId` is given. */
+export function mapDownloadUrl(id: string, nodeId?: string): string {
+  return url(nodeId === undefined ? `/v1/maps/${enc(id)}` : peerPath(nodeId, `/v1/maps/${enc(id)}`));
 }
 
 // Device security. On a secured device the browser signs in with the device
@@ -276,6 +283,12 @@ function methods(at: (path: string) => string) {
   uploadFieldLayout: (id: string, name: string, wpilibJson: string, tagSideM: number) =>
     call<{ id: string }>("POST", "/v1/field-layouts", { query: { id, name, tag_side_m: tagSideM }, raw: wpilibJson, headers: { "Content-Type": "application/json" } }),
   selectFieldLayout: (id: string) => call<{ id: string }>("PUT", "/v1/field-layouts/selected", { body: { id } }),
+
+  // Saved maps: the live mapper's maps, kept for a pipeline to start from. A save waits for the mapper
+  // (a few seconds, `503` when it did not give its map); a delete is refused (`409`) while a pipeline uses the map.
+  maps: () => call<MapList>("GET", "/v1/maps"),
+  deleteMap: (id: string) => call<void>("DELETE", `/v1/maps/${enc(id)}`),
+  saveMap: (pipeline: string, name?: string) => call<MapEntry>("POST", `/v1/pipelines/${enc(pipeline)}/map/save`, { body: name ? { name } : {} }),
 
   // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings
   // (the recordings it lists come from `recordings()` below).

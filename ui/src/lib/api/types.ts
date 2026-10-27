@@ -448,6 +448,8 @@ export interface PipelineSpec {
   dictionary?: string;
   /** The CPU core the graph thread is pinned to (0 to 63); unset leaves it to the scheduler. */
   cpu?: number;
+  /** The saved map (`/v1/maps`) the graph's live mapper starts from; unset or null starts it with no map. */
+  map?: string | null;
 }
 
 /** `GET /v1/pipelines/templates`: a graph helios-engine ships, deployable with a camera on `camera_input`. */
@@ -560,6 +562,8 @@ export interface Pipeline {
   field_layout: string | null;
   /** The CPU core the graph thread is pinned to (the spec's `cpu`); null for the scheduler's. */
   cpu: number | null;
+  /** The saved map the live mapper starts from (the spec's `map`); null: it starts with no map. */
+  map: string | null;
   pose: PoseSummary | null;
   managed: boolean;
   /** This pipeline's line of the status chain: why it is not running, or that it is. */
@@ -829,6 +833,32 @@ export interface FieldLayoutDocument {
     width_m: number;
     tags: { id: number; side_m: number; field_from_tag: { translation: { x: number; y: number; z: number }; rotation: { w: number; x: number; y: number; z: number } } }[];
   };
+}
+
+/** A saved map (`GET /v1/maps`): an Eidos map file the device keeps for pipelines to start from. */
+export interface MapEntry {
+  id: string;
+  name: string;
+  /** When it was stored, milliseconds since the Unix epoch. */
+  saved_at_ms: number;
+  size_bytes: number;
+  /** The pipeline whose live mapper saved it; null for an uploaded map. */
+  pipeline: string | null;
+  /** The camera that pipeline took its frames from. */
+  camera: string | null;
+  format_version: number;
+  /** When the mapper created the map, nanoseconds since the Unix epoch. */
+  created_ns: number;
+  /** The software that wrote the map. */
+  creator: string;
+}
+
+/** `GET /v1/maps`: the stored maps, newest first, with the store's size and limits. */
+export interface MapList {
+  maps: MapEntry[];
+  total_bytes: number;
+  max_total_bytes: number;
+  max_map_bytes: number;
 }
 
 /** The `settings` event: a setting of the device changed; clients refetch that domain. */
