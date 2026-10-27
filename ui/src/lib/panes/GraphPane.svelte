@@ -154,7 +154,7 @@
       <GraphCanvas {draft} transfers={transferByEdge} />
     </SvelteFlowProvider>
   {/key}
-  <PlanSection pipelineId={workload.id} revision={workload.revision} running={workload.state === "running"} />
+  <PlanSection pipelineId={workload.id} revision={workload.revision} running={workload.state === "running"} device={cluster.deviceOf(workload)} />
 {:else if cluster.workloads.length}
   <Empty icon="schema" text="Pick a pipeline in the tab bar, or click one in the Pipelines list." />
 {:else}

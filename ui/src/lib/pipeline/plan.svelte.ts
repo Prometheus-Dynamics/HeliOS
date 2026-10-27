@@ -3,8 +3,9 @@
 // device transfer is an edge with an adapter step (a DeviceUpload or DeviceDownload) or one that
 // crosses residency: each one is a round trip the graph pays for (AGENTS.md rule 4).
 
-import { api, errorText } from "#lib/api/client.js";
+import { errorText } from "#lib/api/client.js";
 import type { PipelinePlan, PlanEdge } from "#lib/api/types.js";
+import type { PipelineDevice } from "#lib/pipeline/device.js";
 
 export interface Transfer {
   edge: PlanEdge;
@@ -44,13 +45,16 @@ class PlanStore {
     return this.#plans[id] ?? { plan: null, error: null, loading: false, revision: null };
   }
 
-  /** Reads the plan for a revision (a no-op while that revision's plan is here or on its way). */
-  async load(id: string, revision: number) {
+  /**
+   * Reads the plan for a revision (a no-op while that revision's plan is here or on its way). `id` is
+   * the pipeline's cluster key; `device` is where it runs (a peer's plan is read through the gateway).
+   */
+  async load(id: string, revision: number, device: PipelineDevice) {
     const current = this.#plans[id];
     if (current && current.revision === revision && (current.loading || current.plan || current.error)) return;
     this.#plans[id] = { plan: current?.plan ?? null, error: null, loading: true, revision };
     try {
-      const plan = await api.pipelinePlan(id);
+      const plan = await device.scope.pipelinePlan(device.id);
       this.#plans[id] = { plan, error: null, loading: false, revision };
     } catch (error) {
       this.#plans[id] = { plan: null, error: errorText(error), loading: false, revision };

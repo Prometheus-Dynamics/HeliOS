@@ -12,6 +12,7 @@ import { api, errorText, scoped, type HeliosApi } from "#lib/api/client.js";
 import { toDaedalus } from "#lib/api/adapt.js";
 import { maps, type MapHost } from "./maps.svelte";
 import { deviceId, entityKey } from "#lib/api/peers.js";
+import { pipelineDevice, type PipelineDevice } from "#lib/pipeline/device.js";
 import type { CameraControlChanges, MapEntry } from "#lib/api/types.js";
 import type { DenseView } from "#lib/vision/dense.js";
 import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
@@ -481,6 +482,11 @@ class ClusterStore {
   mapHost(nodeId: string): MapHost {
     const remote = this.node(nodeId)?.peer !== undefined;
     return { id: nodeId, remote, scope: remote ? scoped(nodeId) : api };
+  }
+
+  /** Where a pipeline runs, for the calls that read it: its id on its device, and the API that reaches the device. */
+  deviceOf(w: Workload): PipelineDevice {
+    return pipelineDevice(w.nodeId, w.id, this.node(w.nodeId)?.peer !== undefined);
   }
 
   /** Saves pipeline `id`'s live map now, as `name` (the mapper gives its map within seconds). */

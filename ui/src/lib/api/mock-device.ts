@@ -134,6 +134,26 @@ function recordPeerRequest(request: PeerRequest) {
   }
 }
 
+/** A pipeline's plan as the simulated engine answers it (`explain_plan`), or `null` for no such pipeline. */
+function planAnswer(w: (typeof ROBOT_WORKLOADS)[number] | undefined): MockAnswer | null {
+  if (!w) return null;
+  // The simulated engine runs the mask and quad stages on the GPU, so the frame goes up once and the runs come down once.
+  const gpu = (nodeId: string) => /mask_prep|quads_from/.test(w.graph.nodes.find((n) => n.id === nodeId)?.type ?? "");
+  return {
+    value: {
+      format: "helios.engine.plan.v1",
+      plan: {
+        nodes: w.graph.nodes.map((n, index) => ({ index, id: n.id, label: n.label, compute: gpu(n.id) ? "gpu" : "cpu" })),
+        edges: w.graph.edges.map((e, index) => {
+          const up = !gpu(e.from.node) && gpu(e.to.node);
+          const down = gpu(e.from.node) && !gpu(e.to.node);
+          return { index, from_node_id: e.from.node, from_port: e.from.port, to_node_id: e.to.node, to_port: e.to.port, transport: "shm", copies_frame: up || down, crosses_residency: up || down, adapter_steps: up ? ["DeviceUpload"] : down ? ["DeviceDownload"] : [] };
+        }),
+      },
+    },
+  };
+}
+
 /** The simulated device's answer to a request, or `null` when the simulated robot has no such route. */
 export async function mockDevice(method: string, path: string, options: { query?: Record<string, unknown>; body?: unknown; raw?: BodyInit }): Promise<MockAnswer | null> {
   const device = read();
@@ -146,7 +166,12 @@ export async function mockDevice(method: string, path: string, options: { query?
     const id = decodeURIComponent(peer[1]);
     const routed = MOCK_DEVICE === "robot" && MOCK_PEERS.peers.some((p) => p.node_id === id && p.routed);
     if (!routed) throw new Error(`peer ${id} is not routed`);
-    if (method === "GET") return null;
+    if (method === "GET") {
+      // A peer's plan: the peer's own pipeline, which the cluster keys `<node>/<id>` (its id on the peer is `<id>`).
+      const plan = /^pipelines\/([^/]+)\/plan$/.exec(peer[2]);
+      const pipeline = plan ? decodeURIComponent(plan[1]) : "";
+      return plan ? planAnswer(ROBOT_WORKLOADS.find((w) => w.nodeId === id && w.id === `${id}/${pipeline}`)) : null;
+    }
     recordPeerRequest({ peer: id, method, path: `/v1/${peer[2]}`, body: options.body ?? null });
     return answer(undefined);
   }
@@ -154,23 +179,7 @@ export async function mockDevice(method: string, path: string, options: { query?
   // A pipeline's plan (`explain_plan`): the simulated engine runs the mask and quad stages on the GPU,
   // so the frame goes up once and the runs come down once, as a real plan would show.
   const plan = /^\/v1\/pipelines\/([^/]+)\/plan$/.exec(path);
-  if (plan && method === "GET") {
-    const id = decodeURIComponent(plan[1]);
-    const w = [...WORKLOADS, ...ROBOT_WORKLOADS].find((x) => x.id === id);
-    if (!w) return null;
-    const gpu = (nodeId: string) => /mask_prep|quads_from/.test(w.graph.nodes.find((n) => n.id === nodeId)?.type ?? "");
-    return answer({
-      format: "helios.engine.plan.v1",
-      plan: {
-        nodes: w.graph.nodes.map((n, index) => ({ index, id: n.id, label: n.label, compute: gpu(n.id) ? "gpu" : "cpu" })),
-        edges: w.graph.edges.map((e, index) => {
-          const up = !gpu(e.from.node) && gpu(e.to.node);
-          const down = gpu(e.from.node) && !gpu(e.to.node);
-          return { index, from_node_id: e.from.node, from_port: e.from.port, to_node_id: e.to.node, to_port: e.to.port, transport: "shm", copies_frame: up || down, crosses_residency: up || down, adapter_steps: up ? ["DeviceUpload"] : down ? ["DeviceDownload"] : [] };
-        }),
-      },
-    });
-  }
+  if (plan && method === "GET") return planAnswer([...WORKLOADS, ...ROBOT_WORKLOADS].find((x) => x.id === decodeURIComponent(plan[1])));
 
   if (path === "/v1/device/nt4") {
     if (method === "GET") return answer(nt4State(device.nt4));

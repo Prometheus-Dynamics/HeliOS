@@ -3,13 +3,15 @@
   // graph pays for), then every node with where it computes. The plan is read per revision
   // (pipeline/plan.svelte.ts); the graph above marks the same transfers on its edges.
   import Icon from "#lib/components/common/Icon.svelte";
+  import type { PipelineDevice } from "#lib/pipeline/device.js";
   import { plans, transfersOf } from "#lib/pipeline/plan.svelte.js";
 
   // The plan exists while the pipeline runs (a stopped one has none to read: the device answers 404).
-  let { pipelineId, revision, running, open = false }: { pipelineId: string; revision: number; running: boolean; open?: boolean } = $props();
+  // `device` is where the pipeline runs: a peer's plan is read through the gateway, under its node.
+  let { pipelineId, revision, running, device, open = false }: { pipelineId: string; revision: number; running: boolean; device: PipelineDevice; open?: boolean } = $props();
 
   $effect(() => {
-    if (running) void plans.load(pipelineId, revision);
+    if (running) void plans.load(pipelineId, revision, device);
   });
   const state = $derived(plans.get(pipelineId));
   const plan = $derived(state.plan);
