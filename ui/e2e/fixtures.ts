@@ -21,6 +21,9 @@ const ALLOWED_CONSOLE: { pattern: RegExp; why: string }[] = [
   // A running pipeline the device has not planned yet answers 404 to its plan; the graph says so
   // under the canvas, and the browser logs the response as a failed resource load.
   { pattern: /status of 404 .*\/v1\/pipelines\/[^/]+\/plan/i, why: "the device has no plan for the pipeline yet" },
+  // The simulated robot's feed (`/mock/robot/<n>.jpg`, `detections.json`, `poses.json`) is not in this
+  // checkout; the mock shows its robot without it.
+  { pattern: /status of 404 .*\/mock\/robot\/[\w.]+/i, why: "the mock robot's feed files are not in this checkout" },
 ];
 
 function allowed(text: string) {
