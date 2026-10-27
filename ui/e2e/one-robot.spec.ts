@@ -82,4 +82,27 @@ test.describe("one robot (mock)", () => {
     const requests = (await peerRequests(page)) as { peer: string }[];
     expect(requests.every((r) => r.peer === "systemcore-peer")).toBe(true);
   });
+  test("each device's pipeline named default shows, and each is editable on its own device", async ({ page }) => {
+    await openScreen(page, "Pipelines");
+    const owner = page.getByRole("button", { name: /AprilTags · front Owner/ });
+    const peer = page.getByRole("button", { name: /AprilTags · back SystemCore/ });
+    await expect(owner).toBeVisible();
+    await expect(peer).toBeVisible();
+    await expect(owner.getByText("Owner · r7", { exact: true })).toBeVisible();
+    await expect(peer.getByText("SystemCore · r7", { exact: true })).toBeVisible();
+    // Stopping the SystemCore's `default` goes to the peer's pipeline, and only that one stops.
+    await peer.click({ button: "right" });
+    await page.getByRole("menu").getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(peer.getByText("stopped", { exact: true })).toBeVisible();
+    await expect(owner.getByText("stopped", { exact: true })).toHaveCount(0);
+    await expect
+      .poll(() => peerRequests(page))
+      .toContainEqual(expect.objectContaining({ peer: "systemcore-peer", method: "POST", path: "/v1/pipelines/default/stop" }));
+    // The Raze's own `default` is still the Raze's: it stops through this device, not the gateway.
+    await owner.click({ button: "right" });
+    await page.getByRole("menu").getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(owner.getByText("stopped", { exact: true })).toBeVisible();
+    const requests = (await peerRequests(page)) as { peer: string; path: string }[];
+    expect(requests.filter((r) => r.path.includes("/pipelines/default/stop")).every((r) => r.peer === "systemcore-peer")).toBe(true);
+  });
 });
