@@ -115,6 +115,8 @@ pub struct CameraFacts {
     pub capture: Option<CaptureLive>,
     /// The device node (`/dev/videoN`), when the camera has one.
     pub device: Option<PathBuf>,
+    /// The device node is named but not on the system (the camera is unplugged or not enumerated).
+    pub device_missing: bool,
     /// Other programs holding the device node, by name (empty when none, or not looked for).
     pub holders: Vec<String>,
     /// The calibration stored for the frame size the pipelines take.
@@ -339,6 +341,11 @@ fn pipelines_stage(pipelines: &[PipelineFacts]) -> Stage {
 }
 
 fn camera_stage(camera: &CameraFacts) -> Stage {
+    if camera.device_missing {
+        let device = camera.device.as_ref().map_or_else(String::new, |d| format!(" {}", d.display()));
+        return Stage::new("camera", "Camera", StageState::Blocked, format!("Not connected: no device{device} on this system"))
+            .hint("Check the camera's cable and the port it is plugged into. It shows here again once it is detected.");
+    }
     if !camera.service {
         return Stage::new("camera", "Camera", StageState::Blocked, "The camera has no camera service, so it has no frames")
             .hint("Check the camera is plugged in and listed under Peripherals. Only cameras with a camera service show frames here.");
@@ -658,6 +665,26 @@ mod tests {
         let frames = stage(&derive(&served(None), &[]), "frames").clone();
         assert_eq!(frames.state, StageState::Waiting);
         assert!(frames.hint.unwrap_or_default().contains("camera view or a pipeline"));
+    }
+
+    #[test]
+    fn a_camera_whose_device_node_is_gone_is_not_connected_before_the_service() {
+        // The camera is unplugged: its record and service are still there, the node is not.
+        let camera = CameraFacts { device_missing: true, live_error: Some("camera service did not answer in time".into()), ..served(None) };
+        let status = derive(&camera, &[]);
+        let first = &status.stages[0];
+        assert_eq!((first.stage, first.state), ("camera", StageState::Blocked));
+        assert_eq!(first.reason, "Not connected: no device /dev/video0 on this system");
+        assert!(first.hint.as_deref().unwrap_or_default().contains("cable"));
+        assert_eq!(status.blocking, Some("camera"));
+        assert_eq!(status.summary, "Camera: Not connected: no device /dev/video0 on this system");
+    }
+
+    #[test]
+    fn a_camera_with_its_device_node_is_connected() {
+        let status = derive(&served(None), &[]);
+        assert_eq!(stage(&status, "camera").state, StageState::Ok);
+        assert_eq!(stage(&status, "camera").reason, "Connected at /dev/video0");
     }
 
     #[test]

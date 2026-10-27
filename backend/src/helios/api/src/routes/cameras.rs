@@ -239,6 +239,7 @@ async fn chain_of(state: &SharedState, view: &StateView, camera: &Camera, record
         service_online: camera.service_online,
         live_error: camera.live_error.clone(),
         capture,
+        device_missing: device.as_ref().is_some_and(|node| !node.exists()),
         device,
         holders,
         calibration,
