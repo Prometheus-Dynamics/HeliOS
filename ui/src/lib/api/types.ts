@@ -448,6 +448,8 @@ export interface PipelineSpec {
   dictionary?: string;
   /** The CPU core the graph thread is pinned to (0 to 63); unset leaves it to the scheduler. */
   cpu?: number;
+  /** The nice value of the graph thread (0 to 19); unset keeps the default. */
+  nice?: number;
   /** The saved map (`/v1/maps`) the graph's live mapper starts from; unset or null starts it with no map. */
   map?: string | null;
 }
@@ -564,6 +566,10 @@ export interface Pipeline {
   cpu: number | null;
   /** The saved map the live mapper starts from (the spec's `map`); null: it starts with no map. */
   map: string | null;
+  /** The tag family the graph's detector groups decode (the spec's `dictionary`); null: the graph's own. */
+  dictionary: string | null;
+  /** The nice value of the graph thread (the spec's `nice`); null: the default. */
+  nice: number | null;
   pose: PoseSummary | null;
   managed: boolean;
   /** This pipeline's line of the status chain: why it is not running, or that it is. */

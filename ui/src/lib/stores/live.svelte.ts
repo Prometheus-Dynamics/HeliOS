@@ -4,6 +4,7 @@
 // backend for yet (501) are reported once, as "not available".
 
 import { dictionaryLabel } from "#lib/format.js";
+import { specOf } from "#lib/api/spec.js";
 import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl, previewUrl, scoped, type HeliosApi } from "#lib/api/client.js";
@@ -991,8 +992,10 @@ export class LiveCluster {
 
   private specFor(id: string, graph: GraphDocument, enabled = true): W.PipelineSpec {
     const current = this.pipelines.get(id);
-    // The map is kept while the graph still has the live mapper (a PUT without it starts with no map).
-    return { name: current?.name ?? this.name(id), graph: toDaedalus(graph), bindings: current?.bindings ?? {}, enabled, map: hasLiveMap(graph) ? (current?.map ?? undefined) : undefined };
+    // Every setting the pipeline has is kept (a PUT replaces the spec). The map is kept only while the
+    // graph still has the live mapper.
+    const kept: Partial<W.PipelineSpec> = current?.graph ? specOf(current) : { name: this.name(id), bindings: current?.bindings ?? {} };
+    return { ...kept, name: kept.name ?? this.name(id), bindings: kept.bindings ?? {}, graph: toDaedalus(graph), enabled, map: hasLiveMap(graph) ? kept.map : undefined };
   }
 
   async restartWorkload(id: string) {
@@ -1048,7 +1051,7 @@ export class LiveCluster {
     const deployed = keep === undefined ? undefined : this.pipelines.get(keep);
     for (const key of mine) {
       const p = this.pipelines.get(key);
-      if (p?.enabled && (key !== keep || !template)) await this.act("Stop", () => this.apiOfPipeline(key).putPipeline(this.pipelineId(key), { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: false, map: p.map ?? undefined }));
+      if (p?.enabled && (key !== keep || !template)) await this.act("Stop", () => this.apiOfPipeline(key).putPipeline(this.pipelineId(key), { ...specOf(p), enabled: false }));
     }
     if (!template) {
       await this.refreshPipelines();
@@ -1070,7 +1073,7 @@ export class LiveCluster {
     const family = (d: string) => d.split("_")[0];
     const was = String(current?.graph.nodes.find((n) => n.params.dictionary !== undefined)?.params.dictionary ?? "");
     const kept = was && t.dictionary && family(was) === family(t.dictionary) ? was : undefined;
-    const spec: W.PipelineSpec = { name: title, graph: t.graph, bindings, enabled: true, dictionary: kept ?? t.dictionary ?? undefined, field_layout: deployed?.field_layout ?? undefined, map: t.capabilities?.includes("map") ? (deployed?.map ?? undefined) : undefined };
+    const spec: W.PipelineSpec = { name: title, graph: t.graph, bindings, enabled: true, dictionary: kept ?? t.dictionary ?? undefined, field_layout: deployed?.field_layout ?? undefined, cpu: deployed?.cpu ?? undefined, nice: deployed?.nice ?? undefined, map: t.capabilities?.includes("map") ? (deployed?.map ?? undefined) : undefined };
     if (keep) await this.act("Pipeline", () => this.apiOfPipeline(keep).putPipeline(this.pipelineId(keep), spec), () => `${name} now runs ${template.title}`);
     else await this.act("Create pipeline", () => this.apiOfCamera(cameraId).createPipeline(spec), () => `${name} now runs ${template.title}`);
     await this.refreshPipelines();
@@ -1102,7 +1105,7 @@ export class LiveCluster {
     return this.serial(async () => {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
-      const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined, map: p.map ?? undefined };
+      const spec: W.PipelineSpec = { ...specOf(p), search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
       await this.act("Search", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
       await this.refreshPipelines();
     });
@@ -1113,7 +1116,7 @@ export class LiveCluster {
     return this.serial(async () => {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
-      await this.act("Tag family", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, map: p.map ?? undefined }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
+      await this.act("Tag family", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), { ...specOf(p), dictionary }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
       await this.refreshPipelines();
     });
   }
@@ -1124,7 +1127,7 @@ export class LiveCluster {
     return this.serial(async () => {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
-      const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: cpu ?? undefined, map: p.map ?? undefined };
+      const spec: W.PipelineSpec = { ...specOf(p), cpu: cpu ?? undefined };
       await this.act("CPU core", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
       await this.refreshPipelines();
     });
@@ -1136,7 +1139,7 @@ export class LiveCluster {
     return this.serial(async () => {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
-      const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: p.search_mode ?? undefined, full_search_every: p.full_search_every ?? undefined, loss_full_search_after: p.loss_full_search_after ?? undefined, margin_growth_misses: p.margin_growth_misses ?? undefined, map: map ?? undefined };
+      const spec: W.PipelineSpec = { ...specOf(p), map };
       await this.act("Map", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), spec), (r) => (map === null ? `${r.name} starts with no map` : `${r.name} starts from its saved map when it next starts`));
       await this.refreshPipelines();
     });
