@@ -50,3 +50,26 @@ test("a map a pipeline starts from cannot be deleted until the pipeline chooses 
 test("a pipeline cannot start from a map the device does not keep", async () => {
   await expect(call("PUT", "/v1/pipelines/live-map-front", { name: "Live map", bindings: {}, map: "map-missing" })).rejects.toThrow("no map map-missing");
 });
+
+/** A map file's bytes: the header as the device reads it (version 1 unless said), no map after it. */
+function mapFile(creator = "eidos-mapping", version = 1): Blob {
+  const header = new Uint8Array(22 + creator.length);
+  header.set(new TextEncoder().encode("EIDMAP\0\0"), 0);
+  const view = new DataView(header.buffer);
+  view.setUint16(8, version, true);
+  view.setUint16(10, 0, true);
+  view.setBigUint64(12, 42n, true);
+  view.setUint16(20, creator.length, true);
+  header.set(new TextEncoder().encode(creator), 22);
+  return new Blob([header]);
+}
+
+test("a map file is kept as a map when its header is a version 1 map, and refused with the reason when not", async () => {
+  const kept = (await mockDevice("POST", "/v1/maps", { query: { name: "Lab upload" }, raw: mapFile() }))?.value as MapEntry;
+  expect(kept.name).toBe("Lab upload");
+  expect(kept.format_version).toBe(1);
+  expect(kept.creator).toBe("eidos-mapping");
+  expect(kept.pipeline).toBeNull();
+  await expect(mockDevice("POST", "/v1/maps", { raw: new Blob([new TextEncoder().encode("PNG, not a map")]) })).rejects.toThrow("not a saved map");
+  await expect(mockDevice("POST", "/v1/maps", { raw: mapFile("eidos-mapping", 2) })).rejects.toThrow("version 2");
+});

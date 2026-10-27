@@ -58,6 +58,11 @@ class MapsStore {
     return this.act(`save:${key}`, () => host.scope.saveMap(pipeline, name), () => this.refresh(host));
   }
 
+  /** Keeps a map file the device as a new map (`name` optional). A file the device refuses keeps its reason. */
+  async upload(host: MapHost, file: Blob, name?: string): Promise<MapEntry | undefined> {
+    return this.act("upload", () => host.scope.uploadMap(file, name), () => this.refresh(host));
+  }
+
   /** Deletes a stored map. A refusal (a pipeline starts from it) is kept as the map's failure. */
   async remove(host: MapHost, id: string): Promise<boolean> {
     const done = await this.act(`delete:${id}`, () => host.scope.deleteMap(id).then(() => true), () => this.refresh(host));

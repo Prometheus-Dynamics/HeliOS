@@ -289,6 +289,8 @@ function methods(at: (path: string) => string) {
   maps: () => call<MapList>("GET", "/v1/maps"),
   deleteMap: (id: string) => call<void>("DELETE", `/v1/maps/${enc(id)}`),
   saveMap: (pipeline: string, name?: string) => call<MapEntry>("POST", `/v1/pipelines/${enc(pipeline)}/map/save`, { body: name ? { name } : {} }),
+  /** A map file (Eidos's, version 1) as a new saved map; the device checks its header and refuses a bad one (`422`). */
+  uploadMap: (file: Blob, name?: string) => call<MapEntry>("POST", "/v1/maps", { query: { name }, raw: file, headers: { "Content-Type": "application/octet-stream" } }),
 
   // Playback: recordings and image folders replayed as cameras. Transport is the player's camera settings
   // (the recordings it lists come from `recordings()` below).

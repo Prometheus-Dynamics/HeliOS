@@ -202,6 +202,39 @@ export async function mockDevice(method: string, path: string, options: { query?
   // Saved maps: listed, saved from a live-map pipeline, deleted (refused while a pipeline starts from one).
   if (path === "/v1/maps" && method === "GET") return answer(mapList(device));
 
+  // A map file kept: its header is checked as the device checks it (magic, version 1, no flags).
+  if (path === "/v1/maps" && method === "POST") {
+    const bytes = new Uint8Array(await (options.raw as Blob).arrayBuffer());
+    if (bytes.length > MAX_MAP_BYTES) throw new Error(`a map is at most ${MAX_MAP_BYTES} bytes, this one is ${bytes.length}`);
+    if (String.fromCharCode(...bytes.slice(0, 8)) !== "EIDMAP\0\0") throw new Error("not a saved map: the file does not start with EIDMAP");
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const version = view.getUint16(8, true);
+    if (version !== 1) throw new Error(`not a saved map: map file version ${version} is not supported (this reads version 1)`);
+    if (view.getUint16(10, true) !== 0) throw new Error("not a saved map: map file flags are not supported (version 1 has none)");
+    const created = Number(view.getBigUint64(12, true));
+    const creatorLength = view.getUint16(20, true);
+    const creator = new TextDecoder().decode(bytes.slice(22, 22 + creatorLength));
+    const total = mapList(device).total_bytes;
+    if (total + bytes.length > MAX_TOTAL_MAP_BYTES) throw new Error(`the maps take ${total} of ${MAX_TOTAL_MAP_BYTES} bytes and this map needs ${bytes.length}: delete a map first`);
+    const now = Date.now();
+    const mapId = `map-${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const name = (typeof options.query?.name === "string" ? options.query.name : "").trim();
+    const entry: MapEntry = {
+      id: mapId,
+      name: name || mapId,
+      saved_at_ms: now,
+      size_bytes: bytes.length,
+      pipeline: null,
+      camera: null,
+      format_version: version,
+      created_ns: created,
+      creator,
+    };
+    device.maps = [...device.maps, entry];
+    write(device, "maps", entry.id);
+    return answer(entry);
+  }
+
   const map = /^\/v1\/maps\/([^/]+)$/.exec(path);
   if (map && method === "DELETE") {
     const id = decodeURIComponent(map[1]);

@@ -44,12 +44,25 @@
     untrack(() => void maps.refresh(current));
   });
 
+  const uploading = $derived(Boolean(maps.busy["upload"]));
+  const uploadError = $derived(maps.failures["upload"]);
+
   async function save() {
     const saved = await cluster.saveMap(w.id, name.trim() || undefined);
     if (saved) {
       name = "";
       toasts.success(`Saved the map as ${saved.name}`);
     }
+  }
+
+  // The file is kept as a map named after it; the device's refusal (a bad header) is shown here.
+  async function upload(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const kept = await maps.upload(host, file, file.name.replace(/\.eidmap$/, "") || undefined);
+    input.value = "";
+    if (kept) toasts.success(`Kept the map ${kept.name}`);
   }
 </script>
 
@@ -63,6 +76,12 @@
   </span>
 </Prop>
 {#if saveError}<div class="err">{saveError}</div>{/if}
+<Prop label="Keep a map file" help="Keeps a map file saved elsewhere (a version 1 Eidos map). The board checks it when it is kept.">
+  <span class="save">
+    <input class="file" type="file" accept=".eidmap,application/octet-stream" aria-label="Map file" disabled={uploading} onchange={upload} />
+  </span>
+</Prop>
+{#if uploadError}<div class="err">{uploadError}</div>{/if}
 
 {#if readError}
   <div class="err">Cannot read the saved maps: {readError}</div>
@@ -123,6 +142,12 @@
   }
   .name:focus {
     border-color: var(--accent-ring);
+  }
+  .file {
+    flex: 1;
+    min-width: 0;
+    font-size: 11.5px;
+    color: var(--fg-2);
   }
   .none {
     padding: 4px 10px 6px;
