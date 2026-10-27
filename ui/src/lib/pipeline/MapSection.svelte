@@ -10,7 +10,7 @@
   import { timeAgo, bytes } from "#lib/format.js";
   import Choice from "#lib/kit/Choice.svelte";
   import Prop from "#lib/kit/Prop.svelte";
-  import { mapChoices, mapOrigin, mapsSummary } from "#lib/maps/mapping.js";
+  import { mapChoices, mapOrigin, mapsSummary, noMapToSave } from "#lib/maps/mapping.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { maps } from "#lib/stores/maps.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
@@ -25,6 +25,8 @@
   const readError = $derived(maps.readErrors[w.nodeId]);
   const saving = $derived(Boolean(maps.busy[`save:${w.id}`]));
   const saveError = $derived(maps.failures[`save:${w.id}`]);
+  // Why there is no map to save yet (the mapper's live pose), or null when Save now can save one.
+  const noMap = $derived(noMapToSave(w.state === "running", cluster.mapFor(w)?.pose ?? null));
 
   // The device names a map's pipeline and camera by their ids on that device; the cluster knows them by key.
   const names = {
@@ -48,6 +50,7 @@
   const uploadError = $derived(maps.failures["upload"]);
 
   async function save() {
+    if (noMap) return;
     const saved = await cluster.saveMap(w.id, name.trim() || undefined);
     if (saved) {
       name = "";
@@ -72,9 +75,10 @@
 <Prop label="Save the map" help="Keeps the map the live mapper has built so far as a saved map. Takes a few seconds, and the pipeline must be running.">
   <span class="save">
     <input class="name" placeholder="Name (optional)" aria-label="Map name" maxlength={120} bind:value={name} disabled={saving} />
-    <button type="button" class="act" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save now"}</button>
+    <button type="button" class="act" disabled={saving || noMap !== null} title={noMap ?? undefined} onclick={save}>{saving ? "Saving…" : "Save now"}</button>
   </span>
 </Prop>
+{#if noMap && !saving}<div class="none">{noMap}</div>{/if}
 {#if saveError}<div class="err">{saveError}</div>{/if}
 <Prop label="Keep a map file" help="Keeps a map file saved elsewhere (a version 1 Eidos map). The board checks it when it is kept.">
   <span class="save">

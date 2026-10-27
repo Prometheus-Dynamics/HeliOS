@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { api, mapDownloadUrl } from "../src/lib/api/client";
 import type { MapEntry, MapList } from "../src/lib/api/types";
-import { hasLiveMap, mapChoices, mapOrigin, mapsSummary } from "../src/lib/maps/mapping";
+import { hasLiveMap, mapChoices, mapOrigin, mapsSummary, noMapToSave } from "../src/lib/maps/mapping";
+import { parseMapPose } from "../src/lib/vision/map";
 
 const entry = (over: Partial<MapEntry> = {}): MapEntry => ({
   id: "map-a1",
@@ -37,6 +38,17 @@ test("a map the pipeline starts from but that is no longer stored stays choosabl
   const choices = mapChoices([entry()], "map-gone");
   expect(choices.at(-1)).toEqual({ value: "map-gone", label: "map-gone (not stored)" });
   expect(mapChoices([entry()], "map-a1")).toHaveLength(2);
+});
+
+test("Save now waits for a map: none while the pipeline is stopped or the mapper is still calibrating", () => {
+  const pose = (state: string) =>
+    parseMapPose({ state, reason: "", valid: state === "tracking", calibration: { estimated: true, rms_px: 0.4, views: 9, frames: 90 }, alignment: { aligned: false, matched_tags: 0, residual_m: 0 } });
+  expect(noMapToSave(true, null)).toContain("not reported");
+  expect(noMapToSave(true, pose("bootstrapping"))).toContain("still calibrating");
+  expect(noMapToSave(true, pose("tracking"))).toBeNull();
+  expect(noMapToSave(true, pose("coasting"))).toBeNull();
+  expect(noMapToSave(true, pose("lost"))).toBeNull();
+  expect(noMapToSave(false, pose("tracking"))).toContain("Start the pipeline");
 });
 
 test("a map's origin names its pipeline and camera, or says it was uploaded", () => {

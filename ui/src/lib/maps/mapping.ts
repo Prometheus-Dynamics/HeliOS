@@ -4,6 +4,7 @@
 
 import { bytes } from "#lib/format.js";
 import type { MapEntry, MapList } from "#lib/api/types.js";
+import type { MapPose } from "#lib/vision/map.js";
 
 /** The live mapper's node type, as a graph names it (`eidos:mapping.live_map`). */
 export const LIVE_MAP_NODE = "eidos:mapping.live_map";
@@ -28,6 +29,19 @@ export function mapOrigin(map: MapEntry, names: { pipeline: (id: string) => stri
   if (!map.pipeline) return "uploaded";
   const from = `from ${names.pipeline(map.pipeline)}`;
   return map.camera ? `${from} · ${names.camera(map.camera)}` : from;
+}
+
+/**
+ * Why the live mapper has no map to save yet, as a line for the control that would save it (null when
+ * it has one). A pipeline that is not running has none, and neither does a mapper still bootstrapping
+ * (calibrating, no tags seen yet, the state the device reports as `bootstrapping`). The device refuses
+ * a save then, after a wait; the control says so instead.
+ */
+export function noMapToSave(running: boolean, pose: MapPose | null): string | null {
+  if (!running) return "Start the pipeline to save its map.";
+  if (!pose) return "The live mapper has not reported yet. Save once it has a map.";
+  if (pose.state === "bootstrapping") return "The live mapper is still calibrating, so there is no map to save yet.";
+  return null;
 }
 
 /** The stored maps' line: how many, and how much of the store they take. */
