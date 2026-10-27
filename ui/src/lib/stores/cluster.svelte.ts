@@ -272,6 +272,18 @@ class ClusterStore {
     const input = this.cameraInput(w);
     return input ? this.camera(w.bindings[input]) : undefined;
   }
+  /**
+   * Why a quarantined pipeline stopped, from what it reads: its camera's first blocking stage when
+   * the camera is there and blocked, the camera's absence when it is not connected, else the
+   * pipeline's own status. `restart` says whether restarting it can help.
+   */
+  stopOf(w: Workload): { reason: string; hint: string | null; stage: string | null; restart: boolean } {
+    const stop = blockingStage(this.cameraOf(w)?.status);
+    if (stop) return { reason: `${stop.label}: ${stop.reason}`, hint: stop.hint, stage: stop.stage, restart: false };
+    const absent = Object.values(w.bindings).find((id) => !this.camera(id));
+    if (absent) return { reason: `camera not connected (${absent} is not on the device)`, hint: "Plug it in, or stop the pipeline.", stage: null, restart: false };
+    return { reason: w.status?.reason ?? "stopped", hint: w.status?.hint ?? null, stage: null, restart: true };
+  }
   workload(id: string) {
     return this.workloads.find((w) => w.id === id);
   }
@@ -282,7 +294,7 @@ class ClusterStore {
   get attention(): { tone: "error" | "warning"; text: string; href: string }[] {
     const items: { tone: "error" | "warning"; text: string; href: string }[] = [];
     for (const w of this.workloads.filter((x) => x.state === "quarantined")) {
-      items.push({ tone: "error", text: `${w.name} is quarantined after ${w.restarts} restarts`, href: `/pipelines/${encodeURIComponent(w.id)}` });
+      items.push({ tone: "error", text: `${w.name} is stopped: ${this.stopOf(w).reason}`, href: `/pipelines/${encodeURIComponent(w.id)}` });
     }
     for (const c of this.cameras) {
       const stop = blockingStage(c.status);
@@ -312,6 +324,17 @@ class ClusterStore {
   private toPeer(nodeId: string | undefined, run: (peer: HeliosApi) => Promise<unknown>) {
     if (!this.mock || !nodeId || this.node(nodeId)?.peer?.routed !== true) return;
     run(scoped(nodeId)).catch(() => undefined);
+  }
+
+  /**
+   * The pipeline a camera feeds: on the camera's own node, the running one that binds it (else the
+   * first that does). Keys are per node, so a peer's camera is only read by its node's pipelines.
+   */
+  pipelineOf(cameraKey: string): string | undefined {
+    const camera = this.camera(cameraKey);
+    if (!camera) return undefined;
+    const reading = this.workloads.filter((w) => w.nodeId === camera.nodeId && Object.values(w.bindings).includes(cameraKey));
+    return (reading.find((w) => w.state === "running") ?? reading[0])?.id;
   }
 
   // --- Actions -----------------------------------------------------------
