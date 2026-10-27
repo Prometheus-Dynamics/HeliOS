@@ -56,6 +56,10 @@ const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
 /// Control kinds a value can be stored and reset for.
 const SCALAR_KINDS: [ControlKind; 6] = [ControlKind::Bool, ControlKind::Int, ControlKind::Uint, ControlKind::Float, ControlKind::Menu, ControlKind::IntMenu];
 
+/// The sensor's frame duration, which a running processed capture keeps (a reset cannot change it
+/// under the pipelines' frame requests: the camera service refuses another rate, see `reset`).
+const FRAME_DURATION_CONTROL: &str = "frame_duration_us";
+
 /// One control change to make: what it was asked for as, the target and the value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlChange {
@@ -246,9 +250,13 @@ impl CameraClient {
     pub async fn reset(&self) -> ApiResult<Vec<AppliedCameraControl>> {
         self.store.clear_camera_settings(&self.camera_id).await?;
         let descriptors = self.client.controls_async().await.map_err(|error| control_error("", &[], error))?;
+        // The frame rate and duration are not reset here: the pipelines' frame requests carry the
+        // rate (`refresh_pipelines` after this call), and a running capture refuses a new duration
+        // ("keeps the frame rate it started with"), which would stop the reset half-way.
         let mut changes = descriptors
             .iter()
-            .filter(|descriptor| descriptor.writable && descriptor.standard != Some(StandardControl::AfTrigger) && SCALAR_KINDS.contains(&descriptor.meta.kind))
+            .filter(|descriptor| descriptor.writable && descriptor.standard != Some(StandardControl::AfTrigger) && descriptor.standard != Some(StandardControl::FrameRate))
+            .filter(|descriptor| descriptor.meta.name != FRAME_DURATION_CONTROL && SCALAR_KINDS.contains(&descriptor.meta.kind))
             .map(|descriptor| ControlChange {
                 key: descriptor.standard.map_or_else(|| descriptor.meta.name.clone(), |standard| standard_key(standard).to_string()),
                 target: ControlTarget::Id(descriptor.meta.id),

@@ -8,16 +8,19 @@ export interface Selection {
   id: string;
   /** Owning object, e.g. the workload a graph node belongs to. */
   parent?: string;
+  /** The order of the selection (the newest is the largest), set by `select`. */
+  at?: number;
 }
 
 class SelectionStore {
   current = $state<Selection | null>(null);
   /** Last selected object of each kind, so panes can follow "the camera" etc. */
   last = $state<Partial<Record<SelectionKind, Selection>>>({});
+  private count = 0;
 
   select(selection: Selection | null) {
     this.current = selection;
-    if (selection) this.last[selection.kind] = selection;
+    if (selection) this.last[selection.kind] = { ...selection, at: ++this.count };
   }
 
   is(kind: SelectionKind, id: string) {

@@ -58,14 +58,16 @@
       >
         <Swatch id={c.resourceId} icon="camera" size={20} />
         <span class="name">
-          <b>{identity.name(c.resourceId, c.name)}</b>
-          <span class="sub">{c.settings.width}×{c.settings.height} · {c.settings.format}{c.foreign ? ` · ${c.foreign}` : ""}</span>
-          {#if stop}<span class="sub" data-stage={stop.stage} style:color={stop.state === "blocked" ? "var(--err)" : "var(--info)"}>{stop.label}: {stop.reason}</span>{/if}
+          <span class="title">
+            <b title={identity.name(c.resourceId, c.name)}>{identity.name(c.resourceId, c.name)}</b>
+            {#if cluster.node(c.nodeId)?.peer}
+              {@const gw = cluster.gateway}
+              <Badge tone="info" text={gw ? `via ${identity.name(gw.id, gw.name)}` : "via gateway"} />
+            {/if}
+          </span>
+          <span class="sub" title="{c.settings.width}×{c.settings.height} · {c.settings.format}{c.foreign ? ` · ${c.foreign}` : ""}">{c.settings.width}×{c.settings.height} · {c.settings.format}{c.foreign ? ` · ${c.foreign}` : ""}</span>
+          {#if stop}<span class="sub" data-stage={stop.stage} style:color={stop.state === "blocked" ? "var(--err)" : "var(--info)"} title="{stop.label}: {stop.reason}">{stop.label}: {stop.reason}</span>{/if}
         </span>
-        {#if cluster.node(c.nodeId)?.peer}
-          {@const gw = cluster.gateway}
-          <Badge tone="info" text={gw ? `via ${identity.name(gw.id, gw.name)}` : "via gateway"} />
-        {/if}
         <span class="num" class:dim={!tags} data-tip="Tags this frame"><Icon name="target" size={11} />{tags}</span>
         <span class="num fps" class:bad={c.stats.fps < c.settings.fps * 0.9}>{c.stats.fps.toFixed(0)}</span>
       </button>
@@ -138,7 +140,15 @@
     min-width: 0;
     line-height: 1.25;
   }
+  /* The name and its badge share a line; the name gives way first. */
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
   .name b {
+    min-width: 0;
     font-size: 12.5px;
     font-weight: 600;
     overflow: hidden;
@@ -146,11 +156,16 @@
     white-space: nowrap;
   }
   .sub {
+    min-width: 0;
     font-size: 10.5px;
     color: var(--fg-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .num {
     display: inline-flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 2px;
     font-family: var(--font-code);
@@ -162,6 +177,7 @@
   }
   .fps {
     min-width: 20px;
+    flex-shrink: 0;
     justify-content: flex-end;
     color: var(--ok);
   }

@@ -9,7 +9,7 @@
   let { node, ws }: { node: LayoutNode; ws: string } = $props();
 
   let host = $state<HTMLDivElement>();
-  /** The narrowest a pane may be dragged (px): wide enough for its bar and a table's columns. */
+  /** The narrowest a pane may be (px): wide enough for its bar and a table's columns. */
   const MIN_WIDTH_PX = 220;
   const MIN_HEIGHT_PX = 120;
 
@@ -50,7 +50,7 @@
 {:else}
   <div class="split {node.dir}" bind:this={host}>
     {#each node.children as child, i (child.id)}
-      <div class="cell" style:flex="{node.sizes[i]} 1 0">
+      <div class="cell" style:flex="{node.sizes[i]} 1 0" style:min-width={node.dir === "row" ? `min(${MIN_WIDTH_PX}px, ${100 / node.children.length}%)` : undefined}>
         <LayoutView node={child} {ws} />
       </div>
       {#if i < node.children.length - 1}

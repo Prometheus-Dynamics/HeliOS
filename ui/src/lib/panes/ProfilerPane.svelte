@@ -13,10 +13,10 @@
   import PaneBar from "#lib/workspace/PaneBar.svelte";
   import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
-  import { follow } from "./follow.svelte";
+  import { followPipeline } from "./follow.svelte";
 
   let { pane, ws }: PaneProps = $props();
-  const target = follow(() => pane, () => ws, "workload", () => cluster.workloads[0]?.id);
+  const target = followPipeline(() => pane, () => ws, (camera) => cluster.pipelineOf(camera), () => cluster.workloads[0]?.id);
   const w = $derived(target.id ? cluster.workload(target.id) : undefined);
   const sort = $derived((pane.props?.sort as "graph" | "time") ?? "graph");
 

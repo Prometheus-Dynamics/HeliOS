@@ -2,6 +2,7 @@
 
 import type { IconName } from "#lib/ui/icons.js";
 import { drafts } from "#lib/graph/drafts.svelte.js";
+import { shell } from "#lib/core/shell.svelte.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
 import { blockingStage } from "#lib/status/chain.js";
 
@@ -13,20 +14,37 @@ export interface Problem {
   fixes: { label: string; icon: IconName; run: () => void; primary?: boolean }[];
 }
 
+/** Where each stage of a camera's status chain is fixed (the same panes as the setup checklist). */
+const STAGE_FIX: Record<string, { label: string; icon: IconName; screen: "setup" | "tune" | "device"; pane: string }> = {
+  camera: { label: "Open devices", icon: "camera", screen: "device", pane: "devices" },
+  service: { label: "Open devices", icon: "camera", screen: "device", pane: "devices" },
+  frames: { label: "Open devices", icon: "camera", screen: "device", pane: "devices" },
+  pipeline: { label: "Choose what it runs", icon: "list-check", screen: "setup", pane: "camera-jobs" },
+  detections: { label: "Open camera controls", icon: "adjustments-horizontal", screen: "tune", pane: "camera-controls" },
+  calibration: { label: "Open calibration", icon: "grid-4x4", screen: "setup", pane: "calibration" },
+  map: { label: "Choose what it runs", icon: "list-check", screen: "setup", pane: "camera-jobs" },
+  depth: { label: "Choose what it runs", icon: "list-check", screen: "setup", pane: "camera-jobs" },
+  features: { label: "Choose what it runs", icon: "list-check", screen: "setup", pane: "camera-jobs" },
+};
+
 /** Needs a person: an error, or something with a fix to press. */
 export const actionable = (p: Problem) => p.severity === "error" || p.fixes.length > 0;
 
 export function problems(): Problem[] {
   const out: Problem[] = [];
   for (const w of cluster.workloads.filter((x) => x.state === "quarantined")) {
+    const stop = cluster.stopOf(w);
+    const fix = stop.stage ? STAGE_FIX[stop.stage] : undefined;
     out.push({
       id: `wl:${w.id}`,
       severity: "error",
-      title: `${w.name}: quarantined after ${w.restarts} crashes`,
-      why: "Stopped to protect the rest of the device; its camera keeps streaming.",
+      title: `${w.name}: ${stop.reason}`,
+      why: stop.hint ?? "Stopped to protect the rest of the device.",
       fixes: [
-        ...(cluster.canRollBack(w.id) ? [{ label: `Roll back to r${w.revision - 1}`, icon: "history" as const, primary: true, run: () => drafts.get(w.id).rollBack() }] : []),
-        { label: "Restart", icon: "refresh", run: () => cluster.restartWorkload(w.id) },
+        ...(fix ? [{ label: fix.label, icon: fix.icon, primary: true, run: () => shell.open(fix.screen, fix.pane) }] : []),
+        // A bad revision is what rolling back and restarting mend; a missing camera or a blocked stage is not.
+        ...(stop.restart && cluster.canRollBack(w.id) ? [{ label: `Roll back to r${w.revision - 1}`, icon: "history" as const, primary: true, run: () => drafts.get(w.id).rollBack() }] : []),
+        ...(stop.restart ? [{ label: "Restart", icon: "refresh" as const, run: () => cluster.restartWorkload(w.id) }] : []),
         { label: "Stop", icon: "player-stop", run: () => cluster.stopWorkload(w.id) },
       ],
     });

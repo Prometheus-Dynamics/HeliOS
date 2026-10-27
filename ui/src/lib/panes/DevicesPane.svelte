@@ -53,19 +53,21 @@
       <span class="name">
         <Swatch id={n.id} icon={nodeIcon(n.kind)} size={20} />
         <span class="nm">
-          <b>{identity.name(n.id, n.name)}</b>
-          <i>{n.model}</i>
-        </span>
-        <span class="tags">
-          {#if n.peer}
-            {@const gw = cluster.gateway ? identity.name(cluster.gateway.id, cluster.gateway.name) : "gateway"}
-            <span data-tip={n.peer.routed ? `Reached through ${gw}` : "The gateway does not reach this peer"}>
-              <Badge tone={n.peer.routed ? "info" : "warn"} text={n.peer.routed ? `via ${gw}` : "not routed"} />
+          <b title={identity.name(n.id, n.name)}>{identity.name(n.id, n.name)}</b>
+          <span class="meta">
+            <i title={n.model}>{n.model}</i>
+            <span class="tags">
+              {#if n.peer}
+                {@const gw = cluster.gateway ? identity.name(cluster.gateway.id, cluster.gateway.name) : "gateway"}
+                <span data-tip={n.peer.routed ? `Reached through ${gw}` : "The gateway does not reach this peer"}>
+                  <Badge tone={n.peer.routed ? "info" : "warn"} text={n.peer.routed ? `via ${gw}` : "not routed"} />
+                </span>
+                {#if n.peer.foundBy}<Badge tone="neutral" text={`found by ${n.peer.foundBy}`} mono />{/if}
+              {/if}
+              <Badge tone={placeOf(n).tone} text={placeOf(n).text} />
+              <Badge tone="neutral" text={n.kind} mono />
             </span>
-            {#if n.peer.foundBy}<Badge tone="neutral" text={`found by ${n.peer.foundBy}`} mono />{/if}
-          {/if}
-          <Badge tone={placeOf(n).tone} text={placeOf(n).text} />
-          <Badge tone="neutral" text={n.kind} mono />
+          </span>
         </span>
       </span>
       <span class="link" data-tip="{n.link} · {n.address}"><Icon name={LINK_ICON[n.link]} size={12} /><span>{n.address}</span></span>
@@ -117,7 +119,9 @@
   }
   .row {
     position: relative;
-    height: 36px;
+    min-height: 36px;
+    padding-top: 4px;
+    padding-bottom: 4px;
     border-bottom: 1px solid var(--line);
   }
   .row:hover {
@@ -148,26 +152,38 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+    overflow: hidden;
   }
+  /* The name on its own line; the model and the badges under it, wrapping rather than overlapping. */
   .nm {
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-width: 0;
     line-height: 1.25;
   }
+  .meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    min-width: 0;
+  }
   .tags {
     display: flex;
-    flex-shrink: 0;
+    flex-wrap: wrap;
     gap: 4px;
-    margin-left: auto;
+    min-width: 0;
   }
   .nm b {
+    min-width: 0;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .nm i {
+    min-width: 0;
     font-style: normal;
     font-size: 10.5px;
     color: var(--fg-3);
