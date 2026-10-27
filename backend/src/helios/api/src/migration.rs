@@ -15,9 +15,11 @@
 //!
 //! Orion keeps what the old id published: the providers and executors of `node-local`, and the
 //! resources those providers published. Nothing publishes under the old id again, so
-//! [`spawn_retire`] removes them, once the new id's own provider is live, and on every start until
-//! none are left (the marker does not cover them: a board migrated before this ran still has them).
-//! Removing a provider drops the resources it published (Orion prunes them with it).
+//! [`spawn_retire`] removes the desired records of the old id, once the new id's own provider is
+//! live, and on every start until none are left (the marker does not cover them: a board migrated
+//! before this ran still has them). Orion has no client request that retracts observed records, and
+//! it prunes them only when it starts, so the old id's observed resources stay in Orion until then;
+//! the API hides them meanwhile (`retired_resources` in `orion.rs`).
 
 use std::{
     collections::BTreeMap,
