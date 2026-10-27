@@ -10,8 +10,9 @@ import { dispatchSettings } from "#lib/core/sync.js";
 import { demoDocument, documentFromWpilib, type WpilibFieldLayout } from "#lib/stores/field-layout.js";
 import { MOCK_DEVICE } from "./mode";
 import { MOCK_PEERS } from "./mock-devices";
+import { LIVE_MAP_NODE } from "#lib/maps/mapping.js";
 import { ROBOT_WORKLOADS, WORKLOADS } from "./mock";
-import type { FieldLayoutDocument, FieldLayoutList, Nt4Settings, SettingsChange, SetupRecord, StoredIdentity } from "./types";
+import type { FieldLayoutDocument, FieldLayoutList, MapEntry, MapList, Nt4Settings, SettingsChange, SetupRecord, StoredIdentity } from "./types";
 
 const KEY = "helios:mock-device";
 const CHANNEL = "helios-mock-device";
@@ -22,10 +23,30 @@ interface Device {
   identities: Record<string, StoredIdentity>;
   setup: SetupRecord;
   field: { selected: string; layouts: Record<string, FieldLayoutDocument> };
+  /** The saved maps (`/v1/maps`): the map files themselves are not simulated, only their entries. */
+  maps: MapEntry[];
+}
+
+/** The device's limits for saved maps (`maps.rs`): the store's total and one map's size. */
+const MAX_TOTAL_MAP_BYTES = 128 * 1024 * 1024;
+const MAX_MAP_BYTES = 16 * 1024 * 1024;
+
+/** One practice map, so the Maps section of a live-map pipeline has something to show on a fresh simulated robot. */
+function demoMaps(): MapEntry[] {
+  const saved = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  return [{ id: "map-practice-field", name: "Practice field", saved_at_ms: saved, size_bytes: 1_310_720, pipeline: "live-map-front", camera: "camera.raze-front.cam0", format_version: 1, created_ns: saved * 1_000_000, creator: "eidos-mapping" }];
 }
 
 function fresh(): Device {
-  return { nt4: { ...DEFAULT_NT4 }, identities: {}, setup: { onboarded: false }, field: { selected: DEMO_ID, layouts: { [DEMO_ID]: demoDocument(DEMO_ID) } } };
+  return { nt4: { ...DEFAULT_NT4 }, identities: {}, setup: { onboarded: false }, field: { selected: DEMO_ID, layouts: { [DEMO_ID]: demoDocument(DEMO_ID) } }, maps: demoMaps() };
+}
+
+/** The map each simulated pipeline starts from (`null`: none), by pipeline id. Kept with the tab's pipelines, as the simulated pipelines are. */
+const pipelineMaps = new Map<string, string | null>();
+
+function mapList(device: Device): MapList {
+  const maps = [...device.maps].sort((a, b) => b.saved_at_ms - a.saved_at_ms || a.id.localeCompare(b.id));
+  return { maps, total_bytes: device.maps.reduce((sum, map) => sum + map.size_bytes, 0), max_total_bytes: MAX_TOTAL_MAP_BYTES, max_map_bytes: MAX_MAP_BYTES };
 }
 
 function read(): Device {
@@ -176,6 +197,58 @@ export async function mockDevice(method: string, path: string, options: { query?
       return answer(undefined);
     }
     return null;
+  }
+
+  // Saved maps: listed, saved from a live-map pipeline, deleted (refused while a pipeline starts from one).
+  if (path === "/v1/maps" && method === "GET") return answer(mapList(device));
+
+  const map = /^\/v1\/maps\/([^/]+)$/.exec(path);
+  if (map && method === "DELETE") {
+    const id = decodeURIComponent(map[1]);
+    if (!device.maps.some((m) => m.id === id)) throw new Error(`no map ${id}`);
+    const users = [...pipelineMaps].filter(([, chosen]) => chosen === id).map(([pipeline]) => pipeline);
+    if (users.length) throw new Error(`pipelines ${users.join(", ")} start from map ${id}; choose another map for them first`);
+    device.maps = device.maps.filter((m) => m.id !== id);
+    write(device, "maps", id);
+    return answer(undefined);
+  }
+
+  const save = /^\/v1\/pipelines\/([^/]+)\/map\/save$/.exec(path);
+  if (save && method === "POST") {
+    const id = decodeURIComponent(save[1]);
+    const w = [...WORKLOADS, ...ROBOT_WORKLOADS].find((x) => x.id === id);
+    if (!w) throw new Error(`no pipeline ${id}`);
+    if (!w.graph.nodes.some((n) => n.type === LIVE_MAP_NODE)) throw new Error(`pipeline ${id} has no live map to save`);
+    const size = 1_100_000 + Math.floor(Math.random() * 400_000);
+    const used = mapList(device).total_bytes;
+    if (used + size > MAX_TOTAL_MAP_BYTES) throw new Error(`the maps take ${used} of ${MAX_TOTAL_MAP_BYTES} bytes and this map needs ${size}: delete a map first`);
+    const now = Date.now();
+    const mapId = `map-${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const name = ((options.body as { name?: string } | undefined)?.name ?? "").trim();
+    const entry: MapEntry = {
+      id: mapId,
+      name: name || mapId,
+      saved_at_ms: now,
+      size_bytes: size,
+      pipeline: id,
+      camera: Object.values(w.bindings)[0] ?? null,
+      format_version: 1,
+      created_ns: now * 1_000_000,
+      creator: "eidos-mapping (simulated)",
+    };
+    device.maps = [...device.maps, entry];
+    write(device, "maps", entry.id);
+    return answer(entry);
+  }
+
+  // A pipeline's spec: only the map it starts from is kept here (the simulated engine runs no graph).
+  const pipeline = /^\/v1\/pipelines\/([^/]+)$/.exec(path);
+  if (pipeline && method === "PUT") {
+    const id = decodeURIComponent(pipeline[1]);
+    const chosen = (options.body as { map?: string | null } | undefined)?.map ?? null;
+    if (chosen !== null && !device.maps.some((m) => m.id === chosen)) throw new Error(`no map ${chosen}`);
+    pipelineMaps.set(id, chosen);
+    return answer(undefined);
   }
 
   if (path === "/v1/device/setup") {
