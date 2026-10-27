@@ -20,8 +20,11 @@ test.describe("screens", () => {
   }
 
   test("the rail is the four jobs, in order", async ({ page }) => {
+    // The buttons' labels (their text also carries the setup-steps and problem badges).
     const rail = page.getByRole("navigation", { name: "Screens" });
-    await expect(rail.getByRole("button", { name: /^(Set up|Run|Tune|Device)$/ })).toHaveText([...SCREENS]);
+    const labels = rail.getByRole("button", { name: /^(Set up|Run|Tune|Device)$/ });
+    await expect(labels).toHaveCount(4);
+    expect(await labels.evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-label")))).toEqual([...SCREENS]);
   });
 
   test("the status bar's problems and setup jump to Run and Set up", async ({ page }) => {
