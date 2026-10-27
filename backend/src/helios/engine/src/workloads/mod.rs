@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, deserialize_config};
 use serde::Deserialize;
 
 use crate::model::{
-    ContextValue, DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS, EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PipelineInputSource, PluginRequirement,
+    ContextValue, DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS, EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, MapSource, PipelineInputSource, PluginRequirement,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -22,6 +22,22 @@ struct EngineWorkloadConfig {
     /// The graph thread's nice value (the API's pipeline `nice`).
     #[serde(default)]
     nice: Option<u32>,
+    /// The saved map the graph starts from, and the save requests (the API's pipeline `map`).
+    #[serde(default)]
+    map: MapConfig,
+}
+
+/// `map.*`: the saved map the graph's `map` input takes when it starts (`id` and `path` together),
+/// and `save`, the count of save requests (each new value asks the graph for a save).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct MapConfig {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    save: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -153,6 +169,7 @@ pub fn decode_assigned_workload(record: &WorkloadRecord, node_id: &str) -> Resul
     let graph_ref = decode_graph_ref(record, &decoded)?;
     let bindings = decode_bindings(record, &decoded)?;
     let plugin_requirements = decode_plugin_requirements(&decoded);
+    let map = decode_map(record, &decoded)?;
 
     Ok(ExecutionWorkload {
         workload_id: record.workload_id.as_str().to_string(),
@@ -163,7 +180,17 @@ pub fn decode_assigned_workload(record: &WorkloadRecord, node_id: &str) -> Resul
         plugin_requirements,
         cpu: decoded.cpu,
         nice: decoded.nice,
+        map,
+        map_save: decoded.map.save.unwrap_or(0),
     })
+}
+
+fn decode_map(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> Result<Option<MapSource>, WorkloadDecodeError> {
+    match (&decoded.map.id, &decoded.map.path) {
+        (None, None) => Ok(None),
+        (Some(id), Some(path)) => Ok(Some(MapSource { id: id.clone(), path: PathBuf::from(path) })),
+        _ => Err(WorkloadDecodeError::InvalidField { workload_id: record.workload_id.as_str().to_string(), field: "map".into(), message: "a map names both map.id and map.path".into() }),
+    }
 }
 
 fn decode_graph_ref(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> Result<GraphRef, WorkloadDecodeError> {

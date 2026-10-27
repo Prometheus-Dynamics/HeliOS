@@ -123,6 +123,20 @@ pub struct ExecutionWorkload {
     /// The nice value of the graph thread (`nice` in the config, 0 to 19: a lower priority); unset
     /// keeps the default. A change restarts the graph.
     pub nice: Option<u32>,
+    /// The saved map the graph starts from, fed to its `map` input when it starts (`map.id` and
+    /// `map.path` in the config). A change restarts the graph: a map is the start of a run.
+    pub map: Option<MapSource>,
+    /// Save requests so far (`map.save`). Each new value asks the running graph to save its map
+    /// once (see `execution::map_io`); it does not restart the graph, so it is not compiled.
+    pub map_save: u64,
+}
+
+/// A saved map a graph starts from (`docs/map-format.md` in Eidos): the map's id and the file on
+/// the board that holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapSource {
+    pub id: String,
+    pub path: PathBuf,
 }
 
 impl ExecutionWorkload {
@@ -135,6 +149,7 @@ impl ExecutionWorkload {
         for binding in &mut shape.bindings {
             binding.context = binding.context.keys().map(|key| (key.split('.').next().unwrap_or_default().to_string(), ContextValue::Name(String::new()))).collect();
         }
+        shape.map_save = 0;
         shape
     }
 }

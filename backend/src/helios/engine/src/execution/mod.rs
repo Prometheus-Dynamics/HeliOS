@@ -12,6 +12,7 @@ mod camera_context;
 mod driver;
 mod frame_source;
 mod graph;
+pub mod map_io;
 pub(crate) mod outputs;
 mod pipeline_bus;
 mod pipeline_inputs;
@@ -185,6 +186,7 @@ impl ResidentExecutionSet {
         }
         let driver = self.drivers.get_mut(id).expect("driver was just ensured");
         driver.update_camera_context(workload);
+        driver.update_map(workload);
         driver.update_context(resolved.resources);
         Ok(driver.snapshot())
     }

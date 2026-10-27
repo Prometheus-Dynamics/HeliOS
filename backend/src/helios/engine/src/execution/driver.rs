@@ -45,7 +45,7 @@ use daedalus::{
         ExecutionTelemetry,
         host_bridge::{HostBridgeHandle, InboundFd, ValueSerializerMap},
     },
-    transport::Payload,
+    transport::{FeedOutcome, Payload},
 };
 use nix::{
     errno::Errno,
@@ -60,6 +60,7 @@ use super::{
     camera_context,
     frame_source::{FrameReceive, FrameSource, FrameSourceStatus},
     graph::{CompiledWorkloadGraph, ResidentHostGraph},
+    map_io::{self, MAP_PORT, SAVE_PORT, SAVED_MAP_PORT, SavePulse},
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
     pipeline_bus::{PipelineBus, next_run_id},
     pipeline_inputs::PipelineFeeds,
@@ -89,6 +90,8 @@ struct DriverShared {
 }
 
 struct DriverState {
+    /// The `save` input's state: a save request raises it, the saved map lowers it.
+    save: SavePulse,
     stats: DriverStats,
     fps: FpsWindow,
     outputs: BTreeMap<String, LatestOutput>,
@@ -188,10 +191,22 @@ impl WorkloadDriver {
                 metrics,
                 sequence: 0,
                 last_input_at: None,
+                save: SavePulse::default(),
             }),
             outputs_ready,
         });
         let host = graph.host_graph.host().clone();
+        // A saved map is the start of the run: it is in the graph's `map` input before the thread
+        // ticks (a new map is a new run, see `map_io`). A map the graph cannot take fails the start.
+        if let Some(map) = &workload.map {
+            if !graph.input_ports.iter().any(|port| port == MAP_PORT) {
+                return Err(ExecutionError::Plan(format!("map {}: the graph has no {MAP_PORT} input", map.id)));
+            }
+            let bytes = map_io::load_map(&map.path).map_err(ExecutionError::Execute)?;
+            if let FeedOutcome::Rejected(reason) = host.push_arc_as(MAP_PORT, map_io::MAP_TYPE_KEY, bytes) {
+                return Err(ExecutionError::Plan(format!("map {}: the graph rejected it: {reason:?}", map.id)));
+            }
+        }
         let stop = graph.host_graph.stop_handle();
         let serializers = graph.host_graph.value_serializers().clone();
         let plan_message = graph.plan.to_string();
@@ -262,6 +277,20 @@ impl WorkloadDriver {
     /// graph's held structured host inputs (`camera`, `extrinsics`, `<input>_camera`, ...; see
     /// `camera_context`) whose value changed. Every tick after a push sees the new value; a push
     /// never ticks the graph. Values the graph has no host input for are ignored.
+    /// Raise the graph's `save` input for a new save request (`map.save` changed): the graph saves
+    /// its map on the next tick and gives `saved_map`. The request never restarts the graph.
+    pub fn update_map(&mut self, workload: &ExecutionWorkload) {
+        // Pushed under the state lock: `TickRecorder::record` lowers `save` under the same lock, so
+        // a lowering cannot overtake this raise.
+        let mut state = lock(&self.shared.state);
+        if let Some(value) = state.save.request(workload.map_save)
+            && let FeedOutcome::Rejected(reason) = self.host.push(SAVE_PORT, value)
+        {
+            drop(state);
+            self.record_error(format!("save request rejected: {reason:?}"));
+        }
+    }
+
     pub fn update_camera_context(&mut self, workload: &ExecutionWorkload) {
         let primary = self.sources.first().map(|source| source.input.clone());
         for binding in workload.bindings.iter().filter(|binding| self.sources.iter().any(|source| source.input == binding.input)) {
@@ -419,6 +448,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Records each tick's outputs, stats and metrics for the publishing loop.
 struct TickRecorder {
     output_ports: Vec<String>,
+    /// The graph's host, to lower `save` after a save.
+    host: HostBridgeHandle,
     shared: Arc<DriverShared>,
     nt4: Nt4Output,
     publisher: Publisher,
@@ -429,7 +460,7 @@ struct TickRecorder {
 impl TickRecorder {
     fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>, nt4: Nt4Output, publisher: Publisher) -> Self {
         let next_overhead = graph.host_graph.frame_overhead_enabled().then(Instant::now);
-        Self { output_ports: graph.output_ports.clone(), shared, nt4, publisher, next_overhead }
+        Self { output_ports: graph.output_ports.clone(), host: graph.host_graph.host().clone(), shared, nt4, publisher, next_overhead }
     }
 
     fn record(&mut self, graph: &ResidentHostGraph, result: Result<&ExecutionTelemetry, String>) {
@@ -460,6 +491,7 @@ impl TickRecorder {
             })
             .collect();
         let nt4_outputs = (self.nt4.sink.active() || self.nt4.live.active()).then(|| payload_outputs.clone());
+        let saved = outputs.iter().any(|(port, _)| port == SAVED_MAP_PORT);
         let frame_overhead = match self.next_overhead {
             Some(due) if now >= due => {
                 self.next_overhead = Some(now + FRAME_OVERHEAD_INTERVAL);
@@ -475,7 +507,13 @@ impl TickRecorder {
             let sequence = state.sequence;
             // Every tick is progress, whatever outputs it had: a consumer waits on the tick.
             self.publisher.publish(state.stats.last_frame_timestamp, payload_outputs);
-            state.outputs.extend(outputs.into_iter().map(|(port, value)| (port, LatestOutput { sequence, updated_at_ms, value })));
+            // The saved map is up to a megabyte: it reaches the live socket and the pipeline bus, not
+            // the latest outputs that Orion publishes.
+            state.outputs.extend(outputs.into_iter().filter(|(port, _)| port != SAVED_MAP_PORT).map(|(port, value)| (port, LatestOutput { sequence, updated_at_ms, value })));
+            // The save's edge was taken by this tick: lower `save`, so the next request is an edge.
+            if saved && let Some(value) = state.save.saved() {
+                self.host.push(SAVE_PORT, value);
+            }
             state.fps.record_frame(now);
             state.stats.fps = state.fps.fps();
             state.stats.last_tick_ms = state.last_input_at.take().map_or(0.0, |pushed| now.duration_since(pushed).as_secs_f64() * 1000.0);

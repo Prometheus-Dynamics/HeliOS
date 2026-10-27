@@ -56,6 +56,7 @@ mod features;
 /// The live-map template (`eidos:mapping.live_map`) and its golden document.
 #[cfg(test)]
 mod live_map;
+mod saved_map;
 /// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
 #[cfg(test)]
 mod camera_uncertainty;
@@ -265,6 +266,8 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
         plugin_requirements: Vec::new(),
         cpu: None,
         nice: None,
+        map: None,
+        map_save: 0,
     }
 }
 
