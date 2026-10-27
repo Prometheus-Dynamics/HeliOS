@@ -12,7 +12,7 @@ mod camera_context;
 mod driver;
 mod frame_source;
 mod graph;
-pub mod map_io;
+mod map_io;
 pub(crate) mod outputs;
 mod pipeline_bus;
 mod pipeline_inputs;

@@ -2,13 +2,11 @@
 //! edge of the graph's `save` input, and the saved bytes start a new run through its `map` input.
 
 use eidos_daedalus::types::Bytes;
+use helios_maps::wire_map_ports;
 
 use super::live_map::{SCENE_FOCAL_PX, live_map_scene};
 use super::*;
-use crate::{
-    execution::map_io::{SAVED_MAP_PORT, wire_map_ports},
-    model::MapSource,
-};
+use crate::{execution::map_io::SAVED_MAP_PORT, model::MapSource};
 
 /// The live-map golden graph as the API deploys it: `map` and `save` wired to the host.
 fn live_map_document() -> String {

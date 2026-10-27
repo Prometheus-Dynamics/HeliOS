@@ -1591,6 +1591,7 @@ dependencies = [
  "helios-eidos-plugin",
  "helios-field",
  "helios-layout",
+ "helios-maps",
  "helios-robot",
  "libc",
  "nix",
@@ -1623,6 +1624,14 @@ version = "1.0.1-dev"
 dependencies = [
  "anyhow",
  "tempfile",
+]
+
+[[package]]
+name = "helios-maps"
+version = "1.0.1-dev"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

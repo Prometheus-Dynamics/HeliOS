@@ -1,0 +1,16 @@
+[package]
+name = "helios-maps"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "helios_maps"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
