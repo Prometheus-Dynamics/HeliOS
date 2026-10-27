@@ -2,12 +2,12 @@
 // operator looks. The simulated robot (`?mock=1`) has one scenario per way a camera gets stuck
 // (api/mock.ts); on a real device the same text comes from GET /v1/cameras and GET /v1/pipelines.
 import { expect, test } from "./fixtures";
-import { openScreen } from "./nav";
+import { openPane, openScreen } from "./nav";
 
 test.describe("status chain", () => {
   test("the camera list says which stage stops each camera", async ({ page, target }) => {
     test.skip(target !== "mock", "the scenarios are the simulated robot's");
-    await openScreen(page, "Cameras");
+    await openScreen(page, "Tune");
     // A camera another program holds: the frames stage, and the program.
     await expect(page.getByText("In use by visionserver (Limelight vision)").first()).toBeVisible();
     // A pipeline that decodes another tag family than the field's.
@@ -20,7 +20,7 @@ test.describe("status chain", () => {
 
   test("the pipelines list says why a pipeline is not running", async ({ page, target }) => {
     test.skip(target !== "mock", "the scenarios are the simulated robot's");
-    await openScreen(page, "Pipelines");
+    await openPane(page, "Tune", "Pipelines");
     await expect(page.getByText("Failed: the CLAHE pre-filter raised an error").first()).toBeVisible();
     await expect(page.getByText("quarantined · 5 restarts")).toHaveCount(0);
   });

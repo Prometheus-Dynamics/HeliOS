@@ -1,5 +1,5 @@
 // The camera controls' names, labels, groups, units and maths. Pure (no stores, no DOM): the
-// camera pane, the inspector's quick controls and their tests all read it, so a control means
+// camera controls pane and its tests read it, so a control means
 // the same thing everywhere.
 //
 // Names come from Styx's native backend (`native_backend.rs`, the revision Backend/Cargo.lock

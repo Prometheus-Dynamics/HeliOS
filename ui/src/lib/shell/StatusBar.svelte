@@ -8,7 +8,6 @@
   import { identity } from "#lib/core/identity.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
-  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { liveState } from "#lib/stores/live.svelte.js";
 
@@ -36,8 +35,8 @@
   const nt = $derived.by(() => {
     const state = liveState.nt4;
     if (!cluster.live || !state) return null;
-    if (!state.settings.enabled) return { tone: "", text: "NT off", tip: "Publishing to NetworkTables is off (Settings › Robot)" };
-    if (!state.server) return { tone: "warn", text: "NT: no team", tip: "Set the team number in Settings › Robot so results reach robot code" };
+    if (!state.settings.enabled) return { tone: "", text: "NT off", tip: "Publishing to NetworkTables is off (Device › Robot link)" };
+    if (!state.server) return { tone: "warn", text: "NT: no team", tip: "Set the team number in Device › Robot link so results reach robot code" };
     return state.connected
       ? { tone: "ok", text: `NT ${state.server}`, tip: `Publishing every frame to ${state.server} under ${state.settings.prefix}` }
       : { tone: "warn", text: `NT waiting`, tip: `Not connected to ${state.server} yet: is the device on the robot network?` };
@@ -48,20 +47,20 @@
   <span class="sel">{#if readout}<Icon name="crosshair" size={11} />{readout}{:else}Nothing selected{/if}</span>
   <span class="grow"></span>
   {#if next}
-    <button type="button" onclick={() => workspaces.open(shell.active, pane("setup"))} data-tip="Open the setup checklist">
+    <button type="button" onclick={() => shell.open("setup", "setup")} data-tip="Open the setup checklist">
       <Icon name="list-check" size={11} />Setup {steps.length - steps.filter((x) => !x.done).length}/{steps.length} · next: {next.title.toLowerCase()}
     </button>
   {/if}
-  <button type="button" class:bad={issues.length > 0} onclick={() => shell.go("overview")}>
+  <button type="button" class:bad={issues.length > 0} onclick={() => shell.open("run", "status")}>
     <Icon name={issues.length ? "alert-triangle" : "circle-check"} size={11} />{issues.length ? `${issues.length} problem${issues.length > 1 ? "s" : ""}` : "OK"}
   </button>
   {#if cluster.live && !liveState.connected}
-    <button type="button" class="bad" onclick={() => shell.go("overview")} data-tip={liveState.error ?? "The device's event stream is not connected. The page retries on its own."}>
+    <button type="button" class="bad" onclick={() => shell.open("run", "status")} data-tip={liveState.error ?? "The device's event stream is not connected. The page retries on its own."}>
       <Icon name="alert-triangle" size={11} />Device link lost
     </button>
   {/if}
   {#if nt}
-    <button type="button" class="nt {nt.tone}" onclick={() => shell.go("settings")} data-tip={nt.tip}><Icon name="plug" size={11} />{nt.text}</button>
+    <button type="button" class="nt {nt.tone}" onclick={() => shell.open("device", "robot")} data-tip={nt.tip}><Icon name="plug" size={11} />{nt.text}</button>
   {/if}
   <RecordingIndicator />
   <span class="mono">{cluster.live ? "live" : `${cluster.playing ? "live" : "paused"} · frame ${cluster.frame}`}</span>

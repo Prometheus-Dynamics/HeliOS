@@ -10,6 +10,7 @@ import { dispatchSettings } from "#lib/core/sync.js";
 import { demoDocument, documentFromWpilib, type WpilibFieldLayout } from "#lib/stores/field-layout.js";
 import { MOCK_DEVICE } from "./mode";
 import { MOCK_PEERS } from "./mock-devices";
+import { ROBOT_WORKLOADS, WORKLOADS } from "./mock";
 import type { FieldLayoutDocument, FieldLayoutList, Nt4Settings, SettingsChange, SetupRecord, StoredIdentity } from "./types";
 
 const KEY = "helios:mock-device";
@@ -127,6 +128,27 @@ export async function mockDevice(method: string, path: string, options: { query?
     if (method === "GET") return null;
     recordPeerRequest({ peer: id, method, path: `/v1/${peer[2]}`, body: options.body ?? null });
     return answer(undefined);
+  }
+
+  // A pipeline's plan (`explain_plan`): the simulated engine runs the mask and quad stages on the GPU,
+  // so the frame goes up once and the runs come down once, as a real plan would show.
+  const plan = /^\/v1\/pipelines\/([^/]+)\/plan$/.exec(path);
+  if (plan && method === "GET") {
+    const id = decodeURIComponent(plan[1]);
+    const w = [...WORKLOADS, ...ROBOT_WORKLOADS].find((x) => x.id === id);
+    if (!w) return null;
+    const gpu = (nodeId: string) => /mask_prep|quads_from/.test(w.graph.nodes.find((n) => n.id === nodeId)?.type ?? "");
+    return answer({
+      format: "helios.engine.plan.v1",
+      plan: {
+        nodes: w.graph.nodes.map((n, index) => ({ index, id: n.id, label: n.label, compute: gpu(n.id) ? "gpu" : "cpu" })),
+        edges: w.graph.edges.map((e, index) => {
+          const up = !gpu(e.from.node) && gpu(e.to.node);
+          const down = gpu(e.from.node) && !gpu(e.to.node);
+          return { index, from_node_id: e.from.node, from_port: e.from.port, to_node_id: e.to.node, to_port: e.to.port, transport: "shm", copies_frame: up || down, crosses_residency: up || down, adapter_steps: up ? ["DeviceUpload"] : down ? ["DeviceDownload"] : [] };
+        }),
+      },
+    });
   }
 
   if (path === "/v1/device/nt4") {

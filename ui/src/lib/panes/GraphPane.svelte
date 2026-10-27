@@ -1,4 +1,7 @@
 <script lang="ts">
+  // The pipeline viewer and editor: the graph with each node's live time, the plan's device
+  // transfers drawn on the edges they cross and listed below, and a header with the tick against
+  // the frame budget. Follows the selected pipeline, or stays pinned to one.
   import PlanSection from "#lib/components/pipeline/PlanSection.svelte";
   import { SvelteFlowProvider } from "@xyflow/svelte";
   import { identity } from "#lib/core/identity.svelte.js";
@@ -10,8 +13,10 @@
   import Icon from "#lib/components/common/Icon.svelte";
   import Badge from "#lib/kit/Badge.svelte";
   import IconButton from "#lib/kit/IconButton.svelte";
+  import Meter from "#lib/kit/Meter.svelte";
   import Picker from "#lib/kit/Picker.svelte";
   import type { GraphDocument } from "#lib/api/model.js";
+  import { plans, transferKey, transfersOf, type Transfer } from "#lib/pipeline/plan.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
@@ -25,6 +30,12 @@
   const workload = $derived(target.id ? cluster.workload(target.id) : undefined);
   const draft = $derived(workload ? drafts.get(workload.id) : undefined);
   const STATE_TONE = { running: "ok", starting: "info", quarantined: "err", stopped: "neutral" } as const;
+  /** The per-frame budget on the CM5 (ms): the header shows the tick against it. */
+  const BUDGET_MS = 1;
+
+  // The plan, per revision: the transfers it names are drawn on the graph's edges.
+  const transfers = $derived(workload?.state === "running" ? transfersOf(plans.get(workload.id).plan) : []);
+  const transferByEdge = $derived(new Map<string, Transfer>(transfers.map((t) => [transferKey(t.edge.from_node_id, t.edge.from_port, t.edge.to_node_id, t.edge.to_port), t])));
 
   // Find box: Enter steps through the matches, each one centred and selected.
   let query = $state("");
@@ -123,15 +134,31 @@
       <button type="button" onclick={() => draft.rollBack()}>Roll back</button>
       <button type="button" onclick={() => cluster.restartWorkload(workload.id)}>Restart</button>
     </div>
+  {:else if workload.state !== "running" && workload.status && workload.status.state !== "ok"}
+    <div class="banner info">
+      <b>{workload.status.reason}</b> {workload.status.hint ?? ""}
+    </div>
+  {/if}
+  {#if workload.state === "running"}
+    {@const p50 = workload.perf.tickP50Ms}
+    <div class="tick" data-tip="The pipeline's tick: median and 99th percentile, its rate, and the median's share of the {BUDGET_MS} ms per-frame budget">
+      <span class="kpi"><b class="mono">{p50.toFixed(2)}</b> ms p50</span>
+      <span class="kpi"><b class="mono">{workload.perf.tickP99Ms.toFixed(2)}</b> ms p99</span>
+      <span class="kpi"><b class="mono">{workload.perf.fps}</b> fps</span>
+      <span class="budget"><Meter value={p50 / BUDGET_MS} warn={0.75} crit={1} height={5} /><small>{Math.round((p50 / BUDGET_MS) * 100)}% of {BUDGET_MS} ms</small></span>
+      <span class="kpi" class:warn={transfers.length > 0}><Icon name="arrows-transfer-down" size={13} />{transfers.length === 0 ? "no transfers" : `${transfers.length} ${transfers.length === 1 ? "transfer" : "transfers"}`}</span>
+    </div>
   {/if}
   {#key workload.id}
     <SvelteFlowProvider>
-      <GraphCanvas {draft} />
+      <GraphCanvas {draft} transfers={transferByEdge} />
     </SvelteFlowProvider>
   {/key}
-  <PlanSection pipelineId={workload.id} />
+  <PlanSection pipelineId={workload.id} revision={workload.revision} running={workload.state === "running"} />
+{:else if cluster.workloads.length}
+  <Empty icon="schema" text="Pick a pipeline in the tab bar, or click one in the Pipelines list." />
 {:else}
-  <Empty icon="schema" text="No pipeline selected." />
+  <Empty icon="schema" text="No pipeline yet. Choose what each camera runs on the Set up screen and its graph appears here." />
 {/if}
 
 <style>
@@ -180,6 +207,11 @@
     background: var(--err-bg);
     border-bottom: 1px solid color-mix(in oklab, var(--err) 30%, transparent);
   }
+  .banner.info {
+    color: var(--fg-2);
+    background: var(--info-bg);
+    border-bottom-color: color-mix(in oklab, var(--info) 30%, transparent);
+  }
   .banner b {
     color: var(--fg);
   }
@@ -193,5 +225,45 @@
   }
   .banner button:first-of-type {
     margin-left: auto;
+  }
+  .tick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    padding: 5px 10px;
+    font-size: 11.5px;
+    color: var(--fg-3);
+    border-bottom: 1px solid var(--line);
+    background: var(--s1);
+  }
+  .kpi {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .kpi b {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .kpi.warn {
+    color: var(--warn);
+    font-weight: 600;
+  }
+  .budget {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 120px;
+    max-width: 260px;
+  }
+  .budget small {
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .mono {
+    font-family: var(--font-code);
   }
 </style>

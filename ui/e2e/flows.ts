@@ -1,6 +1,6 @@
 // Steps several flows share, each done with clicks in the UI.
 import { expect, type Locator, type Page } from "@playwright/test";
-import { openScreen } from "./nav";
+import { firstCameraChooser, openPane, tab } from "./nav";
 
 /**
  * Clicks the chooser's Apply when it shows (it shows only when the choice differs from what runs),
@@ -14,14 +14,13 @@ export async function applyIfChanged(chooser: Locator) {
 }
 
 /**
- * Pipelines -> Defaults -> the first camera's chooser: AprilTag localization, applied. `map` and
- * `depth` set those switches when given and otherwise leave them as the camera has them. Leaves
- * the chooser showing the camera's running pipeline.
+ * Set up > Cameras -> the first camera's chooser: AprilTag localization, applied. `map` and `depth`
+ * set those switches when given and otherwise leave them as the camera has them. Leaves the
+ * chooser showing the camera's running pipeline.
  */
 export async function applyAprilTag(page: Page, { map, depth }: { map?: boolean; depth?: boolean } = {}) {
-  await openScreen(page, "Pipelines");
-  await page.getByRole("button", { name: "Each camera's default pipeline" }).click();
-  const chooser = page.locator("section").filter({ has: page.getByRole("radiogroup", { name: "Tags" }) }).first();
+  await openPane(page, "Set up", "Cameras");
+  const chooser = firstCameraChooser(page);
   await chooser.getByRole("radio", { name: "AprilTag" }).click();
   const map3d = chooser.getByRole("switch", { name: "3D map" });
   if (map !== undefined && (await map3d.isChecked()) !== map) await map3d.click();
@@ -31,8 +30,9 @@ export async function applyAprilTag(page: Page, { map, depth }: { map?: boolean;
   return chooser;
 }
 
-/** From the chooser's "Tune pipeline" link: the pipeline selected in the Pipelines screen's Inspector. */
+/** From the chooser's "Tune pipeline" link: the pipeline's settings, on Tune. */
 export async function tuneRunningPipeline(page: Page) {
   await page.getByRole("button", { name: "Tune pipeline" }).first().click();
-  await expect(page.getByRole("navigation", { name: "Screens" }).getByRole("button", { name: "Pipelines", exact: true })).toHaveAttribute("class", /active/);
+  await expect(page.getByRole("navigation", { name: "Screens" }).getByRole("button", { name: "Tune", exact: true })).toHaveAttribute("class", /active/);
+  await expect(tab(page, "Pipeline settings")).toHaveAttribute("aria-selected", "true");
 }

@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     'overview',
     'architecture',
+    'ui-information-architecture',
     {
       type: 'category',
       label: 'Devices',

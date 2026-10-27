@@ -143,35 +143,17 @@ class WorkspaceStore {
     return [...this.order.map((id) => this.#saved[id]).filter(Boolean), ...this.custom];
   }
 
-  /** Built-in screens shown in the rail; null shows them all. Yours always show. */
-  #visible = $state<string[] | null>(loadRaw<string[] | null>("visible-screens", null));
-
-  isVisible(id: string): boolean {
-    return !this.#presets[id] || this.#visible === null || this.#visible.includes(id);
-  }
-
-  /** The screens in the rail, in order. */
-  get shown(): Workspace[] {
-    return this.all.filter((w) => this.isVisible(w.id));
-  }
-
-  /** Built-in screens not in the rail (offered in the gallery). */
-  get hidden(): Workspace[] {
-    return this.order.filter((id) => !this.isVisible(id)).map((id) => this.#saved[id]).filter(Boolean);
-  }
-
-  setVisible(ids: string[] | null) {
-    this.#visible = ids;
-    save("visible-screens", ids);
-  }
-
-  show(id: string) {
-    if (this.#visible && !this.#visible.includes(id)) this.setVisible([...this.#visible, id]);
-  }
-
-  hide(id: string) {
-    const base = this.#visible ?? [...this.order];
-    this.setVisible(base.filter((x) => x !== id));
+  /**
+   * Forgets saved copies of built-in screens this build no longer has (an older build's presets),
+   * so they do not show up as yours. Called once the presets are registered.
+   */
+  prune() {
+    const stale = Object.values(this.#saved).filter((w) => w.builtin && !this.#presets[w.id]).map((w) => w.id);
+    if (!stale.length) return;
+    for (const id of stale) delete this.#saved[id];
+    this.#modified = this.#modified.filter((id) => !stale.includes(id));
+    save("workspaces", this.#saved);
+    save("workspaces-modified", this.#modified);
   }
 
   /** Puts a whole layout beside the current one (a kit of panes). */

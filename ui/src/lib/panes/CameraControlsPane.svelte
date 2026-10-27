@@ -1,15 +1,12 @@
 <script lang="ts">
-  // A camera's own settings: the sensor and its image (capture, exposure, white balance,
-  // flicker, advanced), then its lens and where it sits on the robot. Every pipeline on the
-  // camera shares them. What runs on the camera and how a pipeline is tuned (its resolution,
-  // detection, stages) are the pipeline's settings, one click away. Everything comes from the
-  // camera service's control list, so the mock and a device show the same controls.
+  // A camera's own settings: the sensor and its image (capture, exposure, white balance, flicker,
+  // advanced). Every pipeline on the camera shares them. What runs on the camera is chosen on Set
+  // up; how a pipeline is tuned (its resolution, detection, stages) is Pipeline settings. Everything
+  // comes from the camera service's control list, so the mock and a device show the same controls.
   import type { Camera } from "#lib/api/model.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import Badge from "#lib/kit/Badge.svelte";
   import IconButton from "#lib/kit/IconButton.svelte";
-  import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
-  import Num from "#lib/kit/Num.svelte";
   import Picker from "#lib/kit/Picker.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Section from "#lib/kit/Section.svelte";
@@ -20,15 +17,10 @@
   import WhiteBalanceFields from "#lib/camera/WhiteBalanceFields.svelte";
   import { changedByUser, fieldControlsOf, friendlyLabel, groupOf, resetTarget } from "#lib/camera/controls.js";
   import type { CameraControlInfo } from "#lib/api/model.js";
-  import { capabilitiesOf } from "#lib/core/defaults.js";
-  import { pane as paneRef, workspaces } from "#lib/core/workspace.svelte.js";
   import { keyOf, writeControls } from "#lib/camera/write.js";
-  import { identity } from "#lib/core/identity.svelte.js";
+  import { colorVar, identity } from "#lib/core/identity.svelte.js";
+  import Swatch from "#lib/kit/Swatch.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
-  import { calibration } from "#lib/stores/calibration.svelte.js";
-  import { robot } from "#lib/stores/robot.svelte.js";
-  import { guide } from "#lib/core/guide.svelte.js";
-  import { shell } from "#lib/core/shell.svelte.js";
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
   import PaneBar from "#lib/workspace/PaneBar.svelte";
@@ -40,9 +32,6 @@
   const target = follow(() => pane, () => ws, "camera", () => cluster.cameras[0]?.resourceId);
   const camera = $derived(target.id ? cluster.camera(target.id) : undefined);
   const node = $derived(camera ? cluster.node(camera.nodeId) : undefined);
-  const active = $derived(camera ? guide.active(camera) : undefined);
-  const cal = $derived(camera ? calibration.saved[calibration.key(camera)] : undefined);
-  const place = $derived(camera ? robot.placement(camera.resourceId) : null);
 
   const controls = $derived(camera?.controls ?? []);
   let query = $state("");
@@ -59,7 +48,6 @@
   /** The capture controls beyond the frame rate's field: the sensor's rotation and mirroring. */
   const capture = $derived(inGroup("capture"));
   const advanced = $derived(inGroup("advanced"));
-  const runs = $derived(active ? capabilitiesOf(active.graph) : []);
   const filtering = $derived(Boolean(q) || changedOnly);
   /** A composite section (exposure, white balance) has a changed control behind it. */
   const changedIn = (group: ReturnType<typeof groupOf>) => controls.some((c) => groupOf(c) === group && changedByUser(controls, c));
@@ -69,14 +57,8 @@
   const showExposure = $derived((!changedOnly || changedIn("exposure")) && named("exposure", "gain", "auto exposure", "ae", "brightness", "apriltag"));
   const showWhite = $derived((!changedOnly || changedIn("white")) && named("white balance", "awb", "colour", "color", "temperature"));
   const showFlicker = $derived(!filtering || flicker.length > 0);
-  const showLens = $derived(!filtering || (!changedOnly && named("calibration", "lens", "position", "rotation", "mount", "placement")));
   const showAdvanced = $derived(!filtering || advanced.length > 0);
-  const nothing = $derived(filtering && !showSensor && !showExposure && !showWhite && !showFlicker && !showLens && !showAdvanced);
-
-  function openJobs() {
-    shell.go("cameras");
-    workspaces.open("cameras", paneRef("camera-jobs"));
-  }
+  const nothing = $derived(filtering && !showSensor && !showExposure && !showWhite && !showFlicker && !showAdvanced);
 
   function resetAll(c: Camera) {
     if (cluster.live) {
@@ -124,7 +106,10 @@
 
 {#if camera}
   <div class="scroll">
-    <IdentityEditor id={camera.resourceId} fallbackName={camera.name} fallbackIcon="camera" sub="{camera.sensor} · {node?.name ?? camera.nodeId}" />
+    <div class="head" style:--c={colorVar(identity.get(camera.resourceId).color)}>
+      <Swatch id={camera.resourceId} icon="camera" size={22} />
+      <span class="hn"><b>{identity.name(camera.resourceId, camera.name)}</b><i>{camera.sensor} · {node?.name ?? camera.nodeId}</i></span>
+    </div>
     <div class="stats">
       <span><b>{camera.stats.fps.toFixed(0)}</b> fps</span>
       <span><b>{camera.stats.latencyMs.toFixed(1)}</b> ms</span>
@@ -133,19 +118,6 @@
       {#if camera.foreign}<Badge tone="warn" text="via {camera.foreign}" />{/if}
     </div>
 
-    <div class="runs">
-      <span class="k">Runs</span>
-      {#if camera.foreign}
-        <span class="muted">Run by {camera.foreign}</span>
-      {:else if active}
-        <button type="button" class="link" onclick={() => selection.select({ kind: "workload", id: active.id })}>{identity.name(active.id, active.name)}</button>
-        <span class="muted">{runs.map((c) => c.replace("_", " ")).join(" · ")}</span>
-      {:else}
-        <span class="muted">Video only</span>
-      {/if}
-      <span class="grow"></span>
-      {#if !camera.foreign}<button type="button" class="link" onclick={openJobs}>Change</button>{/if}
-    </div>
     <div class="tools">
       <input class="search" placeholder="Search camera controls" bind:value={query} aria-label="Search camera controls" />
       <button type="button" class="filter" class:on={changedOnly} aria-pressed={changedOnly} onclick={() => (changedOnly = !changedOnly)}>Changed only</button>
@@ -193,31 +165,6 @@
       </Section>
     {/if}
 
-    {#if showLens}
-      <Section title="Lens and placement" key="cam-lens">
-        <Prop label="Calibration" help="Lens intrinsics at the current resolution.">
-          {#if cal}
-            <span class="mono">{cal.rms.toFixed(3)} px RMS · fx {cal.fx.toFixed(0)}</span>
-          {:else}
-            <span class="warn">none at {camera.settings.width}×{camera.settings.height}</span>
-          {/if}
-          <button type="button" class="link" onclick={() => shell.go("calibration")}>{cal ? "Redo" : "Calibrate"}</button>
-        </Prop>
-        {#if place}
-          <Prop label="Position (cm)" help="Robot frame: x forward, y left, z up from the floor at the chassis centre." changed={robot.isCustom(camera.resourceId)} onreset={() => robot.reset(camera.resourceId)}>
-            {#each [0, 1, 2] as i (i)}
-              <Num value={Math.round(place.pos[i] * 1000) / 10} step={0.5} width={62} label={["x", "y", "z"][i]} onchange={(v) => { const pos = [...place.pos] as [number, number, number]; pos[i] = v / 100; robot.set(camera.resourceId, { pos }); }} />
-            {/each}
-          </Prop>
-          <Prop label="Rotation (°)" help="Roll, pitch (up), yaw (left).">
-            <Num value={place.roll} min={-180} max={180} step={0.5} width={62} label="Roll" onchange={(v) => robot.set(camera.resourceId, { roll: v })} />
-            <Num value={place.pitch} min={-90} max={90} step={0.5} width={62} label="Pitch" onchange={(v) => robot.set(camera.resourceId, { pitch: v })} />
-            <Num value={place.yaw} min={-180} max={180} step={0.5} width={62} label="Yaw" onchange={(v) => robot.set(camera.resourceId, { yaw: v })} />
-          </Prop>
-        {/if}
-      </Section>
-    {/if}
-
     {#if showAdvanced}
       <Section title="Advanced" key="cam-advanced" open={filtering} count={advanced.length}>
         {#each advanced as c (c.id)}
@@ -250,12 +197,33 @@
     min-height: 0;
     overflow-y: auto;
   }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 4px;
+  }
+  .hn {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+  }
+  .hn b {
+    font-size: 13.5px;
+    font-weight: 650;
+  }
+  .hn i {
+    font-style: normal;
+    font-size: 11px;
+    color: var(--fg-3);
+  }
   .stats {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 4px 12px;
-    padding: 0 10px 8px 48px;
+    padding: 0 10px 8px 40px;
     font-size: 11.5px;
     color: var(--fg-3);
     border-bottom: 1px solid var(--line);
@@ -264,21 +232,6 @@
     color: var(--fg);
     font-family: var(--font-code);
     font-weight: 600;
-  }
-  .runs {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px 8px;
-    padding: 6px 10px;
-    font-size: 11.5px;
-    border-bottom: 1px solid var(--line);
-  }
-  .runs .k {
-    color: var(--fg-3);
-  }
-  .grow {
-    flex: 1;
   }
   .tools {
     display: flex;
@@ -315,14 +268,6 @@
     color: var(--accent-fg);
     border-color: var(--accent-ring);
     background: color-mix(in oklab, var(--accent) 12%, transparent);
-  }
-  .link {
-    font-size: 11.5px;
-    color: var(--accent-fg);
-    white-space: nowrap;
-  }
-  .link:hover {
-    text-decoration: underline;
   }
   .warn {
     font-size: 11.5px;

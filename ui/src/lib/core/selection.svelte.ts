@@ -1,5 +1,5 @@
 // One selection for the whole app: click a camera, node, process, tag or
-// resource anywhere and the inspector (and any pane following it) shows it.
+// resource anywhere and every pane following the selection shows it.
 
 export type SelectionKind = "camera" | "workload" | "graph-node" | "device" | "resource" | "stream" | "process" | "tag";
 

@@ -94,23 +94,23 @@
   {/if}
 
   <div class="chips" data-tour="readouts">
-    <button type="button" class="chip" onclick={() => shell.go("hardware")} data-tip="Devices online">
+    <button type="button" class="chip" onclick={() => shell.go("device")} data-tip="Devices online">
       <span class="dot" class:warn={degraded > 0}></span>
       <b>{online}</b><span class="of">/{cluster.nodes.length}</span> nodes
     </button>
-    <button type="button" class="chip" onclick={() => shell.go("pipelines")} data-tip="Pipelines running / quarantined">
+    <button type="button" class="chip" onclick={() => shell.open("tune", "pipelines")} data-tip="Pipelines running / quarantined">
       <Icon name="schema" size={13} />
       <b>{running.length}</b> run
       {#if quarantined}<span class="bad"><Icon name="alert-triangle" size={12} />{quarantined}</span>{/if}
     </button>
-    <button type="button" class="chip" onclick={() => shell.go("pipelines")} data-tip="Slowest pipeline tick, p50">
+    <button type="button" class="chip" onclick={() => shell.open("tune", "profiler")} data-tip="Slowest pipeline tick, p50">
       <Icon name="stopwatch" size={13} /><b class="mono">{p50.toFixed(2)}</b>ms
     </button>
-    <button type="button" class="chip" onclick={() => shell.go("vision")} data-tip="Tags detected this frame, all cameras">
+    <button type="button" class="chip" onclick={() => shell.go("run")} data-tip="Tags detected this frame, all cameras">
       <Icon name="target" size={13} /><b class="mono">{tagsSeen}</b>tags
     </button>
     {#if hottest}
-      <button type="button" class="chip" class:hot={hottest.tempC > 60} onclick={() => { selection.select({ kind: "device", id: hottest.id }); shell.go("hardware"); }} data-tip="Hottest: {hottest.name}">
+      <button type="button" class="chip" class:hot={hottest.tempC > 60} onclick={() => { selection.select({ kind: "device", id: hottest.id }); shell.go("device"); }} data-tip="Hottest: {hottest.name}">
         <Icon name="temperature" size={13} /><b class="mono">{hottest.tempC.toFixed(0)}</b>°C
       </button>
     {/if}
@@ -125,7 +125,7 @@
         type="button"
         class="sec"
         class:open={auth.open}
-        onclick={() => shell.go("settings")}
+        onclick={() => shell.open("device", "robot")}
         data-tour="security"
         data-tip={auth.open ? "Open: anyone on this network can change this device, update it or reboot it. Click to secure it with a password." : `Secured: a password or API token is needed.${auth.status.via === "session" ? " You are signed in." : ""} Click for security settings.`}
       >
@@ -341,5 +341,29 @@
   }
   .mono {
     font-family: var(--font-code);
+  }
+  /* Phone-wide: the screen's name, the lock and the search; the readouts are on Run and Device. */
+  @media (max-width: 759px) {
+    .top {
+      gap: 6px;
+      padding: 0 6px;
+    }
+    .chips,
+    .add,
+    .mod {
+      display: none;
+    }
+    .ws {
+      flex: 1;
+    }
+    .search {
+      width: 32px;
+      padding: 0;
+      justify-content: center;
+    }
+    .search span,
+    .search kbd {
+      display: none;
+    }
   }
 </style>

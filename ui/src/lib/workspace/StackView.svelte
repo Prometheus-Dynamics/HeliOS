@@ -11,7 +11,14 @@
   import { help } from "#lib/shell/help.svelte.js";
   import { device } from "#lib/stores/device.svelte.js";
 
-  let { stack, ws }: { stack: Extract<LayoutNode, { kind: "stack" }>; ws: string } = $props();
+  // `onactivate` is for a transient stack (the narrow layout's one stack of every pane): the
+  // active tab is kept by the caller, not written into the saved layout.
+  let { stack, ws, onactivate }: { stack: Extract<LayoutNode, { kind: "stack" }>; ws: string; onactivate?: (index: number) => void } = $props();
+
+  function activate(index: number) {
+    if (onactivate) onactivate(index);
+    else workspaces.activate(ws, stack.id, index);
+  }
 
   let barTarget = $state<HTMLElement | null>(null);
   let body = $state<HTMLDivElement>();
@@ -170,8 +177,8 @@
           draggable="true"
           ondragstart={(e) => dragStart(e, i)}
           ondragend={() => (workspaces.dragging = null)}
-          onclick={() => workspaces.activate(ws, stack.id, i)}
-          onkeydown={(e) => e.key === "Enter" && workspaces.activate(ws, stack.id, i)}
+          onclick={() => activate(i)}
+          onkeydown={(e) => e.key === "Enter" && activate(i)}
           onauxclick={(e) => e.button === 1 && workspaces.close(ws, stack.id, i)}
           oncontextmenu={(e) => tabMenu(e, i)}
           style:--tab-color={color}

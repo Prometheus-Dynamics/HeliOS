@@ -20,7 +20,7 @@ test.describe("camera controls", () => {
   test.use({ allowConsole: [/status of 503 .*\/v1\/cameras\/[^/]+\/settings/] });
 
   test("search filters, changed-only shows what changed, exposure and gain reach the camera, reset", async ({ page, target }) => {
-    await openScreen(page, "Cameras");
+    await openScreen(page, "Tune");
     const api = page.request;
     const camera = target === "sim" ? await simCamera(api) : null;
     const reset = page.getByRole("button", { name: "Reset all controls to defaults" });

@@ -191,7 +191,7 @@ export function checkConnection(nodes: FlowNode[], edges: FlowEdge[], c: Connect
   return { ok: true, type: from };
 }
 
-/** Parameters whose value differs from the catalog default. Shown as a count on the node; values live in the inspector. */
+/** Parameters whose value differs from the catalog default. Shown as a count on the node; values live in Pipeline settings. */
 export function changedParams(type: NodeType | undefined, params: Record<string, ParamValue>): Param[] {
   if (!type) return [];
   return type.params.filter((p) => (params[p.name] ?? p.default) !== p.default);

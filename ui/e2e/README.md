@@ -35,13 +35,13 @@ Chromium comes from `bunx playwright install chromium`.
 
 | File | Flow |
 | --- | --- |
-| `default-pipelines.spec.ts` | Pipelines → Defaults: AprilTag with the 3D map and depth, then ArUco, then video only. Sim: one enabled Eidos pipeline per camera, the same id throughout, and the graph has `live_map` and `dense.map` (then none). |
-| `pipeline-settings.spec.ts` | The Inspector's Resolution and pyramid levels (binding `output_width`, `output_height`, `pyramid`); tag family, search mode and full-search interval (`dictionary`, `search_mode`, `full_search_every`). |
+| `default-pipelines.spec.ts` | Set up → Cameras: AprilTag with the 3D map and depth, then ArUco, then video only. Sim: one enabled Eidos pipeline per camera, the same id throughout, and the graph has `live_map` and `dense.map` (then none). |
+| `pipeline-settings.spec.ts` | Tune → Pipeline settings: Resolution and pyramid levels (binding `output_width`, `output_height`, `pyramid`); tag family, search mode and full-search interval (`dictionary`, `search_mode`, `full_search_every`). |
 | `tuning.spec.ts` | Tuning, by stage: a tab-through of a float field changes nothing; one parameter is edited and deployed. Sim: the whole graph's const inputs, type and value, match before and after except the one edited input; `requires` and edges are unchanged. |
 | `graph-editor.spec.ts` | Select a node (its settings show), Find centres it, Auto-arrange moves nodes and does not ask for a deploy. |
 | `camera-controls.spec.ts` | Search filters the sections, Changed only, exposure and gain typed in manual mode and read back from the camera, reset. |
-| `setup.spec.ts` | The checklist's "Choose what each camera does" opens the chooser; the first-run wizard shows once and can be skipped. |
-| `screens.spec.ts` | Every screen in the left rail opens; the add-a-screen gallery opens. |
+| `setup.spec.ts` | The checklist: a camera's next step opens the pane that does it; Set up → Cameras has each camera's chooser; the first-run wizard shows once and can be skipped. |
+| `screens.spec.ts` | Each of the four jobs opens with its panes; the rail is the four jobs; the status bar jumps to Run and Set up; the add-a-screen gallery opens. |
 | `device-features.spec.ts` | A device's own features (LED ring, security, reboot, boot slots, recovery ladder) show only where the device has them. Mock: the Raze image (all of them) and `?mock=systemcore`, a guest (none). Sim: the UI matches what `GET /v1/device` reports, so `HELIOS_E2E_URL` can point at a real device (read-only). |
 
 Sim tests start from whatever the device holds (a previous run's pipeline, its tag family, its

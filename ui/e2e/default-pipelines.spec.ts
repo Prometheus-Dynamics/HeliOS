@@ -1,15 +1,13 @@
-// Default pipelines: a camera's one pipeline, picked in Pipelines -> Defaults (What cameras run).
+// Default pipelines: a camera's one pipeline, picked on Set up > Cameras.
 // The UI's switches and choices are real clicks; on the sim, every step is checked on the device.
 import { device, eidosPipelinesOn, enabledPipelineOn, nodeTypes, simCamera } from "./device";
 import { expect, test } from "./fixtures";
 import { applyIfChanged } from "./flows";
-import { firstCameraChooser, openScreen } from "./nav";
+import { firstCameraChooser, openPane } from "./nav";
 
 test.describe("default pipelines", () => {
   test("AprilTag with 3D map and depth, then ArUco, then video only", async ({ page, target }) => {
-    await openScreen(page, "Pipelines");
-    await page.getByRole("button", { name: "Each camera's default pipeline" }).click();
-    await expect(page.getByRole("tab", { name: "What cameras run" })).toBeVisible();
+    await openPane(page, "Set up", "Cameras");
 
     const chooser = firstCameraChooser(page);
     await expect(chooser).toBeVisible();
@@ -31,7 +29,8 @@ test.describe("default pipelines", () => {
     await expect(map).toBeChecked();
     await depth.click();
     await expect(depth).toBeChecked();
-    await expect(chooser.getByText("Localization, 3D map and depth", { exact: false })).toBeVisible();
+    // The chooser's own line (its status line below may name the same template, with the pipeline's state).
+    await expect(chooser.getByText("Localization, 3D map and depth", { exact: true })).toBeVisible();
 
     await applyIfChanged(chooser);
 

@@ -98,7 +98,7 @@
       return;
     }
     const index = Number(event.key) - 1;
-    const all = workspaces.shown;
+    const all = workspaces.all;
     if (index >= 0 && index < Math.min(9, all.length)) shell.go(all[index].id);
   }
 </script>
@@ -119,9 +119,9 @@
     {#key shell.active}
       <Workspace id={shell.active} />
     {/key}
+    <StatusBar />
   </div>
 </div>
-<StatusBar />
 {@render children()}
 <MenuHost />
 <Palette />
@@ -153,8 +153,15 @@
   .main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+  /* Phone-wide: the rail is a bar along the bottom (see Rail.svelte). */
+  @media (max-width: 759px) {
+    .app {
+      flex-direction: column-reverse;
+    }
   }
   .explain-bar {
     display: flex;

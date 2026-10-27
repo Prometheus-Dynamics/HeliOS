@@ -7,35 +7,33 @@ import { identity } from "#lib/core/identity.svelte.js";
 import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
 import { selection } from "#lib/core/selection.svelte.js";
 import { shell } from "#lib/core/shell.svelte.js";
-import { pane, workspaces } from "#lib/core/workspace.svelte.js";
+import { workspaces } from "#lib/core/workspace.svelte.js";
 import { downloadJson } from "#lib/files.js";
 import { cluster } from "#lib/stores/cluster.svelte.js";
-import { allPanes } from "#lib/workspace/panes.js";
+import { allPanes, homeOf } from "#lib/workspace/panes.js";
 import { gallery } from "./gallery.svelte";
 import { help } from "./help.svelte";
 
 export function registerCommands() {
   commands.register("screens", () =>
-    workspaces.all.map((w) => {
-      const i = workspaces.shown.indexOf(w);
-      return { id: `screen:${w.id}`, title: workspaces.isVisible(w.id) ? w.name : `${w.name} (add to rail)`, group: "Screens", icon: w.icon, keywords: w.summary, shortcut: i >= 0 && i < 9 ? String(i + 1) : undefined, run: () => { workspaces.show(w.id); shell.go(w.id); } };
-    }),
+    workspaces.all.map((w, i) => ({ id: `screen:${w.id}`, title: w.name, group: "Screens", icon: w.icon, keywords: w.summary, shortcut: i < 9 ? String(i + 1) : undefined, run: () => shell.go(w.id) })),
   );
+  // A pane opens on the job it belongs to (its home), so a control is always found in its one place.
   commands.register("panes", () =>
     allPanes()
       .filter((p) => p.type !== "welcome")
-      .map((p) => ({ id: `pane:${p.type}`, title: `Open ${p.title}`, group: "Panes", icon: p.icon, keywords: `${p.summary} ${p.group}`, run: () => workspaces.open(shell.active, pane(p.type)) })),
+      .map((p) => ({ id: `pane:${p.type}`, title: `Open ${p.title}`, group: "Panes", icon: p.icon, keywords: `${p.summary} ${p.group}`, run: () => shell.open(homeOf(p), p.type) })),
   );
   commands.register("objects", () => [
-    ...cluster.cameras.map((c) => ({ id: `cam:${c.resourceId}`, title: identity.name(c.resourceId, c.name), group: "Cameras", icon: "camera" as const, keywords: `${c.resourceId} ${c.sensor} camera`, run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.go("cameras"); } })),
-    ...cluster.workloads.map((w) => ({ id: `wl:${w.id}`, title: identity.name(w.id, w.name), group: "Pipelines", icon: "schema" as const, keywords: `${w.id} pipeline graph`, run: () => { selection.select({ kind: "workload", id: w.id }); shell.go("pipelines"); } })),
-    ...cluster.nodes.map((n) => ({ id: `dev:${n.id}`, title: identity.name(n.id, n.name), group: "Devices", icon: "cpu" as const, keywords: `${n.model} ${n.address} device`, run: () => { selection.select({ kind: "device", id: n.id }); shell.go("hardware"); } })),
+    ...cluster.cameras.map((c) => ({ id: `cam:${c.resourceId}`, title: identity.name(c.resourceId, c.name), group: "Cameras", icon: "camera" as const, keywords: `${c.resourceId} ${c.sensor} camera`, run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.go("tune"); } })),
+    ...cluster.workloads.map((w) => ({ id: `wl:${w.id}`, title: identity.name(w.id, w.name), group: "Pipelines", icon: "schema" as const, keywords: `${w.id} pipeline graph`, run: () => { selection.select({ kind: "workload", id: w.id }); shell.open("tune", "pipeline-settings"); } })),
+    ...cluster.nodes.map((n) => ({ id: `dev:${n.id}`, title: identity.name(n.id, n.name), group: "Devices", icon: "cpu" as const, keywords: `${n.model} ${n.address} device`, run: () => { selection.select({ kind: "device", id: n.id }); shell.go("device"); } })),
   ]);
   commands.register("actions", () => [
     { id: "act:pause", title: cluster.playing ? "Pause live feeds" : "Resume live feeds", group: "Actions", icon: cluster.playing ? "player-pause" : "player-play", shortcut: "Space", run: () => { cluster.playing = !cluster.playing; } },
     { id: "act:reset-layout", title: "Reset this screen's layout", group: "Actions", icon: "rotate-clockwise", run: () => workspaces.reset(shell.active) },
     { id: "act:reopen", title: "Reopen the last closed pane", group: "Actions", icon: "history", keywords: "undo close restore tab", run: () => workspaces.reopen(shell.active) },
-    { id: "act:add-screen", title: "Add a screen…", group: "Actions", icon: "layout-grid", keywords: "rail gallery more screens", run: () => gallery.show("screens") },
+    { id: "act:add-screen", title: "Add a screen of your own…", group: "Actions", icon: "layout-grid", keywords: "rail gallery more screens", run: () => gallery.show("screens") },
     { id: "act:add-kit", title: "Add a kit of panes to this screen…", group: "Actions", icon: "puzzle", keywords: "gallery prebuilt add panes", run: () => gallery.show("kits") },
     { id: "act:explain", title: "What's on this screen?", group: "Help", icon: "info-circle", shortcut: "F1", keywords: "explain help panes", run: () => { help.explain = true; } },
     { id: "act:tour", title: "Take the tour", group: "Help", icon: "rocket", keywords: "tutorial help intro", run: () => help.startTour() },

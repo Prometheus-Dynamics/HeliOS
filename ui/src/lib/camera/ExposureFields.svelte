@@ -3,7 +3,7 @@
   // ones the camera takes now (its effective range when it reports one, else one frame at the
   // frame rate within the device's limits). Auto shows the live values, locked. The pane adds EV,
   // the AE state, the AE limits (motion blur, gain), the exposure and metering modes and the
-  // metering region; the inspector shows only the basics.
+  // metering region; `compact` shows only the basics.
   import type { Camera, CameraControlInfo } from "#lib/api/model.js";
   import Prop from "#lib/kit/Prop.svelte";
   import Seg from "#lib/kit/Seg.svelte";

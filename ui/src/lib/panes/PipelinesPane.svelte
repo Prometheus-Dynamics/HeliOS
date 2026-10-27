@@ -6,7 +6,6 @@
   import { menu } from "#lib/core/menu.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
-  import { pane, workspaces } from "#lib/core/workspace.svelte.js";
   import { drafts } from "#lib/graph/drafts.svelte.js";
   import { tableFor, templateGraph, TEMPLATES } from "#lib/graph/graph.js";
   import IconButton from "#lib/kit/IconButton.svelte";
@@ -32,15 +31,14 @@
     ];
   }
 
-  /** The default pipelines, picked per camera (What cameras run). */
+  /** The default pipelines are picked per camera on the Set up screen. */
   function openDefaults() {
-    shell.go("cameras");
-    workspaces.open("cameras", pane("camera-jobs"));
+    shell.open("setup", "camera-jobs");
   }
 
   async function create(e: MouseEvent) {
     menu.below(e.currentTarget as Element, [
-      { label: "Default pipeline for a camera…", icon: "list-check", hint: "Localization, 3D map, depth, markers or feature tracks: one pipeline per camera", run: openDefaults },
+      { label: "What a camera runs (Set up)…", icon: "list-check", hint: "Localization, 3D map, depth, markers or feature tracks: one pipeline per camera", run: openDefaults },
       { separator: true as const },
       { heading: "Custom pipeline from" },
       ...TEMPLATES.map((t) => ({
@@ -58,11 +56,13 @@
 </script>
 
 <PaneBar>
-  <IconButton icon="list-check" label="Each camera's default pipeline" text="Defaults" size={24} onclick={openDefaults} />
   <IconButton icon="plus" label="New pipeline" text="New" size={24} onclick={create} />
 </PaneBar>
 
 <div class="table">
+  {#if !cluster.workloads.length}
+    <div class="none">No pipeline yet. <button type="button" class="link" onclick={openDefaults}>Choose what each camera runs</button> on the Set up screen; its pipeline appears here.</div>
+  {/if}
   <div class="head">
     <span></span><span>Pipeline</span><span>Camera</span><span class="r">p50</span><span class="r">p99</span><span>trend</span><span class="r">fps</span><span class="r">mem</span><span></span>
   </div>
@@ -221,5 +221,17 @@
     display: flex;
     justify-content: flex-end;
     gap: 1px;
+  }
+  .none {
+    padding: 10px;
+    font-size: 12px;
+    color: var(--fg-3);
+  }
+  .link {
+    color: var(--accent-fg);
+    font-size: inherit;
+  }
+  .link:hover {
+    text-decoration: underline;
   }
 </style>

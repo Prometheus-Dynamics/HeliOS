@@ -3,7 +3,7 @@
 // The mock has two devices: `?mock=1` is the Raze image (every feature) and `?mock=systemcore` a
 // SystemCore guest (none of them). The sim (HELIOS_E2E_URL) is checked against what it reports.
 import { expect, test, type Page } from "./fixtures";
-import { openScreen } from "./nav";
+import { openPane } from "./nav";
 import type { Capabilities } from "../src/lib/api/types";
 
 /** A section by its title (the `Section` header's text). */
@@ -24,10 +24,11 @@ test.describe("the Raze image (mock)", () => {
   test.use({ allowConsole: [MOCK_ROBOT_DATA] });
 
   test("has its LED ring, security, reboot, boot slots and recovery ladder", async ({ page }) => {
-    await openScreen(page, "Settings");
+    await openPane(page, "Device", "Hardware");
     await expect(section(page, "LEDs")).toBeVisible();
+    await openPane(page, "Device", "Robot link");
     await expect(section(page, "Security")).toBeVisible();
-    await openScreen(page, "Hardware");
+    await openPane(page, "Device", "Software");
     await expect(reboot(page)).toBeVisible();
     await expect(section(page, "Boot slots")).toBeVisible();
     await expect(section(page, "Recovery")).toBeVisible();
@@ -41,10 +42,11 @@ test.describe("a SystemCore guest (mock)", () => {
   test("has no LED ring, security, reboot, slots or recovery ladder, and lists its own services", async ({ page }) => {
     await page.goto("/?mock=systemcore");
     await expect(page.getByRole("navigation", { name: "Screens" })).toBeVisible();
-    await openScreen(page, "Settings");
+    await openPane(page, "Device", "Hardware");
     await expect(section(page, "LEDs")).toHaveCount(0);
+    await openPane(page, "Device", "Robot link");
     await expect(section(page, "Security")).toHaveCount(0);
-    await openScreen(page, "Hardware");
+    await openPane(page, "Device", "Software");
     await expect(reboot(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Safe mode", exact: true })).toHaveCount(0);
     await expect(section(page, "Boot slots")).toHaveCount(0);
@@ -62,10 +64,11 @@ test.describe("the device (HELIOS_E2E_URL)", () => {
     const capabilities = (await response.json()) as Partial<Capabilities>;
     expect(capabilities.features, "the device reports its features (an older helios-api does not: redeploy it)").toBeDefined();
     const features = capabilities.features!;
-    await openScreen(page, "Settings");
+    await openPane(page, "Device", "Hardware");
     await expect(section(page, "LEDs")).toHaveCount(features.leds ? 1 : 0);
+    await openPane(page, "Device", "Robot link");
     await expect(section(page, "Security")).toHaveCount(features.security ? 1 : 0);
-    await openScreen(page, "Hardware");
+    await openPane(page, "Device", "Software");
     await expect(reboot(page)).toHaveCount(features.reboot ? 1 : 0);
     await expect(section(page, "Recovery")).toHaveCount(features.recovery_ladder ? 1 : 0);
   });

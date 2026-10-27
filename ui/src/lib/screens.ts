@@ -1,6 +1,6 @@
-// The built-in screens. Each is a workspace preset: rearrange it and your
-// version is kept; "Reset" brings this one back. Start is the simple one new
-// users begin with; the rest are added from the gallery when needed.
+// The built-in screens: one per job (docs/docs/ui-information-architecture.md). Each is a workspace
+// preset: rearrange it and your version is kept; "Reset" brings this one back. Every control is on
+// exactly one of them.
 
 import { col, pane, row, stack, workspaces, type LayoutNode, type Workspace } from "#lib/core/workspace.svelte.js";
 import type { IconName } from "#lib/ui/icons.js";
@@ -9,110 +9,55 @@ function ws(id: string, name: string, icon: IconName, color: number, summary: st
   return () => ({ id, name, icon, color, summary, root });
 }
 
+/** The four jobs, in rail order. */
+export const JOBS = ["setup", "run", "tune", "device"] as const;
+
 export function registerScreens() {
   workspaces.registerPreset(
-    "start",
-    ws("start", "Start", "home", 7, "Every camera live, what still needs setting up, and anything that is wrong.",
-      row([0.68, 0.32],
+    "setup",
+    ws("setup", "Set up", "list-check", 7, "First run, or a new camera or board: the checklist, what each camera runs, calibration, where it sits, the field.",
+      row([0.34, 0.66],
+        stack(pane("setup")),
+        stack(pane("camera-jobs"), pane("calibration"), pane("mounts"), pane("robot3d"), pane("field"), pane("board")),
+      ),
+    ),
+  );
+  workspaces.registerPreset(
+    "run",
+    ws("run", "Run", "eye", 6, "Match time: every camera with its tags and status, the robot on the field, and health. Nothing to edit.",
+      row([0.64, 0.36],
         stack(pane("mosaic")),
-        col([0.55, 0.45], stack(pane("setup"), pane("status")), stack(pane("inspector"))),
+        col([0.52, 0.48], stack(pane("map")), stack(pane("status"))),
       ),
     ),
   );
   workspaces.registerPreset(
-    "overview",
-    ws("overview", "Overview", "layout-grid", 8, "The whole robot: devices, cameras, pipelines, 3D and logs on one screen.",
-      row([0.22, 0.5, 0.28],
-        col([0.62, 0.38], stack(pane("status"), pane("setup")), stack(pane("inspector"))),
-        col([0.64, 0.36], stack(pane("mosaic")), stack(pane("pipelines"), pane("streams"))),
-        col([0.6, 0.4], stack(pane("robot3d"), pane("field")), stack(pane("logs"))),
+    "tune",
+    ws("tune", "Tune", "adjustments-horizontal", 4, "One camera or pipeline at a time: camera controls, pipeline settings, the graph with its plan and timings.",
+      row([0.18, 0.52, 0.3],
+        stack(pane("cameras"), pane("pipelines"), pane("catalog")),
+        col([0.56, 0.44], stack(pane("camera"), pane("playback")), stack(pane("graph"), pane("profiler"))),
+        stack(pane("camera-controls"), pane("pipeline-settings")),
       ),
     ),
   );
   workspaces.registerPreset(
-    "cameras",
-    ws("cameras", "Cameras", "camera", 4, "Tune one camera: live view with ROI and histogram, every setting, and what each camera runs.",
-      row([0.17, 0.55, 0.28],
-        stack(pane("cameras")),
-        col([0.72, 0.28], stack(pane("camera")), stack(pane("logs"))),
-        stack(pane("camera-controls"), pane("camera-jobs")),
+    "device",
+    ws("device", "Device", "cpu", 1, "Boards and this browser: software and updates, hardware, processes, logs, recordings, robot link and security, look and backup.",
+      col([0.34, 0.66],
+        stack(pane("devices")),
+        row([0.5, 0.5], stack(pane("system"), pane("peripherals"), pane("processes"), pane("logs")), stack(pane("robot"), pane("recordings"), pane("preferences"))),
       ),
     ),
   );
-  workspaces.registerPreset(
-    "vision",
-    ws("vision", "Vision", "eye", 6, "A camera and its pipeline side by side, with timings: for tuning detection.",
-      row([0.16, 0.56, 0.28],
-        stack(pane("cameras")),
-        col([0.6, 0.4], stack(pane("camera")), stack(pane("graph"))),
-        col([0.62, 0.38], stack(pane("inspector"), pane("camera-controls")), stack(pane("profiler"))),
-      ),
-    ),
-  );
-  workspaces.registerPreset(
-    "perception",
-    ws("perception", "Perception", "eye", 12, "What the camera sees, what it would look like on the field, and the depth the mapper measures, side by side.",
-      row([0.36, 0.38, 0.26],
-        stack(pane("camera", { overlays: { depth: true } })),
-        stack(pane("map")),
-        stack(pane("depth")),
-      ),
-    ),
-  );
-  workspaces.registerPreset(
-    "pipelines",
-    ws("pipelines", "Pipelines", "schema", 10, "Each camera's default pipeline, and the graph editor: node catalog, canvas, inspector, profiler.",
-      row([0.15, 0.6, 0.25],
-        stack(pane("catalog")),
-        col([0.68, 0.32], stack(pane("graph")), stack(pane("pipelines"), pane("camera-jobs"), pane("profiler"))),
-        col([0.6, 0.4], stack(pane("inspector")), stack(pane("camera"))),
-      ),
-    ),
-  );
-  workspaces.registerPreset(
-    "robot",
-    ws("robot", "Robot", "cube", 3, "Where each camera is on the robot (numbers or CAD), and the field layout.",
-      row([0.66, 0.34],
-        col([0.64, 0.36], stack(pane("robot3d")), stack(pane("mounts"))),
-        col([0.5, 0.5], stack(pane("field")), stack(pane("inspector"))),
-      ),
-    ),
-  );
-  workspaces.registerPreset(
-    "calibration",
-    ws("calibration", "Calibration", "grid-4x4", 2, "Calibrate cameras and print calibration boards.",
-      row([0.75, 0.25], stack(pane("calibration"), pane("board")), col([0.5, 0.5], stack(pane("cameras")), stack(pane("camera-controls")))),
-    ),
-  );
-  workspaces.registerPreset(
-    "recordings",
-    ws("recordings", "Recordings", "player-record", 5, "Record a camera, capture the last seconds, and keep or export the recordings.",
-      row([0.62, 0.38], stack(pane("recordings")), col([0.6, 0.4], stack(pane("camera")), stack(pane("logs")))),
-    ),
-  );
-  workspaces.registerPreset(
-    "hardware",
-    ws("hardware", "Hardware", "cpu", 1, "Every device: processes and cores, fan, LEDs, GPIO, IMU, updates and recovery.",
-      col([0.36, 0.64],
-        row([0.72, 0.28], stack(pane("devices")), stack(pane("inspector"))),
-        row([0.42, 0.3, 0.28], stack(pane("processes")), stack(pane("peripherals")), stack(pane("system"), pane("logs"))),
-      ),
-    ),
-  );
-  workspaces.registerPreset(
-    "playback",
-    ws("playback", "Playback", "player-play", 11, "Replay a recording or image folder as a camera, and run a pipeline on it.",
-      row([0.7, 0.3], stack(pane("playback")), stack(pane("pipelines"))),
-    ),
-  );
-  workspaces.registerPreset("settings", ws("settings", "Settings", "settings", 9, "Security, theme, names and colours, layouts, backup.", stack(pane("settings"))));
+  workspaces.prune();
 }
 
 /** Prebuilt groups of panes you can drop into any screen. */
 export const KITS: { id: string; title: string; summary: string; icon: IconName; make: () => LayoutNode }[] = [
   { id: "perception", title: "Perception", summary: "The camera view with its depth, the 3D scene of the field and the map, and the depth.", icon: "eye", make: () => row([0.36, 0.38, 0.26], stack(pane("camera", { overlays: { depth: true } })), stack(pane("map")), stack(pane("depth"))) },
   { id: "tune-camera", title: "Tune a camera", summary: "Live view with ROI and histogram, next to every camera setting.", icon: "camera", make: () => row([0.6, 0.4], stack(pane("camera")), stack(pane("camera-controls"))) },
-  { id: "edit-pipeline", title: "Edit a pipeline", summary: "Node catalog, graph canvas and inspector.", icon: "schema", make: () => row([0.2, 0.55, 0.25], stack(pane("catalog")), stack(pane("graph")), stack(pane("inspector"))) },
+  { id: "edit-pipeline", title: "Edit a pipeline", summary: "Node catalog, graph canvas and the pipeline's settings.", icon: "schema", make: () => row([0.2, 0.55, 0.25], stack(pane("catalog")), stack(pane("graph")), stack(pane("pipeline-settings"))) },
   { id: "performance", title: "Performance", summary: "Per-node timings and the processes and cores behind them.", icon: "stopwatch", make: () => col([0.5, 0.5], stack(pane("profiler")), stack(pane("processes"))) },
   { id: "geometry", title: "Robot geometry", summary: "3D robot with camera fields of view, and the mounts table.", icon: "cube", make: () => col([0.62, 0.38], stack(pane("robot3d")), stack(pane("mounts"))) },
   { id: "field", title: "Field", summary: "Field layout editor and what each camera can see from where the robot is.", icon: "map", make: () => stack(pane("field")) },

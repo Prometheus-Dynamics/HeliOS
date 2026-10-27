@@ -1,8 +1,9 @@
-// Guidance on top of the stores: what each camera is doing (its "job"),
-// the setup checklist, and plain-language answers for the command palette.
-// Everything resolves to the same screens, panes and settings experts use.
+// Guidance on top of the stores: what each camera is doing (its "job"), the setup checklist (each
+// camera's status chain, plus what the robot needs), and plain-language answers for the command
+// palette. Everything resolves to the same screens, panes and settings experts use.
 
 import type { Camera, Workload } from "#lib/api/model.js";
+import type { StatusStage } from "#lib/api/types.js";
 import { identity } from "#lib/core/identity.svelte.js";
 import type { IconName } from "#lib/ui/icons.js";
 import { calibration } from "#lib/stores/calibration.svelte.js";
@@ -25,6 +26,26 @@ export const DICTIONARIES: Record<"apriltag" | "aruco", { value: string; label: 
   ],
   aruco: ["4x4", "5x5", "6x6", "7x7"].flatMap((size) => [50, 100, 250, 1000].map((n) => ({ value: `aruco_${size}_${n}`, label: `${size} · ${n}` }))),
 };
+
+/** Where a setup step is done: the job screen and the pane on it. */
+export interface StepTarget {
+  screen: "setup" | "tune" | "device";
+  pane: string;
+}
+
+/**
+ * One step of a camera's setup: `ok` is done, `waiting` is in progress (the chain's stage says how
+ * far), `todo` is not started, `blocked` is stopped by something (the stage's reason says what).
+ */
+export interface CameraStep {
+  id: string;
+  title: string;
+  detail: string;
+  state: "ok" | "waiting" | "todo" | "blocked";
+  hint: string | null;
+  progress: StatusStage["progress"];
+  target: StepTarget;
+}
 
 /** The dictionary a pipeline's detector decodes ("" without one). */
 function dictionaryOf(w: Workload): string {
@@ -82,23 +103,59 @@ class GuideStore {
   }
 
   calibrated(c: Camera) {
-    return Boolean(calibration.saved[calibration.key(c)]);
+    return Boolean(calibration.saved[calibration.key(c)]) || c.status?.stages.some((s) => s.stage === "calibration" && s.state === "ok") === true;
   }
 
   get nativeCameras(): Camera[] {
     return cluster.cameras.filter((c) => !c.foreign);
   }
 
-  /** The setup checklist, in the order a new team should do it. */
+  /**
+   * One camera's setup, in order, from its status chain (helios-api `camera_status`) and what this
+   * browser knows (its name, its placement): the stage that stops the chain is the next step, with
+   * the chain's reason, hint and progress, and the pane that does it.
+   */
+  cameraSteps(c: Camera): CameraStep[] {
+    const stage = (id: string) => c.status?.stages.find((s) => s.stage === id);
+    const stop = c.status?.blocking ?? null;
+    const chainStep = (id: string, title: string, fallback: string, target: StepTarget, done: () => boolean): CameraStep => {
+      const s = stage(id);
+      if (s && s.state !== "off") {
+        const state = s.state === "ok" ? "ok" : s.state === "blocked" ? "blocked" : s.stage === stop ? "waiting" : "todo";
+        return { id, title, detail: s.reason, state, hint: s.state === "ok" ? null : s.hint, progress: s.progress, target };
+      }
+      return { id, title, detail: fallback, state: done() ? "ok" : "todo", hint: null, progress: null, target };
+    };
+    const steps: CameraStep[] = [];
+    // The camera itself, its service and its frames: only when something stops them.
+    const front = ["camera", "service", "frames"].map(stage).find((s) => s && s.state !== "ok" && s.state !== "off");
+    if (front) steps.push({ id: front.stage, title: "Camera", detail: front.reason, state: front.state === "blocked" ? "blocked" : "waiting", hint: front.hint, progress: front.progress, target: { screen: "device", pane: "devices" } });
+    steps.push(
+      chainStep("pipeline", "Choose what it runs", this.active(c) ? "Runs its pipeline." : "Localization, 3D map, depth, markers or feature tracks.", { screen: "setup", pane: "camera-jobs" }, () => Boolean(this.active(c))),
+      chainStep("detections", "See tags", cluster.detectionsFor(c).length ? `${cluster.detectionsFor(c).length} tags in view.` : "Point it at a tag: its outline and id show over the picture.", { screen: "tune", pane: "camera-controls" }, () => cluster.detectionsFor(c).length > 0),
+      chainStep("calibration", "Calibrate", this.calibrated(c) ? "Calibrated." : "About two minutes with a printed board; the live map also fits the lens on its own.", { screen: "setup", pane: "calibration" }, () => this.calibrated(c)),
+      { id: "place", title: "Place it on the robot", detail: robot.isCustom(c.resourceId) ? "Placed." : "Where it sits and which way it looks: needed for positions.", state: robot.isCustom(c.resourceId) ? "ok" : "todo", hint: null, progress: null, target: { screen: "setup", pane: "mounts" } },
+    );
+    for (const [id, title] of [["map", "3D map"], ["depth", "Depth"], ["features", "Feature tracks"]] as const) {
+      const s = stage(id);
+      if (s && s.state !== "off") steps.push(chainStep(id, title, s.reason, { screen: "setup", pane: "camera-jobs" }, () => s.state === "ok"));
+    }
+    // A step blocked by something before it (no tags without a pipeline) is not the next one.
+    return steps;
+  }
+
+  /** The step a camera is at: the first that is not done. */
+  nextFor(c: Camera): CameraStep | undefined {
+    return this.cameraSteps(c).find((s) => s.state !== "ok");
+  }
+
+  /** The setup checklist, in the order a new team should do it (the status bar and the rail count it). */
   get checklist(): { id: string; title: string; detail: string; done: boolean; icon: IconName }[] {
     const cams = this.nativeCameras;
-    // Built-in defaults give icons, not names; a name means someone chose it.
-    const named = cams.every((c) => identity.get(c.resourceId).name);
     const placed = cams.every((c) => robot.isCustom(c.resourceId));
     const cal = cams.filter((c) => this.calibrated(c)).length;
     const working = cams.filter((c) => this.active(c)).length;
     return [
-      { id: "name", title: "Name your cameras", detail: named ? "Every camera has a name and colour." : "Give each camera a name and colour so you can tell them apart.", done: named, icon: "tag" },
       { id: "jobs", title: "Choose what each camera does", detail: working === cams.length ? "Every camera runs its pipeline." : `${working} of ${cams.length} run a pipeline. Pick localization, the 3D map and depth, markers or feature tracks.`, done: working === cams.length, icon: "list-check" },
       { id: "place", title: "Tell HeliOS where each camera is", detail: placed ? "All cameras are placed on the robot." : "Where it sits on the robot and which way it looks. Needed for positions.", done: placed, icon: "cube" },
       { id: "calibrate", title: "Calibrate each camera", detail: `${cal} of ${cams.length} done. About two minutes each with a printed board.`, done: cal === cams.length, icon: "grid-4x4" },
@@ -107,7 +164,7 @@ class GuideStore {
         ? {
             id: "robot-code",
             title: "Connect to robot code",
-            detail: liveState.nt4?.connected ? `Publishing to ${liveState.nt4.server} under ${liveState.nt4.settings.prefix}.` : liveState.nt4?.server ? `Waiting for ${liveState.nt4.server}. Is the device on the robot network?` : "Set your team number in Settings › Robot.",
+            detail: liveState.nt4?.connected ? `Publishing to ${liveState.nt4.server} under ${liveState.nt4.settings.prefix}.` : liveState.nt4?.server ? `Waiting for ${liveState.nt4.server}. Is the device on the robot network?` : "Set your team number in Device › Robot link.",
             done: Boolean(liveState.nt4?.connected),
             icon: "plug",
           }

@@ -1,4 +1,4 @@
-// How the camera fields write to the device. One place, so the pane and the inspector send the
+// How the camera fields write to the device. One place, so every field sends the
 // same keys: a control's standard key when it has one (`exposure_us`, `ae`, `fps`...), else its
 // name. The live store batches writes made while dragging into one PATCH; the mock applies them.
 // A `null` forgets a control: it goes to the device's default and the value kept for it is dropped.

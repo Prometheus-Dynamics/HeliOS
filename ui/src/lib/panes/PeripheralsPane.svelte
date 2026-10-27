@@ -21,6 +21,7 @@
   import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
   import ImuPanel from "#lib/imu/ImuPanel.svelte";
+  import LedSection from "#lib/components/leds/LedSection.svelte";
   import { follow } from "./follow.svelte";
 
   let { pane, ws }: PaneProps = $props();
@@ -30,7 +31,7 @@
   // A section shows only for a feature the device has (`device.hasOn`), so the pane is empty when
   // none of them is there.
   const empty = $derived(
-    hw && !(device.hasOn(target.id, "fan") && hw.fan) && !(device.hasOn(target.id, "leds") && hw.leds.length) && !hw.gpio.length && !(device.hasOn(target.id, "imu") && hw.imu) && !(device.hasOn(target.id, "power") && hw.power.length) && !(device.hasOn(target.id, "usb_power") && hw.switches?.length) && !hw.lemnos?.length,
+    hw && !(device.hasOn(target.id, "fan") && hw.fan) && !(device.hasOn(target.id, "leds") && (hw.leds.length || !node?.peer)) &&!hw.gpio.length && !(device.hasOn(target.id, "imu") && hw.imu) && !(device.hasOn(target.id, "power") && hw.power.length) && !(device.hasOn(target.id, "usb_power") && hw.switches?.length) && !hw.lemnos?.length,
   );
   // Live readings at 4 Hz while this pane is open.
   $effect(() => system.watchPeripherals());
@@ -69,7 +70,12 @@
       </Section>
     {/if}
 
-    {#if device.hasOn(target.id, "leds") && hw.leds.length}
+    {#if device.hasOn(target.id, "leds") && !node.peer}
+      <!-- This device's ring: its settings (the device checks them). A peer's ring shows its state below. -->
+      <Section title="LEDs" key="hw-leds">
+        <LedSection />
+      </Section>
+    {:else if device.hasOn(target.id, "leds") && hw.leds.length}
       <Section title="LEDs" key="hw-leds" count={hw.leds.length}>
         {#each hw.leds as led (led.id)}
           <div class="led">
