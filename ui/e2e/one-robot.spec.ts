@@ -4,7 +4,7 @@
 // node's badge, the LED controls are the Raze's, and a change to the peer's camera goes through the
 // peer's scope, where the simulated peer keeps the request (`helios:mock-peers`, see mock-device.ts).
 import { expect, test, type Page } from "./fixtures";
-import { openScreen } from "./nav";
+import { openPane, openScreen } from "./nav";
 
 /** A section by its title (the `Section` header's text). */
 function section(page: Page, title: string) {
@@ -38,7 +38,7 @@ test.describe("one robot (mock)", () => {
   });
 
   test("the Devices pane lists this device and the SystemCore peer, each with its badge", async ({ page }) => {
-    await openScreen(page, "Hardware");
+    await openScreen(page, "Device");
     const owner = page.getByRole("button", { name: /Owner/ });
     const systemcore = page.getByRole("button", { name: /SystemCore/ });
     await expect(owner.getByText("this device", { exact: true })).toBeVisible();
@@ -46,7 +46,7 @@ test.describe("one robot (mock)", () => {
   });
 
   test("the camera list shows the peer's camera as reached via this device, and this device's without one", async ({ page }) => {
-    await openScreen(page, "Cameras");
+    await openScreen(page, "Tune");
     const back = cameraRow(page, /^Back /);
     await expect(back).toBeVisible();
     await expect(back.getByText(/^via /)).toBeVisible();
@@ -56,15 +56,15 @@ test.describe("one robot (mock)", () => {
   });
 
   test("the LED controls are the Raze's: they show for it and not for the SystemCore", async ({ page }) => {
-    await openScreen(page, "Hardware");
+    await openPane(page, "Device", "Hardware");
     await expect(section(page, "LEDs")).toBeVisible();
-    // Selecting the SystemCore in the Devices pane: the Peripherals pane follows the selection.
+    // Selecting the SystemCore in the Devices pane: the Hardware pane follows the selection.
     await page.getByRole("button", { name: /SystemCore/ }).click();
     await expect(section(page, "LEDs")).toHaveCount(0);
   });
 
   test("a change to the peer's camera goes to the peer, and the peer keeps it", async ({ page }) => {
-    await openScreen(page, "Cameras");
+    await openScreen(page, "Tune");
     await cameraRow(page, /^Back /).click();
     // Manual exposure: the change is the peer camera's, so it goes to the peer's own API.
     await page.getByRole("radiogroup", { name: "Exposure mode" }).getByRole("radio", { name: "Manual", exact: true }).click();

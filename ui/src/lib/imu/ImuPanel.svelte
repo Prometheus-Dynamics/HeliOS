@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The IMU, live, as the Hardware screen and the IMU pane show it: the board in 3D (from its own
+  // The IMU, live, as Device > Hardware shows it: the board in 3D (from its own
   // fusion when the node has it, else a filter of the IMU here), the status ring's LEDs on the
   // model and beside it, the accelerometer, gyro and magnetometer over the last seconds, and the
   // numbers. Readings come from the node's live stream (`liveStreams`), pushed as they are read.

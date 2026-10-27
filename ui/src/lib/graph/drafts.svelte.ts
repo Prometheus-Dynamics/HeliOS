@@ -1,5 +1,5 @@
 // Pipeline drafts: the edited, not-yet-deployed graph per workload. The canvas,
-// inspector, catalog and profiler panes all work on the same draft, so a
+// pipeline settings, catalog and profiler panes all work on the same draft, so a
 // change in one shows in the others. Deploy turns the draft into a revision.
 //
 // A draft follows the device: when the deployed graph changes under an unedited

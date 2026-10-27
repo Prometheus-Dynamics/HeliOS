@@ -1,5 +1,5 @@
 // The default pipelines the device offers a camera, read once and shared by every place that
-// shows the choice (the inspector, What cameras run, setup). The UI's built-in list stands in
+// shows the choice (Set up > Cameras, the first-run wizard). The UI's built-in list stands in
 // until the device answers; a device that could not be reached is asked again next time.
 
 import { cluster } from "#lib/stores/cluster.svelte.js";

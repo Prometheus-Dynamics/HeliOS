@@ -5,7 +5,7 @@
 // its storage and its BroadcastChannel, as two tabs of one browser do).
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect, setOnboarded, test, type Target } from "./fixtures";
-import { openScreen } from "./nav";
+import { openPane } from "./nav";
 
 /** Skips the first-run wizard in a mock tab (the simulated robot's document is in this browser). */
 function seedMockDevice() {
@@ -41,8 +41,8 @@ test.describe("live sync", () => {
     // The device's own settings are put back as they were (the sim is a device the others use too).
     const before = target === "sim" ? await (await a.request.get("/v1/device/nt4")).json() : null;
     try {
-      await openScreen(a, "Settings");
-      await openScreen(b, "Settings");
+      await openPane(a, "Device", "Robot link");
+      await openPane(b, "Device", "Robot link");
       const teamInA = a.getByLabel("Team number", { exact: true });
       await expect(teamInA).toBeVisible();
       await teamInA.fill("4321");
@@ -61,8 +61,8 @@ test.describe("live sync", () => {
     const { a, b, contexts } = await openTabs(browser, baseURL, target);
     const before = target === "sim" ? await (await a.request.get("/v1/device/nt4")).json() : null;
     try {
-      await openScreen(a, "Settings");
-      await openScreen(b, "Settings");
+      await openPane(a, "Device", "Robot link");
+      await openPane(b, "Device", "Robot link");
       await expect(b.getByRole("switch", { name: "Publish to NetworkTables" })).toBeChecked({ timeout: 15_000 });
       await a.getByRole("switch", { name: "Publish to NetworkTables" }).click();
       await expect(b.getByRole("switch", { name: "Publish to NetworkTables" })).not.toBeChecked({ timeout: 15_000 });

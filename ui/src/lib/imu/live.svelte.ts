@@ -1,4 +1,4 @@
-// The node's live stream, shared by every view that shows it (the IMU pane, the Hardware screen).
+// The node's live stream, shared by every view that shows it (Device > Hardware).
 // One socket while any view watches (`watch`), closed with the last one. The rows are kept
 // outside Svelte's reactivity (drawn from directly each frame); `version` moves per batch so
 // views that read it update.

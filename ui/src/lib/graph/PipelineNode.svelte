@@ -2,7 +2,7 @@
   // A graph node on the canvas, kept compact: a header (category, title,
   // plugin), one row per port pair (inputs left, outputs right) and a footer
   // with live timing and how many parameters differ from the catalog. Values
-  // stay in the inspector.
+  // stay in Pipeline settings.
   import { Handle, Position, type NodeProps } from "@xyflow/svelte";
   import { CATALOG_BY_ID } from "#lib/api/catalog.js";
   import Icon from "#lib/components/common/Icon.svelte";
