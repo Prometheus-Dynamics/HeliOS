@@ -130,7 +130,7 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (c927136, plugin ABI 9), Styx dev (ab05a57, simulated cameras: feature `sim`, glTF scenes `scene=gltf`, `clock=lockstep`), Eidos dev (c357fb91,
+#   Daedalus 3.0 dev (21d401e, plugin ABI 11: boundary labels from `TypeExpr::canonical_label()`), Styx dev (b6444d3: the 3.0 API, `#[non_exhaustive]` enums; simulated cameras: feature `sim`, glTF scenes `scene=gltf`, `clock=lockstep`), Eidos dev (c357fb91,
 #   feature tracks `eidos:features.track`; tracking overrides and tracked stage nodes), Orion v4 main (4fadba9:
 #   request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`; also the Gaia
 #   `orion` source), Lemnos dev (b2634fc: fault reasons and the lemnosd -> Orion bridge; also the
@@ -138,7 +138,7 @@ tempfile = "3.27.0"
 # The engine and the plugin libraries must come from the same Daedalus commit: the image builds
 # them in one cargo invocation (Gaia build_group "helios-backend").
 # Updating another library tends to move Daedalus to its dev head: re-pin it with
-# `cargo update -p daedalus-rs --precise c927136599786cb05aed8ce919b0efd91c7b715d` (updating Styx
+# `cargo update -p daedalus-rs --precise 21d401ec8241e766265907ef76edfb321b2c15e5` (updating Styx
 # moves it too), and check `cargo tree -d`.
 daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }

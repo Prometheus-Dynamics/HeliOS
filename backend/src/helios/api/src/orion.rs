@@ -8,7 +8,7 @@ use orion::{
     Revision,
     client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
     control_plane::{
-        ActionRequest, ActionResult, ArtifactRecord, ClusterStateEnvelope, DesiredClusterState, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord,
+        ActionRequest, ActionResult, ArtifactRecord, DesiredClusterState, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord,
         ObservedClusterState, ResourceRecord, StateSnapshot, StatusEntry, StatusQuery, WorkloadObservedState, WorkloadRecord,
     },
     core::ResourceId,
@@ -287,6 +287,7 @@ mod tests {
     }
 
     fn snapshot(desired: DesiredClusterState, observed: ObservedClusterState) -> StateSnapshot {
+        use orion::control_plane::ClusterStateEnvelope;
         StateSnapshot { state: ClusterStateEnvelope { desired, observed, applied: Default::default() } }
     }
 
