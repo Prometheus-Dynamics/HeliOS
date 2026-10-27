@@ -37,9 +37,10 @@
   let natural = $state<{ w: number; h: number } | null>(null);
   let previewFailed = $state(false);
   // The live preview comes over its WebSocket, each frame with its overlays, drawn together on a
-  // canvas; the MJPEG <img> is the fallback when the socket cannot be used.
+  // canvas; the MJPEG <img> is the fallback when the socket cannot be used. The gateway does not
+  // relay WebSockets, so a peer's camera is the MJPEG (its polled route) from the start.
   let socketFailed = $state(false);
-  const socketMode = $derived(Boolean(live) && !socketFailed && typeof WebSocket !== "undefined" && Boolean(cluster.live));
+  const socketMode = $derived(Boolean(live) && !socketFailed && typeof WebSocket !== "undefined" && Boolean(cluster.live) && !cluster.node(camera.nodeId)?.peer);
   // A picture (or its element) is on screen. Without one the status chain takes the box instead.
   const previewing = $derived(socketMode || (Boolean(live) && !previewFailed) || Boolean(camera.feed.base));
   let screen = $state<HTMLCanvasElement>();
