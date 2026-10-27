@@ -5,10 +5,11 @@
   import Icon from "#lib/components/common/Icon.svelte";
   import { plans, transfersOf } from "#lib/pipeline/plan.svelte.js";
 
-  let { pipelineId, revision, open = false }: { pipelineId: string; revision: number; open?: boolean } = $props();
+  // The plan exists while the pipeline runs (a stopped one has none to read: the device answers 404).
+  let { pipelineId, revision, running, open = false }: { pipelineId: string; revision: number; running: boolean; open?: boolean } = $props();
 
   $effect(() => {
-    void plans.load(pipelineId, revision);
+    if (running) void plans.load(pipelineId, revision);
   });
   const state = $derived(plans.get(pipelineId));
   const plan = $derived(state.plan);
@@ -23,6 +24,8 @@
     {#if plan}
       <small>{plan.plan.nodes.length} nodes · {plan.plan.edges.length} edges</small>
       <small class:warn={transfers.length > 0}><Icon name="arrows-transfer-down" size={12} />{transfers.length === 0 ? "no device transfers" : `${transfers.length} device ${transfers.length === 1 ? "transfer" : "transfers"}`}</small>
+    {:else if !running}
+      <small>read while the pipeline runs</small>
     {:else if state.loading}
       <small>reading…</small>
     {:else if state.error}
@@ -30,7 +33,9 @@
     {/if}
   </summary>
   <div class="body">
-    {#if plan}
+    {#if !running}
+      <p class="dim">The device plans a pipeline when it starts: start it to see its nodes, edges and device transfers.</p>
+    {:else if plan}
       {#if transfers.length}
         <ul class="transfers" aria-label="Device transfers">
           {#each transfers as t (t.edge.index)}

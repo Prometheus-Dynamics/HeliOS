@@ -18,6 +18,9 @@ const ALLOWED_CONSOLE: { pattern: RegExp; why: string }[] = [
   { pattern: /ERR_ABORTED|net::ERR_.*(preview|frames|stream)/i, why: "aborted MJPEG preview or stream when a test navigates away" },
   // Browsers ask for /favicon.ico on their own; the UI ships no icon file.
   { pattern: /favicon\.ico/i, why: "browser favicon request" },
+  // A running pipeline the device has not planned yet answers 404 to its plan; the graph says so
+  // under the canvas, and the browser logs the response as a failed resource load.
+  { pattern: /status of 404 .*\/v1\/pipelines\/[^/]+\/plan/i, why: "the device has no plan for the pipeline yet" },
 ];
 
 function allowed(text: string) {

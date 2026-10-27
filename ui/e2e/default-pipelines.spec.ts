@@ -29,7 +29,8 @@ test.describe("default pipelines", () => {
     await expect(map).toBeChecked();
     await depth.click();
     await expect(depth).toBeChecked();
-    await expect(chooser.getByText("Localization, 3D map and depth", { exact: false })).toBeVisible();
+    // The chooser's own line (its status line below may name the same template, with the pipeline's state).
+    await expect(chooser.getByText("Localization, 3D map and depth", { exact: true })).toBeVisible();
 
     await applyIfChanged(chooser);
 

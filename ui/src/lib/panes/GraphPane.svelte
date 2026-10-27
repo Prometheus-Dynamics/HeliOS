@@ -34,7 +34,7 @@
   const BUDGET_MS = 1;
 
   // The plan, per revision: the transfers it names are drawn on the graph's edges.
-  const transfers = $derived(workload ? transfersOf(plans.get(workload.id).plan) : []);
+  const transfers = $derived(workload?.state === "running" ? transfersOf(plans.get(workload.id).plan) : []);
   const transferByEdge = $derived(new Map<string, Transfer>(transfers.map((t) => [transferKey(t.edge.from_node_id, t.edge.from_port, t.edge.to_node_id, t.edge.to_port), t])));
 
   // Find box: Enter steps through the matches, each one centred and selected.
@@ -154,7 +154,7 @@
       <GraphCanvas {draft} transfers={transferByEdge} />
     </SvelteFlowProvider>
   {/key}
-  <PlanSection pipelineId={workload.id} revision={workload.revision} />
+  <PlanSection pipelineId={workload.id} revision={workload.revision} running={workload.state === "running"} />
 {:else if cluster.workloads.length}
   <Empty icon="schema" text="Pick a pipeline in the tab bar, or click one in the Pipelines list." />
 {:else}
