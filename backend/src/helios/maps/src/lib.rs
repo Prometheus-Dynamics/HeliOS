@@ -120,15 +120,6 @@ pub fn wire_map_ports(graph: &mut Value) -> bool {
     let position = |id: &str| nodes.iter().position(|node| node.get("id").and_then(Value::as_str) == Some(id));
     let (Some(host), Some(live)) = (position(HOST_NODE), position(LIVE_MAP_NODE)) else { return false };
     let nodes = graph.pointer_mut("/graph/nodes").and_then(Value::as_array_mut).expect("nodes were just read");
-    // A graph stored before Eidos gave the mapper these ports lists the node without them, and the
-    // planner refuses a node whose port lists are stale: the node gets them as Eidos declares them.
-    let live_node = &mut nodes[live];
-    for port in [MAP_PORT, SAVE_PORT] {
-        push_unique(&mut live_node["inputs"], port);
-        set_metadata(&mut live_node["metadata"], &format!("inputs.{port}.access"), json!({ "type": "String", "value": "owned" }));
-    }
-    push_unique(&mut live_node["outputs"], SAVED_MAP_PORT);
-    set_metadata(&mut live_node["metadata"], &format!("outputs.{SAVED_MAP_PORT}.conditional"), json!({ "type": "Bool", "value": true }));
     let host_node = &mut nodes[host];
     for port in [MAP_PORT, SAVE_PORT] {
         push_unique(&mut host_node["outputs"], port);
@@ -159,16 +150,6 @@ fn push_unique(value: &mut Value, port: &str) {
         && !list.iter().any(|entry| entry.as_str() == Some(port))
     {
         list.push(json!(port));
-    }
-}
-
-/// Sets metadata entry `key` to `value` unless the node already has it.
-fn set_metadata(metadata: &mut Value, key: &str, value: Value) {
-    if !metadata.is_object() {
-        *metadata = json!({});
-    }
-    if let Some(entries) = metadata.as_object_mut() {
-        entries.entry(key).or_insert(value);
     }
 }
 
@@ -289,22 +270,6 @@ mod tests {
         assert!(edges.contains(&json!({ "from": { "node": 0, "port": "map" }, "to": { "node": 1, "port": "map" } })));
         assert!(edges.contains(&json!({ "from": { "node": 0, "port": "save" }, "to": { "node": 1, "port": "save" } })));
         assert!(edges.contains(&json!({ "from": { "node": 1, "port": "saved_map" }, "to": { "node": 0, "port": "saved_map" } })));
-    }
-
-    #[test]
-    fn a_graph_stored_before_the_map_ports_gets_them_on_the_mapper() {
-        let mut graph = unwired_live_map();
-        let live = &mut graph["graph"]["nodes"][1];
-        live["inputs"].as_array_mut().expect("inputs").retain(|port| port != MAP_PORT && port != SAVE_PORT);
-        live["outputs"].as_array_mut().expect("outputs").retain(|port| port != SAVED_MAP_PORT);
-        assert!(wire_map_ports(&mut graph));
-        let live = &graph["graph"]["nodes"][1];
-        for port in [MAP_PORT, SAVE_PORT] {
-            assert!(live["inputs"].as_array().expect("inputs").contains(&json!(port)), "{port}");
-            assert_eq!(live["metadata"][format!("inputs.{port}.access")]["value"], "owned");
-        }
-        assert!(live["outputs"].as_array().expect("outputs").contains(&json!(SAVED_MAP_PORT)));
-        assert_eq!(live["metadata"]["outputs.saved_map.conditional"]["value"], true);
     }
 
     #[test]

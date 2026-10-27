@@ -103,7 +103,8 @@ fn a_graph_stored_without_the_map_ports_saves_its_map() {
     // before HeliOS wired them must save all the same, with no redeploy.
     let plugins = TestPlugins::load();
     let calibrated = calibration_context(SCENE_FOCAL_PX, "pinhole");
-    // Stored before Eidos gave the mapper its map ports, too: the mapper's port lists lack them.
+    // Stored before Eidos gave the mapper its map ports, too: the mapper's port lists lack them, and
+    // the compile refreshes them from the plugin (`PluginRegistry::refresh_graph_ports`).
     let mut raw: serde_json::Value = serde_json::from_str(include_str!("../../../graphs/live-map.graph.json")).expect("the golden graph");
     for node in raw["graph"]["nodes"].as_array_mut().expect("nodes") {
         if node["id"] == "eidos:mapping.live_map" {
