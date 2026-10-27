@@ -122,7 +122,16 @@ pub(crate) fn plan_introspection(host_graph: &ResidentHostGraph, requires: serde
 /// is rejected.
 fn graph_document_for(workload: &ExecutionWorkload) -> Result<GraphDocument, ExecutionError> {
     match &workload.graph_ref {
-        GraphRef::InlineSpec(json) => GraphDocument::from_json(json).map_err(|error| ExecutionError::GraphDocument(error.to_string())),
+        GraphRef::InlineSpec(json) => {
+            // A live mapper's map and save ports are wired here too, so a graph stored before they
+            // existed saves and loads without a redeploy. Idempotent: a wired graph is unchanged.
+            let mut value: serde_json::Value = serde_json::from_str(json).map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
+            if helios_maps::wire_map_ports(&mut value) {
+                let wired = value.to_string();
+                return GraphDocument::from_json(&wired).map_err(|error| ExecutionError::GraphDocument(error.to_string()));
+            }
+            GraphDocument::from_json(json).map_err(|error| ExecutionError::GraphDocument(error.to_string()))
+        }
         GraphRef::ArtifactId(artifact_id) => Err(ExecutionError::UnsupportedArtifactGraph(artifact_id.clone())),
         GraphRef::ResourceId(resource_id) => Err(ExecutionError::UnsupportedResourceGraph(resource_id.clone())),
     }

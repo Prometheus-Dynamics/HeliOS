@@ -96,3 +96,27 @@ fn a_map_the_graph_cannot_read_fails_the_start() {
         WorkloadDriver::start(spec, graph, frames, Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).err().expect("a missing map is an error, not an empty start");
     assert!(error.to_string().contains("gone.eidmap"), "{error}");
 }
+
+#[test]
+fn a_graph_stored_without_the_map_ports_saves_its_map() {
+    // The golden graph as Eidos generates it: no host ports for the map or the save. A graph stored
+    // before HeliOS wired them must save all the same, with no redeploy.
+    let plugins = TestPlugins::load();
+    let calibrated = calibration_context(SCENE_FOCAL_PX, "pinhole");
+    let raw = include_str!("../../../graphs/live-map.graph.json").to_string();
+    let mut spec = workload("workload.stored-unwired", raw, vec![camera_binding(&calibrated)]);
+    spec.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
+    let bus = PipelineBus::default();
+    let (mut driver, frames) = spawn_driver(&plugins, spec.clone(), bus.clone());
+    driver.update_camera_context(&spec);
+    for index in 0..10 {
+        feed(&driver, &frames, index);
+    }
+    spec.map_save = 1;
+    driver.update_map(&spec);
+    feed(&driver, &frames, 10);
+    let (_, saved) = bus.latest("workload.stored-unwired", SAVED_MAP_PORT).expect("the stored graph saved its map");
+    let bytes = saved.payload.get_ref::<Bytes>().expect("saved_map is bytes").bytes.clone();
+    assert_eq!(&bytes[..8], b"EIDMAP\0\0");
+    assert_eq!(driver.stats().last_error, None);
+}
