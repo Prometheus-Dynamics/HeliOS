@@ -468,7 +468,7 @@ export class LiveCluster {
       wires
         .filter((wire) => wire.settings_writable)
         .map(async (wire) => {
-          const camera = cameras.find((c) => c.resourceId === wire.id);
+          const camera = cameras.find((c) => c.resourceId === entityKey(p.node_id, wire.id));
           if (!camera) return;
           try {
             applyCameraSettings(camera, await client.cameraSettings(wire.id));
