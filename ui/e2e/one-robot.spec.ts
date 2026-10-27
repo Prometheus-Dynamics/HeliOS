@@ -83,7 +83,7 @@ test.describe("one robot (mock)", () => {
     expect(requests.every((r) => r.peer === "systemcore-peer")).toBe(true);
   });
   test("each device's pipeline named default shows, and each is editable on its own device", async ({ page }) => {
-    await openScreen(page, "Pipelines");
+    await openPane(page, "Tune", "Pipelines");
     const owner = page.getByRole("button", { name: /AprilTags · front Owner/ });
     const peer = page.getByRole("button", { name: /AprilTags · back SystemCore/ });
     await expect(owner).toBeVisible();
