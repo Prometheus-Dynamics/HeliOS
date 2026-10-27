@@ -248,6 +248,11 @@ opt-level = 3
 opt-level = 0
 debug = "line-tables-only"
 
+# Dependencies get no debug info at all in dev builds (Gaia f787734: about half the target dir and
+# faster links); our own crates keep their line tables.
+[profile.dev.package."*"]
+debug = false
+
 # Faster local iteration profile: keeps release-like behavior while avoiding
 # expensive full LTO during the final link step.
 [profile.dev-release]
