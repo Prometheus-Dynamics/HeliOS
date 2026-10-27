@@ -234,6 +234,8 @@ export interface Workload {
   cpuApplied: number | null;
   /** Why the engine could not pin the graph thread to `cpu`. */
   cpuError: string | null;
+  /** The saved map the live mapper starts from (`null`: none); the mock and the device keep it per pipeline. */
+  map?: string | null;
   perf: {
     tickP50Ms: number;
     tickP99Ms: number;

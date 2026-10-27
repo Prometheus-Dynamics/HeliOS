@@ -8,9 +8,11 @@ import { dictionaryLabel } from "#lib/format.js";
 import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
 import { CAMERAS, GUEST_NODES, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, ROBOT_CAMERAS, ROBOT_LOGS, ROBOT_NODES, ROBOT_RESOURCES, ROBOT_STREAMS, ROBOT_WORKLOADS, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
-import { scoped, type HeliosApi } from "#lib/api/client.js";
+import { api, errorText, scoped, type HeliosApi } from "#lib/api/client.js";
+import { toDaedalus } from "#lib/api/adapt.js";
+import { maps, type MapHost } from "./maps.svelte";
 import { deviceId, entityKey } from "#lib/api/peers.js";
-import type { CameraControlChanges } from "#lib/api/types.js";
+import type { CameraControlChanges, MapEntry } from "#lib/api/types.js";
 import type { DenseView } from "#lib/vision/dense.js";
 import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
 import { BUILT_IN, type DefaultTemplate } from "#lib/core/defaults.js";
@@ -473,6 +475,35 @@ class ClusterStore {
     if (!w || !node) return;
     node.params.dictionary = dictionary;
     toasts.success(`${w.name} now finds ${dictionaryLabel(dictionary)}`);
+  }
+
+  /** The device a node is, as the maps store reads its saved maps: this device, or a peer through the gateway. */
+  mapHost(nodeId: string): MapHost {
+    const remote = this.node(nodeId)?.peer !== undefined;
+    return { id: nodeId, remote, scope: remote ? scoped(nodeId) : api };
+  }
+
+  /** Saves pipeline `id`'s live map now, as `name` (the mapper gives its map within seconds). */
+  async saveMap(id: string, name?: string): Promise<MapEntry | undefined> {
+    const w = this.workload(id);
+    if (!w) return undefined;
+    return maps.save(this.mapHost(w.nodeId), id, deviceId(w.nodeId, id), name);
+  }
+
+  /** The saved map pipeline `id` starts from (`null`: none); it is loaded when the pipeline starts or restarts. */
+  async setMap(id: string, map: string | null) {
+    if (this.live) return this.live.setMap(id, map);
+    const w = this.workload(id);
+    if (!w) return;
+    try {
+      // The simulated device keeps the choice as the device does (a PUT of the pipeline's spec).
+      await this.mapHost(w.nodeId).scope.putPipeline(deviceId(w.nodeId, id), { name: w.name, graph: toDaedalus(w.graph), bindings: {}, map: map ?? undefined });
+    } catch (error) {
+      toasts.error(`Map: ${errorText(error)}`);
+      return;
+    }
+    w.map = map;
+    toasts.success(map === null ? `${w.name} starts with no map` : `${w.name} starts from its saved map when it next starts`);
   }
 
   /** Pin a pipeline's graph thread to a core (`null`: the scheduler's choice). */

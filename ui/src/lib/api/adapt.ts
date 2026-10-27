@@ -405,6 +405,7 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload, k
     cpu: p.cpu ?? null,
     cpuApplied: typeof p.telemetry?.cpu === "number" ? p.telemetry.cpu : null,
     cpuError: p.telemetry?.cpu_error ?? null,
+    map: p.map ?? null,
     perf: { tickP50Ms: quantile(history, 0.5), tickP99Ms: quantile(history, 0.99), fps, memMiB: 0, nodeMs: nodeTimes(p, graph.nodes.map((n) => n.id)), tickHistory: history },
   };
 }
