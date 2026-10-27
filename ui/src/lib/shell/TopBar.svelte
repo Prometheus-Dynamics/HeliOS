@@ -342,4 +342,28 @@
   .mono {
     font-family: var(--font-code);
   }
+  /* Phone-wide: the screen's name, the lock and the search; the readouts are on Run and Device. */
+  @media (max-width: 759px) {
+    .top {
+      gap: 6px;
+      padding: 0 6px;
+    }
+    .chips,
+    .add,
+    .mod {
+      display: none;
+    }
+    .ws {
+      flex: 1;
+    }
+    .search {
+      width: 32px;
+      padding: 0;
+      justify-content: center;
+    }
+    .search span,
+    .search kbd {
+      display: none;
+    }
+  }
 </style>

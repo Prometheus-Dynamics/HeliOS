@@ -9,12 +9,28 @@
   import { toasts } from "#lib/stores/toasts.svelte.js";
   import { setEditorLive } from "./context";
   import type { Draft } from "./drafts.svelte";
+  import { transferKey, type Transfer } from "#lib/pipeline/plan.svelte.js";
   import { CATEGORY_COLORS, DRAG_MIME, NODE_WIDTH, checkConnection, edgeId, makeEdge, type FlowEdge, type FlowNode } from "./graph";
   import PipelineNode from "./PipelineNode.svelte";
 
-  let { draft, minimap = true }: { draft: Draft; minimap?: boolean } = $props();
+  let { draft, minimap = true, transfers = new Map() }: { draft: Draft; minimap?: boolean; transfers?: Map<string, Transfer> } = $props();
 
   const nodeTypes = { pipeline: PipelineNode } as unknown as NodeTypes;
+
+  // The plan's device transfers, drawn on the edges they cross: a label (up to the GPU, down to the
+  // CPU) and a class. Only an edge whose marking changed is replaced, so the draft is not touched
+  // for nothing (an unchanged edge keeps its identity for undo and deploy).
+  const LABEL = { upload: "↑ GPU", download: "↓ CPU", cross: "⇄ residency" } as const;
+  $effect(() => {
+    const marks = transfers;
+    const next = draft.edges.map((e) => {
+      const t = marks.get(transferKey(e.source, e.sourceHandle ?? "", e.target, e.targetHandle ?? ""));
+      const label = t ? LABEL[t.kind] : undefined;
+      const cls = t ? "typed-edge transfer" : "typed-edge";
+      return e.label === label && e.class === cls ? e : { ...e, label, class: cls, animated: Boolean(t) };
+    });
+    if (next.some((e, i) => e !== draft.edges[i])) untrack(() => (draft.edges = next));
+  });
   const flow = useSvelteFlow<FlowNode, FlowEdge>();
   const workload = $derived(draft.workload);
   const nodeSum = $derived(workload ? Object.values(workload.perf.nodeMs).reduce((s, v) => s + v, 0) : 0);
@@ -209,6 +225,22 @@
   }
   .canvas :global(.typed-edge.selected .svelte-flow__edge-path) {
     stroke-width: 2.6;
+  }
+  /* A device transfer: the frame crosses between the CPU and the GPU on this edge. */
+  .canvas :global(.transfer .svelte-flow__edge-path) {
+    stroke: var(--warn);
+    stroke-opacity: 1;
+    stroke-width: 2.2;
+    stroke-dasharray: 6 4;
+  }
+  .canvas :global(.transfer .svelte-flow__edge-label) {
+    padding: 1px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--warn);
+    background: var(--s1);
+    border: 1px solid color-mix(in oklab, var(--warn) 50%, transparent);
+    border-radius: var(--r-1);
   }
   .canvas :global(.svelte-flow__node:focus-visible) {
     outline: none;
