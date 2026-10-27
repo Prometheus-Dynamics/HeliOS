@@ -1,12 +1,14 @@
 <script lang="ts">
-  // What each camera runs, all cameras at once: the setup step's screen. Each camera picks from
-  // the default pipelines; tuning a pipeline afterwards is the pipeline's own settings.
+  // Set up › Cameras: every camera, with its name, icon and colour, and what it runs, picked from the
+  // default pipelines. Tuning a pipeline afterwards is the pipeline's own settings (Tune).
   import Icon from "#lib/components/common/Icon.svelte";
+  import StatusChain from "#lib/components/status/StatusChain.svelte";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
   import { guide } from "#lib/core/guide.svelte.js";
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import PipelineChoice from "#lib/camera/PipelineChoice.svelte";
+  import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import type { PaneProps } from "#lib/workspace/panes.js";
   import Empty from "./Empty.svelte";
@@ -17,18 +19,18 @@
 <div class="scroll">
   {#each cluster.cameras as camera (camera.resourceId)}
     {@const running = guide.active(camera)}
-    <section style:--c={colorVar(identity.get(camera.resourceId).color)}>
+    {@const sel = selection.last.camera?.id === camera.resourceId}
+    <section class:sel style:--c={colorVar(identity.get(camera.resourceId).color)} data-camera={camera.resourceId}>
       <header>
-        <span class="dot"></span>
-        <b>{identity.name(camera.resourceId, camera.name)}</b>
-        <span class="sub">{cluster.node(camera.nodeId)?.name ?? camera.nodeId}</span>
+        <IdentityEditor id={camera.resourceId} fallbackName={camera.name} fallbackIcon="camera" sub="{camera.sensor} · {cluster.node(camera.nodeId)?.name ?? camera.nodeId}{camera.mount ? ` · ${camera.mount}` : ''}" />
         {#if running}
-          <button type="button" class="link" onclick={() => { selection.select({ kind: "workload", id: running.id }); shell.go("pipelines"); }}>
+          <button type="button" class="link" onclick={() => { selection.select({ kind: "workload", id: running.id }); shell.open("tune", "pipeline-settings"); }}>
             Tune pipeline <Icon name="arrow-right" size={12} />
           </button>
         {/if}
       </header>
       <PipelineChoice {camera} />
+      <div class="why"><StatusChain status={camera.status} only={["pipeline", "detections"]} variant="why" /></div>
     </section>
   {:else}
     <Empty icon="camera" text="No cameras yet. Plug one in and it appears here." />
@@ -42,30 +44,27 @@
     overflow-y: auto;
   }
   section {
+    position: relative;
     border-bottom: 1px solid var(--line);
+  }
+  section.sel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--c);
   }
   header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px 2px;
+    padding: 4px 10px 0 2px;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--c);
-    flex-shrink: 0;
-  }
-  b {
-    font-size: 13px;
-    font-weight: 650;
-  }
-  .sub {
+  header > :global(.ident) {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
-    color: var(--fg-3);
   }
   .link {
     display: inline-flex;
@@ -73,8 +72,15 @@
     gap: 3px;
     font-size: 11.5px;
     color: var(--accent-fg);
+    white-space: nowrap;
   }
   .link:hover {
     text-decoration: underline;
+  }
+  .why {
+    padding: 0 10px 8px;
+  }
+  .why:empty {
+    display: none;
   }
 </style>

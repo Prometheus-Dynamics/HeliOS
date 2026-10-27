@@ -70,6 +70,8 @@ import IRobot from "@tabler/icons-svelte-runes/icons/robot";
 import IRouter from "@tabler/icons-svelte-runes/icons/router";
 import ISearch from "@tabler/icons-svelte-runes/icons/search";
 import ISettings from "@tabler/icons-svelte-runes/icons/settings";
+import ISettingsAutomation from "@tabler/icons-svelte-runes/icons/settings-automation";
+import IArrowsTransferDown from "@tabler/icons-svelte-runes/icons/arrows-transfer-down";
 import IShieldCheck from "@tabler/icons-svelte-runes/icons/shield-check";
 import ISignature from "@tabler/icons-svelte-runes/icons/signature";
 import ISitemap from "@tabler/icons-svelte-runes/icons/sitemap";
@@ -350,6 +352,8 @@ export const ICONS = {
   "router": IRouter,
   "search": ISearch,
   "settings": ISettings,
+  "settings-automation": ISettingsAutomation,
+  "arrows-transfer-down": IArrowsTransferDown,
   "shield-check": IShieldCheck,
   "signature": ISignature,
   "sitemap": ISitemap,

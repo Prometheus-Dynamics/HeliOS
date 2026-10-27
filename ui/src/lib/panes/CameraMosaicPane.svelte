@@ -59,7 +59,7 @@
       role="button"
       tabindex="0"
       onclick={() => selection.select({ kind: "camera", id: c.resourceId })}
-      ondblclick={() => shell.go("cameras")}
+      ondblclick={() => shell.open("tune", "camera")}
       onkeydown={(e) => e.key === "Enter" && selection.select({ kind: "camera", id: c.resourceId })}
     >
       <Feed camera={c} {overlays} compact />

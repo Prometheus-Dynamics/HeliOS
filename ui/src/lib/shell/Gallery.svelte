@@ -12,15 +12,17 @@
   import { importWorkspace } from "./workspace-actions";
 
   const current = $derived(workspaces.get(shell.active));
-  const screens = $derived(workspaces.all.filter((w) => w.builtin));
+  const jobs = $derived(workspaces.all.filter((w) => w.builtin));
   const panes = $derived(allPanes().filter((p) => p.type !== "welcome"));
 
   function close() {
     gallery.open = false;
   }
-  function addScreen(id: string) {
-    workspaces.show(id);
-    shell.go(id);
+  /** A screen of your own, started as a copy of a job's layout. */
+  function copyOf(id: string) {
+    const w = workspaces.get(id);
+    if (!w) return;
+    shell.go(workspaces.saveAs(id, `My ${w.name.toLowerCase()}`, w.icon, w.color));
     close();
   }
 </script>
@@ -32,7 +34,7 @@
   <div class="dlg" role="dialog" aria-label="Add to HeliOS">
     <header>
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={gallery.tab === "screens"} class:on={gallery.tab === "screens"} onclick={() => (gallery.tab = "screens")}><Icon name="layout-grid" size={14} />Screens</button>
+        <button type="button" role="tab" aria-selected={gallery.tab === "screens"} class:on={gallery.tab === "screens"} onclick={() => (gallery.tab = "screens")}><Icon name="layout-grid" size={14} />New screen</button>
         <button type="button" role="tab" aria-selected={gallery.tab === "kits"} class:on={gallery.tab === "kits"} onclick={() => (gallery.tab = "kits")}><Icon name="puzzle" size={14} />Kits for this screen</button>
         <button type="button" role="tab" aria-selected={gallery.tab === "panes"} class:on={gallery.tab === "panes"} onclick={() => (gallery.tab = "panes")}><Icon name="apps" size={14} />Single panes</button>
       </div>
@@ -41,23 +43,17 @@
 
     <div class="body">
       {#if gallery.tab === "screens"}
-        <p class="lead">A screen is a full layout in the left rail. Add the ones you need; remove any with right-click → Hide.</p>
+        <p class="lead">The four jobs are always in the rail. A screen of your own goes under them: start from a job's layout, or from nothing, then add kits and panes and drag tabs around.</p>
         <div class="grid">
-          {#each screens as w (w.id)}
-            {@const inRail = workspaces.isVisible(w.id)}
+          {#each jobs as w (w.id)}
             <div class="card" style:--c={colorVar(w.color)}>
               <div class="thumb"><LayoutThumb node={w.root} /></div>
               <div class="meta">
                 <span class="ic"><Icon name={w.icon} size={14} /></span>
-                <div class="txt"><b>{w.name}</b><i>{w.summary}</i></div>
+                <div class="txt"><b>Copy of {w.name}</b><i>{w.summary}</i></div>
               </div>
               <div class="acts">
-                {#if inRail}
-                  <button type="button" onclick={() => { shell.go(w.id); close(); }}>Open</button>
-                  <span class="note">In the rail</span>
-                {:else}
-                  <button type="button" class="primary" onclick={() => addScreen(w.id)}><Icon name="plus" size={13} />Add screen</button>
-                {/if}
+                <button type="button" class="primary" onclick={() => copyOf(w.id)}><Icon name="copy" size={13} />Create</button>
               </div>
             </div>
           {/each}
@@ -254,10 +250,6 @@
     color: var(--on-accent);
     background: var(--accent);
     border-color: var(--accent);
-  }
-  .note {
-    font-size: 11px;
-    color: var(--fg-3);
   }
   .list {
     display: grid;

@@ -45,7 +45,7 @@
 
   <div class="devs">
     {#each cluster.nodes as n (n.id)}
-      <button type="button" class="dev" class:off={n.health === "offline"} style:--c={colorVar(identity.get(n.id).color)} onclick={() => selection.select({ kind: "device", id: n.id })} ondblclick={() => shell.go("hardware")}>
+      <button type="button" class="dev" class:off={n.health === "offline"} style:--c={colorVar(identity.get(n.id).color)} onclick={() => selection.select({ kind: "device", id: n.id })} ondblclick={() => shell.go("device")}>
         <Swatch id={n.id} icon={nodeIcon(n.kind)} size={18} />
         <span class="nm">{identity.name(n.id, n.name)}</span>
         <span class="h h-{n.health}"></span>

@@ -79,7 +79,7 @@
   {/if}
   <IconButton icon="refresh" label="Restart" size={24} onclick={() => cluster.restartWorkload(w.id)} />
   <IconButton icon="history" label="Roll back" size={24} disabled={!cluster.canRollBack(w.id)} onclick={() => d.rollBack()} />
-  <IconButton icon="schema" label="Open the graph" size={24} onclick={() => shell.go("pipelines")} />
+  <IconButton icon="schema" label="Open the graph" size={24} onclick={() => shell.open("tune", "graph")} />
 </div>
 
 <Section title="Inputs" key="pipe-inputs" count={Object.keys(w.inputs).length}>

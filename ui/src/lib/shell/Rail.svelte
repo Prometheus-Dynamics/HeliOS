@@ -1,21 +1,24 @@
 <script lang="ts">
-  // Screens down the left edge. Each is a workspace with its own colour; the
-  // ones you made sit under the line. Right-click to rename, recolour, reset.
+  // The four jobs down the left edge (Set up, Run, Tune, Device), then the screens you made under
+  // the line. Right-click to rename, recolour, reset. On a phone-wide window the rail is a bar
+  // along the bottom.
   import Icon from "#lib/components/common/Icon.svelte";
   import { commands } from "#lib/core/commands.svelte.js";
   import { colorVar, ID_COLORS } from "#lib/core/identity.svelte.js";
   import { menu } from "#lib/core/menu.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { workspaces, type Workspace } from "#lib/core/workspace.svelte.js";
+  import { guide } from "#lib/core/guide.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { gallery } from "./gallery.svelte";
   import { help } from "./help.svelte";
-  import { pane } from "#lib/core/workspace.svelte.js";
   import { WS_ICONS, renameWorkspace } from "./workspace-actions";
 
-  const presets = $derived(workspaces.shown.filter((w) => w.builtin));
+  const jobs = $derived(workspaces.all.filter((w) => w.builtin));
   const custom = $derived(workspaces.custom);
   const alerts = $derived(cluster.attention.length);
+  /** Setup steps still to do: shown on the Set up job until the checklist is done. */
+  const todo = $derived(guide.checklist.filter((s) => !s.done).length);
 
   function helpMenu(el: Element) {
     const r = el.getBoundingClientRect();
@@ -23,7 +26,6 @@
       { heading: "Help" },
       { label: "What's on this screen?", icon: "info-circle", shortcut: "F1", run: () => (help.explain = true) },
       { label: "Take the tour", icon: "rocket", run: () => help.startTour() },
-      { label: "Setup checklist", icon: "list-check", run: () => workspaces.open(shell.active, pane("setup")) },
       { label: "First-time setup again", icon: "rotate-clockwise", run: () => (help.onboarding = true) },
       { separator: true },
       { label: "Search everything", icon: "search", shortcut: "Ctrl K", run: () => (commands.open = true) },
@@ -39,17 +41,15 @@
       { separator: true },
       { label: "Duplicate", icon: "copy", run: () => shell.go(workspaces.saveAs(w.id, `${w.name} copy`, w.icon, w.color)) },
       ...(w.builtin
-        ? [
-            { label: "Reset layout", icon: "rotate-clockwise" as const, disabled: !workspaces.isModified(w.id), run: () => workspaces.reset(w.id) },
-            { label: "Hide from rail", icon: "eye-off" as const, hint: "Add it back from + → Screens", disabled: w.id === "settings", run: () => { workspaces.hide(w.id); if (shell.active === w.id) shell.go(workspaces.shown[0]?.id ?? "start"); } },
-          ]
-        : [{ label: "Delete screen", icon: "trash" as const, danger: true, run: () => { workspaces.remove(w.id); shell.go(workspaces.shown[0]?.id ?? "start"); } }]),
+        ? [{ label: "Reset layout", icon: "rotate-clockwise" as const, disabled: !workspaces.isModified(w.id), run: () => workspaces.reset(w.id) }]
+        : [{ label: "Delete screen", icon: "trash" as const, danger: true, run: () => { workspaces.remove(w.id); shell.go("run"); } }]),
     ]);
   }
 </script>
 
 {#snippet item(w: Workspace, i: number)}
   {@const active = shell.active === w.id}
+  {@const badge = w.id === "run" ? alerts : w.id === "setup" ? todo : 0}
   <button
     type="button"
     class="item"
@@ -63,36 +63,36 @@
   >
     <Icon name={w.icon} size={18} stroke={active ? 2 : 1.7} />
     <span class="lbl">{w.name}</span>
+    {#if badge}<span class="badge" class:warn={w.id === "run"} aria-label="{badge} {w.id === 'run' ? 'problems' : 'setup steps left'}">{badge}</span>{/if}
     {#if workspaces.isModified(w.id)}<span class="mod" aria-label="layout changed"></span>{/if}
   </button>
 {/snippet}
 
 <nav class="rail" aria-label="Screens" data-tour="rail">
-  <button type="button" class="logo" aria-label="HeliOS" onclick={() => shell.go("overview")}>
+  <button type="button" class="logo" aria-label="HeliOS" onclick={() => shell.go("run")}>
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
       <circle cx="12" cy="12" r="4.2" fill="var(--accent)" />
       {#each Array.from({ length: 8 }) as _, k (k)}
         <rect x="11.2" y="1.6" width="1.6" height="4" rx="0.8" fill="var(--accent)" opacity="0.75" transform="rotate({k * 45} 12 12)" />
       {/each}
     </svg>
-    {#if alerts}<span class="alert-badge">{alerts}</span>{/if}
   </button>
 
   <div class="list">
-    {#each presets as w, i (w.id)}
+    {#each jobs as w, i (w.id)}
       {@render item(w, i)}
     {/each}
     {#if custom.length}<div class="rule"></div>{/if}
     {#each custom as w, i (w.id)}
-      {@render item(w, presets.length + i)}
+      {@render item(w, jobs.length + i)}
     {/each}
-    <button type="button" class="item add" aria-label="Add a screen" data-tip="Add a screen{workspaces.hidden.length ? ` (${workspaces.hidden.length} available)` : ''}" onclick={() => gallery.show("screens")} data-tour="add-screen">
+    <button type="button" class="item add" aria-label="Add a screen" data-tip="Add a screen of your own, or a kit of panes to this one" onclick={() => gallery.show("screens")} data-tour="add-screen">
       <Icon name="plus" size={16} />
     </button>
   </div>
 
   <div class="foot">
-    <button type="button" class="item" aria-label="Help" data-tip="Tour, what's on this screen, setup" onclick={(e) => helpMenu(e.currentTarget)} data-tour="help">
+    <button type="button" class="item" aria-label="Help" data-tip="Tour, what's on this screen, first-time setup" onclick={(e) => helpMenu(e.currentTarget)} data-tour="help">
       <Icon name="help" size={18} />
     </button>
     <button type="button" class="item" aria-label="Search and run" data-tip="Search and run · Ctrl K" onclick={() => (commands.open = true)}>
@@ -118,20 +118,6 @@
     width: 34px;
     height: 34px;
     margin-bottom: 4px;
-  }
-  .alert-badge {
-    position: absolute;
-    top: 0;
-    right: -4px;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 4px;
-    font-size: 9.5px;
-    font-weight: 700;
-    line-height: 15px;
-    color: #fff;
-    background: var(--err);
-    border-radius: var(--r-1);
   }
   .list {
     display: flex;
@@ -183,10 +169,28 @@
     border-radius: 0 2px 2px 0;
     background: var(--c);
   }
+  .badge {
+    position: absolute;
+    top: 3px;
+    right: 5px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 15px;
+    color: var(--on-accent);
+    background: var(--accent);
+    border-radius: var(--r-1);
+  }
+  .badge.warn {
+    color: #fff;
+    background: var(--err);
+  }
   .mod {
     position: absolute;
     right: 5px;
-    top: 5px;
+    bottom: 4px;
     width: 5px;
     height: 5px;
     border-radius: 50%;
@@ -205,5 +209,43 @@
   }
   .foot .item {
     height: 34px;
+  }
+
+  /* Phone-wide: a bar along the bottom with the jobs; the rest is in the top bar. */
+  @media (max-width: 759px) {
+    .rail {
+      flex-direction: row;
+      width: 100%;
+      height: 54px;
+      padding: 0 4px;
+      border-top: 1px solid var(--line);
+      background: var(--s1);
+    }
+    .logo,
+    .foot,
+    .rule,
+    .add {
+      display: none;
+    }
+    .list {
+      flex-direction: row;
+      justify-content: space-around;
+      overflow-x: auto;
+      overflow-y: hidden;
+      width: 100%;
+    }
+    .item {
+      flex: 1 0 64px;
+      height: 46px;
+    }
+    .item.active::before {
+      left: 10px;
+      right: 10px;
+      top: auto;
+      bottom: -4px;
+      width: auto;
+      height: 3px;
+      border-radius: 2px 2px 0 0;
+    }
   }
 </style>

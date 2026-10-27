@@ -3,6 +3,7 @@
   // of a ring, see where the storage stands, and keep, download or export the
   // stored recordings for Eidos.
   import RecordingNow from "#lib/components/recording/RecordingNow.svelte";
+  import RecordingSection from "#lib/components/recording/RecordingSection.svelte";
   import RingsPanel from "#lib/components/recording/RingsPanel.svelte";
   import StoragePanel from "#lib/components/recording/StoragePanel.svelte";
   import StoredTable from "#lib/components/recording/StoredTable.svelte";
@@ -47,6 +48,9 @@
   </Section>
   <Section title="Stored recordings" key="rec-stored" count={recordings.stored.length}>
     <StoredTable />
+  </Section>
+  <Section title="Recorder settings" key="rec-settings" open={false}>
+    <RecordingSection />
   </Section>
 </div>
 

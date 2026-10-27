@@ -1,27 +1,20 @@
 <script lang="ts">
-  // Device security, look and feel, names and colours for everything, layouts,
-  // and backups.
+  // This browser: how HeliOS looks here, the names and colours of everything, the screens you
+  // made, a backup of all of it, and the keyboard.
   import Icon from "#lib/components/common/Icon.svelte";
-  import LedSection from "#lib/components/leds/LedSection.svelte";
-  import RecordingSection from "#lib/components/recording/RecordingSection.svelte";
-  import NtSection from "#lib/components/robot/NtSection.svelte";
-  import SecuritySection from "#lib/components/security/SecuritySection.svelte";
   import { exportAll, importAll } from "#lib/core/backup.js";
   import { colorVar, identity } from "#lib/core/identity.svelte.js";
   import { prefs, THEMES } from "#lib/core/prefs.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { workspaces } from "#lib/core/workspace.svelte.js";
-  import { device } from "#lib/stores/device.svelte.js";
   import { downloadJson, pickJson } from "#lib/files.js";
   import IconButton from "#lib/kit/IconButton.svelte";
   import Prop from "#lib/kit/Prop.svelte";
   import Section from "#lib/kit/Section.svelte";
   import Seg from "#lib/kit/Seg.svelte";
-  import Swatch from "#lib/kit/Swatch.svelte";
   import IdentityEditor from "#lib/kit/IdentityEditor.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { exportWorkspace, importWorkspace } from "#lib/shell/workspace-actions.js";
-  import { gallery } from "#lib/shell/gallery.svelte.js";
   import { help } from "#lib/shell/help.svelte.js";
 
   const ACCENTS = ["#ff6b6b", "#ff7a3d", "#f5a524", "#3ccf7e", "#2dd4bf", "#4c8dff", "#9775fa", "#f783ac"];
@@ -35,8 +28,9 @@
   );
   const SHORTCUTS = [
     ["Ctrl K", "Search and run anything"],
-    ["1 – 9", "Switch screen"],
+    ["1 – 4", "Set up, Run, Tune, Device (then your screens)"],
     ["Space", "Pause or resume live feeds"],
+    ["F1", "What's on this screen?"],
     ["Ctrl S", "Deploy the pipeline you are editing"],
     ["Ctrl Z / Ctrl Shift Z", "Undo / redo in the graph"],
     ["Ctrl L", "Tidy the graph layout"],
@@ -46,33 +40,7 @@
   ];
 </script>
 
-<div class="settings">
-  {#if device.has("security")}
-    <SecuritySection />
-  {/if}
-
-  <Section title="Robot" key="set-robot">
-    <NtSection />
-    <Prop label="Screens in the rail">
-      <button type="button" class="mini" onclick={() => gallery.show("screens")}>Choose…</button>
-      <button type="button" class="mini" onclick={() => workspaces.setVisible(null)}>Show all</button>
-    </Prop>
-    <Prop label="Help">
-      <button type="button" class="mini" onclick={() => help.startTour()}>Tour</button>
-      <button type="button" class="mini" onclick={() => (help.onboarding = true)}>First-time setup</button>
-    </Prop>
-  </Section>
-
-  <Section title="Recording" key="set-recording">
-    <RecordingSection />
-  </Section>
-
-  {#if device.has("leds")}
-    <Section title="LEDs" key="set-leds">
-      <LedSection />
-    </Section>
-  {/if}
-
+<div class="scroll">
   <Section title="Theme" key="set-theme">
     <div class="themes">
       {#each THEMES as t (t.id)}
@@ -132,6 +100,10 @@
         {/if}
       </div>
     {/each}
+    <Prop label="Help">
+      <button type="button" class="mini-btn" onclick={() => help.startTour()}>Tour</button>
+      <button type="button" class="mini-btn" onclick={() => (help.onboarding = true)}>First-time setup</button>
+    </Prop>
   </Section>
 
   <Section title="Backup" key="set-backup">
@@ -150,17 +122,10 @@
 </div>
 
 <style>
-  .settings {
+  .scroll {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
-    align-content: start;
-    column-gap: 1px;
-    background: var(--line);
-  }
-  .settings > :global(section) {
-    background: var(--s1);
   }
   .themes {
     display: grid;
@@ -347,7 +312,7 @@
     background: transparent;
     border: 1px solid var(--line-strong);
   }
-  .mini {
+  .mini-btn {
     height: 22px;
     padding: 0 9px;
     font-size: 11.5px;
@@ -356,7 +321,7 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--r-1);
   }
-  .mini:hover {
+  .mini-btn:hover {
     color: var(--fg);
     background: var(--s3);
   }

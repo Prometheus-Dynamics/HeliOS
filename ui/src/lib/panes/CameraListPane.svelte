@@ -26,9 +26,10 @@
   function actions(c: Camera) {
     return menu.context(() => [
       { heading: identity.name(c.resourceId, c.name) },
-      { label: "Show controls", icon: "adjustments-horizontal", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.go("cameras"); } },
-      { label: "Calibrate…", icon: "grid-4x4", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.go("calibration"); } },
-      { label: "Place on robot…", icon: "cube", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.go("robot"); } },
+      { label: "Camera controls", icon: "adjustments-horizontal", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.open("tune", "camera-controls"); } },
+      { label: "What it runs…", icon: "list-check", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.open("setup", "camera-jobs"); } },
+      { label: "Calibrate…", icon: "grid-4x4", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.open("setup", "calibration"); } },
+      { label: "Place on robot…", icon: "cube", run: () => { selection.select({ kind: "camera", id: c.resourceId }); shell.open("setup", "mounts"); } },
       { separator: true },
       { label: "Reset settings", icon: "rotate-clockwise", run: () => cluster.setCamera(c.resourceId, { autoExposure: false, exposureUs: 2200, gain: 4, fps: 60, roi: null }) },
     ]);

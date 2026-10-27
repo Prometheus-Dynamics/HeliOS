@@ -1,26 +1,18 @@
 <script lang="ts">
-  // First run: team number, the cameras found and what each should do, and
-  // how much of HeliOS to show to begin with. Takes under a minute; everything
-  // can be changed later.
+  // First run: only what nothing else asks. The team number (unless the robot controller gives it)
+  // and, on a device that has security, whether to leave it open. It then lands on Set up, whose
+  // checklist carries the rest: names, what each camera runs, calibration, placement, the field.
   import Icon from "#lib/components/common/Icon.svelte";
-  import { choiceOf, templateFor } from "#lib/core/defaults.js";
-  import { guide } from "#lib/core/guide.svelte.js";
-  import { colorVar, ID_COLORS, identity } from "#lib/core/identity.svelte.js";
-  import { offeredTemplates } from "#lib/core/templates.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { team } from "#lib/core/team.svelte.js";
   import { roborioAddress } from "#lib/core/robot-facts.js";
-  import { workspaces } from "#lib/core/workspace.svelte.js";
   import SecureForm from "#lib/components/security/SecureForm.svelte";
   import { auth } from "#lib/stores/auth.svelte.js";
   import { cluster } from "#lib/stores/cluster.svelte.js";
   import { device } from "#lib/stores/device.svelte.js";
-  import Feed from "#lib/vision/Feed.svelte";
-  import { DEFAULT_OVERLAYS } from "#lib/vision/overlays.js";
   import { help } from "./help.svelte";
 
   let step = $state(0);
-  let simple = $state(true);
   let teamText = $state("");
   let overriding = $state(false);
   // A team the robot controller gives is shown, not asked again, unless the user overrides it.
@@ -30,7 +22,7 @@
     if (!teamText && team.number) teamText = String(team.number);
   });
   // The security step is the owner's: a guest's access belongs to its host, so it is not offered.
-  const STEPS = $derived(device.has("security") ? ["Team", "Cameras", "Screens", "Security", "Done"] : ["Team", "Cameras", "Screens", "Done"]);
+  const STEPS = $derived(device.has("security") ? ["Team", "Security", "Done"] : ["Team", "Done"]);
   const SECURITY = $derived(STEPS.indexOf("Security"));
   const LAST = $derived(STEPS.length - 1);
   // FRC robots run open; anything else is offered a password first. The
@@ -38,13 +30,6 @@
   let secureChoice = $state<"open" | "secure" | null>(null);
   const choice = $derived(secureChoice ?? (teamNumber > 0 ? "open" : "secure"));
   const blocked = $derived(step === SECURITY && choice === "secure" && auth.open);
-  const overlays = { ...DEFAULT_OVERLAYS, histogram: false, hud: false };
-  $effect(() => {
-    if (help.onboarding) void offeredTemplates.load();
-  });
-
-  /** The screens "Start simple" keeps in the rail: what a new team needs first. */
-  const SIMPLE_SCREENS = ["start", "cameras", "calibration", "settings"];
 
   function finish(tour: boolean) {
     // The controller's team is already the device's answer; only a team the user typed is saved.
@@ -52,25 +37,15 @@
       const n = Number(teamText);
       team.number = Number.isInteger(n) && n > 0 && n < 100000 ? n : null;
     }
-    // The names shown here were confirmed, so they count as chosen.
-    for (const c of cluster.cameras) if (!identity.get(c.resourceId).name) identity.set(c.resourceId, { name: c.name });
-    workspaces.setVisible(simple ? SIMPLE_SCREENS : null);
-    shell.go(simple ? "start" : "overview");
+    shell.go("setup");
     help.finishOnboarding();
     if (tour) setTimeout(() => help.startTour(), 300);
   }
 
-  /** Out of the wizard without choosing anything: every screen stays in the rail, and nothing
-   * (camera names, the team) counts as set up. */
+  /** Out of the wizard without choosing anything: nothing (the team) counts as set up. */
   function skip() {
-    workspaces.setVisible(null);
-    shell.go("overview");
+    shell.go("run");
     help.finishOnboarding();
-  }
-
-  function cycleColor(id: string) {
-    const c = identity.get(id).color;
-    identity.set(id, { color: ID_COLORS[c % ID_COLORS.length] });
   }
 </script>
 
@@ -88,7 +63,7 @@
     <div class="body">
       {#if step === 0}
         <h2>Welcome to HeliOS</h2>
-        <p>HeliOS runs the robot's cameras and vision: it finds AprilTags and other targets, works out where the robot is, and sends the results to robot code. This sets the basics; everything can be changed later.</p>
+        <p>HeliOS runs the robot's cameras and vision: it finds AprilTags and other targets, works out where the robot is, and sends the results to robot code. This asks for the team; the <b>Set up</b> screen walks through the rest, camera by camera.</p>
         {#if fromController}
           <div class="field">
             <span>Team number</span>
@@ -106,73 +81,23 @@
           <Icon name="circle-check" size={14} />
           Found {cluster.nodes.length} {cluster.nodes.length === 1 ? "device" : "devices"} and {cluster.cameras.length} {cluster.cameras.length === 1 ? "camera" : "cameras"} on this robot.
         </div>
-      {:else if step === 1}
-        <h2>Your cameras</h2>
-        <p>Name each one so you can tell them apart, and choose what it does: all of a camera's work runs as one pipeline on one core. The colour follows it everywhere.</p>
-        <div class="cams">
-          {#each cluster.cameras as c (c.resourceId)}
-            <div class="cam" style:--c={colorVar(identity.get(c.resourceId).color)}>
-              <div class="thumb"><Feed camera={c} {overlays} compact /></div>
-              <button type="button" class="sw" onclick={() => cycleColor(c.resourceId)} aria-label="Change colour" data-tip="Change colour"></button>
-              <input class="name" value={identity.name(c.resourceId, c.name)} aria-label="Camera name" onchange={(e) => identity.set(c.resourceId, { name: (e.currentTarget as HTMLInputElement).value.trim() || undefined })} />
-              <span class="where">{c.mount}</span>
-              {#if c.foreign}
-                <span class="job ro">Run by {c.foreign}</span>
-              {:else}
-                {@const running = templateFor(choiceOf(guide.active(c)?.graph, guide.dictionary(c)), offeredTemplates.list)}
-                <select
-                  class="job"
-                  value={running?.id ?? ""}
-                  aria-label="What this camera does"
-                  title={running?.summary ?? "No pipeline: the camera only shows video."}
-                  onchange={(e) => {
-                    const id = (e.currentTarget as HTMLSelectElement).value;
-                    void cluster.applyDefault(c.resourceId, offeredTemplates.list.find((t) => t.id === id) ?? null, identity.name(c.resourceId, c.name));
-                  }}
-                >
-                  {#each offeredTemplates.list as t (t.id)}
-                    <option value={t.id}>{t.title}</option>
-                  {/each}
-                  <option value="">Video only</option>
-                </select>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {:else if step === 2}
-        <h2>How much to show</h2>
-        <p>You can add or hide screens any time from the + in the left rail.</p>
-        <div class="choices">
-          <button type="button" class="choice" class:on={simple} onclick={() => (simple = true)}>
-            <Icon name="home" size={20} />
-            <b>Start simple</b>
-            <span>Start (every camera, the setup checklist, any problems), Cameras and Calibration. Add Pipelines, Robot, Hardware and more from the + when you need them.</span>
-            <em>Recommended for new teams</em>
-          </button>
-          <button type="button" class="choice" class:on={!simple} onclick={() => (simple = false)}>
-            <Icon name="layout-grid" size={20} />
-            <b>Everything</b>
-            <span>All screens in the rail from the start: cameras, pipelines and graphs, robot geometry, calibration, hardware and processes.</span>
-            <em>For teams who know what they want</em>
-          </button>
-        </div>
       {:else if step === SECURITY}
         <h2>Who can change this device</h2>
         {#if auth.secured}
-          <div class="found"><Icon name="lock" size={14} />This device is secured with a password. Manage it in Settings, Security.</div>
+          <div class="found"><Icon name="lock" size={14} />This device is secured with a password. Manage it under Device › Robot link.</div>
         {:else}
           <p>Open devices need no login: anyone on the robot network can change pipelines, install updates and reboot. That is normal on an FRC robot. Anywhere else, secure it with a password.</p>
           <div class="choices">
             <button type="button" class="choice" class:on={choice === "open"} onclick={() => (secureChoice = "open")}>
               <Icon name="lock-open" size={20} />
               <b>Leave it open</b>
-              <span>No password and no tokens. The top bar shows <b>Open</b> as a reminder. You can secure it any time in Settings.</span>
+              <span>No password and no tokens. The top bar shows <b>Open</b> as a reminder. You can secure it any time under Device › Robot link.</span>
               <em>FRC robots on the field</em>
             </button>
             <button type="button" class="choice" class:on={choice === "secure"} onclick={() => (secureChoice = "secure")}>
               <Icon name="lock" size={20} />
               <b>Secure this device</b>
-              <span>One device password for people using HeliOS; API tokens for tools like Atlas. Turn it off again in Settings.</span>
+              <span>One device password for people using HeliOS; API tokens for tools like Atlas. Turn it off again under Device › Robot link.</span>
               <em>Labs, classrooms, shared networks</em>
             </button>
           </div>
@@ -183,12 +108,13 @@
       {:else}
         <h2>Ready</h2>
         <p>
-          {#if auth.secured}This device is <b>secured</b>: HeliOS asks for the password in new browsers.{:else}This device is <b>open</b>; the top bar says so, and Settings can secure it.{/if}
+          {#if auth.secured}This device is <b>secured</b>: HeliOS asks for the password in new browsers.{:else}This device is <b>open</b>; the top bar says so, and Device › Robot link can secure it.{/if}
         </p>
-        <p>Two things are still needed before matches, and the <b>Setup checklist</b> keeps track of them:</p>
+        <p>The <b>Set up</b> screen is next. Its checklist is each camera's status chain, so it says what is still missing and opens the pane that fixes it:</p>
         <ul>
+          <li><b>Name each camera</b> and choose what it runs; tags show as soon as a pipeline does.</li>
           <li><b>Calibrate each camera</b> with a printed board (about two minutes each).</li>
-          <li><b>Set where each camera is</b> on the robot (numbers, or click it on your CAD).</li>
+          <li><b>Place each camera</b> on the robot (numbers, or click it on your CAD), and pick the field.</li>
         </ul>
         <p>A one-minute tour shows where everything is.</p>
       {/if}
@@ -200,7 +126,7 @@
       {#if step < LAST}
         <button type="button" class="primary" disabled={blocked} data-tip={blocked ? "Set a password above, or choose Leave it open" : undefined} onclick={() => step++}>Next<Icon name="arrow-right" size={13} /></button>
       {:else}
-        <button type="button" onclick={() => finish(false)}>Finish</button>
+        <button type="button" onclick={() => finish(false)}>Go to Set up</button>
         <button type="button" class="primary" onclick={() => finish(true)}><Icon name="rocket" size={13} />Take the tour</button>
       {/if}
     </div>
@@ -220,7 +146,7 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: min(820px, calc(100vw - 40px));
+    width: min(720px, calc(100vw - 24px));
     max-height: 88vh;
     display: flex;
     flex-direction: column;
@@ -345,71 +271,9 @@
     font-size: 12.5px;
     color: var(--ok);
   }
-  .cams {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .cam {
-    display: grid;
-    grid-template-columns: 96px 14px 1fr 1fr 170px;
-    align-items: center;
-    gap: 10px;
-    padding: 4px;
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--c);
-    border-radius: var(--r-2);
-  }
-  .thumb {
-    display: flex;
-    height: 56px;
-    border-radius: var(--r-1);
-    overflow: hidden;
-  }
-  .sw {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--c);
-  }
-  .name {
-    height: 30px;
-    padding: 0 8px;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--fg);
-    background: var(--inset);
-    border: 1px solid var(--line);
-    border-radius: var(--r-1);
-    outline: none;
-  }
-  .name:focus {
-    border-color: var(--accent);
-  }
-  .where {
-    font-size: 11.5px;
-    color: var(--fg-3);
-  }
-  .job {
-    height: 30px;
-    padding: 0 8px;
-    font: inherit;
-    font-size: 12.5px;
-    color: var(--fg);
-    background: var(--inset);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--r-1);
-  }
-  .job.ro {
-    display: flex;
-    align-items: center;
-    color: var(--fg-3);
-    border-style: dashed;
-  }
   .choices {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 12px;
   }
   .choice {

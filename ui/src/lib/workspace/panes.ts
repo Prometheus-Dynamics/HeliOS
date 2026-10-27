@@ -13,11 +13,16 @@ export interface PaneProps {
   ws: string;
 }
 
+/** The job a pane belongs to: the built-in screen it is found on (docs/docs/ui-information-architecture.md). */
+export type Job = "setup" | "run" | "tune" | "device";
+
+export const JOB_NAMES: Record<Job, string> = { setup: "Set up", run: "Run", tune: "Tune", device: "Device" };
+
 export interface PaneDef {
   type: string;
   title: string;
   icon: IconName;
-  group: "Vision" | "Pipelines" | "Robot" | "Hardware" | "System" | "Tools";
+  group: Job;
   summary: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- panes that ignore their props are fine too
   component: Component<PaneProps> | Component<any>;
@@ -37,6 +42,11 @@ export function definePane(def: PaneDef) {
 
 export function paneDef(type: string): PaneDef | undefined {
   return registry.get(type);
+}
+
+/** The built-in screen a pane lives on. */
+export function homeOf(def: PaneDef): Job {
+  return def.group;
 }
 
 /** The panes this device offers: those whose feature it has. */
