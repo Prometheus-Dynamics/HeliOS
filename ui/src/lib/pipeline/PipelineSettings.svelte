@@ -13,6 +13,7 @@
   import { selection } from "#lib/core/selection.svelte.js";
   import { shell } from "#lib/core/shell.svelte.js";
   import { drafts } from "#lib/graph/drafts.svelte.js";
+  import { hasLiveMap } from "#lib/maps/mapping.js";
   import { CATEGORY_COLORS, CATEGORY_ICONS } from "#lib/graph/graph.js";
   import Badge from "#lib/kit/Badge.svelte";
   import Choice from "#lib/kit/Choice.svelte";
@@ -24,6 +25,8 @@
   import Seg from "#lib/kit/Seg.svelte";
   import Spark from "#lib/kit/Spark.svelte";
   import { cluster } from "#lib/stores/cluster.svelte.js";
+  import { maps } from "#lib/stores/maps.svelte.js";
+  import MapSection from "./MapSection.svelte";
   import ParamRow from "./ParamRow.svelte";
   import { byGroup, isChangedParam, matchesParam } from "./params";
 
@@ -117,6 +120,12 @@
     <div class="none">This pipeline reads no inputs.</div>
   {/each}
 </Section>
+
+{#if hasLiveMap(w.graph)}
+  <Section title="Map" key="pipe-map" count={maps.lists[w.nodeId]?.maps.length}>
+    <MapSection workload={w} />
+  </Section>
+{/if}
 
 {#if caps.includes("tags")}
   <Section title="Detection" key="pipe-detect">
