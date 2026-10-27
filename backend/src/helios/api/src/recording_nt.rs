@@ -4,6 +4,8 @@
 //!   false stops the running one;
 //! - `<prefix>/capture_last` (boolean): a rising edge writes the capture-last clip (the first camera
 //!   with a ring);
+//! - `<prefix>/map/save` (boolean): a rising edge saves the map of each running live-map pipeline,
+//!   named after the match (`/FMSInfo`), as `POST /v1/pipelines/{id}/map/save` does;
 //! - `<prefix>/recording/{active,bytes,dropped,file}` (boolean, int, int, string): the status, about
 //!   once a second (`dropped`: frames and host messages not written);
 //! - auto-record (the `auto_record` setting) reads the FMS topics `/FMSInfo/FMSControlData` (bit 0:
@@ -24,6 +26,7 @@ use tracing::{debug, info, warn};
 use crate::{
     SharedState,
     recordings::{self, StartRecording},
+    routes::{maps, pipelines},
 };
 
 pub const FMS_PREFIX: &str = "/FMSInfo";
@@ -42,6 +45,7 @@ const STATUS_EVERY: Duration = Duration::from_secs(1);
 pub struct Topics {
     pub record: String,
     pub capture_last: String,
+    pub map_save: String,
     pub active: String,
     pub bytes: String,
     pub dropped: String,
@@ -53,6 +57,7 @@ pub fn topics(prefix: &str) -> Topics {
     Topics {
         record: format!("{prefix}/record"),
         capture_last: format!("{prefix}/capture_last"),
+        map_save: format!("{prefix}/map/save"),
         active: format!("{status}/active"),
         bytes: format!("{status}/bytes"),
         dropped: format!("{status}/dropped"),
@@ -65,6 +70,7 @@ pub fn topics(prefix: &str) -> Topics {
 pub enum Command {
     Record(bool),
     CaptureLast,
+    SaveMap,
 }
 
 /// Turns the control topics' values into commands. `record` acts on every change (its first value
@@ -74,6 +80,7 @@ pub enum Command {
 pub struct Controls {
     record: Option<bool>,
     capture_last: Option<bool>,
+    map_save: Option<bool>,
 }
 
 impl Controls {
@@ -84,6 +91,12 @@ impl Controls {
     pub fn capture_last(&mut self, value: bool) -> Option<Command> {
         let previous = self.capture_last.replace(value);
         (previous == Some(false) && value).then_some(Command::CaptureLast)
+    }
+
+    /// A rising edge of `map/save` saves the maps (a value left true at connect does not).
+    pub fn map_save(&mut self, value: bool) -> Option<Command> {
+        let previous = self.map_save.replace(value);
+        (previous == Some(false) && value).then_some(Command::SaveMap)
     }
 }
 
@@ -189,6 +202,8 @@ struct Connection {
 enum Job {
     Command(Command),
     Enabled { enabled: bool, label: Option<String> },
+    /// `map/save`: the running live-map pipelines save, named `name` (the match, when known).
+    SaveMap { name: Option<String> },
 }
 
 struct Publishers {
@@ -235,7 +250,7 @@ impl Link {
             }
         });
         let topics = topics(&connection.prefix);
-        let control = handle.subscribe(&[topics.record.as_str(), topics.capture_last.as_str()], SubscribeOptions::default()).ok();
+        let control = handle.subscribe(&[topics.record.as_str(), topics.capture_last.as_str(), topics.map_save.as_str()], SubscribeOptions::default()).ok();
         let fms = handle.subscribe(&[FMS_PREFIX], SubscribeOptions { prefix: true, ..SubscribeOptions::default() }).ok();
         let publish = |name: &str, type_name: &str| handle.publish(name, type_name).ok();
         let publishers = match (publish(&topics.active, "boolean"), publish(&topics.bytes, "int"), publish(&topics.dropped, "int"), publish(&topics.file, "string")) {
@@ -313,11 +328,17 @@ async fn run(state: SharedState, jobs: mpsc::UnboundedSender<Job>) {
                         controls.record(on)
                     } else if name == open.topics.capture_last {
                         controls.capture_last(on)
+                    } else if name == open.topics.map_save {
+                        controls.map_save(on)
                     } else {
                         None
                     };
                     if let Some(command) = command {
-                        let _ = jobs.send(Job::Command(command));
+                        let job = match command {
+                            Command::SaveMap => Job::SaveMap { name: fms.label() },
+                            command => Job::Command(command),
+                        };
+                        let _ = jobs.send(job);
                     }
                 }
             }
@@ -368,6 +389,8 @@ async fn work(state: SharedState, mut jobs: mpsc::UnboundedReceiver<Job>) {
                 Ok(clip) => info!(file = %clip.file, "capture-last clip written over NetworkTables"),
                 Err(error) => warn!(error = %error.message, "capture-last over NetworkTables refused"),
             },
+            Job::Command(Command::SaveMap) => {}
+            Job::SaveMap { name } => save_maps(&state, name).await,
             Job::Enabled { enabled, label } => {
                 let auto_on = state.store.recording_settings().await.map(|settings| settings.auto_record).unwrap_or(false);
                 match auto.enabled(enabled && auto_on, label) {
@@ -385,6 +408,20 @@ async fn work(state: SharedState, mut jobs: mpsc::UnboundedReceiver<Job>) {
                     None => {}
                 }
             }
+        }
+    }
+}
+
+/// Saves the map of each running live-map pipeline (`map/save`), each named `name`.
+async fn save_maps(state: &SharedState, name: Option<String>) {
+    let ids = match state.orion.view().await {
+        Ok(view) => pipelines::live_map_pipelines(&view),
+        Err(error) => return warn!(error = %error.message, "maps over NetworkTables not saved"),
+    };
+    for id in ids {
+        match maps::save_pipeline(state, &id, name.clone()).await {
+            Ok(entry) => info!(pipeline = %id, map = %entry.id, "map saved over NetworkTables"),
+            Err(error) => warn!(pipeline = %id, error = %error.message, "map over NetworkTables not saved"),
         }
     }
 }
@@ -424,6 +461,16 @@ mod tests {
         assert_eq!(edges.capture_last(false), None);
         assert_eq!(edges.capture_last(true), Some(Command::CaptureLast));
         assert_eq!(edges.capture_last(true), None);
+    }
+
+    #[test]
+    fn map_save_is_a_rising_edge_on_its_own_topic() {
+        assert_eq!(topics("/helios").map_save, "/helios/map/save");
+        let mut controls = Controls::default();
+        assert_eq!(controls.map_save(true), None, "a value true at connect saves nothing");
+        assert_eq!(controls.map_save(true), None, "held true is not a new save");
+        assert_eq!(controls.map_save(false), None);
+        assert_eq!(controls.map_save(true), Some(Command::SaveMap));
     }
 
     #[test]

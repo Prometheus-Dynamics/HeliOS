@@ -975,6 +975,15 @@ pub fn set_map_saves(record: &mut WorkloadRecord, saves: u64) {
     }
 }
 
+/// The running pipelines whose graph has a live mapper (what a `map/save` saves).
+pub fn live_map_pipelines(view: &StateView) -> Vec<String> {
+    engine_workloads(view)
+        .filter(|w| w.desired_state == DesiredState::Running)
+        .filter(|w| config_string(w, "graph.inline").and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).is_some_and(|graph| helios_maps::has_live_map(&graph)))
+        .map(|w| pipeline_id(w.workload_id.as_str()))
+        .collect()
+}
+
 /// The pipelines that start from saved map `id`.
 pub fn pipelines_using_map(view: &StateView, id: &str) -> Vec<String> {
     engine_workloads(view).filter(|w| config_string(w, MAP_ID_KEY).as_deref() == Some(id)).map(|w| pipeline_id(w.workload_id.as_str())).collect()
