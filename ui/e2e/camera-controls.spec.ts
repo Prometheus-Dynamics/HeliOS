@@ -1,6 +1,6 @@
 // Camera controls: search, "Changed only", exposure and gain, and reset. On the sim each change is
 // read back from the camera's settings (GET /v1/cameras/{id}/settings).
-import { device, readingOf, simCamera, waitForCameraService, type DeviceCamera } from "./device";
+import { device, eventually, readingOf, simCamera, waitForCameraReady, type DeviceCamera } from "./device";
 import { expect, test } from "./fixtures";
 import { openScreen } from "./nav";
 
@@ -31,15 +31,24 @@ test.describe("camera controls", () => {
 
     // What the device reports for exposure and gain, by their roles (whatever the camera calls them).
     const reading = async (role: "exposure_us" | "gain") => (camera ? readingOf(await device.cameraSettings(api, camera.id), role) : null);
+    // The camera service restarts whenever a control changes its mode and answers 503 until it is back:
+    // each step that needs the camera waits for its status chain to reach frames, and each settings read
+    // is retried through that window (the same answer, not a looser one).
+    const ready = async () => {
+      if (camera) await waitForCameraReady(api, camera);
+    };
+    const readSetting = (role: "exposure_us" | "gain") => eventually(`the camera's ${role} reading`, () => reading(role), () => true, { timeoutMs: 60_000, describe: (_, error) => error ?? "no reading" });
 
     // Start from the defaults, so "changed" means what this test changed.
-    if (camera) await waitForCameraService(api, camera.id);
+    await ready();
     await reset.click();
+    await ready();
     if (camera) await expect.poll(async () => (await device.cameraSettings(api, camera.id)).persisted).toEqual({});
-    const exposureAtStart = await reading("exposure_us");
+    const exposureAtStart = await readSetting("exposure_us");
 
     // Exposure is typed in manual mode: auto exposure holds the field.
     await page.getByRole("radiogroup", { name: "Exposure mode" }).getByRole("radio", { name: "Manual", exact: true }).click();
+    await ready();
     await expect(exposure).toBeEnabled();
 
     // Search narrows the sections: gain is in the exposure section, so that stays, and white balance goes.
@@ -52,6 +61,7 @@ test.describe("camera controls", () => {
 
     // Exposure in ms and gain as a factor, typed. 1.20 ms fits under every cap a camera may have
     // (the AprilTag preset caps exposure at 1.5 ms on a real board), so the camera takes it as typed.
+    await ready();
     await exposure.click();
     await exposure.fill("1.20");
     await exposure.press("Enter");
@@ -71,6 +81,7 @@ test.describe("camera controls", () => {
     }
     expect(readBack, "the exposure field shows the typed 1.20 ms").toBe("ok");
     // Gain is a factor on the libcamera devices (two decimals) and a whole number on a UVC camera.
+    await ready();
     await gain.click();
     await gain.fill("2.00");
     await gain.press("Enter");
@@ -87,6 +98,7 @@ test.describe("camera controls", () => {
     await expect(changedOnly).toHaveAttribute("aria-pressed", "false");
 
     if (camera) {
+      await ready();
       // The sensor quantises its exposure line time: 1.20 ms reads back within a few microseconds where
       // the device reports µs (its summary). A camera without that summary reports its own units, so
       // there the exposure only has to have moved from where it started.
@@ -102,9 +114,11 @@ test.describe("camera controls", () => {
     }
 
     // Reset puts the defaults back on the camera and forgets what was kept.
+    await ready();
     await reset.click();
     await expect.poll(async () => Math.abs(parseFloat(await exposure.inputValue()) - 1.2) < 0.005).toBe(false);
     if (camera) {
+      await ready();
       await expect.poll(async () => (await device.cameraSettings(api, camera.id)).persisted).toEqual({});
       await expect.poll(() => reading("exposure_us")).toBe(exposureAtStart);
     }
