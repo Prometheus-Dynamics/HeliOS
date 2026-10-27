@@ -9,6 +9,7 @@ import { applyControlValue } from "#lib/api/adapt.js";
 import { clamp, clampedNote, rangeOr } from "#lib/camera/controls.js";
 import { CAMERAS, GUEST_NODES, LOGS, MOCK_INTRINSICS, NODES, RESOURCES, ROBOT_CAMERAS, ROBOT_LOGS, ROBOT_NODES, ROBOT_RESOURCES, ROBOT_STREAMS, ROBOT_WORKLOADS, STREAMS, WORKLOADS, defaultGraph, mockCameraFeatures, mockDenseView, mockMapView, mockPoseView } from "#lib/api/mock.js";
 import { scoped, type HeliosApi } from "#lib/api/client.js";
+import { deviceId, entityKey } from "#lib/api/peers.js";
 import type { CameraControlChanges } from "#lib/api/types.js";
 import type { DenseView } from "#lib/vision/dense.js";
 import type { Intrinsics, PoseView } from "#lib/vision/pose.js";
@@ -281,17 +282,17 @@ class ClusterStore {
   get attention(): { tone: "error" | "warning"; text: string; href: string }[] {
     const items: { tone: "error" | "warning"; text: string; href: string }[] = [];
     for (const w of this.workloads.filter((x) => x.state === "quarantined")) {
-      items.push({ tone: "error", text: `${w.name} is quarantined after ${w.restarts} restarts`, href: `/pipelines/${w.id}` });
+      items.push({ tone: "error", text: `${w.name} is quarantined after ${w.restarts} restarts`, href: `/pipelines/${encodeURIComponent(w.id)}` });
     }
     for (const c of this.cameras) {
       const stop = blockingStage(c.status);
-      if (stop?.state === "blocked") items.push({ tone: "error", text: `${c.name}: ${stop.reason}`, href: `/cameras/${c.resourceId}` });
+      if (stop?.state === "blocked") items.push({ tone: "error", text: `${c.name}: ${stop.reason}`, href: `/cameras/${encodeURIComponent(c.resourceId)}` });
     }
     for (const n of this.nodes.filter((x) => x.health !== "online" && x.peer?.routed !== false)) {
-      items.push({ tone: n.health === "offline" ? "error" : "warning", text: `${n.name} is ${n.health}`, href: `/devices/${n.id}` });
+      items.push({ tone: n.health === "offline" ? "error" : "warning", text: `${n.name} is ${n.health}`, href: `/devices/${encodeURIComponent(n.id)}` });
     }
     for (const n of this.nodes.filter((x) => x.clock.offsetUs > 1000 && x.health !== "offline")) {
-      items.push({ tone: "warning", text: `${n.name} clock is ${(n.clock.offsetUs / 1000).toFixed(1)} ms off`, href: `/devices/${n.id}` });
+      items.push({ tone: "warning", text: `${n.name} clock is ${(n.clock.offsetUs / 1000).toFixed(1)} ms off`, href: `/devices/${encodeURIComponent(n.id)}` });
     }
     return items;
   }
@@ -319,7 +320,7 @@ class ClusterStore {
     if (this.live) return this.live.restartWorkload(id);
     const w = this.workload(id);
     if (!w) return;
-    this.toPeer(w.nodeId, (peer) => peer.restartPipeline(id));
+    this.toPeer(w.nodeId, (peer) => peer.restartPipeline(deviceId(w.nodeId, id)));
     w.state = "starting";
     await this.later();
     w.state = "running";
@@ -333,7 +334,7 @@ class ClusterStore {
     if (this.live) return this.live.stopWorkload(id);
     const w = this.workload(id);
     if (!w) return;
-    this.toPeer(w.nodeId, (peer) => peer.stopPipeline(id));
+    this.toPeer(w.nodeId, (peer) => peer.stopPipeline(deviceId(w.nodeId, id)));
     await this.later(300);
     w.state = "stopped";
     this.log(w.nodeId, "helios-runner", "info", `${w.name} stopped`);
@@ -465,7 +466,8 @@ class ClusterStore {
   async createWorkload(name: string, nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {
     if (this.live) return this.live.createWorkload(name, nodeId, cameraId, graph);
     await this.later(500);
-    const id = `wl-${Math.random().toString(36).slice(2, 7)}`;
+    // A peer's pipeline is keyed by its node (`entityKey`), as the live store keys it.
+    const id = entityKey(this.node(nodeId)?.peer ? nodeId : undefined, `wl-${Math.random().toString(36).slice(2, 7)}`);
     this.workloads.push({
       id,
       name,
@@ -517,7 +519,7 @@ class ClusterStore {
     }
     c.stats.fps = c.settings.fps;
     // A peer's camera takes the same change on the peer (the mock peer keeps the request).
-    this.toPeer(c.nodeId, (peer) => peer.setCameraSettings(id, sent as CameraControlChanges));
+    this.toPeer(c.nodeId, (peer) => peer.setCameraSettings(deviceId(c.nodeId, id), sent as CameraControlChanges));
   }
 
   async updateCamera(id: string, settings: Partial<CameraSettings>) {

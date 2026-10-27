@@ -7,7 +7,7 @@ import { dictionaryLabel } from "#lib/format.js";
 import { applyCameraSettings, applyControlValue, applyPersisted, fromDaedalus, toCamera, toDaedalus, toLogLine, toNode, toResource, toStreams, toWorkload, type DeviceSnapshot } from "#lib/api/adapt.js";
 import type { Detection } from "#lib/api/model.js";
 import { api, ApiError, errorText, isNotAvailable, liveOutputsUrl, previewUrl, scoped, type HeliosApi } from "#lib/api/client.js";
-import { mergeLists, peerNode, routedPeers, unreachableNode } from "#lib/api/peers.js";
+import { deviceId, entityKey, peerNode, routedPeers, unreachableNode } from "#lib/api/peers.js";
 import { dispatchSettings, onSettingsChange } from "#lib/core/sync.js";
 import { LiveOutputs } from "./live-outputs";
 import type { Camera, CameraSettings, ClusterNode, GraphDocument, LogLine, PipelineInput, Resource, Stream, Workload } from "#lib/api/model.js";
@@ -118,6 +118,7 @@ function toDetections(value: unknown): Detection[] {
 }
 
 export class LiveCluster {
+  /** The pipelines by key (`entityKey`): a pipeline's id is only unique on its device. */
   private pipelines = new Map<string, W.Pipeline>();
   /** Pipeline writes run one after another. Each reads the pipelines the one before it left, so a
    * second click never sends the graph the first one replaced (a search change after a tag-family
@@ -157,11 +158,9 @@ export class LiveCluster {
   private localResources: Resource[] = [];
   /** Each listed peer of the robot, by node id, as last read (an unrouted one has no data). */
   private peerState = new Map<string, PeerState>();
-  /** Which node each pipeline is on (pipeline ids are the device's own; a write goes to that device). */
+  /** Which node each pipeline is on, by its key (a write goes to that device). */
   private pipelineNode = new Map<string, string>();
   private peerOutputsAt = 0;
-  /** Ids already reported as taken by a local one (a peer's item with the same id is left out). */
-  private reportedTaken = new Set<string>();
   /** The latest detections per camera resource, from its running pipeline's `detections` output. */
   private detections = $state<Record<string, Detection[]>>({});
   /** The latest feature tracks per camera resource, from its running pipeline's `tracks` output. */
@@ -301,6 +300,21 @@ export class LiveCluster {
     return this.apiOf(this.data.cameras.find((c) => c.resourceId === id)?.nodeId);
   }
 
+  /** A pipeline's id on its own device (its key without its node, for a peer's). */
+  private pipelineId(key: string): string {
+    return deviceId(this.pipelineNode.get(key), key);
+  }
+
+  /** A camera's id on its own device. */
+  private cameraId(key: string): string {
+    return deviceId(this.data.cameras.find((c) => c.resourceId === key)?.nodeId, key);
+  }
+
+  /** The peer a node is, or undefined for this device: the scope of its entities' keys (`entityKey`). */
+  private peerOf(nodeId: string | undefined): string | undefined {
+    return !nodeId || nodeId === this.nodeId ? undefined : nodeId;
+  }
+
   /** The routed peers' node ids: the only ones the UI reads or writes. */
   private routedIds(): string[] {
     return [...this.peerState.values()].filter((s) => s.node.peer?.routed).map((s) => s.node.id);
@@ -311,7 +325,8 @@ export class LiveCluster {
     const camera = toCamera(wire);
     if (peer !== undefined) {
       camera.nodeId = peer;
-      if (camera.feed.live) camera.feed.live = previewUrl(camera.resourceId, peer);
+      camera.resourceId = entityKey(peer, wire.id);
+      if (camera.feed.live) camera.feed.live = previewUrl(wire.id, peer);
     }
     const kept = before.get(camera.resourceId);
     if (kept?.controls) {
@@ -328,44 +343,30 @@ export class LiveCluster {
 
   /** The cameras the cluster lists: this device's and each routed peer's. */
   private publishCameras() {
-    const merged = mergeLists(this.localCameras, [...this.peerState.values()].map((s) => s.cameras), (c) => c.resourceId);
-    this.taken(merged.dropped, "camera");
-    this.data.cameras = merged.items;
+    this.data.cameras = [...this.localCameras, ...[...this.peerState.values()].flatMap((s) => s.cameras)];
   }
 
   /** The pipelines the cluster lists, each with its node: the workloads, and the streams they publish. */
   private publishPipelines() {
-    const local = this.localPipelines.map((pipeline) => ({ pipeline, nodeId: this.nodeId }));
-    const peers = [...this.peerState.values()].map((s) => s.pipelines.map((pipeline) => ({ pipeline, nodeId: s.node.id })));
-    const merged = mergeLists(local, peers, (x) => x.pipeline.id);
-    this.taken(merged.dropped, "pipeline");
-    this.pipelines = new Map(merged.items.map((x) => [x.pipeline.id, x.pipeline]));
-    this.pipelineNode = new Map(merged.items.map((x) => [x.pipeline.id, x.nodeId]));
+    const local = this.localPipelines.map((pipeline) => ({ peer: undefined, nodeId: this.nodeId, pipeline }));
+    const peers = [...this.peerState.values()].flatMap((s) => s.pipelines.map((pipeline) => ({ peer: s.node.id, nodeId: s.node.id, pipeline })));
+    const items = [...local, ...peers].map((x) => ({ ...x, key: entityKey(x.peer, x.pipeline.id) }));
+    this.pipelines = new Map(items.map((x) => [x.key, x.pipeline]));
+    this.pipelineNode = new Map(items.map((x) => [x.key, x.nodeId]));
     const previous = new Map(this.data.workloads.map((w) => [w.id, w]));
-    this.data.workloads = merged.items.map((x) => toWorkload(x.pipeline, x.nodeId, previous.get(x.pipeline.id)));
-    this.data.streams = toStreams(merged.items.map((x) => x.pipeline));
+    this.data.workloads = items.map((x) => toWorkload(x.pipeline, x.nodeId, previous.get(x.key), (id) => entityKey(x.peer, id)));
+    this.data.streams = items.flatMap((x) => toStreams(x.pipeline, (id) => entityKey(x.peer, id)));
   }
 
   /** The resources the cluster lists: this device's and each routed peer's. */
   private publishResources() {
-    const merged = mergeLists(this.localResources, [...this.peerState.values()].map((s) => s.resources), (r) => r.id);
-    this.taken(merged.dropped, "resource");
-    this.data.resources = merged.items;
+    this.data.resources = [...this.localResources, ...[...this.peerState.values()].flatMap((s) => s.resources)];
   }
 
   /** The logs the cluster lists: this device's (as read, and followed) and each routed peer's. */
   private publishLogs() {
     const peerIds = new Set(this.peerState.keys());
     this.data.logs = [...this.data.logs.filter((l) => !peerIds.has(l.nodeId)), ...[...this.peerState.values()].flatMap((s) => s.logs)];
-  }
-
-  /** A list's items a peer had with an id this device already has: left out, and said once. */
-  private taken(ids: string[], what: string) {
-    for (const id of ids) {
-      if (this.reportedTaken.has(`${what}:${id}`)) continue;
-      this.reportedTaken.add(`${what}:${id}`);
-      toasts.info(`A ${what} ${id} on a peer has the same id as one on this device; the peer's is not shown.`);
-    }
   }
 
   async refreshCameras() {
@@ -382,7 +383,7 @@ export class LiveCluster {
   /** The camera's controls as its camera service lists them. */
   async refreshCameraControls(id: string) {
     try {
-      const settings = await this.apiOfCamera(id).cameraSettings(id);
+      const settings = await this.apiOfCamera(id).cameraSettings(this.cameraId(id));
       const camera = this.data.cameras.find((c) => c.resourceId === id);
       if (camera) applyCameraSettings(camera, settings);
     } catch (error) {
@@ -480,7 +481,7 @@ export class LiveCluster {
       node,
       cameras,
       pipelines,
-      resources: resources ? resources.filter((r) => !DERIVED_TYPES.has(r.type)).map((r) => toResource(r, p.node_id)) : (previous?.resources ?? []),
+      resources: resources ? resources.filter((r) => !DERIVED_TYPES.has(r.type)).map((r) => toResource(r, p.node_id, (id) => entityKey(p.node_id, id))) : (previous?.resources ?? []),
       logs: logs ? logs.lines.map((l) => toLogLine(l, p.node_id)) : (previous?.logs ?? []),
     };
   }
@@ -522,7 +523,7 @@ export class LiveCluster {
   /** Detections for each camera with a running pipeline (one small request for all of them). */
   async refreshOutputs() {
     if (typeof document !== "undefined" && document.hidden) return;
-    const running = [...this.pipelines.values()].filter((p) => p.state === "running");
+    const running = [...this.pipelines.keys()].filter((key) => this.pipelines.get(key)?.state === "running");
     if (!running.length) {
       if (Object.keys(this.detections).length) this.detections = {};
       this.features = {};
@@ -539,39 +540,40 @@ export class LiveCluster {
     } catch {
       return;
     }
-    // The routed peers' outputs come from each peer's own list (a peer that does not answer has none).
+    // The routed peers' outputs come from each peer's own list (a peer that does not answer has none),
+    // named by the peer's pipeline keys. This device's outputs are already named by its own ids.
     this.peerOutputsAt = performance.now();
-    const peers = await Promise.all(this.routedIds().map((id) => scoped(id).outputs().catch(() => [] as W.PipelineOutput[])));
+    const peers = await Promise.all(this.routedIds().map(async (id) => (await scoped(id).outputs().catch(() => [] as W.PipelineOutput[])).map((o) => ({ ...o, pipeline: entityKey(id, o.pipeline) }))));
     outputs = [...outputs, ...peers.flat()];
     const next: Record<string, Detection[]> = {};
     const nextFeatures: Record<string, CameraFeatures> = {};
-    for (const p of running) {
-      const camera = this.cameraOfPipeline(p);
-      const out = outputs.find((o) => o.pipeline === p.id && o.port === "detections");
+    for (const key of running) {
+      const camera = this.cameraOfPipeline(key);
+      const out = outputs.find((o) => o.pipeline === key && o.port === "detections");
       if (camera && out) next[camera] = toDetections(out.value);
-      const tracks = outputs.find((o) => o.pipeline === p.id && o.port === "tracks");
-      const features = camera && tracks ? this.featuresOf(camera, p, tracks.value) : null;
+      const tracks = outputs.find((o) => o.pipeline === key && o.port === "tracks");
+      const features = camera && tracks ? this.featuresOf(camera, key, tracks.value) : null;
       if (camera && features) nextFeatures[camera] = features;
     }
     this.detections = next;
     this.features = nextFeatures;
     for (const camera of this.trailBooks.keys()) if (!(camera in nextFeatures)) this.trailBooks.delete(camera);
     const nextMaps: Record<string, MapView> = {};
-    for (const p of running) {
-      const view = this.mapFromOutputs(p.id, outputs);
-      if (view) nextMaps[p.id] = view;
+    for (const key of running) {
+      const view = this.mapFromOutputs(key, outputs);
+      if (view) nextMaps[key] = view;
     }
     this.maps = nextMaps;
     // The dense and pose outputs from the same list. A null value (nothing new this tick) keeps the latest.
-    for (const p of running) {
+    for (const key of running) {
       for (const port of [...DENSE_PORTS, ...POSE_PORTS]) {
-        const out = outputs.find((o) => o.pipeline === p.id && o.port === port);
+        const out = outputs.find((o) => o.pipeline === key && o.port === port);
         if (!out || out.value === null || out.value === undefined) continue;
-        if (DENSE_PORTS.has(port)) this.applyDense(p.id, port, { change: "updated", value: out });
-        else this.applyPose(p.id, port, { change: "updated", value: out });
+        if (DENSE_PORTS.has(port)) this.applyDense(key, port, { change: "updated", value: out });
+        else this.applyPose(key, port, { change: "updated", value: out });
       }
     }
-    const runningIds = new Set(running.map((p) => p.id));
+    const runningIds = new Set(running);
     if (Object.keys(this.dense).some((id) => !runningIds.has(id))) this.dense = Object.fromEntries(Object.entries(this.dense).filter(([id]) => runningIds.has(id)));
     if (Object.keys(this.poses).some((id) => !runningIds.has(id))) this.poses = Object.fromEntries(Object.entries(this.poses).filter(([id]) => runningIds.has(id)));
   }
@@ -643,7 +645,7 @@ export class LiveCluster {
       const { [pipelineId]: _, ...rest } = this.poses;
       this.poses = rest;
     }
-    for (const key of [...this.seenAt.keys()]) if (key.startsWith(`${pipelineId}/`)) this.seenAt.delete(key);
+    for (const port of [...DENSE_PORTS, ...POSE_PORTS]) this.seenAt.delete(`${pipelineId}/${port}`);
   }
 
   /**
@@ -699,11 +701,11 @@ export class LiveCluster {
     return this.poses[pipelineId] ?? null;
   }
 
-  /** The running pipeline feeding a camera that has `wanted` (the first one that does), with its id. */
+  /** The running pipeline feeding a camera that has `wanted` (the first one that does), by its key. */
   private pipelineWith(cameraId: string, wanted: (pipelineId: string) => boolean): string | undefined {
-    for (const p of this.pipelines.values()) {
-      if (p.state !== "running" || this.cameraOfPipeline(p) !== cameraId) continue;
-      if (wanted(p.id)) return p.id;
+    for (const [key, p] of this.pipelines) {
+      if (p.state !== "running" || this.cameraOfPipeline(key) !== cameraId) continue;
+      if (wanted(key)) return key;
     }
     return undefined;
   }
@@ -736,7 +738,7 @@ export class LiveCluster {
 
   private async loadIntrinsics(cameraId: string) {
     try {
-      const { calibrations } = await this.apiOfCamera(cameraId).calibrations(cameraId);
+      const { calibrations } = await this.apiOfCamera(cameraId).calibrations(this.cameraId(cameraId));
       const k = calibrations.find((c) => c.fx > 0 && c.fy > 0 && c.width > 0 && c.height > 0);
       this.intrinsics = { ...this.intrinsics, [cameraId]: k ? { fx: k.fx, fy: k.fy, cx: k.cx, cy: k.cy, width: k.width, height: k.height, model: k.model, distortion: k.distortion } : null };
     } catch {
@@ -750,9 +752,18 @@ export class LiveCluster {
     return p50 ? { frameMs: p50.frameMs, mapMs: p50.mapMs } : null;
   }
 
-  /** The camera resource feeding a pipeline. */
-  private cameraOfPipeline(p: W.Pipeline): string | undefined {
-    return Object.values(p.bindings).find((b) => this.data.cameras.some((c) => c.resourceId === b.resource_id))?.resource_id;
+  /** The key of the camera a pipeline's binding names (on the pipeline's node). */
+  private bindingCamera(pipelineKey: string, resourceId: string): string {
+    return entityKey(this.peerOf(this.pipelineNode.get(pipelineKey)), resourceId);
+  }
+
+  /** The camera (by its key) feeding a pipeline, if one of its bindings is a camera. */
+  private cameraOfPipeline(pipelineKey: string): string | undefined {
+    const p = this.pipelines.get(pipelineKey);
+    if (!p) return undefined;
+    return Object.values(p.bindings)
+      .map((b) => this.bindingCamera(pipelineKey, b.resource_id))
+      .find((id) => this.data.cameras.some((c) => c.resourceId === id));
   }
 
   /** An `output` event: a pipeline published a new value of a host output. */
@@ -771,10 +782,12 @@ export class LiveCluster {
 
   /** Draw camera `cameraId`'s overlays as they were at the frame captured at `frameTs` (ns). */
   applyFrameOverlay(cameraId: string, frameTs: number) {
-    for (const pipeline of this.pipelines.values()) {
-      if (this.cameraOfPipeline(pipeline) !== cameraId) continue;
+    for (const key of this.pipelines.keys()) {
+      // The live outputs are this device's: a peer's pipelines come from their own lists (refreshOutputs).
+      if (this.peerOf(this.pipelineNode.get(key))) continue;
+      if (this.cameraOfPipeline(key) !== cameraId) continue;
       for (const port of ["detections", "tracks"]) {
-        const output = this.liveOutputs.at(`${pipeline.id}/${port}`, frameTs);
+        const output = this.liveOutputs.at(`${key}/${port}`, frameTs);
         if (output) this.applyOutput({ id: output.id, change: "updated", value: output.value }, true, true);
       }
     }
@@ -788,8 +801,7 @@ export class LiveCluster {
     if (!live && this.liveOutputs.connected && data.change !== "removed") return;
     // A camera view drawing its overlays frame by frame takes them from its frames only.
     if (!frame && (port === "tracks" || port === "detections") && data.change !== "removed") {
-      const pipeline = this.pipelines.get(pipelineId);
-      const camera = pipeline && this.cameraOfPipeline(pipeline);
+      const camera = this.cameraOfPipeline(pipelineId);
       if (camera && this.frameOverlays.has(camera)) return;
     }
     if (port === "tracks") return this.applyTracks(pipelineId, data);
@@ -798,8 +810,8 @@ export class LiveCluster {
     if (POSE_PORTS.has(port)) return this.applyPose(pipelineId, port, data);
     if (port !== "detections") return;
     const pipeline = this.pipelines.get(pipelineId);
-    const camera = pipeline && this.cameraOfPipeline(pipeline);
-    if (!camera) return;
+    const camera = pipeline && this.cameraOfPipeline(pipelineId);
+    if (!pipeline || !camera) return;
     if (data.change === "removed" || !data.value || pipeline.state !== "running") {
       if (camera in this.detections) {
         const { [camera]: _, ...rest } = this.detections;
@@ -818,9 +830,9 @@ export class LiveCluster {
   private applyTracks(pipelineId: string, data: { change: string; value?: W.PipelineOutput }) {
     const pipeline = this.pipelines.get(pipelineId);
     if (!pipeline) return;
-    const camera = this.cameraOfPipeline(pipeline);
+    const camera = this.cameraOfPipeline(pipelineId);
     if (!camera) return;
-    const features = data.change === "removed" || !data.value || pipeline.state !== "running" ? null : this.featuresOf(camera, pipeline, data.value.value);
+    const features = data.change === "removed" || !data.value || pipeline.state !== "running" ? null : this.featuresOf(camera, pipelineId, data.value.value);
     if (features) this.features = { ...this.features, [camera]: features };
     else {
       this.trailBooks.delete(camera);
@@ -832,11 +844,11 @@ export class LiveCluster {
   }
 
   /** A camera's features from its `tracks` value. An unchanged value is the same tick, so its trails are kept as they are. */
-  private featuresOf(camera: string, pipeline: W.Pipeline, value: unknown): CameraFeatures | null {
+  private featuresOf(camera: string, pipelineKey: string, value: unknown): CameraFeatures | null {
     const signature = JSON.stringify(value);
     const previous = this.features[camera];
     if (previous?.signature === signature) return previous;
-    const tracks = toFeatureTracks(value, this.frameOf(pipeline, camera));
+    const tracks = toFeatureTracks(value, this.frameOf(pipelineKey, camera));
     if (!tracks) return null;
     let book = this.trailBooks.get(camera);
     if (!book) {
@@ -847,8 +859,9 @@ export class LiveCluster {
   }
 
   /** The frame a pipeline's tracks are in: its binding's output size, else the camera's own size. */
-  private frameOf(pipeline: W.Pipeline, camera: string): { w: number; h: number } | undefined {
-    const binding = Object.values(pipeline.bindings).find((b) => b.resource_id === camera);
+  private frameOf(pipelineKey: string, camera: string): { w: number; h: number } | undefined {
+    const pipeline = this.pipelines.get(pipelineKey);
+    const binding = pipeline && Object.values(pipeline.bindings).find((b) => this.bindingCamera(pipelineKey, b.resource_id) === camera);
     if (binding?.output_width && binding.output_height) return { w: binding.output_width, h: binding.output_height };
     const settings = this.data.cameras.find((c) => c.resourceId === camera)?.settings;
     return settings ? { w: settings.width, h: settings.height } : undefined;
@@ -981,18 +994,18 @@ export class LiveCluster {
   }
 
   async restartWorkload(id: string) {
-    await this.act("Restart", () => this.apiOfPipeline(id).restartPipeline(id), () => `${this.name(id)} restarted`);
+    await this.act("Restart", () => this.apiOfPipeline(id).restartPipeline(this.pipelineId(id)), () => `${this.name(id)} restarted`);
     await this.refreshPipelines();
   }
 
   async stopWorkload(id: string) {
-    await this.act("Stop", () => this.apiOfPipeline(id).stopPipeline(id), () => `${this.name(id)} stopped`);
+    await this.act("Stop", () => this.apiOfPipeline(id).stopPipeline(this.pipelineId(id)), () => `${this.name(id)} stopped`);
     await this.refreshPipelines();
   }
 
   saveGraph(id: string, graph: GraphDocument): Promise<boolean> {
     return this.serial(async () => {
-      const deployed = await this.act("Deploy", () => this.apiOfPipeline(id).putPipeline(id, this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
+      const deployed = await this.act("Deploy", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), this.specFor(id, graph)), (p) => `Deployed revision ${p.revision ?? "?"} of ${p.name}`);
       await this.refreshPipelines();
       return Boolean(deployed);
     });
@@ -1004,14 +1017,14 @@ export class LiveCluster {
   }
 
   async rollBackWorkload(id: string) {
-    await this.act("Roll back", () => this.apiOfPipeline(id).rollbackPipeline(id), (p) => `${p.name} is back on revision ${p.revision ?? "?"}`);
+    await this.act("Roll back", () => this.apiOfPipeline(id).rollbackPipeline(this.pipelineId(id)), (p) => `${p.name} is back on revision ${p.revision ?? "?"}`);
     await this.refreshPipelines();
   }
 
   bindInput(id: string, input: string, resourceId: string) {
     return this.serial(async () => {
       const existing = this.pipelines.get(id)?.bindings[input];
-      await this.act("Bind input", () => this.apiOfPipeline(id).bindInput(id, input, { ...(existing ?? {}), resource_id: resourceId }), () => `${this.name(id)}: ${input} bound to ${resourceId}`);
+      await this.act("Bind input", () => this.apiOfPipeline(id).bindInput(this.pipelineId(id), input, { ...(existing ?? {}), resource_id: this.cameraId(resourceId) }), () => `${this.name(id)}: ${input} bound to ${resourceId}`);
       await this.refreshPipelines();
     });
   }
@@ -1028,10 +1041,12 @@ export class LiveCluster {
   }
 
   private async writeDefault(cameraId: string, template: DefaultTemplate | null, name: string) {
-    const mine = [...this.pipelines.values()].filter((p) => p.graph?.requires.some((r) => r.id === "eidos") && Object.values(p.bindings).some((b) => b.resource_id === cameraId));
-    const keep = mine.find((p) => p.enabled) ?? mine[0];
-    for (const p of mine) {
-      if (p.enabled && (p !== keep || !template)) await this.act("Stop", () => this.apiOfPipeline(p.id).putPipeline(p.id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: false }));
+    const mine = [...this.pipelines.keys()].filter((key) => this.pipelines.get(key)?.graph?.requires.some((r) => r.id === "eidos") && this.cameraOfPipeline(key) === cameraId);
+    const keep = mine.find((key) => this.pipelines.get(key)?.enabled) ?? mine[0];
+    const deployed = keep === undefined ? undefined : this.pipelines.get(keep);
+    for (const key of mine) {
+      const p = this.pipelines.get(key);
+      if (p?.enabled && (key !== keep || !template)) await this.act("Stop", () => this.apiOfPipeline(key).putPipeline(this.pipelineId(key), { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: false }));
     }
     if (!template) {
       await this.refreshPipelines();
@@ -1044,16 +1059,17 @@ export class LiveCluster {
       toasts.error(templates ? `This device has no ${template.title} template` : `Cannot read the device's templates: ${liveState.error ?? "no answer"}`);
       return;
     }
-    const previous = keep ? Object.values(keep.bindings).find((b) => b.resource_id === cameraId) : undefined;
-    const bindings = { [t.camera_input]: { ...(previous ?? {}), resource_id: cameraId, pyramid: t.pyramid ?? 1 } };
+    const device = this.cameraId(cameraId);
+    const previous = deployed ? Object.values(deployed.bindings).find((b) => b.resource_id === device) : undefined;
+    const bindings = { [t.camera_input]: { ...(previous ?? {}), resource_id: device, pyramid: t.pyramid ?? 1 } };
     const title = `${template.title} · ${name}`;
     // The camera's tag family stays when the new template decodes the same kind of tags.
-    const current = keep ? this.data.workloads.find((w) => w.id === keep.id) : undefined;
+    const current = keep ? this.data.workloads.find((w) => w.id === keep) : undefined;
     const family = (d: string) => d.split("_")[0];
     const was = String(current?.graph.nodes.find((n) => n.params.dictionary !== undefined)?.params.dictionary ?? "");
     const kept = was && t.dictionary && family(was) === family(t.dictionary) ? was : undefined;
-    const spec: W.PipelineSpec = { name: title, graph: t.graph, bindings, enabled: true, dictionary: kept ?? t.dictionary ?? undefined, field_layout: keep?.field_layout ?? undefined };
-    if (keep) await this.act("Pipeline", () => this.apiOfPipeline(keep.id).putPipeline(keep.id, spec), () => `${name} now runs ${template.title}`);
+    const spec: W.PipelineSpec = { name: title, graph: t.graph, bindings, enabled: true, dictionary: kept ?? t.dictionary ?? undefined, field_layout: deployed?.field_layout ?? undefined };
+    if (keep) await this.act("Pipeline", () => this.apiOfPipeline(keep).putPipeline(this.pipelineId(keep), spec), () => `${name} now runs ${template.title}`);
     else await this.act("Create pipeline", () => this.apiOfCamera(cameraId).createPipeline(spec), () => `${name} now runs ${template.title}`);
     await this.refreshPipelines();
   }
@@ -1067,15 +1083,15 @@ export class LiveCluster {
     const existing = this.pipelines.get(id)?.bindings[input];
     const binding: W.Binding =
       (change.source ?? (existing?.source === "pipeline" ? "pipeline" : "camera")) === "pipeline"
-        ? { resource_id: "", source: "pipeline", pipeline: change.pipeline ?? existing?.pipeline, port: change.port ?? existing?.port, max_wait_ms: change.maxWaitMs ?? existing?.max_wait_ms }
+        ? { resource_id: "", source: "pipeline", pipeline: change.pipeline ? this.pipelineId(change.pipeline) : existing?.pipeline, port: change.port ?? existing?.port, max_wait_ms: change.maxWaitMs ?? existing?.max_wait_ms }
         : {
             ...(existing?.source === "pipeline" ? { resource_id: "" } : existing),
-            resource_id: change.resourceId ?? existing?.resource_id ?? "",
+            resource_id: change.resourceId !== undefined ? this.cameraId(change.resourceId) : (existing?.resource_id ?? ""),
             ...("outputWidth" in change ? { output_width: change.outputWidth } : {}),
             ...("outputHeight" in change ? { output_height: change.outputHeight } : {}),
             ...("pyramid" in change ? { pyramid: change.pyramid } : {}),
           };
-    await this.act("Input", () => this.apiOfPipeline(id).bindInput(id, input, binding), () => `${this.name(id)}: ${input} updated`);
+    await this.act("Input", () => this.apiOfPipeline(id).bindInput(this.pipelineId(id), input, binding), () => `${this.name(id)}: ${input} updated`);
     await this.refreshPipelines();
   }
 
@@ -1085,7 +1101,7 @@ export class LiveCluster {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
       const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined, search_mode: mode, full_search_every: mode === "tracked" ? (every ?? 8) : undefined };
-      await this.act("Search", () => this.apiOfPipeline(id).putPipeline(id, spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
+      await this.act("Search", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), spec), (r) => (mode === "full" ? `${r.name} searches every frame` : `${r.name} tracks, with a full search every ${every ?? 8} frames`));
       await this.refreshPipelines();
     });
   }
@@ -1095,7 +1111,7 @@ export class LiveCluster {
     return this.serial(async () => {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
-      await this.act("Tag family", () => this.apiOfPipeline(id).putPipeline(id, { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
+      await this.act("Tag family", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), { name: p.name, graph: p.graph!, bindings: p.bindings, enabled: p.enabled, dictionary, field_layout: p.field_layout ?? undefined, cpu: p.cpu ?? undefined }), (r) => `${r.name} now finds ${dictionaryLabel(dictionary)}`);
       await this.refreshPipelines();
     });
   }
@@ -1107,15 +1123,15 @@ export class LiveCluster {
       const p = this.pipelines.get(id);
       if (!p?.graph) return;
       const spec: W.PipelineSpec = { name: p.name, graph: p.graph, bindings: p.bindings, enabled: p.enabled, field_layout: p.field_layout ?? undefined, cpu: cpu ?? undefined };
-      await this.act("CPU core", () => this.apiOfPipeline(id).putPipeline(id, spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
+      await this.act("CPU core", () => this.apiOfPipeline(id).putPipeline(this.pipelineId(id), spec), (r) => (cpu === null ? `${r.name} is placed by the scheduler` : `${r.name} pinned to core ${cpu}`));
       await this.refreshPipelines();
     });
   }
 
   async createWorkload(name: string, nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {
-    const created = await this.act("Create pipeline", () => this.apiOf(nodeId).createPipeline({ name, graph: toDaedalus(graph), bindings: { camera: { resource_id: cameraId } } }), (p) => `${p.name} deployed`);
+    const created = await this.act("Create pipeline", () => this.apiOf(nodeId).createPipeline({ name, graph: toDaedalus(graph), bindings: { camera: { resource_id: this.cameraId(cameraId) } } }), (p) => `${p.name} deployed`);
     await this.refreshPipelines();
-    return created?.id ?? "";
+    return created ? entityKey(this.peerOf(nodeId), created.id) : "";
   }
 
   /**
@@ -1164,7 +1180,7 @@ export class LiveCluster {
     const changes = this.controlChanges.get(id);
     this.controlChanges.delete(id);
     if (!changes || Object.keys(changes).length === 0) return;
-    const result = await this.act("Camera settings", () => this.apiOfCamera(id).setCameraSettings(id, changes));
+    const result = await this.act("Camera settings", () => this.apiOfCamera(id).setCameraSettings(this.cameraId(id), changes));
     const camera = this.data.cameras.find((c) => c.resourceId === id);
     if (!result) {
       if (camera) await this.refreshCameraControls(id);
@@ -1185,7 +1201,7 @@ export class LiveCluster {
   async resetCamera(id: string) {
     const camera = this.data.cameras.find((c) => c.resourceId === id);
     this.controlChanges.delete(id);
-    const result = await this.act("Reset camera", () => this.apiOfCamera(id).resetCameraSettings(id), () => `${camera?.name ?? id} controls reset to defaults`);
+    const result = await this.act("Reset camera", () => this.apiOfCamera(id).resetCameraSettings(this.cameraId(id)), () => `${camera?.name ?? id} controls reset to defaults`);
     if (result) await this.refreshCameraControls(id);
   }
 

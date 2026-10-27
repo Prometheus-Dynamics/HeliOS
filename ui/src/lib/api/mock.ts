@@ -5,6 +5,7 @@
 
 import { CATALOG_BY_ID, defaults } from "./catalog";
 import { MOCK_SYSTEMCORE_PEER } from "./mock-devices";
+import { entityKey } from "./peers";
 import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import type { CameraStatus, StatusStage } from "./types";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
@@ -679,11 +680,12 @@ export const ROBOT_NODES: ClusterNode[] = [
 
 export const ROBOT_CAMERAS: Camera[] = [
   cam("camera.raze-owner.cam0", "Front", ROBOT_OWNER, "Front bumper, 18° up", 0, { status: bootstrappingChain() }),
-  cam("camera.systemcore-peer.cam0", "Back", MOCK_SYSTEMCORE_PEER, "Rear frame, 15° up", 120),
+  cam(entityKey(MOCK_SYSTEMCORE_PEER, "camera.systemcore-peer.cam0"), "Back", MOCK_SYSTEMCORE_PEER, "Rear frame, 15° up", 120),
 ];
 
 export const ROBOT_WORKLOADS: Workload[] = [
-  tagWorkload("tags-owner", "AprilTags · front", ROBOT_OWNER, "camera.raze-owner.cam0", "/helios/front"),
+  // Each device has a pipeline `default`: the cluster keys a peer's by its node (`entityKey`).
+  tagWorkload("default", "AprilTags · front", ROBOT_OWNER, "camera.raze-owner.cam0", "/helios/front"),
   {
     ...WORKLOADS[1],
     id: "live-map-owner",
@@ -692,7 +694,7 @@ export const ROBOT_WORKLOADS: Workload[] = [
     inputs: { camera: { source: "camera", resourceId: "camera.raze-owner.cam0", pyramid: 3 } },
     outputs: ["stream.live-map-owner.pose", "stream.live-map-owner.snapshot", "stream.live-map-owner.timing"],
   },
-  tagWorkload("tags-systemcore", "AprilTags · back", MOCK_SYSTEMCORE_PEER, "camera.systemcore-peer.cam0", "/helios/back"),
+  tagWorkload(entityKey(MOCK_SYSTEMCORE_PEER, "default"), "AprilTags · back", MOCK_SYSTEMCORE_PEER, entityKey(MOCK_SYSTEMCORE_PEER, "camera.systemcore-peer.cam0"), "/helios/back"),
 ];
 
 export const ROBOT_STREAMS: Stream[] = ROBOT_WORKLOADS.filter((w) => w.state === "running" && w.outputs.includes(`stream.${w.id}.poses`)).map((w) => ({

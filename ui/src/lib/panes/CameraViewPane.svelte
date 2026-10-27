@@ -102,7 +102,7 @@
     ontogglepin={() => target.toggle()}
   />
   <span class="sep"></span>
-  {#if camera}<RecordControl {camera} /><span class="sep"></span>{/if}
+  {#if camera && !cluster.node(camera.nodeId)?.peer}<RecordControl {camera} /><span class="sep"></span>{/if}
   <IconButton icon="marquee-2"label="Draw region (crop, or where to meter exposure)" active={roiTool} onclick={toggleRoi} size={24} />
   {#if camera?.settings.roi}
     <IconButton icon="x" label="Clear ROI" size={24} onclick={() => camera && cluster.setCamera(camera.resourceId, { roi: null })} />

@@ -15,7 +15,9 @@
   import PaneBar from "#lib/workspace/PaneBar.svelte";
 
   let picked = $state<string | undefined>(undefined);
-  const camera = $derived(picked ?? cluster.cameras[0]?.resourceId);
+  // The recorder is this device's: a peer's cameras are recorded on the peer, so they are not offered here.
+  const own = $derived(cluster.cameras.filter((c) => !cluster.node(c.nodeId)?.peer));
+  const camera = $derived(picked ?? own[0]?.resourceId);
 
   // Read the listing when the pane opens; the events keep it current after that.
   $effect(() => {
@@ -28,7 +30,7 @@
     label="Camera"
     icon="camera"
     value={camera}
-    options={cluster.cameras.map((c) => ({ id: c.resourceId, name: identity.name(c.resourceId, c.name), hint: c.mount }))}
+    options={own.map((c) => ({ id: c.resourceId, name: identity.name(c.resourceId, c.name), hint: c.mount }))}
     onpick={(id) => (picked = id)}
   />
   <span class="sep"></span>

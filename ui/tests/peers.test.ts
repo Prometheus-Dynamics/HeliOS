@@ -2,7 +2,8 @@
 // and the merge of the peers' lists with this device's (each item keeps its node id).
 import { describe, expect, test } from "bun:test";
 import { api, peerPath, scoped } from "../src/lib/api/client";
-import { mergeLists, peerNode, routedPeers, unreachableNode } from "../src/lib/api/peers";
+import { deviceId, entityKey, peerNode, routedPeers, unreachableNode } from "../src/lib/api/peers";
+import { toWorkload } from "../src/lib/api/adapt";
 import { isReachable, placeOf } from "../src/lib/devices";
 import type { ClusterNode } from "../src/lib/api/model";
 import type { Device, FeatureName, Peer } from "../src/lib/api/types";
@@ -132,34 +133,45 @@ describe("which peers the UI reaches", () => {
   });
 });
 
-describe("merging a peer's list with this device's", () => {
-  type Item = { resourceId: string; nodeId: string };
-  const key = (c: Item) => c.resourceId;
-
-  test("this device's items come first, then each peer's, each with its node id", () => {
-    const local: Item[] = [{ resourceId: "camera.raze-owner.cam0", nodeId: "raze-owner" }];
-    const peers: Item[][] = [[{ resourceId: "camera.systemcore.cam0", nodeId: "systemcore" }], [{ resourceId: "camera.pi.cam0", nodeId: "pi" }]];
-    const merged = mergeLists(local, peers, key);
-    expect(merged.items.map((c) => [c.resourceId, c.nodeId])).toEqual([
-      ["camera.raze-owner.cam0", "raze-owner"],
-      ["camera.systemcore.cam0", "systemcore"],
-      ["camera.pi.cam0", "pi"],
-    ]);
-    expect(merged.dropped).toEqual([]);
+describe("the cluster's keys for a device's entities", () => {
+  test("this device's own ids stay as they are", () => {
+    expect(entityKey(undefined, "default")).toBe("default");
+    expect(deviceId("raze-owner", "default")).toBe("default");
   });
 
-  test("a peer's item with an id this device already has is left out and named", () => {
-    const local: Item[] = [{ resourceId: "pipeline-main", nodeId: "raze-owner" }];
-    const merged = mergeLists(local, [[{ resourceId: "pipeline-main", nodeId: "systemcore" }, { resourceId: "tags", nodeId: "systemcore" }]], key);
-    expect(merged.items).toEqual([
-      { resourceId: "pipeline-main", nodeId: "raze-owner" },
-      { resourceId: "tags", nodeId: "systemcore" },
-    ]);
-    expect(merged.dropped).toEqual(["pipeline-main"]);
+  test("a peer's ids are keyed by its node, and the device's id is recovered from the key", () => {
+    expect(entityKey("systemcore", "default")).toBe("systemcore/default");
+    expect(deviceId("systemcore", "systemcore/default")).toBe("default");
   });
 
-  test("no peers leaves this device's list as it is", () => {
-    const local: Item[] = [{ resourceId: "a", nodeId: "x" }];
-    expect(mergeLists(local, [], key).items).toEqual(local);
+  test("a key with no node prefix is the device's own id", () => {
+    expect(deviceId(undefined, "default")).toBe("default");
+    expect(deviceId("systemcore", "default")).toBe("default");
+  });
+});
+
+describe("two devices with a pipeline of the same id", () => {
+  const pipeline = (id: string, camera: string) =>
+    ({
+      id,
+      name: id,
+      enabled: true,
+      state: "running",
+      revision: 1,
+      bindings: { camera: { source: "camera", resource_id: camera } },
+      outputs: [{ port: "pose" }],
+      graph: { format: "daedalus.graph", schema_version: 1, requires: [], graph: { nodes: [], edges: [] } },
+    }) as unknown as import("../src/lib/api/types").Pipeline;
+
+  test("each keeps its own workload, under its own key, bound to its own camera", () => {
+    const local = toWorkload(pipeline("default", "camera.raze.cam0"), "raze-owner");
+    const peer = toWorkload(pipeline("default", "camera.sc.cam0"), "systemcore", undefined, (id) => entityKey("systemcore", id));
+    expect(local.id).toBe("default");
+    expect(local.bindings).toEqual({ camera: "camera.raze.cam0" });
+    expect(peer.id).toBe("systemcore/default");
+    expect(peer.nodeId).toBe("systemcore");
+    expect(peer.bindings).toEqual({ camera: "systemcore/camera.sc.cam0" });
+    expect(peer.outputs).toEqual(["output.systemcore/default.pose"]);
+    expect(local.id).not.toBe(peer.id);
   });
 });
