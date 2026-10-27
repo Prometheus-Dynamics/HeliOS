@@ -497,7 +497,9 @@ class ClusterStore {
     if (!w) return;
     try {
       // The simulated device keeps the choice as the device does (a PUT of the pipeline's spec).
-      await this.mapHost(w.nodeId).scope.putPipeline(deviceId(w.nodeId, id), { name: w.name, graph: toDaedalus(w.graph), bindings: {}, map: map ?? undefined });
+      // A PUT replaces the spec: the inputs stay as they are, the choice of map changes.
+      const bindings = Object.fromEntries(Object.entries(w.bindings).map(([input, resourceId]) => [input, { resource_id: resourceId }]));
+      await this.mapHost(w.nodeId).scope.putPipeline(deviceId(w.nodeId, id), { name: w.name, graph: toDaedalus(w.graph), bindings, map: map ?? undefined });
     } catch (error) {
       toasts.error(`Map: ${errorText(error)}`);
       return;
