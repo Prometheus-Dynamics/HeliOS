@@ -14,11 +14,22 @@ src = "@assets/identity/etc/nsswitch.conf"
 dest = "/etc/nsswitch.conf"
 origin = "static-asset"
 
+# os-release carries the build's version, so it is written by the build. VERSION_ID and
+# IMAGE_VERSION are the release Atlas orders slots by (lib.sh reads IMAGE_VERSION first) and
+# the one the device identity reports; ID is what the device package checks (`helios`).
 [[stage.files]]
 id = "identity-os-release"
-src = "@assets/identity/etc/os-release"
+content = """
+NAME="Helios"
+ID=helios
+VERSION_ID="${build.version}"
+BUILD_ID="${build.version}"
+PRETTY_NAME="HeliOS ${build.version}"
+IMAGE_ID="helios-${build.target}"
+IMAGE_VERSION="${build.version}"
+"""
 dest = "/etc/os-release"
-origin = "static-asset"
+origin = "generated"
 
 [[stage.files]]
 id = "identity-version"
@@ -92,9 +103,8 @@ unit_path = "@assets/identity/etc/systemd/system/helios-set-build-time.service"
 # Image version info, written by the build to /etc/default/helios-image.env:
 # the exact HeliOS, Raze device package and Orion commits the image was built
 # from. orion-node reads IMAGE_ID/IMAGE_VERSION from it for its host facts
-# (ORION_NODE_IMAGE_VERSION_FILE in orion-node.env). os-release keeps the
-# static VERSION_ID the device identity endpoint reports; keep it equal to
-# `version` in builds/raze.toml.
+# (ORION_NODE_IMAGE_VERSION_FILE in orion-node.env). os-release carries the
+# same `version` (builds/raze.toml), so both name the build.
 [[stage.env_sets]]
 id = "identity-image-version"
 name = "helios-image"
