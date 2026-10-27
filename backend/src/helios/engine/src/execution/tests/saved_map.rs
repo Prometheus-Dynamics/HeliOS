@@ -103,8 +103,18 @@ fn a_graph_stored_without_the_map_ports_saves_its_map() {
     // before HeliOS wired them must save all the same, with no redeploy.
     let plugins = TestPlugins::load();
     let calibrated = calibration_context(SCENE_FOCAL_PX, "pinhole");
-    let raw = include_str!("../../../graphs/live-map.graph.json").to_string();
-    let mut spec = workload("workload.stored-unwired", raw, vec![camera_binding(&calibrated)]);
+    // Stored before Eidos gave the mapper its map ports, too: the mapper's port lists lack them.
+    let mut raw: serde_json::Value = serde_json::from_str(include_str!("../../../graphs/live-map.graph.json")).expect("the golden graph");
+    for node in raw["graph"]["nodes"].as_array_mut().expect("nodes") {
+        if node["id"] == "eidos:mapping.live_map" {
+            node["inputs"].as_array_mut().expect("inputs").retain(|port| port != "map" && port != "save");
+            node["outputs"].as_array_mut().expect("outputs").retain(|port| port != SAVED_MAP_PORT);
+            for key in ["inputs.map.access", "inputs.save.access", "outputs.saved_map.conditional"] {
+                node["metadata"].as_object_mut().expect("metadata").remove(key);
+            }
+        }
+    }
+    let mut spec = workload("workload.stored-unwired", raw.to_string(), vec![camera_binding(&calibrated)]);
     spec.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let bus = PipelineBus::default();
     let (mut driver, frames) = spawn_driver(&plugins, spec.clone(), bus.clone());
