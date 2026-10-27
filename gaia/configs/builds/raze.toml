@@ -91,7 +91,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "cf475611cf7497bd940bd88381956ee5ef705aa0"
+rev = "376cbc61c934631184b3c7327cfc3c1b6b847a45"
 
 # Lemnos (dev f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -110,7 +110,7 @@ rev = "cf475611cf7497bd940bd88381956ee5ef705aa0"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "1ce2a2b9fbf7a0a6f83ce0ea6063a2e4ea29b18c"
+rev = "77bc85ffcf0bfed003176f008506bccf1713c5aa"
 
 # Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
@@ -139,7 +139,7 @@ rev = "60772f0dc29f3770363ae375d9ad746628f90b88"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "0653560deba9c5e2b8745cd66de8c2fa33a6525d"
+rev = "db6c6d490d87760f0f9a4c6836acea8ead963553"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]

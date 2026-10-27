@@ -66,7 +66,7 @@ branch = "dev"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "0653560deba9c5e2b8745cd66de8c2fa33a6525d"
+rev = "db6c6d490d87760f0f9a4c6836acea8ead963553"
 
 # Lemnos at the commit that adds the SystemCore board and host-owned devices (lemnosd, and its
 # board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
@@ -74,7 +74,7 @@ rev = "0653560deba9c5e2b8745cd66de8c2fa33a6525d"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "9cfd6d2044809a42e52714ad83f5218a65f0256e"
+rev = "77bc85ffcf0bfed003176f008506bccf1713c5aa"
 
 [[artifacts]]
 id = "helios-api"
