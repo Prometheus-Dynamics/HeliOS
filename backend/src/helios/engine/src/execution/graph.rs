@@ -68,7 +68,10 @@ pub(crate) fn compile_workload_graph(
     let requires = serde_json::to_value(&document.requires).unwrap_or_default();
     let engine = Engine::new(daedalus_engine_config(settings)).map_err(|error| ExecutionError::Engine(error.to_string()))?;
     let started_at = Instant::now();
-    let host_graph = engine.compile_document_host_graph(registry, document, registry.handlers(), HostBridgeManager::new(), host_alias).map_err(|error| ExecutionError::Plan(error.to_string()))?;
+    let mut host_graph = engine.compile_document_host_graph(registry, document, registry.handlers(), HostBridgeManager::new(), host_alias).map_err(|error| ExecutionError::Plan(error.to_string()))?;
+    // Recording a tick's frame-path overhead costs about 13 us on a CM5: one tick in N keeps the
+    // rolling percentiles meaningful at a fraction of the cost.
+    host_graph.set_frame_overhead_sampling(FRAME_OVERHEAD_SAMPLE_EVERY);
     let planning_ms = started_at.elapsed().as_secs_f64() * 1000.0;
     let input_ports = host_graph.host_inputs().iter().map(|port| port.name().to_string()).collect();
     let output_ports = host_graph.host_outputs().iter().map(|port| port.name().to_string()).collect();
@@ -161,6 +164,9 @@ fn host_alias(document: &GraphDocument) -> String {
         .map(|node| node.label.clone().unwrap_or_else(|| node.id.to_string()))
         .unwrap_or_else(|| DEFAULT_HOST_ALIAS.to_string())
 }
+
+/// Ticks per recorded frame-overhead sample (`HostGraph::set_frame_overhead_sampling`).
+const FRAME_OVERHEAD_SAMPLE_EVERY: u32 = 16;
 
 /// Serial execution on the workload's own driver thread: no worker pool, no GPU. With metrics on,
 /// Daedalus also records each tick's frame-path overhead (`HostGraph::frame_overhead`).
