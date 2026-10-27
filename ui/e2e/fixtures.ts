@@ -4,7 +4,7 @@
 //   console error or uncaught page error (the allow-list below is the only exception).
 // - `target` is "mock" or "sim", from the project. Sim tests check the device with `device.ts`.
 import { expect, test as base, type ConsoleMessage, type Page } from "@playwright/test";
-import { device, restoreDevice, snapshotDevice, waitForCameraReady } from "./device";
+import { changesFrom, device, restoreDevice, snapshotDevice, waitForCameraReady } from "./device";
 
 export type Target = "mock" | "sim";
 
@@ -85,6 +85,8 @@ export const test = base.extend<{
       const before = await snapshotDevice(request);
       await use();
       await restoreDevice(request, before);
+      // The restore is checked, not trusted: the device must now read as it did before the test.
+      expect(changesFrom(before, await snapshotDevice(request)), "the device after the test and its restore differs from how it was found").toEqual([]);
     },
     { auto: true },
   ],

@@ -237,6 +237,43 @@ function sortedForCompare(value: unknown, key: string): unknown {
   return value;
 }
 
+/**
+ * What differs between the device as found (`before`) and now (`after`), one line each; empty when
+ * the device is as found. Pipelines are compared by their spec, so a tag family, a search or an
+ * input size the test left behind is named; cameras by their kept settings.
+ */
+export function changesFrom(before: DeviceSnapshot, after: DeviceSnapshot): string[] {
+  const changes: string[] = [];
+  if (before.onboarded !== after.onboarded) changes.push(`setup flag: ${before.onboarded} -> ${after.onboarded}`);
+  for (const p of before.pipelines) {
+    if (!p.graph) continue;
+    const now = after.pipelines.find((c) => c.id === p.id);
+    if (!now) {
+      changes.push(`pipeline ${p.id} is gone`);
+      continue;
+    }
+    const a = specOf(p);
+    const b = specOf(now);
+    for (const key of Object.keys({ ...a, ...b })) {
+      if (canonical(a[key]) !== canonical(b[key])) changes.push(`pipeline ${p.id}: ${SPEC_FIELD_NAMES[key] ?? key} ${shortJson(a[key])} -> ${shortJson(b[key])}`);
+    }
+  }
+  for (const p of after.pipelines) {
+    if (!before.pipelines.some((b) => b.id === p.id)) changes.push(`pipeline ${p.id} was added`);
+  }
+  for (const camera of before.cameras) {
+    const now = after.cameras.find((c) => c.id === camera.id);
+    if (!now) changes.push(`camera ${camera.name} is gone`);
+    else if (canonical(camera.persisted) !== canonical(now.persisted)) changes.push(`camera ${camera.name}: kept settings ${shortJson(camera.persisted)} -> ${shortJson(now.persisted)}`);
+  }
+  return changes;
+}
+
+function shortJson(value: unknown): string {
+  const text = JSON.stringify(value) ?? "none";
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
 /** Reads what a sim test may change: each pipeline, each frame camera's kept settings and mode, and the setup flag. */
 export async function snapshotDevice(api: APIRequestContext): Promise<DeviceSnapshot> {
   const setup = await getJson<{ onboarded: boolean }>(api, "/v1/device/setup");
@@ -255,16 +292,35 @@ async function send(api: APIRequestContext, method: "POST" | "PUT" | "PATCH" | "
   expect(response.ok(), `${method} ${path}: HTTP ${response.status()} ${body}`).toBeTruthy();
 }
 
+/** The fields of a pipeline's spec, as a reader of a failed restore names them. */
+const SPEC_FIELD_NAMES: Record<string, string> = { dictionary: "tag family", search_mode: "search mode", full_search_every: "full search every", bindings: "input", enabled: "enabled", graph: "graph" };
+
 /**
  * Puts the device back as `before` found it: the setup flag, each pipeline's spec (recreated when
  * it is gone, and a pipeline a test added is removed), and each camera's kept settings, then waits
  * until the pipelines and the cameras show it. A camera that was delivering frames must deliver
- * them again.
+ * them again. Each part runs even when an earlier one fails (a camera that does not answer must
+ * not leave the pipelines changed); the first failure is thrown after all of them.
  */
 export async function restoreDevice(api: APIRequestContext, before: DeviceSnapshot) {
+  const failures: unknown[] = [];
+  for (const part of [restoreSetup, restorePipelines, restoreCameras]) {
+    try {
+      await part(api, before);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length) throw failures[0];
+}
+
+async function restoreSetup(api: APIRequestContext, before: DeviceSnapshot) {
   const setup = await getJson<{ onboarded: boolean }>(api, "/v1/device/setup");
   if (setup.onboarded !== before.onboarded) await send(api, "PUT", "/v1/device/setup", { onboarded: before.onboarded });
+}
 
+/** Each pipeline's spec as found, including its tag family and search (a spec the device keeps whole). */
+async function restorePipelines(api: APIRequestContext, before: DeviceSnapshot) {
   const now = await device.pipelines(api);
   for (const p of before.pipelines) {
     // A pipeline whose graph does not load has no spec to put back, and no test edits one.
@@ -285,7 +341,9 @@ export async function restoreDevice(api: APIRequestContext, before: DeviceSnapsh
   }
   const gone = (await device.pipelines(api)).filter((p) => !before.pipelines.some((b) => b.id === p.id)).map((p) => p.id);
   expect(gone, "pipelines a test added are removed").toEqual([]);
+}
 
+async function restoreCameras(api: APIRequestContext, before: DeviceSnapshot) {
   for (const camera of before.cameras) {
     // Restarting a pipeline restarts the camera's service: its settings answer 503 until it is back.
     await waitForCameraReady(api, camera);
