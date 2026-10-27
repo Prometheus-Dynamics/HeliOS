@@ -127,18 +127,6 @@ export function constOf(p: DevicePipeline, label: string, input: string): Daedal
   return node?.const_inputs.find(([name]) => name === input)?.[1];
 }
 
-/** Waits until the camera's service answers its settings (it restarts when a pipeline changes its mode,
- * and answers 503 meanwhile: the UI is right to show that, and a test should start after it). */
-export async function waitForCameraService(api: APIRequestContext, cameraId: string) {
-  await expect
-    .poll(async () => {
-      const cameras = await device.cameras(api);
-      const camera = cameras.find((c) => c.id === cameraId) as (DeviceCamera & { live_error?: string | null; service_online?: boolean }) | undefined;
-      return camera?.service_online === true && !camera.live_error;
-    }, { timeout: 60_000 })
-    .toBe(true);
-}
-
 /**
  * The camera the device tests drive: `HELIOS_E2E_CAMERA` (an id, or part of a name) when set, else
  * the sim's simulated sensor, else the first camera that serves frames (a real board's own

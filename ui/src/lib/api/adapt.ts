@@ -373,29 +373,34 @@ function quantile(values: number[], q: number): number {
   return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : 0;
 }
 
-function toInput(b: W.Binding): PipelineInput {
-  if (b.source === "pipeline") return { source: "pipeline", pipeline: b.pipeline, port: b.port, maxWaitMs: b.max_wait_ms };
-  return { source: "camera", resourceId: b.resource_id, outputWidth: b.output_width, outputHeight: b.output_height, pyramid: b.pyramid };
+/** A device's own id as the cluster keys it (`entityKey`): this device's ids as they are, a peer's with its node. */
+export type KeyOf = (id: string) => string;
+const ownKey: KeyOf = (id) => id;
+
+function toInput(b: W.Binding, keyOf: KeyOf): PipelineInput {
+  if (b.source === "pipeline") return { source: "pipeline", pipeline: b.pipeline === undefined ? undefined : keyOf(b.pipeline), port: b.port, maxWaitMs: b.max_wait_ms };
+  return { source: "camera", resourceId: keyOf(b.resource_id), outputWidth: b.output_width, outputHeight: b.output_height, pyramid: b.pyramid };
 }
 
-export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): Workload {
+/** A pipeline as the cluster lists it. `keyOf` keys it, and what it refers to (its cameras, its producers), on its node. */
+export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload, keyOf: KeyOf = ownKey): Workload {
   const fps = Number(p.telemetry?.fps ?? 0);
   const tick = Number(p.telemetry?.last_tick_ms ?? 0);
   const graph = fromDaedalus(p.graph);
   const history = [...(previous?.perf.tickHistory ?? []), tick].slice(-60);
   return {
-    id: p.id,
+    id: keyOf(p.id),
     name: p.name,
     nodeId: p.node_id ?? nodeId,
     revision: p.revision ?? 0,
     state: workloadState(p),
     restarts: previous?.restarts ?? 0,
-    bindings: Object.fromEntries(Object.entries(p.bindings).filter(([, b]) => b.resource_id).map(([input, b]) => [input, b.resource_id])),
-    inputs: Object.fromEntries(Object.entries(p.bindings).map(([input, b]) => [input, toInput(b)])),
+    bindings: Object.fromEntries(Object.entries(p.bindings).filter(([, b]) => b.resource_id).map(([input, b]) => [input, keyOf(b.resource_id)])),
+    inputs: Object.fromEntries(Object.entries(p.bindings).map(([input, b]) => [input, toInput(b, keyOf)])),
     searchMode: p.search_mode ?? null,
     fullSearchEvery: p.full_search_every ?? null,
     graph,
-    outputs: p.outputs.map((o) => outputStreamId(p.id, o.port)),
+    outputs: p.outputs.map((o) => outputStreamId(keyOf(p.id), o.port)),
     status: p.status,
     cpu: p.cpu ?? null,
     cpuApplied: typeof p.telemetry?.cpu === "number" ? p.telemetry.cpu : null,
@@ -404,18 +409,17 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload): 
   };
 }
 
-export function toStreams(pipelines: W.Pipeline[]): Stream[] {
-  return pipelines.flatMap((p) =>
-    p.outputs.map((o) => ({
-      id: outputStreamId(p.id, o.port),
-      name: `${p.name} · ${o.port}`,
-      schema: /pose/i.test(o.port) ? ("poses" as const) : /detect|marker|tag/i.test(o.port) ? ("detections" as const) : ("telemetry" as const),
-      producer: p.id,
-      rateHz: Number(p.telemetry?.fps ?? 0),
-      latencyMs: 0,
-      bridges: ["api"],
-    })),
-  );
+/** The streams one pipeline publishes, keyed as its workload is (`keyOf`). */
+export function toStreams(p: W.Pipeline, keyOf: KeyOf = ownKey): Stream[] {
+  return p.outputs.map((o) => ({
+    id: outputStreamId(keyOf(p.id), o.port),
+    name: `${p.name} · ${o.port}`,
+    schema: /pose/i.test(o.port) ? ("poses" as const) : /detect|marker|tag/i.test(o.port) ? ("detections" as const) : ("telemetry" as const),
+    producer: keyOf(p.id),
+    rateHz: Number(p.telemetry?.fps ?? 0),
+    latencyMs: 0,
+    bridges: ["api"],
+  }));
 }
 
 // --- Resources ---------------------------------------------------------------
@@ -434,9 +438,9 @@ function health(h: string): Resource["health"] {
   return h === "healthy" ? "online" : h === "failed" ? "offline" : "degraded";
 }
 
-export function toResource(r: W.Resource, nodeId: string): Resource {
+export function toResource(r: W.Resource, nodeId: string, keyOf: KeyOf = ownKey): Resource {
   return {
-    id: r.id,
+    id: keyOf(r.id),
     type: resourceType(r.type),
     name: r.name,
     nodeId,
@@ -445,7 +449,7 @@ export function toResource(r: W.Resource, nodeId: string): Resource {
     health: health(r.health),
     endpoints: r.endpoints,
     labels: { ...r.labels, orion_type: r.type },
-    leasedBy: r.leased_by,
+    leasedBy: r.leased_by.map(keyOf),
   };
 }
 

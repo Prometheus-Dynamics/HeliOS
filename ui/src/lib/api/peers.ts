@@ -59,24 +59,16 @@ export function routedPeers(peers: Peer[]): Peer[] {
 }
 
 /**
- * The local list, then each peer's, in order. A peer's item is left out (and its key named in
- * `dropped`) when its key is already taken: a device's ids are its own, so two devices sharing an
- * id would otherwise show one another's state. The items keep their node ids.
+ * The cluster's key for an entity a device owns. Ids are only unique per device (every board has a
+ * pipeline `default`), so a peer's entities are `<node>/<id>`. This device's keep their own ids, so
+ * its URLs, names and saved choices do not change.
  */
-export function mergeLists<T>(local: T[], peers: T[][], key: (item: T) => string): { items: T[]; dropped: string[] } {
-  const seen = new Set(local.map(key));
-  const items = [...local];
-  const dropped: string[] = [];
-  for (const list of peers) {
-    for (const item of list) {
-      const id = key(item);
-      if (seen.has(id)) {
-        dropped.push(id);
-        continue;
-      }
-      seen.add(id);
-      items.push(item);
-    }
-  }
-  return { items, dropped };
+export function entityKey(peer: string | undefined, id: string): string {
+  return peer === undefined ? id : `${peer}/${id}`;
+}
+
+/** The id a device knows an entity by, from the cluster's key for it: a peer's key without its node. */
+export function deviceId(node: string | undefined, key: string): string {
+  const prefix = `${node}/`;
+  return node !== undefined && key.startsWith(prefix) ? key.slice(prefix.length) : key;
 }
