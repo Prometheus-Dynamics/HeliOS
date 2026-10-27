@@ -1,0 +1,171 @@
+# Gaia builds of HeliOS. See docs/ci/gaia-builds.md.
+#
+# Every push to dev and every pull request: validate raze.toml and systemcore.toml,
+# and cross-build SystemCore's Rust artifacts with Limelight's SDK (no image).
+# Full images: workflow_dispatch only, on the self-hosted runner labelled `gaia`.
+name: Gaia builds
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - backend/**
+      - gaia/**
+      - tools/build-os.sh
+      - rust-toolchain.toml
+      - .github/workflows/gaia-builds.yml
+  pull_request:
+    paths:
+      - backend/**
+      - gaia/**
+      - tools/build-os.sh
+      - rust-toolchain.toml
+      - .github/workflows/gaia-builds.yml
+  workflow_dispatch:
+    inputs:
+      target:
+        description: What to build
+        type: choice
+        options: [raze, systemcore, both]
+        default: both
+      cargo_profile:
+        description: Backend cargo profile (dev-image links faster; release is what ships)
+        type: choice
+        options: [release, dev-image]
+        default: release
+
+# A newer push supersedes a running check; a dispatched image build is never cancelled.
+concurrency:
+  group: gaia-builds-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # raze.toml stages gaia/build/ui (tools/build-os.sh builds it). Validation only
+      # checks that it exists; the image jobs build the real UI.
+      - name: Placeholder UI build
+        run: mkdir -p gaia/build/ui && echo '<!doctype html>' > gaia/build/ui/index.html
+
+      - name: Validate raze.toml
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@349efac595adcd9783517bda73a6e5294d4633c5
+        with:
+          config: gaia/configs/builds/raze.toml
+          command: validate
+          cache-key: helios-validate
+          cache-paths: .gaia/cache/import-sources
+
+      - name: Validate systemcore.toml
+        if: hashFiles('gaia/configs/builds/systemcore.toml') != ''
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@349efac595adcd9783517bda73a6e5294d4633c5
+        with:
+          config: gaia/configs/builds/systemcore.toml
+          command: validate
+          cache: "false"
+
+  # Whether the SystemCore artifact build can run: it needs EIDOS_READ_TOKEN (Eidos is
+  # private) and systemcore.toml. Fork pull requests get no secrets, so they skip it.
+  systemcore-ready:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: gaia/configs/builds
+      - id: check
+        env:
+          EIDOS_READ_TOKEN: ${{ secrets.EIDOS_READ_TOKEN }}
+        run: |
+          if [[ -z "$EIDOS_READ_TOKEN" ]]; then
+            echo "::notice title=SystemCore artifacts skipped::EIDOS_READ_TOKEN is not available to this run (unset, or a fork pull request)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [[ ! -f gaia/configs/builds/systemcore.toml ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  systemcore-artifacts:
+    needs: [validate, systemcore-ready]
+    if: needs.systemcore-ready.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      # Gaia clones Eidos on the host (a git source) and serves it to cargo from its
+      # mirror; the token is used for that clone only, through git's own config.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.EIDOS_READ_TOKEN }}@github.com/Prometheus-Dynamics/Eidos.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/Prometheus-Dynamics/Eidos
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain and the SystemCore cross target
+        run: |
+          rustup toolchain install          # rust-toolchain.toml: 1.99.0
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Build the SystemCore artifacts
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@349efac595adcd9783517bda73a6e5294d4633c5
+        with:
+          config: gaia/configs/builds/systemcore.toml
+          # dev-image: thin LTO, the faster link; this job checks that it builds.
+          args: --only artifacts --set input.cargo_profile=dev-image
+          cache-key: helios-systemcore
+          # The SDK archive (1.75 GB) and the cargo target dir.
+          cache-paths: |
+            .gaia/cache/downloads
+            .gaia/cache/git
+            ~/.cache/gaia/cargo-target
+          upload: "false"
+
+  # Full images: dispatched by hand, on the self-hosted runner. Until a runner with the
+  # `gaia` label exists, a dispatched run waits in the queue and does nothing.
+  images:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, x64, gaia]
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Gaia on the runner
+        run: |
+          command -v gaia || { echo "::error::gaia is not installed on this runner (docs/ci/gaia-builds.md)"; exit 1; }
+          gaia --version
+
+      - name: Raze image
+        if: inputs.target == 'raze' || inputs.target == 'both'
+        env:
+          CI: "true"
+        run: |
+          tools/build-os.sh raze full \
+            --set input.cargo_profile=${{ inputs.cargo_profile }} \
+            --export "$RUNNER_TEMP/export/raze"
+
+      - name: SystemCore package
+        if: (inputs.target == 'systemcore' || inputs.target == 'both') && hashFiles('gaia/configs/builds/systemcore.toml') != ''
+        env:
+          CI: "true"
+        run: |
+          # build-os.sh builds and stages the UI, and passes slot inputs only to builds that declare them.
+          tools/build-os.sh systemcore \
+            --set input.cargo_profile=${{ inputs.cargo_profile }} \
+            --export "$RUNNER_TEMP/export/systemcore"
+
+      - name: Upload the images
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-images-${{ github.run_number }}
+          path: ${{ runner.temp }}/export
+          if-no-files-found: error
+          retention-days: 14
