@@ -233,6 +233,11 @@ mod tests {
 
     #[test]
     fn prune_keeps_the_recording_being_written_and_claimed_sessions() {
+        // Claims are process-wide and tests run in parallel: this test claims sessions of its own,
+        // so the other tests never see its claim.
+        const OLD: &str = "raze-1-claimed-20260101T000000Z-ddddddd";
+        const MIDDLE: &str = "raze-1-claimed-20260102T000000Z-eeeeeee";
+        const NEW: &str = "raze-1-claimed-20260103T000000Z-fffffff";
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path();
         file_at(path, &format!("{OLD}.mcap"), 100, 1_000);
