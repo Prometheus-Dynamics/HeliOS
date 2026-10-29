@@ -404,10 +404,11 @@ fn frames_stage(camera: &CameraFacts) -> Stage {
 }
 
 /// A capture the service could not start. A USB bus without the bandwidth for one more stream is
-/// the usual cause when several cameras share a hub.
+/// the usual cause when several cameras share a hub: Styx either refuses the stream ("USB
+/// bandwidth") or starts it and no frame arrives ("... on a 480 Mbit/s USB bus: no frame ...").
 fn start_failed(error: &str) -> Stage {
     let stage = Stage::new("frames", "Frames", StageState::Blocked, format!("The capture could not start: {error}"));
-    if error.contains("USB bandwidth") {
+    if error.contains("USB bandwidth") || error.contains("USB bus") {
         stage.hint("Too many cameras share this USB bus. Plug some into another USB port of the device (not a chained hub), or stop a camera you are not using.")
     } else {
         stage.hint("Check the camera's USB connection, and that its mode is one it supports (Camera settings).")
@@ -632,6 +633,15 @@ mod tests {
         let frames = stage(&derive(&camera, &[]), "frames").clone();
         assert_eq!(frames.state, StageState::Blocked);
         assert!(frames.reason.contains("not enough USB bandwidth"), "{}", frames.reason);
+        assert!(frames.hint.as_deref().is_some_and(|hint| hint.contains("another USB port")));
+    }
+
+    #[test]
+    fn a_mode_that_starved_on_a_shared_bus_says_so() {
+        let error = "the camera did not start: camera delivered no frames: YUYV 320x240 on a 480 Mbit/s USB bus: no frame in 2000 ms; uncompressed USB modes starve when a hub or another device shares the bus";
+        let camera = CameraFacts { start_error: Some(error.into()), ..served(None) };
+        let frames = stage(&derive(&camera, &[]), "frames").clone();
+        assert_eq!(frames.state, StageState::Blocked);
         assert!(frames.hint.as_deref().is_some_and(|hint| hint.contains("another USB port")));
     }
 
