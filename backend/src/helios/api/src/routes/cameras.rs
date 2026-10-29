@@ -73,6 +73,9 @@ pub struct CameraLive {
     pub frames_sent: u64,
     pub frames_skipped: u64,
     pub restarts: u64,
+    /// Why the service's last capture start failed (e.g. not enough USB bandwidth); cleared once
+    /// a start succeeds.
+    pub last_error: Option<String>,
     pub captures: Vec<CaptureLive>,
 }
 
@@ -168,6 +171,7 @@ pub async fn live_facts(socket: PathBuf) -> Result<CameraLive, String> {
             frames_sent: metrics.sent,
             frames_skipped: metrics.skipped,
             restarts: metrics.restarts,
+            last_error: metrics.last_error,
             captures: metrics
                 .snapshot
                 .cameras
@@ -238,6 +242,7 @@ async fn chain_of(state: &SharedState, view: &StateView, camera: &Camera, record
         service: camera.frames_endpoint.is_some(),
         service_online: camera.service_online,
         live_error: camera.live_error.clone(),
+        start_error: camera.live.as_ref().and_then(|live| live.last_error.clone()),
         capture,
         device_missing: device.as_ref().is_some_and(|node| !node.exists()),
         device,

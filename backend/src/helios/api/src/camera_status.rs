@@ -111,6 +111,8 @@ pub struct CameraFacts {
     pub service_online: Option<bool>,
     /// Why the service's facts could not be read.
     pub live_error: Option<String>,
+    /// Why the service's last capture start failed; `None` once a start succeeds.
+    pub start_error: Option<String>,
     /// The camera's first capture in the service: its frames, rate and 3A.
     pub capture: Option<CaptureLive>,
     /// The device node (`/dev/videoN`), when the camera has one.
@@ -381,6 +383,9 @@ fn frames_stage(camera: &CameraFacts) -> Stage {
         if !camera.holders.is_empty() {
             return busy_stage(STAGE, camera, &device);
         }
+        if let Some(error) = &camera.start_error {
+            return start_failed(error);
+        }
         return stage(StageState::Waiting, "No capture yet".into()).hint("The capture starts when the camera view or a pipeline uses the camera.");
     };
     let fps = capture.fps_measured.filter(|fps| *fps > 0.0);
@@ -395,6 +400,17 @@ fn frames_stage(camera: &CameraFacts) -> Stage {
     match &capture.last_error {
         Some(error) => stage(StageState::Blocked, format!("The capture failed: {error}")).hint("Check the camera's USB connection, and that its mode is one it supports (Camera settings)."),
         None => stage(StageState::Waiting, "Capture started, no frames yet".into()).hint("Wait a moment. If it stays this way, check the camera's USB connection."),
+    }
+}
+
+/// A capture the service could not start. A USB bus without the bandwidth for one more stream is
+/// the usual cause when several cameras share a hub.
+fn start_failed(error: &str) -> Stage {
+    let stage = Stage::new("frames", "Frames", StageState::Blocked, format!("The capture could not start: {error}"));
+    if error.contains("USB bandwidth") {
+        stage.hint("Too many cameras share this USB bus. Plug some into another USB port of the device (not a chained hub), or stop a camera you are not using.")
+    } else {
+        stage.hint("Check the camera's USB connection, and that its mode is one it supports (Camera settings).")
     }
 }
 
@@ -608,6 +624,15 @@ mod tests {
             ae_state: None,
             last_error: last_error.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn a_start_the_bus_refused_says_so() {
+        let camera = CameraFacts { start_error: Some("not enough USB bandwidth on this bus; the camera needs a lower mode".into()), ..served(None) };
+        let frames = stage(&derive(&camera, &[]), "frames").clone();
+        assert_eq!(frames.state, StageState::Blocked);
+        assert!(frames.reason.contains("not enough USB bandwidth"), "{}", frames.reason);
+        assert!(frames.hint.as_deref().is_some_and(|hint| hint.contains("another USB port")));
     }
 
     fn served(capture: Option<CaptureLive>) -> CameraFacts {
