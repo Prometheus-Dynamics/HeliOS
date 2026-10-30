@@ -13,7 +13,10 @@
 #   with the key. Orion refuses mdns discovery unless peer auth is required, so the two lines are
 #   written together or not at all.
 # - Open (no key, the FRC default): Orion does not discover. HeliOS finds its peers itself, on the
-#   robot's networks (helios-api, peer_scan.rs).
+#   robot's networks (helios-api, peer_scan.rs). With HeliOS's security open too (no auth file), Orion
+#   also trusts a peer that connects from the robot's own links without a key (docs/discovery.md,
+#   "Robot links": peer auth disabled, robot-link auto-trust, the links declared). Those settings need
+#   the team, and they are not written when HeliOS is secured: Orion keeps its own rules then.
 # - The file is checked against those rules before it is installed. A file that fails the check
 #   becomes the single-node profile (no discovery), so orion-node always starts.
 #
@@ -24,15 +27,21 @@ set -eu
 kind=${1:?usage: robot-env <systemcore|raze>}
 out=${HELIOS_ROBOT_ENV:-/run/helios/robot.env}
 link_net=${HELIOS_ROBOT_LINK_NET:-172.31.12.80/29}
+# The USB gadget network, board side (every board's USB link to its controller).
+usb_net=${HELIOS_ROBOT_USB_NET:-172.31.0.0/16}
+# HeliOS's device security state: an absent file is open (helios-api auth_state.rs).
+auth=${HELIOS_ROBOT_AUTH_FILE:-}
 
 case $kind in
 systemcore)
     team_files=${HELIOS_ROBOT_TEAM_FILES:-/etc/team_number.txt:/usr/local/var/lib/helios/api/controller.json}
     key_files=${HELIOS_ROBOT_KEY_FILES:-/usr/local/etc/helios/robot-enrollment.key}
+    auth=${auth:-/usr/local/var/lib/helios/auth/auth.json}
     ;;
 raze)
     team_files=${HELIOS_ROBOT_TEAM_FILES:-/var/lib/helios/api/controller.json}
     key_files=${HELIOS_ROBOT_KEY_FILES:-/etc/helios/robot-enrollment.key}
+    auth=${auth:-/var/lib/helios/auth/auth.json}
     ;;
 *)
     echo "robot-env: unknown board kind '$kind'" >&2
@@ -88,8 +97,9 @@ write() {
         echo "ORION_NODE_ID=$kind-$serial"
         echo "HELIOS_NODE_ID=$kind-$serial"
         if [ -n "$team" ]; then
+            team_net="10.$((team / 100)).$((team % 100)).0/24"
             echo "ORION_NODE_CLUSTER=robot-$team"
-            echo "HELIOS_API_PEER_NETS=$link_net,10.$((team / 100)).$((team % 100)).0/24"
+            echo "HELIOS_API_PEER_NETS=$link_net,$team_net"
         else
             echo "HELIOS_API_PEER_NETS="
         fi
@@ -99,6 +109,13 @@ write() {
             echo "ORION_NODE_ENROLLMENT_KEY_FILE=$key"
         else
             echo "ORION_NODE_DISCOVERY=off"
+        fi
+        if [ -n "$team" ] && [ -z "$key" ] && [ ! -e "$auth" ]; then
+            # Open robot: peers on the robot's own links are trusted without a key, the key pinned on
+            # first use (docs/discovery.md, "Robot links"). Orion's default in open mode, set explicitly.
+            echo "ORION_NODE_PEER_AUTH=disabled"
+            echo "ORION_NODE_PEER_AUTO_TRUST=robot-link"
+            echo "ORION_NODE_ROBOT_LINKS=$usb_net,$link_net,$team_net"
         fi
     } >"$tmp"
     if ! valid "$tmp"; then

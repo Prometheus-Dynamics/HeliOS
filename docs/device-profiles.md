@@ -78,6 +78,13 @@ are one robot to the user: any one HeliOS UI shows and controls all of them.
   unique to the board (`systemcore-<serial>`, `raze-<serial>`), the cluster, discovery, the peer
   networks (the USB link and `10.TE.AM.0/24`) and the enrollment key. Every HeliOS unit reads it
   last.
+- **Robot-link trust (open robots).** With a team, no enrollment key and HeliOS's security off (no
+  `auth.json`), `robot-env` also sets Orion's `ORION_NODE_PEER_AUTH=disabled`,
+  `ORION_NODE_PEER_AUTO_TRUST=robot-link` and `ORION_NODE_ROBOT_LINKS` (the USB gadget network
+  `172.31.0.0/16`, the SystemCore's robot link `172.31.12.80/29`, and `10.TE.AM.0/24`). Orion then
+  pins a peer's key on first use when it connects from one of those links
+  ([Orion discovery, "Robot links"](https://github.com/Prometheus-Dynamics/Orion/blob/main/docs/discovery.md)).
+  Securing HeliOS later does not change Orion until the next boot, when `robot-env` runs again.
 - **The gateway.** helios-api routes `/v1/peers/<node>/<path>` to the peer's own API at
   `/v1/<path>` over the link (`peers.rs`). A peer is reached only when Orion has enrolled it, it
   is on one of the robot's networks and it names its API port. Only HeliOS's `/v1` paths are passed,
