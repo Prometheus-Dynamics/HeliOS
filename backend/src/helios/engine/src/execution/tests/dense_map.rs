@@ -19,11 +19,14 @@ pub(super) fn dense_map_document(registry: &PluginRegistry, config: DenseConfig)
     super::localization_map::map_document(registry, None, Some(config))
 }
 
-/// The dense mapper's settings for a short test clip: a keyframe every second posed frame, from
-/// the frames before it (causal: no wait for later neighbours), whole keyframes per tick (no
-/// budget, so the clip's keyframes all land), and the default rest.
+/// The clip's frames: shorter than the dense mapper's neighbour window, so its keyframes wait for
+/// later neighbours until the last frame (`end_frame`) flushes them all and emits the mesh.
+const SHORT_CLIP_FRAMES: u64 = 24;
+
+/// The dense mapper's settings for a short test clip: a keyframe every second posed frame, whole
+/// keyframes per tick (no budget), the tail flushed at the clip's last frame, and the default rest.
 fn short_clip_tuning() -> DenseConfig {
-    DenseConfig { key_every: 2, window: 40, causal: true, budget_ms: 0.0, ..DenseConfig::default() }
+    DenseConfig { key_every: 2, budget_ms: 0.0, end_frame: SHORT_CLIP_FRAMES as u32, ..DenseConfig::default() }
 }
 
 /// The dense template through the frame driver, one pipeline: the live mapper poses each frame and
@@ -41,7 +44,7 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
 
     // Three scene poses per frame: the camera moves about 4 cm a frame around the tagged wall, so
     // keyframes come with the 10 cm baselines the dense mapper needs for its neighbours.
-    let frame_count = 24_u64;
+    let frame_count = SHORT_CLIP_FRAMES;
     for index in 0..frame_count {
         frames.send(live_map_scene(586, index * 3, (index + 1) * 100_000_000)).expect("send frame");
         wait_for("the pipeline to process the frame", || driver.stats().ticks_processed == index + 1);
