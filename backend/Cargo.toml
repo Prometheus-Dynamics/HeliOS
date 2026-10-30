@@ -131,7 +131,7 @@ tempfile = "3.27.0"
 # `branch`, `tag` and `rev` as different sources, and two copies of Daedalus
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
-#   Daedalus 3.0 dev (21d401e, plugin ABI 11: boundary labels from `TypeExpr::canonical_label()`), Styx dev (fbe003e: one MMAP queue and media lookup shared by the PiSP and Rockchip ISP30 paths; b6444d3: the 3.0 API, `#[non_exhaustive]` enums; simulated cameras: feature `sim`, glTF scenes `scene=gltf`, `clock=lockstep`), Eidos dev (c357fb91,
+#   Daedalus 3.0 dev (21d401e, plugin ABI 11: boundary labels from `TypeExpr::canonical_label()`), Styx dev (fbe003e: one MMAP queue and media lookup shared by the PiSP and Rockchip ISP30 paths; b6444d3: the 3.0 API, `#[non_exhaustive]` enums; simulated cameras: feature `sim`, glTF scenes `scene=gltf`, `clock=lockstep`), Eidos dev (2cfe86a9: a relocalized pose is confirmed by guided feature matches or agreeing tags before it commits; c357fb91,
 #   feature tracks `eidos:features.track`; tracking overrides and tracked stage nodes), Orion dev (9ad7991, the safe-mode unit never enabled; a380034:
 #   safe mode and its metric, robot-link peer trust in open mode, status/workload/provider and action
 #   watches that resume after node restarts, `ClientError::is_transient`, observed records of a removed
