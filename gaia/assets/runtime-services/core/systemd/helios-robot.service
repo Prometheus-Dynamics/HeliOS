@@ -6,8 +6,6 @@ Description=HeliOS robot settings
 Before=orion-node.service helios-api.service helios-engine.service helios-peripherals.service
 
 [Service]
-# glibc gives each thread its own heap arena; capped, a long run stays flat (Styx soak: 125 MB with the default, 30 MB capped).
-Environment=MALLOC_ARENA_MAX=2
 Type=oneshot
 RemainAfterExit=yes
 RuntimeDirectory=helios
