@@ -95,6 +95,9 @@ pub struct BoardContract {
     pub camera_streams_file: PathBuf,
     /// The board's configuration directory (for snapshot globs).
     pub etc_dir: PathBuf,
+    /// Where uploaded updates are kept: the board's writer installs a `file://` image from here in
+    /// place (`update stage-url`), and refuses any other directory.
+    pub upload_dir: PathBuf,
 }
 
 impl BoardContract {
@@ -111,6 +114,7 @@ impl BoardContract {
             camera_file: "/usr/share/board/raze/camera.toml".into(),
             camera_streams_file: "/run/board/camera-streams.json".into(),
             etc_dir: "/etc/board".into(),
+            upload_dir: "/data/updates".into(),
         }
     }
 }
@@ -432,8 +436,10 @@ impl Layout {
     }
 
     /// Where OTA uploads are kept until they are staged.
+    /// Uploaded updates: the board's own directory on a board (its writer installs from there),
+    /// HeliOS's state on a guest.
     pub fn upload_dir(&self) -> PathBuf {
-        self.state_dir.join("updates")
+        self.board().map_or_else(|| self.state_dir.join("updates"), |board| board.upload_dir.clone())
     }
 
     /// The node catalog helios-engine writes at startup.
@@ -563,7 +569,7 @@ mod tests {
         assert_eq!(layout.state_dir(), Path::new("/var/lib/helios"));
         assert_eq!(layout.api_state_dir(), PathBuf::from("/var/lib/helios/api"));
         assert_eq!(layout.auth_file(), PathBuf::from("/var/lib/helios/auth/auth.json"));
-        assert_eq!(layout.upload_dir(), PathBuf::from("/var/lib/helios/updates"));
+        assert_eq!(layout.upload_dir(), PathBuf::from("/data/updates"), "the board writer's own directory");
         assert_eq!(layout.catalog_file(), PathBuf::from("/var/lib/helios/state/catalog.json"));
         assert_eq!(layout.plans_dir(), PathBuf::from("/var/lib/helios/state/plans"));
         assert_eq!(layout.nt4_settings_file(), PathBuf::from("/var/lib/helios/api/nt4.json"));

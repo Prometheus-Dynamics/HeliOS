@@ -82,6 +82,7 @@ where
     }
     let filename = sanitize_filename(filename);
     tokio::fs::create_dir_all(&config.upload_dir).await?;
+    prune_uploads(config).await;
     let partial = config.upload_dir.join(format!(".partial-{}-{}", now_ms(), std::process::id()));
     let mut file = tokio::fs::File::create(&partial).await?;
     let mut hasher = Sha256::new();
@@ -125,6 +126,30 @@ where
     let meta = serde_json::to_vec_pretty(&upload).map_err(|error| ApiError::internal(error.to_string()))?;
     tokio::fs::write(dir.join(META_FILE), meta).await?;
     Ok(upload)
+}
+
+/// How long an upload is kept. An update is installed from its upload within minutes (Atlas's
+/// gateway install has the board's writer read it in place, and leaves it), so an older one is
+/// only taking up /data.
+pub const UPLOAD_KEEP: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Removes uploads, and partial uploads, older than [`UPLOAD_KEEP`]. Runs at start and before
+/// each new upload.
+pub async fn prune_uploads(config: &ApiConfig) {
+    let Ok(mut entries) = tokio::fs::read_dir(&config.upload_dir).await else { return };
+    let now = std::time::SystemTime::now();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let stale = entry.metadata().await.ok().and_then(|meta| meta.modified().ok()).and_then(|modified| now.duration_since(modified).ok()).is_some_and(|age| age > UPLOAD_KEEP);
+        if !stale {
+            continue;
+        }
+        let path = entry.path();
+        let removed = if path.is_dir() { tokio::fs::remove_dir_all(&path).await } else { tokio::fs::remove_file(&path).await };
+        match removed {
+            Ok(()) => tracing::info!(path = %path.display(), "removed an old upload"),
+            Err(error) => tracing::warn!(path = %path.display(), %error, "could not remove an old upload"),
+        }
+    }
 }
 
 pub async fn read_uploads(config: &ApiConfig) -> Vec<Upload> {
@@ -634,6 +659,19 @@ mod tests {
 
     fn chunks(parts: &[&'static [u8]]) -> impl Stream<Item = Result<Bytes, Infallible>> + Unpin {
         futures_util::stream::iter(parts.iter().map(|p| Ok(Bytes::from_static(p))).collect::<Vec<_>>())
+    }
+
+    #[tokio::test]
+    async fn uploads_older_than_the_keep_time_are_pruned() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = config(dir.path());
+        let old = store_upload(&config, "old.slot.tar", None, None, chunks(&[b"old"])).await.expect("old upload");
+        let aged = std::time::SystemTime::now() - UPLOAD_KEEP - std::time::Duration::from_secs(60);
+        std::fs::File::open(config.upload_dir.join(&old.id)).and_then(|dir| dir.set_modified(aged)).expect("age the upload");
+        let new = store_upload(&config, "new.slot.tar", None, None, chunks(&[b"new"])).await.expect("new upload");
+        assert_eq!(read_uploads(&config).await, vec![new.clone()]);
+        prune_uploads(&config).await;
+        assert_eq!(read_uploads(&config).await, vec![new]);
     }
 
     #[tokio::test]

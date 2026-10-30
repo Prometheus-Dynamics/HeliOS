@@ -114,6 +114,11 @@ async fn run() -> anyhow::Result<()> {
     let _rings = helios_api::recording_rings::spawn_supervisor(state.clone());
     // Recording over NetworkTables (`/helios/record`, status) and auto-record (robot enabled).
     let _recording_nt = helios_api::recording_nt::spawn(state.clone());
+    // Uploads an update was installed from (Atlas leaves them in /data/updates) are removed.
+    let _old_uploads = tokio::spawn({
+        let config = state.config.clone();
+        async move { routes::update::prune_uploads(&config).await }
+    });
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("failed to bind {bind}"))?;
     info!(%bind, "helios-api listening");
     info!(mode = state.auth.mode().as_str(), "device security");

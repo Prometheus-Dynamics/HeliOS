@@ -14,6 +14,7 @@ pub mod playback;
 pub mod recordings;
 pub mod resources;
 pub mod streams;
+pub mod support;
 pub mod system;
 pub mod update;
 
@@ -59,6 +60,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/peers/{node}/{*rest}", any(crate::peers::proxy))
         .route("/v1/metrics", get(system::metrics))
         .route("/v1/system/health", get(system::health_report))
+        .route("/v1/support/bundle", get(support::bundle))
         .route("/v1/system/services", get(system::services))
         .route("/v1/system/services/{unit}/restart", post(system::restart_service))
         .route("/v1/system/reboot", post(system::reboot))

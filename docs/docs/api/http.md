@@ -84,6 +84,7 @@ as unavailable and not retry.
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
 | `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature (the hottest sensor), throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
 | `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |
+| `GET` | `/v1/support/bundle` | API, journald, board | A support bundle (`application/gzip`, a `.tar.gz` with secrets redacted): HeliOS's identity, health, cameras, pipelines and its units' journal for the last 3 boots; os-release, kernel log, network and disks (and the opkg packages on a SystemCore); and the board's own bundle (`board-support.tar.gz`) on a board. A peer's is at `/v1/peers/{node}/support/bundle`. `README.txt` in it lists the redaction rule. |
 | `GET` | `/v1/system/services` | systemd | `[{unit, active_state, sub_state, main_pid, memory_bytes, restarts}]` for the HeliOS units |
 | `POST` | `/v1/system/services/{unit}/restart` | systemd | Only HeliOS units (`helios-engine`, `orion-node`, ...). Restarting `helios-api` answers 202 before it happens |
 | `POST` | `/v1/system/reboot` | systemd | 202, then reboots |
@@ -620,7 +621,7 @@ active, the API answering). Otherwise the board restarts into the previous slot 
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/v1/update/uploads` | Raw image body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/var/lib/helios/updates` (on `/data`) and hashed; returns 201 with an upload |
+| `POST` | `/v1/update/uploads` | Raw image body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/data/updates` on a board (the board's writer installs a `file://` image from there in place) or HeliOS's state directory on a guest, and hashed. Uploads older than an hour are removed; returns 201 with an upload |
 | `GET` | `/v1/update/uploads` | Uploads, newest first |
 | `DELETE` | `/v1/update/uploads/{id}` | Delete an upload |
 | `POST` | `/v1/update/apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Starts staging and answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot` (default `true`) applies the update once staged; `false` stops after staging |
@@ -804,7 +805,7 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_ORION_IPC_SOCKET`, `HELIOS_ORION_IPC_STREAM_SOCKET` | `/run/orion/control.sock`, `/run/orion/control-stream.sock` |
 | `HELIOS_API_STATE_DIR` | `/var/lib/helios/api` |
 | `HELIOS_API_STARTUP_FILE` | `/etc/helios/startup.toml` (the first-boot [default pipeline](#first-boot-default-pipeline)) |
-| `HELIOS_API_UPLOAD_DIR` | `/var/lib/helios/updates` (on `/data`) |
+| `HELIOS_API_UPLOAD_DIR` | `/data/updates` on a board; `<state>/updates` on a guest |
 | `HELIOS_BOARD_UPDATE_TOOL` | `/usr/lib/board/update` (the board update writer) |
 | `HELIOS_API_UI_DIR` | `/usr/share/helios/ui`; `off` serves the API only |
 | `HELIOS_BOARD_IDENTITY_PATH` | `/run/board/identity.json` |

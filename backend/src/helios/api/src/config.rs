@@ -281,7 +281,7 @@ mod tests {
     fn the_defaults_are_the_image_paths() {
         let config = ApiConfig::from_vars(std::iter::empty::<(String, String)>()).expect("config");
         assert_eq!(config.state_dir, PathBuf::from("/var/lib/helios/api"));
-        assert_eq!(config.upload_dir, PathBuf::from("/var/lib/helios/updates"));
+        assert_eq!(config.upload_dir, PathBuf::from("/data/updates"));
         assert_eq!(config.ui_dir, Some(PathBuf::from("/usr/share/helios/ui")));
         assert_eq!(config.startup_file, PathBuf::from("/etc/helios/startup.toml"));
         assert_eq!(config.auth_file, PathBuf::from("/var/lib/helios/auth/auth.json"));
