@@ -111,11 +111,11 @@ impl CameraServices {
 /// The capture settings of every camera service. The back end's first job runs on the top rows
 /// while the rest are read out (Styx's rp1-cfe line event): every client gets complete frames
 /// ~1 ms sooner, and a client asking for sliced frames can start on the first slice. The back end
-/// buffers beyond the first few are allocated as clients hold frames, not up front (Styx 5bb3a0c,
-/// CM5: 37.6 MiB against 70.6 MiB per camera). Sensor raw frames are on permanently: a raw
+/// buffers beyond the first few are allocated as clients hold frames, not up front (Styx's
+/// default since 373d703; CM5: 37.6 MiB against 70.6 MiB per camera). Sensor raw frames are on permanently: a raw
 /// consumer (a recording) then joins the running capture, and joining or leaving never restarts it.
 fn camera_capture_config(config: &PeripheralConfig) -> styx::capture_api::StyxConfig {
-    styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_lazy_output_buffers(true).native_sensor_raw(config.camera_sensor_raw)
+    styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_sensor_raw(config.camera_sensor_raw)
 }
 
 fn find_capture_device<'a>(devices: &'a [ProbedDevice], resource: &ResourceDescriptor) -> Option<&'a ProbedDevice> {
