@@ -112,7 +112,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
 rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 
-# Orion dev a380034 (safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; the same commit as backend/Cargo.toml). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
+# Orion dev 9ad7991 (the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; the same commit as backend/Cargo.toml). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
 # Earlier, v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
 # 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
@@ -139,7 +139,7 @@ rev = "60772f0dc29f3770363ae375d9ad746628f90b88"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "a380034c50c13aaefcff065c777d3eb8858dcd86"
+rev = "9ad79911d9919e9cb1d8a9d9d145a45541850e58"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]
