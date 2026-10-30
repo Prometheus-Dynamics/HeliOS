@@ -17,9 +17,8 @@
 //! resources those providers published. Nothing publishes under the old id again, so
 //! [`spawn_retire`] removes the desired records of the old id, once the new id's own provider is
 //! live, and on every start until none are left (the marker does not cover them: a board migrated
-//! before this ran still has them). Orion has no client request that retracts observed records, and
-//! it prunes them only when it starts, so the old id's observed resources stay in Orion until then;
-//! the API hides them meanwhile (`retired_resources` in `orion.rs`).
+//! before this ran still has them). Removing a provider retracts the observed resources it published
+//! (Orion's `RemoveProvider`), so the old id's cameras leave the state with their provider.
 
 use std::{
     collections::BTreeMap,
@@ -321,7 +320,8 @@ pub fn legacy_removals(desired: &DesiredClusterState, from: &str, to: &str, peer
     }
     let providers: Vec<ProviderId> = desired.providers.values().filter(|provider| provider.node_id.as_str() == from).map(|provider| provider.provider_id.clone()).collect();
     let executors: Vec<ExecutorId> = desired.executors.values().filter(|executor| executor.node_id.as_str() == from).map(|executor| executor.executor_id.clone()).collect();
-    let mut removals: Vec<DesiredStateMutation> = desired.resources.values().filter(|resource| providers.contains(&resource.provider_id)).map(|resource| DesiredStateMutation::RemoveResource(resource.resource_id.clone())).collect();
+    let mut removals: Vec<DesiredStateMutation> =
+        desired.resources.values().filter(|resource| providers.contains(&resource.provider_id)).map(|resource| DesiredStateMutation::RemoveResource(resource.resource_id.clone())).collect();
     removals.extend(providers.into_iter().map(DesiredStateMutation::RemoveProvider));
     removals.extend(executors.into_iter().map(DesiredStateMutation::RemoveExecutor));
     removals

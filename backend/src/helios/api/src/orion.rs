@@ -2,16 +2,15 @@
 //! peripherals service and the updater publish is read from here, and pipeline/update/peripheral
 //! requests are written here as desired state.
 
-use std::{collections::BTreeMap, collections::BTreeSet, future::Future, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use orion::{
     Revision,
     client::{ClientError, ControlPlaneEventStream, LocalControlPlaneClient},
     control_plane::{
-        ActionRequest, ActionResult, ArtifactRecord, DesiredClusterState, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord,
-        ObservedClusterState, ResourceRecord, StateSnapshot, StatusEntry, StatusQuery, WorkloadObservedState, WorkloadRecord,
+        ActionRequest, ActionResult, ArtifactRecord, DesiredStateMutation, LeaseRecord, MutationBatch, NodeObservabilitySnapshot, NodeRecord, ResourceRecord, StateSnapshot, StatusEntry, StatusQuery,
+        WorkloadObservedState, WorkloadRecord,
     },
-    core::ResourceId,
 };
 use orion_client::ActionCaller;
 use tokio::sync::Mutex;
@@ -170,7 +169,6 @@ pub struct StateView {
 impl StateView {
     pub fn from_snapshot(snapshot: StateSnapshot) -> Self {
         let state = snapshot.state;
-        let retired = retired_resources(&state.desired, &state.observed);
         let mut view = Self { desired_revision: state.desired.revision.get(), ..Self::default() };
         for (id, node) in state.desired.nodes {
             view.nodes.insert(id.to_string(), node);
@@ -196,17 +194,13 @@ impl StateView {
             view.resources.insert(id.to_string(), resource);
         }
         for (id, resource) in state.observed.resources {
-            if !retired.contains(&id) {
-                view.resources.insert(id.to_string(), resource);
-            }
+            view.resources.insert(id.to_string(), resource);
         }
         for (id, lease) in state.desired.leases {
             view.leases.insert(id.to_string(), lease);
         }
         for (id, lease) in state.observed.leases {
-            if !retired.contains(&id) {
-                view.leases.insert(id.to_string(), lease);
-            }
+            view.leases.insert(id.to_string(), lease);
         }
         view
     }
@@ -214,24 +208,6 @@ impl StateView {
     pub fn workload_observed(&self, id: &str) -> Option<WorkloadObservedState> {
         self.workloads.get(id).map(|workload| workload.observed_state)
     }
-}
-
-/// The observed resources (and leases) Orion no longer keeps: those no desired record backs, with a
-/// provider or executor that is gone from the desired state. Orion's own prune rule
-/// (`prune_observed_for_desired`) drops them at its next start, but a removed provider never reports
-/// them gone, so they stay observed until then; the old node id's cameras after the node-id migration
-/// are one case. Only the view hides them: no record that a live provider or executor backs is touched.
-pub fn retired_resources(desired: &DesiredClusterState, observed: &ObservedClusterState) -> BTreeSet<ResourceId> {
-    observed
-        .resources
-        .values()
-        .filter(|resource| {
-            !desired.resources.contains_key(&resource.resource_id)
-                && !desired.providers.contains_key(&resource.provider_id)
-                && !resource.realized_by_executor_id.as_ref().is_some_and(|executor| desired.executors.contains_key(executor))
-        })
-        .map(|resource| resource.resource_id.clone())
-        .collect()
 }
 
 /// `key=value` labels (Orion's label form) as a map.
@@ -284,55 +260,6 @@ mod tests {
         assert_eq!(enum_name(HealthState::Healthy), "healthy");
         assert_eq!(enum_name(WorkloadObservedState::Running), "running");
         assert_eq!(enum_name(orion::control_plane::ResourceOwnershipMode::SharedRead), "shared_read");
-    }
-
-    fn snapshot(desired: DesiredClusterState, observed: ObservedClusterState) -> StateSnapshot {
-        use orion::control_plane::ClusterStateEnvelope;
-        StateSnapshot { state: ClusterStateEnvelope { desired, observed, applied: Default::default() } }
-    }
-
-    #[test]
-    fn observed_resources_of_a_gone_provider_are_hidden() {
-        use orion::{
-            control_plane::ProviderRecord,
-            core::{NodeId, ProviderId},
-        };
-        let mut desired = DesiredClusterState::default();
-        desired.put_provider(ProviderRecord::builder(ProviderId::new("provider.peripherals.systemcore-3c99"), NodeId::new("systemcore-3c99")).build());
-        desired.put_resource(ResourceRecord::builder(ResourceId::new("capture_device_systemcore-3c99_camera-3c99"), "camera.device", ProviderId::new("provider.peripherals.systemcore-3c99")).build());
-        let mut observed = ObservedClusterState::default();
-        for (resource, provider) in [
-            ("capture_device_systemcore-3c99_camera-3c99", "provider.peripherals.systemcore-3c99"),
-            // The old id's providers were removed from the desired state; their observed records stayed.
-            ("capture_device_node-local_video0", "provider.peripherals.node-local"),
-            ("lemnos_raw_node-local_io", "provider.peripherals.node-local"),
-        ] {
-            observed.put_resource(ResourceRecord::builder(ResourceId::new(resource), "camera.device", ProviderId::new(provider)).build());
-        }
-        let retired = retired_resources(&desired, &observed);
-        assert_eq!(retired.iter().map(ResourceId::as_str).collect::<Vec<_>>(), ["capture_device_node-local_video0", "lemnos_raw_node-local_io"]);
-
-        let view = StateView::from_snapshot(snapshot(desired, observed));
-        assert!(view.resources.contains_key("capture_device_systemcore-3c99_camera-3c99"), "a live provider's record stays");
-        assert!(!view.resources.contains_key("capture_device_node-local_video0"));
-        assert!(!view.resources.contains_key("lemnos_raw_node-local_io"));
-    }
-
-    #[test]
-    fn a_record_backed_by_a_desired_resource_or_executor_stays() {
-        use orion::{
-            control_plane::ExecutorRecord,
-            core::{ExecutorId, NodeId, ProviderId},
-        };
-        let mut desired = DesiredClusterState::default();
-        desired.put_executor(ExecutorRecord::builder(ExecutorId::new("executor.engine.node-local"), NodeId::new("node-local")).build());
-        desired.put_resource(ResourceRecord::builder(ResourceId::new("camera.front"), "camera.device", ProviderId::new("provider.gone")).build());
-        let mut observed = ObservedClusterState::default();
-        // Realized by a desired executor: its provider need not be in the desired state.
-        observed.put_resource(ResourceRecord::builder(ResourceId::new("engine.runtime.node-local"), "execution.runtime", ProviderId::new("provider.engine.node-local")).realized_by_executor(ExecutorId::new("executor.engine.node-local")).build());
-        // Backed by a desired resource: kept whatever its provider.
-        observed.put_resource(ResourceRecord::builder(ResourceId::new("camera.front"), "camera.device", ProviderId::new("provider.gone")).build());
-        assert!(retired_resources(&desired, &observed).is_empty());
     }
 
     #[test]
