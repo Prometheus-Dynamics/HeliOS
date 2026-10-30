@@ -61,12 +61,12 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
 branch = "dev"
 
-# Orion at the commit raze.toml pins (dev 9ad7991: the safe-mode unit is never enabled; a380034: safe mode, robot-link peer trust in open mode).
+# Orion at the commit raze.toml pins (dev 6a70758: one malloc arena with 64 KiB trim thresholds in its unit, lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; a380034: safe mode, robot-link peer trust in open mode).
 [[sources]]
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "9ad79911d9919e9cb1d8a9d9d145a45541850e58"
+rev = "6a70758012d1bf65d97befca6dc9526701ae5070"
 
 # Lemnos dev b87f76c (the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; it includes the SystemCore board and host-owned devices: lemnosd, and its
 # board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
