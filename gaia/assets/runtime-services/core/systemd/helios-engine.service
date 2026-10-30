@@ -6,6 +6,8 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
+# glibc gives each thread its own heap arena; capped, a long run stays flat (Styx soak: 125 MB with the default, 30 MB capped).
+Environment=MALLOC_ARENA_MAX=2
 Type=simple
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
