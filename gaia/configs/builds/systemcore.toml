@@ -61,20 +61,20 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
 branch = "dev"
 
-# Orion at the commit raze.toml pins.
+# Orion at the commit raze.toml pins (dev a380034: safe mode, robot-link peer trust in open mode).
 [[sources]]
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "db6c6d490d87760f0f9a4c6836acea8ead963553"
+rev = "a380034c50c13aaefcff065c777d3eb8858dcd86"
 
-# Lemnos at the commit that adds the SystemCore board and host-owned devices (lemnosd, and its
+# Lemnos dev 66a354d (the public surface trimmed; it includes the SystemCore board and host-owned devices: lemnosd, and its
 # board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "77bc85ffcf0bfed003176f008506bccf1713c5aa"
+rev = "66a354d709a836f26fff1b33a8291be910eb2eab"
 
 [[artifacts]]
 id = "helios-api"

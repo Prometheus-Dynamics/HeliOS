@@ -132,10 +132,11 @@ tempfile = "3.27.0"
 # or Styx would mean two FrameLease and Payload types. The exact commits are
 # pinned by Cargo.lock (`cargo update -p <crate>` moves them):
 #   Daedalus 3.0 dev (21d401e, plugin ABI 11: boundary labels from `TypeExpr::canonical_label()`), Styx dev (b6444d3: the 3.0 API, `#[non_exhaustive]` enums; simulated cameras: feature `sim`, glTF scenes `scene=gltf`, `clock=lockstep`), Eidos dev (c357fb91,
-#   feature tracks `eidos:features.track`; tracking overrides and tracked stage nodes), Orion v4 main (4fadba9:
-#   request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`; also the Gaia
-#   `orion` source), Lemnos dev (b2634fc: fault reasons and the lemnosd -> Orion bridge; also the
-#   Gaia `lemnos` source).
+#   feature tracks `eidos:features.track`; tracking overrides and tracked stage nodes), Orion dev (a380034:
+#   safe mode and its metric, robot-link peer trust in open mode, status/workload/provider and action
+#   watches that resume after node restarts, `ClientError::is_transient`, observed records of a removed
+#   provider retracted by the owner; also the Gaia `orion` source), Lemnos dev (66a354d: the public
+#   surface trimmed; lemnosd's client and its Orion bridge; also the Gaia `lemnos` source).
 # The engine and the plugin libraries must come from the same Daedalus commit: the image builds
 # them in one cargo invocation (Gaia build_group "helios-backend").
 # Updating another library tends to move Daedalus to its dev head: re-pin it with
@@ -151,12 +152,12 @@ daedalus-planner = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git"
 # hardware.
 lemnos-ipc = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev" }
 lemnosd = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
-orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "db6c6d490d87760f0f9a4c6836acea8ead963553", default-features = false }
-# The client SDK, for `ActionCaller` (request/response actions over one stream; the `orion` facade
-# does not re-export it). The same Orion source and commit as `orion`.
-orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "db6c6d490d87760f0f9a4c6836acea8ead963553", default-features = false, features = ["ipc"] }
+orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "a380034c50c13aaefcff065c777d3eb8858dcd86", default-features = false }
+# The client SDK, for `ActionCaller` (request/response actions over one stream, and the client watches
+# that reconnect; the `orion` facade does not re-export it). The same Orion source and commit as `orion`.
+orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "a380034c50c13aaefcff065c777d3eb8858dcd86", default-features = false, features = ["ipc"] }
 # NetworkTables 4 (robot code): pipeline outputs from helios-engine. Same Orion commit.
-orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "db6c6d490d87760f0f9a4c6836acea8ead963553" }
+orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "a380034c50c13aaefcff065c777d3eb8858dcd86" }
 styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false, features = ["std"] }
