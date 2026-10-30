@@ -5,7 +5,7 @@ use std::time::Instant;
 use daedalus::{
     data::model::Value,
     engine::{DEFAULT_FRAME_OVERHEAD_WINDOW, Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
-    planner::{GraphDocument, HostInputPolicy},
+    planner::{GraphDocument, HostInputPolicy, RefreshPolicy},
     runtime::{BackpressureStrategy, HostBridgeManager, RuntimeEdgeExplanation, handler_registry::HandlerRegistry, plugins::PluginRegistry},
 };
 
@@ -62,9 +62,14 @@ pub(crate) fn compile_workload_graph(
     let mut document = graph_document_for(workload)?;
     validate_document_requires(registry, &document)?;
     // A graph stored before a plugin added or dropped a node's ports would fail to plan as stale:
-    // its port lists follow the installed plugins on every compile.
-    for node in registry.refresh_graph_ports(&mut document.graph).nodes {
+    // its port lists follow the installed plugins on every compile. A setting on a port the plugin
+    // no longer has (Eidos folds tuning ports into fixed values) is dropped, and logged with its
+    // value; a wire to such a port still fails to plan.
+    for node in registry.refresh_graph_ports_with(&mut document.graph, RefreshPolicy { drop_stale_consts: true }).nodes {
         tracing::info!(workload = %workload.workload_id, node = %node.id, added_inputs = ?node.added_inputs, added_outputs = ?node.added_outputs, removed_inputs = ?node.removed_inputs, removed_outputs = ?node.removed_outputs, kept_inputs = ?node.kept_inputs, kept_outputs = ?node.kept_outputs, "stored graph ports refreshed from the plugins");
+        if !node.dropped_consts.is_empty() {
+            tracing::warn!(workload = %workload.workload_id, node = %node.id, dropped = ?node.dropped_consts, "stored settings dropped: the plugin no longer has these ports");
+        }
     }
     let host_alias = host_alias(&document);
     if !frame_inputs.is_empty() {
