@@ -93,7 +93,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "5d4749e37d7393750e4af1bba747473d04a558aa"
 
-# Lemnos (dev 66a354d: the public surface trimmed, so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
+# Lemnos (dev b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
 # replies return the granted period, boot-clock timestamps and the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
 # The Raze layer imports Lemnos's lemnosd layer from a
@@ -110,7 +110,7 @@ rev = "5d4749e37d7393750e4af1bba747473d04a558aa"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "66a354d709a836f26fff1b33a8291be910eb2eab"
+rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 
 # Orion dev a380034 (safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; the same commit as backend/Cargo.toml). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).

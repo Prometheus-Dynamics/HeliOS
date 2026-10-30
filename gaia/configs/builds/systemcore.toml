@@ -68,13 +68,13 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
 rev = "a380034c50c13aaefcff065c777d3eb8858dcd86"
 
-# Lemnos dev 66a354d (the public surface trimmed; it includes the SystemCore board and host-owned devices: lemnosd, and its
+# Lemnos dev b87f76c (the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; it includes the SystemCore board and host-owned devices: lemnosd, and its
 # board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "66a354d709a836f26fff1b33a8291be910eb2eab"
+rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 
 [[artifacts]]
 id = "helios-api"
