@@ -1,18 +1,18 @@
 # HeliOS TODO
 
-## Next release (2026.2.0)
+## Next release (2027.0.0)
 
 The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
-added on 2026-10-30 (the last addition). Anything not here waits for a later release. Every item:
-what, why, done when, blocked by.
+added on 2026-10-30 (the last addition). Release targets agreed with the user on 2026-10-30, tagged
+when this feature push is done: HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 3.0.0, Lemnos
+1.0.0, Gaia 3.0.0, Orion 1.0.0. Every backend gets full support wherever the hardware allows
+(scalar, x86 SIMD, aarch64 and armv7 NEON, RVV, GPU); no partial implementations. Anything not
+here waits for a later release. Every item: what, why, done when, blocked by.
 
 ### 1. Freeze items still open
 
 - [ ] **Role UI.** Why: the frozen PIT/ROBOT role split. Done when: role switching works with real
       clicks on a Raze through the SystemCore, and the UI is reviewed visually. Blocked by: nothing.
-- [ ] **Field test day.** Why: the release has to hold up on a robot. Done when: a full session on a
-      robot behind a SystemCore (tags, field pose, NT4, an update, a reboot) with no manual fixes,
-      and its notes are in docs. Blocked by: robot access (user).
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.
@@ -58,15 +58,27 @@ what, why, done when, blocked by.
       remaining targets. Blocked by: nothing.
 - [ ] **K230D device support.** Why: the cheap single-camera tier. Done when: an image for the
       K230D (two slots plus data on SPI-NAND), vision pinned to CPU1 (the only RVV core),
-      services on CPU0, and HeliOS running tags + pose on the OV9782 inside 128 MB. Blocked by: a
-      board, the Gaia BSP (option A), Styx's K230 path, Eidos's RVV kernels.
-- [ ] **Rockchip and Flame device support** (RK3588S, RK3576, RK3566 or RK3562, RV1106G2; Flame is a 32-bit Cortex-A7, so it needs an armv7 build). Why: the
-      module tiers. Done when: each module boots a HeliOS image and runs a camera pipeline, with
-      per-camera CPU and RAM figures reported to the PCB session from the CI dev board. Blocked by:
-      boards, the Gaia BSPs, Styx's rkisp/RGA/MPP, the user's RK3562 decision.
+      services on CPU0, and HeliOS running tags + pose on the OV9782 inside 128 MB. The picture
+      comes from the hardware ISP running Styx's own 3A (decided 2026-10-30), with the RVV software
+      ISP as the fallback. Blocked by: a board, the Gaia BSP (option A), Styx's K230 path, Eidos's
+      RVV kernels.
+- [ ] **Rockchip and Flame device support** (RK3588S, RK3576, RK3566 and RK3562, both
+      low-cost modules being built; Flame RV1106G2 is a 32-bit Cortex-A7, so it gets a full armv7
+      build including Eidos's armv7 NEON). Why: the module tiers. Done when: each module boots a
+      HeliOS image and runs a camera pipeline, with per-camera CPU and RAM figures reported to the
+      PCB session from the CI dev board. Blocked by: boards, the Gaia BSPs, Styx's
+      rkisp/RGA/MPP.
 - [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
       without SSH. Done when: Atlas installs its agent on the SystemCore and flashes the second
       Raze (e5226d57) through it. Blocked by: Atlas.
+- [ ] **Typed camera menus in the UI.** Why: Styx is finishing typed menu entries (user: keep them
+      and use them properly). Done when: camera settings show menu controls as typed choices
+      (names, not raw values) end to end, from Styx through helios-api to the UI, checked with real
+      clicks on a Raze. Blocked by: Styx's typed-menu API.
+- [ ] **CM5 tag speed model.** Why: predict per-camera tag speed on weaker chips (A55, A53, A7,
+      C908). Done when: Eidos's sweep on the Raze (scalar vs NEON, CPU clock pinned, tracked vs
+      full, one thread) gives a ms-per-frame model, recorded in docs and sent to the PCB session.
+      Blocked by: a Raze slot.
 - [ ] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done when: the two
       read-after-apply tests pass 200 runs under load. Blocked by: nothing.
 
@@ -74,15 +86,25 @@ what, why, done when, blocked by.
 
 - [ ] Every dependency pinned to its release tag, not a `dev` revision: Daedalus, Styx, Eidos,
       Orion, Lemnos, and the Gaia sources in `gaia/configs/builds/*.toml`.
-- [ ] Version 2026.2.0 in os-release, the slot version and the UI; CHANGELOG.md for the release.
+- [ ] Version 2027.0.0 in os-release, the slot version and the UI; CHANGELOG.md for the release.
 - [ ] A release image for every supported board from one commit, with sizes reported against each
-      board's slot budget; Atlas's signing key in place (user decision).
+      board's slot budget. Small targets hold exactly two slots plus data, and smaller is better
+      (it allows cheaper flash).
 - [ ] Gates: clippy, tests, UI checks and an image build, green on the release commit.
 
 ### Not this release
 
 - NPU and AI models (Coral, RKNN, the K230 KPU): HeliOS uses the NPU once Coral and AI-model
   support return.
+- Field test day on a robot behind a SystemCore: robot access is unlikely before the release.
+
+### Pinned for later (user, 2026-10-30)
+
+- Atlas's release signing key.
+- Image publishing: GHCR registry and owner, the CI runner token and fork-PR approval, the
+  minisign/cosign install.
+- On hold: OV9782 ColorChecker tuning (waiting on a chart); Styx's bench tests (mains-lamp
+  anti-flicker, C270 YUYV fallback).
 
 ## Backlog
 
