@@ -126,14 +126,14 @@ rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 # kernel-modules/rp1-cfe: the receiver's mid-frame line event for sliced delivery;
 # kernel-modules/pispbe: back end job setup in ~7 us). HeliOS always runs Styx, so all three
 # ship, installed to /lib/modules/<ver>/updates over the stock drivers. The same Styx commit as
-# backend/Cargo.lock's styx crate. History: 373d703 (lazy back-end buffers by default, duplicate aliases removed) and fbe003e (Rockchip ISP30, the shared MMAP queue) changed only the rp1-cfe README; ab05a57 (simulated cameras: clock=lockstep) and
+# backend/Cargo.lock's styx crate. History: 45cb3a3 (typed camera menu entries) and e5d704d (M2M sessions, dma-heap tail slack) and 2fc1119 (RVV pyramid, RISC-V libjpeg-turbo) changed no kernel module; 373d703 (lazy back-end buffers by default, duplicate aliases removed) and fbe003e (Rockchip ISP30, the shared MMAP queue) changed only the rp1-cfe README; ab05a57 (simulated cameras: clock=lockstep) and
 # a22bebd (simulated scenes: scene=gltf, a glTF scene the application builds; 53e873d had
 # scene=tags) changed no kernel module.
 [[sources]]
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "373d70309bb238ce1b1eb34135cf213382791514"
+rev = "45cb3a31d2950c70d0182017f121fbaf1b3f8a89"
 
 [[sources]]
 id = "orion"

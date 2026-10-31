@@ -102,6 +102,14 @@ export interface CropRect {
 /** A value written to a camera control: a number, a boolean, a rectangle (a region), or `null` to forget it. */
 export type ControlWrite = number | string | boolean | null | CropRect;
 
+/** One entry of a menu control: the value that selects it and its display text (a name, or the
+ * number of an integer menu). */
+export interface MenuChoice {
+  value: number;
+  label: string;
+  kind: "name" | "int";
+}
+
 /** A camera control the device lists (live mode), for generic editors. */
 export interface CameraControlInfo {
   id: number;
@@ -113,8 +121,9 @@ export interface CameraControlInfo {
   effectiveMin?: number;
   effectiveMax?: number;
   step?: number;
-  /** The labels of the values, by index (the value is the index). */
-  menu?: string[];
+  /** A menu control's entries, in ascending value: only the values it takes (a V4L2 menu's
+   * gaps are not listed). */
+  menu?: MenuChoice[];
   default: number | boolean | null;
   /** The value now (null when it cannot be read or is not a scalar). */
   value: number | boolean | null;

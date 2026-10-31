@@ -6,10 +6,31 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use styx::{
     ipc::{AppliedControl, ControlDescriptor, ControlEvent, SERVICE_FRAME_RATE},
-    prelude::{Access, ControlKind, ControlValue},
+    prelude::{Access, ControlKind, ControlValue, MenuEntry, MenuLabel},
 };
 
 use super::values::standard_key;
+
+/// One entry of a menu control as the API lists it: the value that selects it, its display text
+/// and whether the entry is a `name` or a number (an `int` entry of an integer menu, such as a
+/// link frequency in Hz).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MenuEntryJson {
+    pub value: i64,
+    /// The display text: the name, or the number in decimal.
+    pub label: String,
+    /// `name` or `int`.
+    pub kind: &'static str,
+}
+
+impl MenuEntryJson {
+    fn new(entry: &MenuEntry) -> Self {
+        match &entry.label {
+            MenuLabel::Name(name) => Self { value: entry.value, label: name.clone(), kind: "name" },
+            MenuLabel::Int(number) => Self { value: entry.value, label: number.to_string(), kind: "int" },
+        }
+    }
+}
 
 /// A camera control as the API lists it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -26,9 +47,13 @@ pub struct CameraControl {
     pub max: serde_json::Value,
     pub default: serde_json::Value,
     pub step: Option<serde_json::Value>,
-    /// The labels of an enumerated control's values, by index (`menu[value]`); `null` when the
-    /// device lists none.
-    pub menu: Option<Vec<String>>,
+    /// An enumerated control's entries, in ascending value: only the values the control takes
+    /// (a sparse V4L2 menu lists just those). A set takes an entry's `label` or its `value`.
+    /// `null` when the device lists none.
+    pub menu: Option<Vec<MenuEntryJson>>,
+    /// The entry the value now selects (`null` when the control is no menu or the value is not
+    /// one of its entries).
+    pub current_entry: Option<MenuEntryJson>,
     /// The range the control takes now, when narrower than `min`..`max` because of how the camera
     /// runs (a native camera's exposure at the current frame duration, the gain AE may use); `null`
     /// when `min`..`max` applies.
@@ -57,7 +82,8 @@ impl CameraControl {
             max: value_json(&meta.max),
             default: value_json(&meta.default),
             step: meta.step.as_ref().map(value_json),
-            menu: meta.menu.clone(),
+            menu: meta.menu.as_ref().map(|entries| entries.iter().map(MenuEntryJson::new).collect()),
+            current_entry: descriptor.current.as_ref().and_then(|value| meta.menu_entry(value)).map(MenuEntryJson::new),
             effective_min: descriptor.effective_min.as_ref().map(value_json),
             effective_max: descriptor.effective_max.as_ref().map(value_json),
             current: descriptor.current.as_ref().map(value_json),

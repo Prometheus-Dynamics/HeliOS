@@ -48,7 +48,7 @@ use crate::{
 
 pub use json::{AppliedCameraControl, CameraControl, control_event_json, value_json};
 pub use values::standard_key;
-use values::{MODES_FIRST, STANDARD, backend_value, default_value, standard_value};
+use values::{MODES_FIRST, STANDARD, control_value, default_value, standard_value};
 
 /// How long one connection attempt to the camera service, or one control request, may take.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -218,7 +218,7 @@ impl CameraClient {
         // Kept under its own name: the value is in the backend's units, not the standard ones.
         // A player's transport (its replay controls) is a session, not a setting: not kept.
         let persist_as = (control.standard != Some(StandardControl::AfTrigger) && !crate::playback::transport::is_transport_control(&control.meta.name)).then(|| control.meta.name.clone());
-        Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(control.meta.id), value: backend_value(key, value)?, standard: control.standard, persist_as, forget: false })
+        Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(control.meta.id), value: control_value(key, &control.meta, value)?, standard: control.standard, persist_as, forget: false })
     }
 
     /// The camera's controls as the service lists them, listed once per `listed` cache.

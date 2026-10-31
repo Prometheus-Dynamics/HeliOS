@@ -312,6 +312,14 @@ export interface ControlRect {
 
 export type ControlValue = null | boolean | number | ControlRect | ControlRect[];
 
+/** One entry of a menu control: the value that selects it, its display text and whether it is a
+ * named entry or a number (an integer menu, such as a link frequency). */
+export interface MenuEntry {
+  value: number;
+  label: string;
+  kind: "name" | "int";
+}
+
 /** A camera control as the camera service lists it (`GET /v1/cameras/{id}/settings`). */
 export interface CameraControl {
   id: number;
@@ -322,8 +330,11 @@ export interface CameraControl {
   max: ControlValue;
   default: ControlValue;
   step: ControlValue | null;
-  /** The labels of an enumerated control's values, by index (the value is the index). */
-  menu: string[] | null;
+  /** An enumerated control's entries, in ascending value: only the values it takes. A set takes an
+   * entry's label or its value. */
+  menu: MenuEntry[] | null;
+  /** The entry the current value selects; null when it is no menu or selects none. */
+  current_entry?: MenuEntry | null;
   /** The range it takes now, when narrower than min..max (exposure at the frame duration, the gain AE may use). */
   effective_min?: ControlValue | null;
   effective_max?: ControlValue | null;

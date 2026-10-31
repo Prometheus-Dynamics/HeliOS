@@ -110,8 +110,8 @@ describe("enum choices", () => {
     expect(enumOptions({ name: "ae_deflicker_mode", menu: null })?.map((o) => o.label)).toEqual(["Off", "On", "On, avoids flicker"]);
   });
 
-  test("a device menu wins over the label map, by index", () => {
-    expect(enumOptions({ name: "ae_flicker_mode", menu: ["a", "b"] })).toEqual([
+  test("a device menu wins over the label map", () => {
+    expect(enumOptions({ name: "ae_flicker_mode", menu: [{ value: 0, label: "a", kind: "name" }, { value: 1, label: "b", kind: "name" }] })).toEqual([
       { value: 0, label: "a" },
       { value: 1, label: "b" },
     ]);
@@ -259,8 +259,8 @@ describe("read-only values", () => {
 });
 
 describe("device menus", () => {
-  test("a value shows the device's menu label, by index, before any fallback map", () => {
-    const menu = ["inactive", "searching", "converged"];
+  test("a value shows the device's menu label before any fallback map", () => {
+    const menu = [{ value: 0, label: "inactive", kind: "name" as const }, { value: 1, label: "searching", kind: "name" as const }, { value: 2, label: "converged", kind: "name" as const }];
     expect(valueText({ name: "ae_state", value: 2, menu })).toBe("converged");
     expect(valueText({ name: "ae_state", value: 0, menu })).toBe("inactive");
     // Without a menu the fallback words apply (searching and converged only).

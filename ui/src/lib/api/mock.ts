@@ -6,7 +6,7 @@
 import { CATALOG_BY_ID, defaults } from "./catalog";
 import { MOCK_SYSTEMCORE_PEER } from "./mock-devices";
 import { entityKey } from "./peers";
-import type { Camera, CameraControlInfo, ClusterNode, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
+import type { Camera, CameraControlInfo, ClusterNode, MenuChoice, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import type { CameraStatus, StatusStage } from "./types";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
 import type { MapPoints, MapPosedFrame, MapSnapshot, MapTag, MapTransform, MapView } from "../vision/map";
@@ -216,6 +216,8 @@ export const GUEST_NODES: ClusterNode[] = [
  * Backend/Cargo.lock pins): the same names, ranges, defaults and flags a device reports.
  */
 function ov9782Controls(values: { exposureUs: number; gain: number; fps: number; autoExposure: boolean }): CameraControlInfo[] {
+  // A 0..n menu of named entries, as a device lists them.
+  const names = (labels: string[]): MenuChoice[] => labels.map((label, value) => ({ value, label, kind: "name" }));
   const control = (c: Pick<CameraControlInfo, "id" | "name" | "kind"> & Partial<CameraControlInfo>): CameraControlInfo => ({
     default: null,
     value: null,
@@ -237,15 +239,15 @@ function ov9782Controls(values: { exposureUs: number; gain: number; fps: number;
     control({ id: 0xf4000008, name: "colour_temperature", kind: "uint", min: 1000, max: 20000, default: 0, step: 1, value: 5600, standard: "colour_temperature" }),
     control({ id: 0xf4000009, name: "red_gain", kind: "float", min: 0, max: 8, default: 0, step: 0.01, value: 1.6, standard: "red_gain" }),
     control({ id: 0xf400000a, name: "blue_gain", kind: "float", min: 0, max: 8, default: 0, step: 0.01, value: 1.9, standard: "blue_gain" }),
-    control({ id: 0xf4000011, name: "ae_flicker_mode", kind: "int", min: 0, max: 3, default: 3, step: 1, value: 3, menu: ["off", "50 Hz", "60 Hz", "auto"] }),
-    control({ id: 0xf4000013, name: "ae_deflicker_mode", kind: "int", min: 0, max: 2, default: 2, step: 1, value: 2, menu: ["off", "on", "with flicker avoidance"] }),
+    control({ id: 0xf4000011, name: "ae_flicker_mode", kind: "int", min: 0, max: 3, default: 3, step: 1, value: 3, menu: names(["off", "50 Hz", "60 Hz", "auto"]) }),
+    control({ id: 0xf4000013, name: "ae_deflicker_mode", kind: "int", min: 0, max: 2, default: 2, step: 1, value: 2, menu: names(["off", "on", "with flicker avoidance"]) }),
     control({ id: 0xf4000012, name: "ae_flicker_detected", kind: "int", min: 0, max: 1_000_000, default: 0, step: 1, value: 10_000, readOnly: true, writable: false }),
-    control({ id: 0xf4000010, name: "ae_state", kind: "int", min: 0, max: 2, default: 1, step: 1, value: 2, readOnly: true, writable: false, menu: ["inactive", "searching", "converged"] }),
+    control({ id: 0xf4000010, name: "ae_state", kind: "int", min: 0, max: 2, default: 1, step: 1, value: 2, readOnly: true, writable: false, menu: names(["inactive", "searching", "converged"]) }),
     // AE limits, modes and metering region: native controls, addressed by name (0 = no limit).
     control({ id: 0xf4000020, name: "ae_exposure_max_us", kind: "uint", min: 0, max: 476066, default: 0, step: 1, value: 0 }),
     control({ id: 0xf4000021, name: "ae_gain_max", kind: "float", min: 0, max: 15.94, default: 0, step: 0.0625, value: 0 }),
-    control({ id: 0xf4000022, name: "ae_exposure_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: ["normal", "short", "long"] }),
-    control({ id: 0xf4000023, name: "ae_metering_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: ["centre-weighted", "spot", "matrix"] }),
+    control({ id: 0xf4000022, name: "ae_exposure_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: names(["normal", "short", "long"]) }),
+    control({ id: 0xf4000023, name: "ae_metering_mode", kind: "int", min: 0, max: 2, default: 0, step: 1, value: 0, menu: names(["centre-weighted", "spot", "matrix"]) }),
     control({ id: 0xf4000024, name: "ae_metering_region", kind: "rectangle", rect: { x: 0, y: 0, width: 0, height: 0 } }),
     // Sensor orientation: Styx's service controls (SERVICE_HFLIP / VFLIP / ROTATION); setting one
     // restarts the capture once.

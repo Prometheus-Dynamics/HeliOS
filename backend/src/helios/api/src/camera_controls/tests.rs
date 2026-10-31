@@ -1,7 +1,8 @@
 use super::*;
+use super::values::backend_value;
 use styx::{
     ipc::{AppliedControl, ControlDescriptor},
-    prelude::{Access, ControlId, ControlMeta, ControlMetadata, ControlRect},
+    prelude::{Access, ControlId, ControlMeta, ControlMetadata, ControlRect, MenuEntry},
 };
 
 #[test]
@@ -60,7 +61,7 @@ fn camera_service(socket: &Path) -> styx::ipc::CameraServiceHandle {
     let mut temperature = control(0x200, "sensor_temperature", ControlKind::Int, ControlValue::Int(40), ControlValue::Int(40));
     temperature.access = Access::ReadOnly;
     let mut flicker = control(0xF400_0010, "ae_flicker_mode", ControlKind::Int, ControlValue::Int(0), ControlValue::Int(3));
-    flicker.menu = Some(["off", "50 Hz", "60 Hz", "auto"].map(String::from).to_vec());
+    flicker.menu = Some(MenuEntry::names(["off", "50 Hz", "60 Hz", "auto"]));
     let mode = Mode::with_interval(MediaFormat::new(FourCc::GREY, Resolution::new(320, 200).expect("resolution"), ColorSpace::Srgb), Interval::from_fps(30).expect("interval"));
     let device = styx::capture_api::make_virtual_device_with_controls(
         "cam",
@@ -118,9 +119,12 @@ async fn controls_are_listed_applied_and_announced() {
     let exposure = controls.iter().find(|control| control.standard == Some("exposure_us")).expect("exposure listed");
     assert!(exposure.writable && exposure.kind == "uint" && exposure.max == serde_json::json!(33_000) && !exposure.persisted, "{exposure:?}");
     assert!(controls.iter().any(|control| control.name == "sensor_temperature" && control.read_only));
-    // The device's menu labels come through, by index.
+    // The device's menu entries come through, typed: value and label.
     let flicker = controls.iter().find(|control| control.name == "ae_flicker_mode").expect("flicker listed");
-    assert_eq!(flicker.menu.as_deref(), Some(["off", "50 Hz", "60 Hz", "auto"].map(String::from).as_slice()));
+    let entries: Vec<(i64, &str)> = flicker.menu.iter().flatten().map(|entry| (entry.value, entry.label.as_str())).collect();
+    assert_eq!(entries, [(0, "off"), (1, "50 Hz"), (2, "60 Hz"), (3, "auto")]);
+    // The current entry is the one the current value selects (none while the value is unread).
+    assert_eq!(flicker.current_entry.as_ref().map(|entry| entry.value), flicker.current.as_ref().and_then(serde_json::Value::as_i64));
 
     // Modes first; out-of-range values are clamped; backend controls by name.
     let request = serde_json::json!({ "exposure_us": 100_000, "sharpness": 4, "ae": false });
@@ -301,10 +305,16 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
     assert!(json["effective_min"].is_null() && json["effective_max"].is_null());
 
     let mut flicker = meta(0xF400_0011, "ae_flicker_mode", ControlKind::Int, Access::ReadWrite, ControlValue::Int(0), ControlValue::Int(3), ControlValue::Int(3));
-    flicker.menu = Some(vec!["off".into(), "50 Hz".into(), "60 Hz".into(), "auto".into()]);
+    flicker.menu = Some(MenuEntry::names(["off", "50 Hz", "60 Hz", "auto"]));
     let descriptor = ControlDescriptor { meta: flicker, current: Some(ControlValue::Int(3)), standard: None, writable: true, effective_min: None, effective_max: None };
     let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
-    assert_eq!(json["menu"], serde_json::json!(["off", "50 Hz", "60 Hz", "auto"]));
+    assert_eq!(json["menu"], serde_json::json!([
+        { "value": 0, "label": "off", "kind": "name" },
+        { "value": 1, "label": "50 Hz", "kind": "name" },
+        { "value": 2, "label": "60 Hz", "kind": "name" },
+        { "value": 3, "label": "auto", "kind": "name" },
+    ]));
+    assert_eq!(json["current_entry"], serde_json::json!({ "value": 3, "label": "auto", "kind": "name" }));
     assert!(json["standard"].is_null());
 
     let applied = AppliedControl { id: ControlId(0xF400_0001), requested: ControlValue::Uint(50_000), value: ControlValue::Uint(8_100), clamped: true, frame: None, deferred: false, restarted: false };
@@ -312,4 +322,83 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
     assert_eq!(json["clamped"], true);
     assert_eq!(json["requested"], 50_000);
     assert_eq!(json["value"], 8_100);
+}
+
+/// A sparse menu lists only the entries it takes (a V4L2 exposure menu skipping index 2), and an
+/// integer menu lists its numbers as labels with kind `int`. The current entry is the one the
+/// value selects, and `null` when the value selects none.
+#[test]
+fn menu_entries_are_listed_typed_with_the_current_one() {
+    let mut exposure = meta(0xF400_0020, "exposure_auto", ControlKind::Int, Access::ReadWrite, ControlValue::Int(1), ControlValue::Int(3), ControlValue::Int(3));
+    exposure.menu = Some(vec![MenuEntry::named(1, "manual"), MenuEntry::named(3, "aperture priority")]);
+    let descriptor = ControlDescriptor { meta: exposure, current: Some(ControlValue::Int(3)), standard: None, writable: true, effective_min: None, effective_max: None };
+    let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
+    assert_eq!(json["menu"], serde_json::json!([{ "value": 1, "label": "manual", "kind": "name" }, { "value": 3, "label": "aperture priority", "kind": "name" }]));
+    assert_eq!(json["current_entry"]["label"], "aperture priority");
+    let unlisted = ControlDescriptor { current: Some(ControlValue::Int(2)), ..descriptor.clone() };
+    assert!(serde_json::to_value(CameraControl::new(&unlisted, &BTreeMap::new())).expect("json")["current_entry"].is_null());
+
+    let mut rates = meta(0xF400_0030, "link_frequency", ControlKind::IntMenu, Access::ReadWrite, ControlValue::Int(0), ControlValue::Int(1), ControlValue::Int(0));
+    rates.menu = Some(vec![MenuEntry::int(0, 456_000_000), MenuEntry::int(1, 228_000_000)]);
+    let descriptor = ControlDescriptor { meta: rates, current: Some(ControlValue::Int(1)), standard: None, writable: true, effective_min: None, effective_max: None };
+    let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
+    assert_eq!(json["menu"], serde_json::json!([{ "value": 0, "label": "456000000", "kind": "int" }, { "value": 1, "label": "228000000", "kind": "int" }]));
+    assert_eq!(json["current_entry"], serde_json::json!({ "value": 1, "label": "228000000", "kind": "int" }));
+}
+
+/// A menu takes an entry's label (ignoring ASCII case; a number for an integer menu) or its value,
+/// and refuses a label it does not have, listing the labels it takes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_menu_takes_its_label_or_its_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("cam.sock");
+    let hub = Arc::new(EventHub::new(16));
+    let _service = camera_service(&socket);
+    let cameras = controls_for(dir.path(), &hub);
+    let client = cameras.client("cam0", &socket).await.expect("camera client");
+
+    let value_of = |changes: &[ControlChange]| changes[0].value.clone();
+    let by_label = client.resolve(serde_json::json!({ "ae_flicker_mode": "50 Hz" }).as_object().expect("object")).await.expect("label");
+    assert_eq!(value_of(&by_label), ControlValue::Int(1));
+    let by_case = client.resolve(serde_json::json!({ "ae_flicker_mode": "AUTO" }).as_object().expect("object")).await.expect("label, any case");
+    assert_eq!(value_of(&by_case), ControlValue::Int(3));
+    let by_value = client.resolve(serde_json::json!({ "ae_flicker_mode": 2 }).as_object().expect("object")).await.expect("value");
+    assert_eq!(value_of(&by_value), ControlValue::Int(2));
+
+    let applied = client.apply(by_label).await.expect("apply by label");
+    assert_eq!(applied[0].value, serde_json::json!(1));
+    let controls = client.controls().await.expect("controls");
+    let flicker = controls.iter().find(|control| control.name == "ae_flicker_mode").expect("flicker");
+    assert_eq!(flicker.current_entry.as_ref().map(|entry| entry.label.as_str()), Some("50 Hz"));
+
+    let refused = client.resolve(serde_json::json!({ "ae_flicker_mode": "sideways" }).as_object().expect("object")).await.expect_err("no such label");
+    assert_eq!(refused.code, crate::error::ErrorCode::BadRequest);
+    assert!(refused.message.contains("off, 50 Hz, 60 Hz, auto"), "{}", refused.message);
+}
+
+/// Settings stored before menu entries were typed (a menu saved by its label, `"50 Hz"`) load
+/// through the same lookup when the camera service connects, and their value is applied.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stored_menu_label_from_before_typed_entries_loads() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("cam.sock");
+    let hub = Arc::new(EventHub::new(16));
+    let store = Arc::new(Store::new(dir.path().join("state")));
+    store.persist_camera_settings("cam0", [("ae_flicker_mode".to_string(), serde_json::json!("50 Hz"))]).await.expect("persist");
+    let _service = camera_service(&socket);
+    let cameras = CameraControls::new(store.clone(), hub.clone());
+    let client = cameras.client("cam0", &socket).await.expect("camera client");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(controls) = client.controls().await
+                && controls.iter().any(|control| control.name == "ae_flicker_mode" && control.current == Some(serde_json::json!(1)))
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the stored label was applied as its entry (50 Hz = 1)");
 }

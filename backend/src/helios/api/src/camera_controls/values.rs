@@ -90,6 +90,25 @@ pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlV
     Ok(ControlValue::Float(number(key, value)? as f32))
 }
 
+/// A backend control's value as a set takes it. A menu takes an entry's label (its name, or the
+/// number of an integer menu, ignoring ASCII case, see `ControlMeta::menu_entry_named`) or its
+/// value (the index, a raw number). A stored label from before entries were typed loads the same
+/// way; other controls take `backend_value`.
+pub fn control_value(key: &str, meta: &ControlMeta, value: &serde_json::Value) -> ApiResult<ControlValue> {
+    if meta.menu.is_some()
+        && let Some(label) = value.as_str()
+    {
+        let entry = meta.menu_entry_named(label).ok_or_else(|| ApiError::bad_request(format!("{key} is one of {}", menu_labels(meta))))?;
+        return Ok(meta.menu_value(entry));
+    }
+    backend_value(key, value)
+}
+
+/// A menu's labels, for the refusal of a label it does not have.
+fn menu_labels(meta: &ControlMeta) -> String {
+    meta.menu.iter().flatten().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+}
+
 /// A control's default as the control takes it. The camera reports a menu's default as an unsigned
 /// number, but a menu takes its index as an integer and refuses the other (a reset would fail on it).
 pub fn default_value(meta: &ControlMeta) -> ControlValue {

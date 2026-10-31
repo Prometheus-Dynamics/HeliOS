@@ -4,8 +4,8 @@
 //
 // Names come from Styx's native backend (`native_backend.rs`, the revision Backend/Cargo.lock
 // pins): `controls::*` ids, `AE_FLICKER_DETECTED` (the light's flicker period in µs). A control's
-// labelled values come from the device's `menu` when it lists one (the value is the index); the
-// label maps below are only the fallback for a device that lists no menu.
+// labelled values come from the device's `menu` entries when it lists them; the label maps below are
+// only the fallback for a device that lists no menu.
 
 import type { CameraControlInfo, CropRect } from "#lib/api/model.js";
 
@@ -203,10 +203,10 @@ export function disabledReason(control: Pick<CameraControlInfo, "writable" | "re
   return null;
 }
 
-/** Choices for a control with labelled values: its menu (indexed by value; a V4L2 menu's gaps are
- * empty names, values the device refuses), a known label map, or none. */
+/** Choices for a control with labelled values: its menu entries (only the values it takes), a
+ * known label map, or none. */
 export function enumOptions(control: Pick<CameraControlInfo, "name" | "menu">): { value: number; label: string }[] | null {
-  if (control.menu && control.menu.length > 0) return control.menu.flatMap((label, value) => (label ? [{ value, label }] : []));
+  if (control.menu && control.menu.length > 0) return control.menu.map(({ value, label }) => ({ value, label }));
   return ENUM_OPTIONS[control.name] ?? null;
 }
 
@@ -250,8 +250,8 @@ export function valueText(control: Pick<CameraControlInfo, "name" | "value" | "r
   if (value === null) return "not readable";
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (control.name === "ae_flicker_detected") return flickerLabel(value);
-  const labelled = control.menu?.[value];
-  if (labelled !== undefined) return labelled;
+  const labelled = control.menu?.find((entry) => entry.value === value);
+  if (labelled) return labelled.label;
   const state = stateLabel(control.name, value);
   if (state) return state;
   const unit = unitOf(control.name);
@@ -307,20 +307,17 @@ export function limitOn(value: number | boolean | null | undefined): boolean {
   return typeof value === "number" && value > 0;
 }
 
-/** The V4L2 exposure menu's manual value; aperture priority is 3, and any other value is auto. */
-const V4L2_MANUAL = 1;
-
 /**
  * Whether an auto mode (auto exposure, auto white balance) is on. A boolean control says so. A menu
- * whose entries name "Manual" is the V4L2 exposure menu (manual is 1, so any other value is auto).
+ * with an entry named "Manual" (the V4L2 exposure menu) is auto at any other entry.
  * Null when the device says neither: the UI then reads the mode as manual and still offers both
  * writes (as booleans).
  */
 export function autoOn(control: Pick<CameraControlInfo, "value" | "menu"> | undefined): boolean | null {
   if (!control || control.value === null) return null;
   if (typeof control.value === "boolean") return control.value;
-  const menuHasManual = control.menu?.some((label) => /manual/i.test(label)) ?? false;
-  return menuHasManual ? control.value !== V4L2_MANUAL : null;
+  const manual = control.menu?.find((entry) => /manual/i.test(entry.label));
+  return manual ? control.value !== manual.value : null;
 }
 
 /** The standard roles the fields use (the API's names for them, see `CameraStandardControl`). */

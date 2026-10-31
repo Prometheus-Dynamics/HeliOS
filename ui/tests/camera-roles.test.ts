@@ -13,7 +13,7 @@ const uvc: CameraControlInfo[] = [
   control({ name: "White Balance, Automatic", kind: "bool", standard: "awb", value: true, default: true }),
   control({ name: "Gain", kind: "int", standard: "gain", value: 192, default: 64, min: 0, max: 255 }),
   control({ name: "White Balance Temperature", kind: "int", standard: "colour_temperature", value: 1690, default: 4000, min: 0, max: 10000 }),
-  control({ name: "Auto Exposure", kind: "menu", standard: "ae", value: 3, default: 3, menu: ["Manual Mode", "Aperture Priority Mode"] }),
+  control({ name: "Auto Exposure", kind: "menu", standard: "ae", value: 3, default: 3, menu: [{ value: 1, label: "Manual Mode", kind: "name" }, { value: 3, label: "Aperture Priority Mode", kind: "name" }] }),
   control({ name: "Exposure Time, Absolute", kind: "int", standard: "exposure_us", value: 419, default: 166, min: 1, max: 10000 }),
   control({ name: "Exposure, Dynamic Framerate", kind: "bool", value: true, default: false }),
   control({ name: "Backlight Compensation", kind: "int", value: 0, default: 0, min: 0, max: 1 }),
@@ -40,11 +40,11 @@ describe("roles", () => {
     expect(autoOn(control({ name: "ae_enable", kind: "bool", value: false }))).toBe(false);
     // V4L2 values: manual is 1 and aperture priority is 3.
     expect(autoOn(uvc[4])).toBe(true);
-    expect(autoOn(control({ name: "Auto Exposure", kind: "menu", value: 1, menu: ["Manual Mode", "Aperture Priority Mode"] }))).toBe(false);
+    expect(autoOn(control({ name: "Auto Exposure", kind: "menu", value: 1, menu: [{ value: 1, label: "Manual Mode", kind: "name" }, { value: 3, label: "Aperture Priority Mode", kind: "name" }] }))).toBe(false);
   });
 
   test("a number the device does not label as manual or auto is unknown", () => {
-    expect(autoOn(control({ name: "Auto Exposure", kind: "menu", value: 1, menu: ["Off", "On"] }))).toBeNull();
+    expect(autoOn(control({ name: "Auto Exposure", kind: "menu", value: 1, menu: [{ value: 0, label: "Off", kind: "name" }, { value: 1, label: "On", kind: "name" }] }))).toBeNull();
     expect(autoOn(control({ name: "Auto Exposure", kind: "int", value: 1 }))).toBeNull();
     expect(autoOn(control({ name: "Auto Exposure", kind: "bool", value: null }))).toBeNull();
     expect(autoOn(undefined)).toBeNull();

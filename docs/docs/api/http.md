@@ -163,7 +163,12 @@ those did not answer):
       "persisted": true },
     { "id": 4093640709, "name": "ae_enable", "kind": "bool", "read_only": false, "min": false, "max": true,
       "default": true, "step": null, "menu": null, "current": false, "standard": "ae", "writable": true,
-      "persisted": true }
+      "persisted": true },
+    { "id": 4093640721, "name": "ae_flicker_mode", "kind": "int", "read_only": false, "min": 0, "max": 3,
+      "default": 3, "step": null, "current": 1, "standard": null, "writable": true, "persisted": true,
+      "menu": [{ "value": 0, "label": "off", "kind": "name" }, { "value": 1, "label": "50 Hz", "kind": "name" },
+               { "value": 2, "label": "60 Hz", "kind": "name" }, { "value": 3, "label": "auto", "kind": "name" }],
+      "current_entry": { "value": 1, "label": "50 Hz", "kind": "name" } }
   ],
   "mode": "1280x800 GREY @60", "fps": 60, "exposure_us": 8000, "analogue_gain": 4, "digital_gain": 1,
   "ae_state": "idle", "live_error": null,
@@ -187,6 +192,13 @@ camera, or a control's listed `name` or `id`:
 | `af_mode` | `manual`, `auto` or `continuous` |
 | `af_trigger` | `start` or `cancel` (in `auto`) |
 | `lens_position` | dioptres (0: infinity), in `manual` |
+
+A menu control lists its entries in `menu`, in ascending value and only the values it takes (a
+sparse V4L2 menu skips the others). Each entry has its `value`, its `label` and its `kind`: `name`,
+or `int` for an integer menu whose labels are numbers (a link frequency). `current_entry` is the
+entry the value now selects, `null` when it selects none or is unread. A `PATCH` sets a menu by an
+entry's `label` (ASCII case ignored) or by its `value`; an unknown label is a 400 that lists the
+labels. A menu stored under its label before entries were typed still loads.
 
 Modes (`ae`, `awb`, `af_mode`) are applied first, then the rest. Nothing is applied when a key
 is unknown or a value has the wrong type (400). Out-of-range values are clamped. The answer
