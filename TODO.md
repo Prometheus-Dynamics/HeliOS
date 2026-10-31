@@ -16,15 +16,18 @@ here waits for a later release. Every item: what, why, done when, blocked by.
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.
-- [ ] **Robot time.** Why: poses must line up with the robot's clock. Done when: the published
-      timestamps match the SystemCore's time within a measured bound, and that bound is in docs.
-      Blocked by: nothing.
+- [ ] **Robot time.** Why: poses must line up with the robot's clock. Partly done: every NT
+      output carries `capture_time_us` in the NT server's clock (deff96c9). Left: measure the bound
+      between published capture times and the SystemCore's time, and write it in docs. Blocked by:
+      nothing.
 - [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
-      Done when: a prior is loaded per camera model and self-calibration converges from it on the
-      Raze. Blocked by: nothing.
+      Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
+      self-calibration (fd343ffc). Left: show self-calibration converging from it on the Raze.
+      Blocked by: nothing.
 - [ ] **SystemCore coexistence.** Why: HeliOS runs next to the SystemCore's own services. Done when:
       the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
-      services, with no port or USB conflicts. Blocked by: the Gaia .ipk path.
+      services, with no port or USB conflicts. The package exists (one .ipk with the whole stack,
+      4f3333c1). Blocked by: nothing.
 - [ ] **Gaia profiles and the layered slot.** Why: small updates and per-device builds. Done when:
       every board profile builds its layered slot and Atlas installs a layer delta on a Raze.
       Blocked by: nothing.
@@ -48,10 +51,11 @@ here waits for a later release. Every item: what, why, done when, blocked by.
       device config sets Styx's raw/output buffer counts and queue depth, and its accelerators
       (ISP path, RGA, VPU) per board; on the K230D start at raw 3, output 2, queue 1. Blocked by:
       Styx's knobs (done) and its accelerator backends.
-- [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU (wgpu now, CUDA
-      possibly later), like NEON/SIMD. Done when: the pipeline config selects the CPU or GPU
-      backend per Eidos operation, dense depth runs on the GPU on a Raze, and the plan shows no
-      CPU→GPU→CPU round trips. Blocked by: Eidos M1, Daedalus's GPU work.
+- [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
+      Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
+      node asks (7630c661). Left: dense on the GPU by default on the Raze once Eidos's real-time gate
+      passes (late frames, tick p99 and keyframes no worse than CPU; round 5 is the best so far),
+      with the pipeline cache in /var/lib/helios/gpu-cache. Blocked by: Eidos's GPU dense rounds.
 - [ ] **Memory slimming.** Why: the K230D has 128 MB for everything. Done when: tags-only at
       1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5 (2026-10-30: about 67 MiB
       plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
@@ -66,20 +70,21 @@ here waits for a later release. Every item: what, why, done when, blocked by.
       low-cost modules being built; Flame RV1106G2 is a 32-bit Cortex-A7, so it gets a full armv7
       build including Eidos's armv7 NEON). Why: the module tiers. Done when: each module boots a
       HeliOS image and runs a camera pipeline, with per-camera CPU and RAM figures reported to the
-      PCB session from the CI dev board. Blocked by: boards, the Gaia BSPs, Styx's
+      PCB session from the CI dev board. Blocked by: boards (off-the-shelf dev boards can stand in:
+      ROCK 5C, ROCK 4D, ZERO 3W, Firefly AIO-3562JQ, Luckfox Pico), the Gaia BSPs, Styx's
       rkisp/RGA/MPP.
 - [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
-      without SSH. Done when: Atlas installs its agent on the SystemCore and flashes the second
-      Raze (e5226d57) through it. Blocked by: Atlas.
-- [ ] **Typed camera menus in the UI.** Why: Styx is finishing typed menu entries (user: keep them
-      and use them properly). Done when: camera settings show menu controls as typed choices
-      (names, not raw values) end to end, from Styx through helios-api to the UI, checked with real
-      clicks on a Raze. Blocked by: Styx's typed-menu API.
+      without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
+      (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
+      agent under Orion). Blocked by: e5226d57 replugged into a SystemCore port; Orion's four asks.
+- [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
+      end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
+      real-click check on a Raze. Blocked by: nothing.
 - [x] **CM5 tag speed model.** Eidos's sweep on the Raze (2026-10-30): a frame costs a fixed
       number of cycles (NEON full search 1.83 Mcycles p50, tracked 1.02), so ms ≈ C / (GHz × k).
       Tags alone fit 120 fps on every target (A7 tightest at 60–70%). In Eidos
-      docs/performance-model.md (6a4dc810), sent to the PCB session. Still to do: the same sweep
-      for tags + live_map once the front end lands, and measured k values from the CI dev board.
+      docs/performance-model.md (6a4dc810), sent to the PCB session. The tags + live_map figure is
+      Eidos's 120 fps item.
 - [ ] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done when: the two
       read-after-apply tests pass 200 runs under load. Blocked by: nothing.
 
@@ -104,31 +109,18 @@ here waits for a later release. Every item: what, why, done when, blocked by.
 - Atlas's release signing key.
 - Image publishing: GHCR registry and owner, the CI runner token and fork-PR approval, the
   minisign/cosign install.
-- On hold: OV9782 ColorChecker tuning (waiting on a chart); Styx's bench tests (mains-lamp
+- On hold: OV9782 ColorChecker tuning (chart and lighting being ordered, 2026-10-31); Styx's bench tests (mains-lamp
   anti-flicker, C270 YUYV fallback).
 
 ## Backlog
 
-State of HeliOS and the Raze work as of 2026-10-09.
-
-## Where things stand
-
-HeliOS is a Raze-only OS (CM5 + OV9782) built with Gaia. Device support comes
-from the Raze device package in Atlas (`devices/raze`), shared with the
-PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
-
-| Piece | Where | State |
-|---|---|---|
-| HeliOS | branch `architecture-overhaul` | Raze A/B layout, read-only EROFS root, device package updater; recipe validates (`gaia validate`, both profiles); no image built yet |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned in lockstep (one source each in the lock; the engine and the plugin libraries come from the same Daedalus commit, one cargo build in the image): Daedalus 3.0 `dev` (c927136, plugin ABI 9: schedule order by node index, per-instance node state, resources and metrics; re-pin it after updating other libraries, Styx updates move it), Styx `dev` (4e8e19c: on Daedalus c927136), Eidos `main` (3546efbf9: tracking overrides and tracked stage nodes, full-search speed; on Daedalus c927136), Orion v4 `main` (4fadba9: request/response resource actions, `ActionRequest.wait_ms`, `ActionCaller`, a wire change; also the Gaia `orion` source; they must match), Lemnos `dev` (b2634fc: fault reasons and lemnosd's Orion bridge; also the Gaia `lemnos` source) |
-| UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image stages its static build, served by helios-api on :5800 |
-| Raze board package | Atlas `dev` (3175ad9: Orion `clock.set`, eased LED blink, honest failed units, libcamera without libyuv/jpeg/bzip2 (HeliOS selects `BR2_PACKAGE_JPEG` itself), the trimmed kernel with the config guard; since 934f538: Lemnos cca50f7; the `lemnos` user from Lemnos's own users table through the device package (42d91e2, quoted in 934f538); the self-test's chip-id reads brokered through lemnosd; no free GPIO/PWM/spidev named; board-agent as a Gaia artifact with `ORION_NODE_LOCAL_AUTH_ALLOW=root`; the `board-*` machinery; discovery keeps `_pd-device._tcp` and `/.well-known/pd-device`) | pinned by HeliOS: A/B update writer (board update), EROFS root, read-only-safe services, lemnosd (HeliOS declares the `lemnos` source and builds lemnosd on the host with Lemnos's `lemnosd-host.toml`; the device package creates the `lemnos` user at build time) |
-| PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
-| Gaia | `main` (2.0.0, d82a9b7) | installed in `~/.cargo/bin` |
+Older working notes. Current pins and their reasons live in `backend/Cargo.toml` (comments) and
+`gaia/configs/builds/*.toml`; HeliOS images build and run on the Raze (A/B slots, EROFS root,
+helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 
 ## Next: a HeliOS image on hardware
 
-- [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) on a free machine. First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
+- [x] Build the HeliOS Raze image (`./tools/build-os.sh raze`): images build and run on the Raze. Kept for the record: First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
 - [ ] A/B and read-only root on hardware: first boot (data.ext4 grows to the eMMC, `/data` binds, machine-id and SSH host keys persist across a reboot and an update, hostname `helios-<serial8>`, `manage_url` `http://helios-<serial8>.local:5800/`), the UI on :5800, an update from the UI and from Atlas (stage, trial reboot, update-health confirms; a broken image rolls back), `rootfs.erofs` size vs. the 512 MiB slot, boot time with an LZMA root, journald after the machine-id bind (restarted once per boot), nothing writing to `/` (`journalctl -b | grep -i 'read-only'`).
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (the per-board serial-hash-v1 address on `usbbr0`, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `board/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
 - [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
@@ -188,7 +180,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 Today a workload with several camera bindings ticks on its primary camera and batches each
 secondary camera's latest frame (at most 500 ms old) with it: neither simultaneous nor shared.
-The plan, on the pinned Daedalus c927136 and Styx 4e8e19c:
+The plan (written against Daedalus c927136 and Styx 4e8e19c; recheck the APIs against today's pins):
 
 - [ ] **One `ExecutionDomain` per camera** (Daedalus `docs/node-authoring.md`, "Sharing
   Preprocessing Across Graphs"), owned by that camera's graph thread: the camera's pipelines
@@ -231,9 +223,9 @@ The plan, on the pinned Daedalus c927136 and Styx 4e8e19c:
 - [x] Orion: an observed-state watch (c22fa42): helios-api subscribes with `subscribe_state_and_observed` and no longer re-reads the snapshot with every host sample.
 - [x] Orion client: reconnecting under the same local address resumes the session (c22fa42); helios-api uses one fixed address again.
 - [x] Atlas: `BOARD_PACKAGE_COMMIT` for a source import: HeliOS writes it (`${source.atlas.commit}`) to `/etc/default/board-package.env`, linked as `/etc/board/board-package.env`.
-- [ ] Gaia: building related rust artifacts in one cargo invocation (engine and plugins).
+- [x] Gaia: building related rust artifacts in one cargo invocation: `build_group = "helios-backend"` (payloads/backend-core.toml, systemcore.toml).
 - [x] Atlas (e12b079) and Lemnos (62c3caf): their layers ask for Gaia >=2.0.0 (b9eb154's board-agent layer and b4d6cfe's lemnosd layer asked for an unreleased 2.1.0, so the recipe did not validate with the installed Gaia).
-- [ ] Eidos: mark the deterministic stage nodes (mask prep, quads, decode, refine) `#[node(shareable)]` so `ExecutionDomain::load_shared_documents` dedupes them across a camera's detectors.
+- [x] Eidos: mark the deterministic stage nodes (mask prep, quads, decode, refine) `#[node(shareable)]` (done: aruco decode, mask and pose nodes are shareable) so `ExecutionDomain::load_shared_documents` dedupes them across a camera's detectors.
 - [ ] Eidos: the tracked detector groups expand to one node (`eidos:detectors.tracked_detect`), so per-stage profiling (AGENTS.md rule 5) and `ExecutionDomain` sharing of mask prep and quads are lost on the default (tracked) path; split it into stage nodes, or report per-stage telemetry from the node.
 - [x] Eidos (d3e4b4a5b): structured `camera` (`eidos:camera_calibration`) and `extrinsics` inputs, `aruco.multi_tag_pose`, template `StructuredInput::GraphInput`; HeliOS no longer rewires scalar ports. The FRC field-layout import stays in HeliOS (`helios-field`): Eidos is a generic CV library.
 - [x] Orion (ec91d0a): `TypedConfigValue::F64`; camera context numbers are F64.
@@ -245,15 +237,15 @@ The plan, on the pinned Daedalus c927136 and Styx 4e8e19c:
 - [x] Lemnos (cca50f7), the round-4 client gaps: `lemnos-ipc` re-exports the compact-model and raw types (HeliOS dropped `lemnos-device`); `ClientOptions::wait` and a lazy reconnecting first connect (HeliOS's own retry is gone); LED clients get no events unless they ask; control writes end with the writer's connection (HeliOS's fan-override marker is gone); `lemnosd::mock::MockLemnosd` (HeliOS's fake socket is gone); raw GPIO/PWM/I2C/SPI through lemnosd (HeliOS's raw actions are back).
 - [x] Lemnos/Atlas: the `lemnos` user at build time comes from Lemnos's `packaging/buildroot/lemnos-users.table` through the device package (Atlas 42d91e2/934f538, `BR2_RAZE_LEMNOS_USERS_TABLE`); HeliOS's copy and its `BR2_ROOTFS_USERS_TABLES` entry are gone.
 - [ ] Styx/Daedalus: `styx::multicam::FrameGrouper` (+ `push_group`) and Daedalus `MultiCamera::synchronized` both group camera frames by timestamp; say which a host should use (HeliOS's plan prefers the grouper, which owns the `FrameClient` fds).
-- [x] Atlas: the Raze `sensors.toml` is obsolete for HeliOS: HeliOS ships and reads no sensors file; its sensors come from lemnosd's board definition (`/etc/lemnos/board.toml`, with the IMU on `i2c:compatible=i2c-gpio`).
+- [x] Atlas: the Raze `sensors.toml` is obsolete for HeliOS: HeliOS ships and reads no sensors file; its sensors come from lemnosd's board definition (`/etc/lemnos/board.toml`; the IMU is on the RP1 PIO bus `pio-i2c:sda=8,scl=7` at 200 Hz since Atlas 20cd0c4).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 
-- [ ] Gaia (pending, not added): `[providers.buildroot.host_tools] ccache = "system,build"` for the Buildroot side. HeliOS's own build image gets `ccache` now (`gaia/docker/aarch64/Dockerfile.aarch64-rpi4`); add the key to `gaia/configs/workspace/base.toml` once Gaia ships it.
+- [x] Gaia: `[providers.buildroot.host_tools] ccache = "system,build"` (in gaia/configs/workspace/base.toml) for the Buildroot side. HeliOS's own build image gets `ccache` now (`gaia/docker/aarch64/Dockerfile.aarch64-rpi4`); add the key to `gaia/configs/workspace/base.toml` once Gaia ships it.
 
-- [ ] Atlas (ask): enable Lemnos's optional `packaging/gaia/lemnos-orion.toml` in the Raze board package (Lemnos b2634fc, the `lemnos-orion` bridge: one `lemnos.<board>.<device>` resource per board device, its readings as status entries, and the set/restore/release/read actions). HeliOS does not import it yet; until it ships, `GET /v1/peripherals` lists only the fan override and raw access.
-- [ ] HeliOS still subscribes to lemnosd's readings (the bridge's `readings` state): nothing publishes them since round 7. Drop the reading subscription once the Lemnos bridge runs on the device.
+- [x] Atlas (Atlas e565dcf): enable Lemnos's optional `packaging/gaia/lemnos-orion.toml` in the Raze board package (Lemnos b2634fc, the `lemnos-orion` bridge: one `lemnos.<board>.<device>` resource per board device, its readings as status entries, and the set/restore/release/read actions). HeliOS does not import it yet; until it ships, `GET /v1/peripherals` lists only the fan override and raw access.
+- [x] HeliOS reads lemnosd's device readings from the Lemnos bridge's resources (`resource/lemnos.*`, helios-api orion.rs/events.rs); the bridge runs on the device.
 - [ ] Raw I/O on hardware, concurrent: two raw actions in flight on the CM5 (one claim's `gpio.get` while another's `i2c.transfer` runs) answer by id without waiting for each other.
-- [ ] Atlas: the Raze `hat_map.dtb` is not installed into `images/rpi-firmware/overlays/` by Atlas's rpi-firmware override (only `*.dtbo` and `overlay_map.dtb`); `gaia/configs/targets/raze.toml` reads it from there as an optional file, so it is absent until Atlas installs it.
+- [x] (Atlas e565dcf) Atlas: the Raze `hat_map.dtb` was not installed into `images/rpi-firmware/overlays/` by Atlas's rpi-firmware override (only `*.dtbo` and `overlay_map.dtb`); `gaia/configs/targets/raze.toml` reads it from there as an optional file, so it is absent until Atlas installs it.
 
 ## PhotonVision image
 
