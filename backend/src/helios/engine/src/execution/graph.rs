@@ -76,7 +76,7 @@ pub(crate) fn compile_workload_graph(
         declare_context_held(&mut document, &host_alias, frame_inputs)?;
     }
     let requires = serde_json::to_value(&document.requires).unwrap_or_default();
-    let engine = Engine::new(daedalus_engine_config(settings)).map_err(|error| ExecutionError::Engine(error.to_string()))?;
+    let engine = Engine::new(daedalus_engine_config(settings, wants_gpu(&document))).map_err(|error| ExecutionError::Engine(error.to_string()))?;
     let started_at = Instant::now();
     let mut host_graph = engine.compile_document_host_graph(registry, document, registry.handlers(), HostBridgeManager::new(), host_alias).map_err(|error| ExecutionError::Plan(error.to_string()))?;
     // Recording a tick's frame-path overhead costs about 13 us on a CM5: one tick in N keeps the
@@ -187,10 +187,24 @@ fn host_alias(document: &GraphDocument) -> String {
 /// Ticks per recorded frame-overhead sample (`HostGraph::set_frame_overhead_sampling`).
 const FRAME_OVERHEAD_SAMPLE_EVERY: u32 = 16;
 
-/// Serial execution on the workload's own driver thread: no worker pool, no GPU. With metrics on,
-/// Daedalus also records each tick's frame-path overhead (`HostGraph::frame_overhead`).
-fn daedalus_engine_config(settings: GraphSettings) -> DaedalusEngineConfig {
-    let mut engine_config = DaedalusEngineConfig { gpu: GpuBackend::Cpu, ..DaedalusEngineConfig::default() }.with_metrics_level(settings.metrics_level);
+/// Whether a node of the graph asks for the GPU: a `backend` setting of `gpu` (Eidos's
+/// `eidos:compute_backend`, e.g. dense.map's plane sweep). The user chooses per node; the engine
+/// only opens the device when one does, so a graph without GPU nodes never loads the driver.
+/// Builds without Eidos's GPU backend (riscv64, armv7) never open it.
+fn wants_gpu(document: &GraphDocument) -> bool {
+    if !cfg!(any(target_arch = "aarch64", target_arch = "x86_64")) {
+        return false;
+    }
+    let Ok(graph) = serde_json::to_value(&document.graph) else { return false };
+    graph["nodes"].as_array().into_iter().flatten().flat_map(|node| node["const_inputs"].as_array().into_iter().flatten()).any(|input| input[0] == "backend" && input[1].to_string().contains("\"gpu\""))
+}
+
+/// Serial execution on the workload's own driver thread: no worker pool. The engine's GPU only
+/// when a node asks for it (`wants_gpu`). With metrics on, Daedalus also records each tick's
+/// frame-path overhead (`HostGraph::frame_overhead`).
+fn daedalus_engine_config(settings: GraphSettings, gpu: bool) -> DaedalusEngineConfig {
+    let gpu = if gpu { GpuBackend::Device } else { GpuBackend::Cpu };
+    let mut engine_config = DaedalusEngineConfig { gpu, ..DaedalusEngineConfig::default() }.with_metrics_level(settings.metrics_level);
     if settings.metrics_level != MetricsLevel::Off {
         engine_config = engine_config.with_frame_overhead(DEFAULT_FRAME_OVERHEAD_WINDOW);
     }

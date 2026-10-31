@@ -55,11 +55,14 @@ helios-field = { path = "../field" }
 # same crate and features the plugin library is built with, in the same cargo build.
 eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
 
+# `gpu`: Eidos's GPU nodes (dense.map's sweep with `backend: gpu`) on Daedalus's wgpu backend, on
+# the targets with a usable GPU (the CM5's V3D, Rockchip's Mali, desktops); riscv64 and armv7 build
+# CPU-only. The engine opens the device only for a graph that asks for it.
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-eidos-daedalus = { workspace = true, features = ["dylib", "simd", "neon"] }
+eidos-daedalus = { workspace = true, features = ["dylib", "simd", "neon", "gpu"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-eidos-daedalus = { workspace = true, features = ["dylib", "simd", "x86"] }
+eidos-daedalus = { workspace = true, features = ["dylib", "simd", "x86", "gpu"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
