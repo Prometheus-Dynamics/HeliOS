@@ -6,7 +6,7 @@
 //! API reads that output from the live relay (`live_outputs`) only while it waits for it, so the
 //! engine serializes a map only when one is being saved.
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use axum::{
     Json,
@@ -20,13 +20,14 @@ use helios_maps::SAVED_MAP_PORT;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::{
-    sync::broadcast::{Receiver, error::RecvError},
+    sync::broadcast::error::RecvError,
     time::Instant,
 };
 
 use crate::{
     SharedState,
     error::{ApiError, ApiResult},
+    live_outputs::LiveReceiver,
     maps::{self, MapEntry, Source},
     routes::{
         check_id,
@@ -157,7 +158,7 @@ async fn request_save(state: &SharedState, id: &str) -> ApiResult<()> {
 }
 
 /// The next `saved_map` of pipeline `pipeline` on the live relay, as the map file's bytes.
-async fn next_saved_map(lines: &mut Receiver<Arc<str>>, pipeline: &str) -> ApiResult<Vec<u8>> {
+async fn next_saved_map(lines: &mut LiveReceiver, pipeline: &str) -> ApiResult<Vec<u8>> {
     loop {
         match lines.recv().await {
             Ok(chunk) if chunk.contains(SAVED_MAP_PORT) => {

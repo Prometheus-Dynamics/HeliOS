@@ -23,6 +23,7 @@ use crate::{
     camera_context::{CameraCalibration, Distortion, LensModel, Orientation, Provenance},
     camera_uncertainty::CalibrationUncertainty,
     host,
+    live_outputs::LiveReceiver,
     routes::pipelines::{self, LiveMapper},
 };
 
@@ -215,7 +216,7 @@ pub fn spawn(state: SharedState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut mappers: BTreeMap<String, LiveMapper> = BTreeMap::new();
         let mut handled = Handled::default();
-        let mut lines: Option<broadcast::Receiver<Arc<str>>> = None;
+        let mut lines: Option<LiveReceiver> = None;
         let mut scan = tokio::time::interval(SCAN_INTERVAL);
         scan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -241,7 +242,7 @@ pub fn spawn(state: SharedState) -> tokio::task::JoinHandle<()> {
     })
 }
 
-async fn next(lines: &mut Option<broadcast::Receiver<Arc<str>>>) -> Result<Arc<str>, broadcast::error::RecvError> {
+async fn next(lines: &mut Option<LiveReceiver>) -> Result<Arc<str>, broadcast::error::RecvError> {
     match lines {
         Some(rx) => rx.recv().await,
         None => std::future::pending().await,

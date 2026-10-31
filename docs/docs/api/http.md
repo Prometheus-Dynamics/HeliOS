@@ -826,4 +826,5 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_API_PREVIEW_SIZE` | `640x400`: the largest camera preview (16 to 4096 each) |
 | `HELIOS_API_PREVIEW_FPS` | `15`: most preview frames per second (0.5 to 60) |
 | `HELIOS_API_PREVIEW_QUALITY` | `70`: preview JPEG quality (1 to 100) |
+| `HELIOS_API_LIVE_BUFFER_BYTES` | `4194304` (4 MiB): pipeline outputs kept for a slow `/v1/live/ws` reader before it skips to the newest (64 KiB to 256 MiB); that much memory while a reader is behind, none once nobody reads |
 | `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `helios-api auth` reads the same variable |

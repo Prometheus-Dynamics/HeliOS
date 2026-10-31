@@ -63,6 +63,9 @@ pub struct ApiConfig {
     pub playback: crate::playback::PlaybackSettings,
     /// The node's live stream the UI shows, and the history a new client starts with.
     pub live_streams: crate::live_streams::LiveStreamSettings,
+    /// Bytes of pipeline outputs kept for slow `/v1/live/ws` readers (`live_outputs`): more lets a
+    /// reader fall further behind before it skips ahead, at that much memory while one does.
+    pub live_buffer_bytes: usize,
     /// The networks the robot's links are on. The gateway reaches a peer only over one of these
     /// (`peers.rs`); none means no peer is reached.
     pub peer_nets: Vec<crate::peers::Ipv4Net>,
@@ -107,6 +110,7 @@ impl ApiConfig {
             lemnos_socket: layout.lemnos_socket(),
             playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
             live_streams: crate::live_streams::LiveStreamSettings::default(),
+            live_buffer_bytes: crate::live_outputs::DEFAULT_BUFFER_BYTES,
             peer_nets: Vec::new(),
             peer_ports: crate::peers::DEFAULT_PEER_PORTS.to_vec(),
             board_agent_port: crate::peers::DEFAULT_BOARD_AGENT_PORT,
@@ -181,6 +185,11 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_LIVE_STREAM_BACKFILL_MS") {
             config.live_streams.backfill_ms = value.parse()?;
+        }
+        if let Some(value) = env.get("HELIOS_API_LIVE_BUFFER_BYTES") {
+            let bytes: usize = value.parse()?;
+            anyhow::ensure!((64 << 10..=256 << 20).contains(&bytes), "HELIOS_API_LIVE_BUFFER_BYTES must be 64 KiB to 256 MiB, got {value}");
+            config.live_buffer_bytes = bytes;
         }
         if let Some(value) = env.get("HELIOS_API_STARTUP_FILE") {
             config.startup_file = value.into();

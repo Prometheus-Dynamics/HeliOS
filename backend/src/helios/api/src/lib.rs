@@ -127,7 +127,7 @@ impl AppState {
             deploys: Mutex::new(()),
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
-            live: live_outputs::LiveRelay::new(),
+            live: live_outputs::LiveRelay::new(config.live_buffer_bytes),
             maps: maps::MapStore::new(config.layout.data_dir().join("maps")),
             playback: playback::Players::new(::orion::client::LocalNodeRuntime::new(config.orion_socket.clone(), config.orion_stream_socket.clone()), &config.node_id, config.playback.clone()),
             config,
