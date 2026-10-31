@@ -4,7 +4,7 @@
 
 The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
 added on 2026-10-30 (the last addition). Release targets agreed with the user on 2026-10-30, tagged
-when this feature push is done: HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 3.0.0, Lemnos
+when this feature push is done: HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 4.0.0, Lemnos
 1.0.0, Gaia 3.0.0, Orion 1.0.0. Every backend gets full support wherever the hardware allows
 (scalar, x86 SIMD, aarch64 and armv7 NEON, RVV, GPU); no partial implementations. Anything not
 here waits for a later release. Every item: what, why, done when, blocked by.
