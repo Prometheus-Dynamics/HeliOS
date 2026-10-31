@@ -1,3 +1,4 @@
+config = 3
 description = "Shared base OS layer: Buildroot source, init system, and the core package baseline."
 
 [[sources]]
@@ -61,6 +62,6 @@ config_overrides = [
   ["BR2_ROOTFS_USERS_TABLES", "\"${project.root_dir}/gaia/assets/buildroot/users/sshd-users.table\""],
 ]
 
-[image.output]
-collect_dir = "gaia/output/${build.name}/images"
-emit_report = true
+[outputs]
+images_dir = "gaia/output/${build.name}/images"
+report = true

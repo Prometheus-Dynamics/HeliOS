@@ -1,3 +1,4 @@
+config = 3
 description = "Backend-core payload layer: the HeliOS services and tools built from the backend workspace (Daedalus, Styx, Eidos, Orion and Lemnos as git dependencies pinned by backend/Cargo.lock). orionctl comes from Orion's own Gaia layer (packaging/gaia/orionctl.toml)."
 
 [providers.rust]

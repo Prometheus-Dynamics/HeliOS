@@ -1,3 +1,4 @@
+config = 3
 description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, the device services and the A/B update writer; this file adds HeliOS's own boot files, kernel options, image scripts and the A/B disk assembly shared with the PhotonVision Raze image."
 target = "raze"
 
@@ -6,7 +7,7 @@ kind = "buildroot"
 # Device tree first, so its @source: token resolves; Gaia takes one value and
 # the last import wins. Package overrides in HeliOS's packages/ would win over
 # the device's; HeliOS keeps none of the device's (libcamera, libpisp).
-external_tree = "@source:atlas/devices/raze/gaia/buildroot-external:gaia/assets/buildroot:@source:styx/kernel-modules/ov9282/buildroot"
+external_tree = "${source.atlas}/devices/raze/gaia/buildroot-external:gaia/assets/buildroot:${source.styx}/kernel-modules/ov9282/buildroot"
 external_tree_mode = "required"
 # defconfig, kernel tarball and hash, OV9782 extension, rpi-firmware overlays,
 # rpi-utils and host-dtc come from the device package.
@@ -45,7 +46,7 @@ required = true
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "$provider.images"
+out_dir = "${provider.images}"
 
 # --- p1: autoboot --------------------------------------------------------------
 # autoboot.txt only. The bootloader reads it first: boot A (p2) by default,
@@ -54,18 +55,18 @@ out_dir = "$provider.images"
 # board/authorized_keys on it, so p1 is shared by both slots.
 [[image.assembly.trees]]
 id = "autoboot"
-path = "$assembly.work/autoboot"
+path = "${assembly.work}/autoboot"
 
 [[image.assembly.files]]
 tree = "autoboot"
-src = "@assets/buildroot/boards/raze/autoboot.txt"
+src = "${assets}/buildroot/boards/raze/autoboot.txt"
 dest = "autoboot.txt"
 
 [[image.assembly.filesystems]]
 id = "autoboot"
 kind = "vfat"
 source_tree = "autoboot"
-output = "$assembly.work/autoboot.vfat"
+output = "${assembly.work}/autoboot.vfat"
 size = "16M"
 
 # --- p2/p3: boot A/B -----------------------------------------------------------
@@ -76,21 +77,21 @@ size = "16M"
 # (cmdline.txt here says root A, /dev/mmcblk0p5).
 [[image.assembly.trees]]
 id = "boot"
-path = "$assembly.work/boot"
+path = "${assembly.work}/boot"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/raze/config.txt"
+src = "${assets}/buildroot/boards/raze/config.txt"
 dest = "config.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/raze/cmdline.txt"
+src = "${assets}/buildroot/boards/raze/cmdline.txt"
 dest = "cmdline.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/buildroot/boards/raze/os_config.json"
+src = "${assets}/buildroot/boards/raze/os_config.json"
 dest = "os_config.json"
 
 # start4.elf/fixup4.dat are the Pi 4 GPU firmware. A CM5 boots from its EEPROM
@@ -98,13 +99,13 @@ dest = "os_config.json"
 # Pi 4 variant, so they are optional.
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/start4.elf"
+src = "${provider.buildroot_output}/images/rpi-firmware/start4.elf"
 dest = "start4.elf"
 optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/fixup4.dat"
+src = "${provider.buildroot_output}/images/rpi-firmware/fixup4.dat"
 dest = "fixup4.dat"
 optional = true
 
@@ -113,31 +114,31 @@ optional = true
 # not read, since a restored package cache does not have it).
 [[image.assembly.files]]
 tree = "boot"
-src_glob = "$provider.buildroot_output/images/bcm*.dtb"
+src_glob = "${provider.buildroot_output}/images/bcm*.dtb"
 dest = "."
 
 # Loaded by HeliOS's config.txt; the device package does not ship it.
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/bcm2712d0.dtbo"
+src = "${provider.buildroot_output}/images/rpi-firmware/overlays/bcm2712d0.dtbo"
 dest = "overlays/bcm2712d0.dtbo"
 optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-wifi-pi5.dtbo"
+src = "${provider.buildroot_output}/images/rpi-firmware/overlays/disable-wifi-pi5.dtbo"
 dest = "overlays/disable-wifi-pi5.dtbo"
 optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-bt-pi5.dtbo"
+src = "${provider.buildroot_output}/images/rpi-firmware/overlays/disable-bt-pi5.dtbo"
 dest = "overlays/disable-bt-pi5.dtbo"
 optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/overlay_map.dtb"
+src = "${provider.buildroot_output}/images/rpi-firmware/overlays/overlay_map.dtb"
 dest = "overlays/overlay_map.dtb"
 optional = true
 
@@ -145,21 +146,21 @@ optional = true
 tree = "boot"
 # Not installed into images/ by Atlas's rpi-firmware override yet (only *.dtbo and overlay_map.dtb
 # are): optional, so it is absent until Atlas installs it.
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/hat_map.dtb"
+src = "${provider.buildroot_output}/images/rpi-firmware/overlays/hat_map.dtb"
 dest = "overlays/hat_map.dtb"
 optional = true
 
 [[image.assembly.transforms]]
 kind = "gzip"
-src = "$provider.buildroot_output/images/Image"
-dest = "$assembly.tree.boot/kernel8.img"
+src = "${provider.buildroot_output}/images/Image"
+dest = "${assembly.tree.boot}/kernel8.img"
 deterministic = true
 
 [[image.assembly.filesystems]]
 id = "boot"
 kind = "vfat"
 source_tree = "boot"
-output = "$provider.images/boot.vfat"
+output = "${provider.images}/boot.vfat"
 size = "128M"
 
 # --- the disk ------------------------------------------------------------------
@@ -172,7 +173,7 @@ size = "128M"
 # inactive slot.
 [[image.assembly.disks]]
 id = "sdcard"
-output = "$provider.images/sdcard.img"
+output = "${provider.images}/sdcard.img"
 partition_table = "mbr"
 signature = "0x48454c49"
 first_lba = 2048
@@ -182,25 +183,25 @@ alignment_lba = 2048
 name = "autoboot"
 type_alias = "fat32-lba"
 bootable = true
-image = "$assembly.work/autoboot.vfat"
+image = "${assembly.work}/autoboot.vfat"
 size = "16M"
 
 [[image.assembly.disks.partitions]]
 name = "boot-a"
 type_alias = "fat32-lba"
-image = "$provider.images/boot.vfat"
+image = "${provider.images}/boot.vfat"
 size = "128M"
 
 [[image.assembly.disks.partitions]]
 name = "boot-b"
 type_alias = "fat32-lba"
-image = "$provider.images/boot.vfat"
+image = "${provider.images}/boot.vfat"
 size = "128M"
 
 [[image.assembly.disks.partitions]]
 name = "rootfs-a"
 type_alias = "linux"
-image = "$provider.images/rootfs.erofs"
+image = "${provider.images}/rootfs.erofs"
 size = "512M"
 
 [[image.assembly.disks.partitions]]
@@ -212,4 +213,4 @@ wipe = true
 [[image.assembly.disks.partitions]]
 name = "data"
 type_alias = "linux"
-image = "$provider.images/data.ext4"
+image = "${provider.images}/data.ext4"

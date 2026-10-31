@@ -1,3 +1,4 @@
+config = 3
 description = "Shared vision/media hardware package layer. Only what HeliOS runs: Styx captures and encodes natively (its PiSP BE and RP1 CFE kernel modules, a vendored libjpeg-turbo for previews). No ffmpeg, H.264/H.265 encoders, libcamera or AI runtimes: nothing on the image loads them (checked on the CM5 against every binary, plugin and running process), and they cost about 24 MB of root. Bring a package back with the feature that needs it."
 
 [image]

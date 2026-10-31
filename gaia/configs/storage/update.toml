@@ -1,3 +1,4 @@
+config = 3
 description = "A/B updates with the Raze device package's writer: the OS hooks it runs (health check, pre-reboot), and orion-node's state on the data partition."
 
 # The device package's writer (/usr/lib/board/update, Atlas docs/ota.md)
@@ -10,14 +11,14 @@ description = "A/B updates with the Raze device package's writer: the OS hooks i
 
 [[stage.files]]
 id = "update-health"
-src = "@assets/update/etc/board/update-health"
+src = "${assets}/update/etc/board/update-health"
 dest = "/etc/board/update-health"
 origin = "static-asset"
 mode = 493
 
 [[stage.files]]
 id = "update-pre-reboot"
-src = "@assets/update/etc/board/update.d/pre-reboot"
+src = "${assets}/update/etc/board/update.d/pre-reboot"
 dest = "/etc/board/update.d/pre-reboot"
 origin = "static-asset"
 mode = 493
@@ -26,7 +27,7 @@ mode = 493
 # over an edited unit): state on the data partition.
 [[stage.files]]
 id = "orion-node-state"
-src = "@assets/update/etc/systemd/system/orion-node.service.d/10-helios-state.conf"
+src = "${assets}/update/etc/systemd/system/orion-node.service.d/10-helios-state.conf"
 dest = "/etc/systemd/system/orion-node.service.d/10-helios-state.conf"
 origin = "static-asset"
 

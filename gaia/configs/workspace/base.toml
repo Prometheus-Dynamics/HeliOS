@@ -1,7 +1,11 @@
+config = 3
+
 [workspace]
 root_dir = "."
 build_dir = "gaia/build/${build.name}"
-out_dir = "gaia/output/${build.name}"
+
+[outputs]
+dir = "gaia/output/${build.name}"
 
 [[workspace.named_paths]]
 alias = "assets"
@@ -34,14 +38,14 @@ parallel_packages = true
 # a full build is mostly small-file IO, which a spinning disk makes slow.
 work_dir = "ram"
 
-[providers.buildroot.package_cache]
+[cache.packages]
 enabled = true
 
 [providers.buildroot.host_tools]
 # The build image's ccache instead of building host-ccache and its libraries.
 ccache = "system,build"
 
-[providers.buildroot.ccache]
+[cache.ccache]
 enabled = true
 max_size = "50G"
 

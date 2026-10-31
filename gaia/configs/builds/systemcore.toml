@@ -1,4 +1,5 @@
-gaia_version = ">=2.0.0"
+config = 3
+gaia_version = ">=2.0.1-dev"
 build_name = "helios-systemcore"
 version = "2026.2.0-dev.${project.commit_count}+${project.commit_short}"
 description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine and its Eidos plugin, helios-peripherals, helios-diagnostics, orion-node, lemnosd, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
@@ -69,7 +70,7 @@ repo = "https://github.com/Prometheus-Dynamics/Orion.git"
 rev = "6a70758012d1bf65d97befca6dc9526701ae5070"
 
 # Lemnos dev b87f76c (the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; it includes the SystemCore board and host-owned devices: lemnosd, and its
-# board definition at packaging/boards/systemcore.toml, read by @source:lemnos below).
+# board definition at packaging/boards/systemcore.toml, read by ${source.lemnos} below).
 [[sources]]
 id = "lemnos"
 kind = "git"
@@ -85,7 +86,7 @@ build_group = "helios-backend"
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 toolchain = "systemcore"
 profile = "${input.cargo_profile}"
-output_path = "${workspace.out_dir}/artifacts/helios-api"
+output_path = "${outputs.dir}/artifacts/helios-api"
 
 [[artifacts]]
 id = "helios-engine"
@@ -96,7 +97,7 @@ build_group = "helios-backend"
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 toolchain = "systemcore"
 profile = "${input.cargo_profile}"
-output_path = "${workspace.out_dir}/artifacts/helios-engine"
+output_path = "${outputs.dir}/artifacts/helios-engine"
 
 [[artifacts]]
 id = "helios-diagnostics"
@@ -107,7 +108,7 @@ build_group = "helios-backend"
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 toolchain = "systemcore"
 profile = "${input.cargo_profile}"
-output_path = "${workspace.out_dir}/artifacts/helios-diagnostics"
+output_path = "${outputs.dir}/artifacts/helios-diagnostics"
 
 # The Eidos Daedalus plugin, in the engine's build group so both share one Daedalus build
 # fingerprint (the Rust-ABI plugin path needs it).
@@ -121,7 +122,7 @@ cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eido
 toolchain = "systemcore"
 profile = "${input.cargo_profile}"
 target_name = "libhelios_eidos_plugin.so"
-output_path = "${workspace.out_dir}/artifacts/libhelios_eidos_plugin.so"
+output_path = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
 
 [[artifacts]]
 id = "helios-peripherals"
@@ -132,7 +133,7 @@ build_group = "helios-backend"
 cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
 toolchain = "systemcore"
 profile = "${input.cargo_profile}"
-output_path = "${workspace.out_dir}/artifacts/helios-peripherals"
+output_path = "${outputs.dir}/artifacts/helios-peripherals"
 
 # lemnosd, Lemnos's hardware service, built with the SystemCore toolchain (its `service` profile is
 # the one Lemnos ships). It reads the host-owned devices of the SystemCore board definition.
@@ -143,7 +144,7 @@ package = "lemnosd"
 source = "lemnos"
 toolchain = "systemcore"
 profile = "service"
-output_path = "${workspace.out_dir}/artifacts/lemnosd"
+output_path = "${outputs.dir}/artifacts/lemnosd"
 
 # orion-node's appliance build (Orion packaging/gaia/orion-node.toml): IPC control plane, peer
 # sync, mDNS discovery, sd_notify and the watchdog.
@@ -156,67 +157,67 @@ toolchain = "systemcore"
 profile = "release"
 no_default_features = true
 features = ["peer-tcp", "discovery-mdns", "systemd-notify"]
-output_path = "${workspace.out_dir}/artifacts/orion-node"
+output_path = "${outputs.dir}/artifacts/orion-node"
 
 [image]
 kind = "none"
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "${workspace.out_dir}"
+out_dir = "${outputs.dir}"
 
 # The package's files as installed: the guest layout (docs/device-profiles.md, "The install
 # layout") and the units in /etc/systemd/system, as SystemCore's own packages do.
 [[image.assembly.trees]]
 id = "pkg-root"
-path = "$assembly.work/pkg-root"
+path = "${assembly.work}/pkg-root"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/helios-api"
+src = "${outputs.dir}/artifacts/helios-api"
 dest = "usr/local/bin/helios-api"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/helios-engine"
+src = "${outputs.dir}/artifacts/helios-engine"
 dest = "usr/local/bin/helios-engine"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/helios-diagnostics"
+src = "${outputs.dir}/artifacts/helios-diagnostics"
 dest = "usr/local/bin/helios-diagnostics"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/helios-peripherals"
+src = "${outputs.dir}/artifacts/helios-peripherals"
 dest = "usr/local/bin/helios-peripherals"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/orion-node"
+src = "${outputs.dir}/artifacts/orion-node"
 dest = "usr/local/bin/orion-node"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/lemnosd"
+src = "${outputs.dir}/artifacts/lemnosd"
 dest = "usr/local/bin/lemnosd"
 mode = "0755"
 
 # The SystemCore board definition, from the pinned Lemnos checkout (host-owned devices only).
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@source:lemnos/packaging/boards/systemcore.toml"
+src = "${source.lemnos}/packaging/boards/systemcore.toml"
 dest = "usr/local/share/lemnos/boards/systemcore.toml"
 mode = "0644"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/libhelios_eidos_plugin.so"
+src = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
 dest = "usr/local/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
 mode = "0755"
 
@@ -228,75 +229,75 @@ dest = "usr/local/share/helios/ui/"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/helios.png"
+src = "${assets}/systemcore/helios.png"
 dest = "usr/local/share/helios/helios.png"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/runtime-services/core/etc/helios/startup.toml"
+src = "${assets}/runtime-services/core/etc/helios/startup.toml"
 dest = "usr/local/etc/helios/startup.toml"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/etc/layout.env"
+src = "${assets}/systemcore/etc/layout.env"
 dest = "usr/local/etc/helios/layout.env"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/etc/helios.env"
+src = "${assets}/systemcore/etc/helios.env"
 dest = "usr/local/etc/helios/helios.env"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/etc/orion-node.env"
+src = "${assets}/systemcore/etc/orion-node.env"
 dest = "usr/local/etc/helios/orion-node.env"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-orion.service"
+src = "${assets}/systemcore/systemd/helios-orion.service"
 dest = "etc/systemd/system/helios-orion.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-engine.socket"
+src = "${assets}/systemcore/systemd/helios-engine.socket"
 dest = "etc/systemd/system/helios-engine.socket"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-engine.service"
+src = "${assets}/systemcore/systemd/helios-engine.service"
 dest = "etc/systemd/system/helios-engine.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-lemnosd.service"
+src = "${assets}/systemcore/systemd/helios-lemnosd.service"
 dest = "etc/systemd/system/helios-lemnosd.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-peripherals.service"
+src = "${assets}/systemcore/systemd/helios-peripherals.service"
 dest = "etc/systemd/system/helios-peripherals.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-api.service"
+src = "${assets}/systemcore/systemd/helios-api.service"
 dest = "etc/systemd/system/helios-api.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/robot/robot-env"
+src = "${assets}/robot/robot-env"
 dest = "usr/local/lib/helios/robot-env"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "@assets/systemcore/systemd/helios-robot.service"
+src = "${assets}/systemcore/systemd/helios-robot.service"
 dest = "etc/systemd/system/helios-robot.service"
 
 [[image.assembly.packages]]
 id = "helios"
 format = "ipk"
 tree = "pkg-root"
-dest = "$assembly.out/"
+dest = "${assembly.out}/"
 debian_binary = false                       # the layout of Limelight's own packages
 allowed_prefixes = ["/usr/local", "/etc/systemd/system"]
 

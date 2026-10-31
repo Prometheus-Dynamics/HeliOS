@@ -10,6 +10,8 @@
 # and gpg must find that key: run with GNUPGHOME=~/.cache/gaia-registry-test/gnupg.
 # A shared registry (GHCR) later is the same table with another registry, repository and token.
 
+config = 3
+
 [secrets.registry_token]
 file = "~/.cache/gaia-registry-test/auth/password"
 

@@ -1,3 +1,4 @@
+config = 3
 description = "Base OS layer: shared Buildroot source, core packages, the read-only EROFS root with its /data partition, and OS features used by every target."
 target = "aarch64-linux"
 

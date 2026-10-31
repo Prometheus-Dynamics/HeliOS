@@ -1,3 +1,4 @@
+config = 3
 description = "Read-only EROFS root and the /data partition: the root slot image (LZMA, large pclusters), /var on tmpfs, /data (p7) mounted early with the persistent state bound into place, the machine ID on /data (sshd host keys are the device package's, per board), and the device hostname."
 
 # The root filesystem is one A/B slot (p5/p6, 512 MiB, targets/raze.toml) that
@@ -9,14 +10,14 @@ description = "Read-only EROFS root and the /data partition: the root slot image
 
 [[stage.files]]
 id = "data-setup-script"
-src = "@assets/storage/usr/lib/helios/data-setup"
+src = "${assets}/storage/usr/lib/helios/data-setup"
 dest = "/usr/lib/helios/data-setup"
 origin = "static-asset"
 mode = 493
 
 [[stage.files]]
 id = "data-grow-script"
-src = "@assets/storage/usr/lib/helios/grow-data"
+src = "${assets}/storage/usr/lib/helios/grow-data"
 dest = "/usr/lib/helios/grow-data"
 origin = "static-asset"
 mode = 493
@@ -27,26 +28,26 @@ mode = 493
 [[stage.services]]
 id = "data-setup-service"
 name = "helios-data-setup.service"
-unit_path = "@assets/storage/systemd/helios-data-setup.service"
+unit_path = "${assets}/storage/systemd/helios-data-setup.service"
 
 # sshd: the device package's sshd_config.d (keys from the boot partition, in
 # /run) and host keys on /data; no `ssh-keygen -A` into the read-only /etc.
 [[stage.files]]
 id = "sshd-config"
-src = "@assets/os/etc/ssh/sshd_config"
+src = "${assets}/os/etc/ssh/sshd_config"
 dest = "/etc/ssh/sshd_config"
 origin = "static-asset"
 
 [[stage.files]]
 id = "sshd-service-dropin"
-src = "@assets/os/etc/systemd/system/sshd.service.d/10-helios.conf"
+src = "${assets}/os/etc/systemd/system/sshd.service.d/10-helios.conf"
 dest = "/etc/systemd/system/sshd.service.d/10-helios.conf"
 origin = "static-asset"
 
 # The device package's hostname default with a HeliOS prefix: helios-{serial8}.
 [[stage.files]]
 id = "board-hostname-env"
-src = "@assets/os/etc/board/hostname.env"
+src = "${assets}/os/etc/board/hostname.env"
 dest = "/etc/board/hostname.env"
 origin = "static-asset"
 
@@ -101,7 +102,7 @@ stage_files = [
 ]
 stage_services = ["data-setup-service"]
 
-[image.output]
+[outputs]
 # Keep provider work/output collection isolated per build, but place release
 # compressed raw disk images in a repo-level output folder for flashing/distribution.
 # The same .img.xz updates a running board (the device package's writer).

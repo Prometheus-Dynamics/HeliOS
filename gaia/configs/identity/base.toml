@@ -1,16 +1,17 @@
+config = 3
 description = "Shared identity layer: OS identity files, locale, timezone, and the UI address for the device identity (manage_url). The hostname (helios-{serial8}), sshd and its host keys are set up in os/storage/erofs.toml; the hardware watchdog, SSH keys from the boot partition and the device identity endpoint come from the Raze device package."
 
 [stage]
 
 [[stage.files]]
 id = "identity-hosts"
-src = "@assets/identity/etc/hosts"
+src = "${assets}/identity/etc/hosts"
 dest = "/etc/hosts"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-nsswitch"
-src = "@assets/identity/etc/nsswitch.conf"
+src = "${assets}/identity/etc/nsswitch.conf"
 dest = "/etc/nsswitch.conf"
 origin = "static-asset"
 
@@ -33,43 +34,43 @@ origin = "generated"
 
 [[stage.files]]
 id = "identity-version"
-src = "@assets/identity/etc/helios/version"
+src = "${assets}/identity/etc/helios/version"
 dest = "/etc/helios/version"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-build-id"
-src = "@assets/identity/etc/helios/build-id"
+src = "${assets}/identity/etc/helios/build-id"
 dest = "/etc/helios/build-id"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-build-epoch"
-src = "@assets/identity/etc/helios/build.epoch"
+src = "${assets}/identity/etc/helios/build.epoch"
 dest = "/etc/helios/build.epoch"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-defaults"
-src = "@assets/identity/etc/default/helios-identity"
+src = "${assets}/identity/etc/default/helios-identity"
 dest = "/etc/default/helios-identity"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-locale-conf"
-src = "@assets/identity/etc/locale.conf"
+src = "${assets}/identity/etc/locale.conf"
 dest = "/etc/locale.conf"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-default-locale"
-src = "@assets/identity/etc/default/locale"
+src = "${assets}/identity/etc/default/locale"
 dest = "/etc/default/locale"
 origin = "static-asset"
 
 [[stage.files]]
 id = "identity-timezone"
-src = "@assets/identity/etc/timezone"
+src = "${assets}/identity/etc/timezone"
 dest = "/etc/timezone"
 origin = "static-asset"
 
@@ -78,7 +79,7 @@ origin = "static-asset"
 # links there, gaia/assets/buildroot/scripts/post-build.sh).
 [[stage.files]]
 id = "identity-manage-url-script"
-src = "@assets/identity/usr/lib/helios/manage-url"
+src = "${assets}/identity/usr/lib/helios/manage-url"
 dest = "/usr/lib/helios/manage-url"
 origin = "static-asset"
 mode = 493
@@ -86,11 +87,11 @@ mode = 493
 [[stage.services]]
 id = "identity-manage-url-service"
 name = "helios-manage-url.service"
-unit_path = "@assets/identity/etc/systemd/system/helios-manage-url.service"
+unit_path = "${assets}/identity/etc/systemd/system/helios-manage-url.service"
 
 [[stage.files]]
 id = "identity-set-build-time-script"
-src = "@assets/identity/usr/local/bin/helios-set-build-time.sh"
+src = "${assets}/identity/usr/local/bin/helios-set-build-time.sh"
 dest = "/usr/local/bin/helios-set-build-time.sh"
 origin = "static-asset"
 mode = 493
@@ -98,7 +99,7 @@ mode = 493
 [[stage.services]]
 id = "identity-set-build-time-service"
 name = "helios-set-build-time.service"
-unit_path = "@assets/identity/etc/systemd/system/helios-set-build-time.service"
+unit_path = "${assets}/identity/etc/systemd/system/helios-set-build-time.service"
 
 # Image version info, written by the build to /etc/default/helios-image.env:
 # the exact HeliOS, Raze device package and Orion commits the image was built

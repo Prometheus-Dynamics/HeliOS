@@ -1,16 +1,17 @@
+config = 3
 description = "Shared minimal network layer: Ethernet DHCP with mDNS, answered by systemd-resolved (no avahi)."
 
 [stage]
 
 [[stage.files]]
 id = "network-ethernet-dhcp"
-src = "@assets/network/etc/systemd/network/10-eth0.network"
+src = "${assets}/network/etc/systemd/network/10-eth0.network"
 dest = "/etc/systemd/network/10-eth0.network"
 origin = "static-asset"
 
 [[stage.files]]
 id = "network-wait-online-override"
-src = "@assets/network/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf"
+src = "${assets}/network/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf"
 dest = "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf"
 origin = "static-asset"
 

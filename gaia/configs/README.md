@@ -139,7 +139,7 @@ Orion's `packaging/gaia/orionctl.toml`, imported right after it from the same
 source. HeliOS overrides them in later layers:
 
 - `runtime-services/backend-core.toml` redeclares `orion-node-env` with
-  `@assets/runtime-services/core/etc/default/orion-node.env` (single-node
+  `${assets}/runtime-services/core/etc/default/orion-node.env` (single-node
   appliance profile, `ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root` so
   helios-api and operators in a root shell reach the node,
   `ORION_NODE_HOST_FACTS_REFRESH_MS=2000` for the UI's live metrics, state in
@@ -174,9 +174,10 @@ the port the device identity's `manage_url` names
   external tree (device tree first, then `gaia/assets/buildroot`), kernel
   fragments, `config.txt`, `cmdline.txt`, `autoboot.txt`, the post-build and
   post-image scripts, and the A/B disk assembly.
-- `workspace/` – `root_dir`, `build_dir`/`out_dir` (`gaia/build/${build.name}`,
-  `gaia/output/${build.name}`), the `@assets` alias, reporting, failure policy,
-  and the Buildroot build-speed settings (parallel packages, ccache).
+- `workspace/` – `root_dir`, `build_dir` (`gaia/build/${build.name}`), `outputs.dir`
+  (`gaia/output/${build.name}`), the `assets` alias, reporting, failure policy,
+  the Buildroot build-speed settings (parallel packages) and the `[cache]` table
+  (ccache, package cache).
 - `os/`, `network/`, `hardware/`, `identity/`, `ops/`, `storage/`,
   `runtime-config/` – layer fragments imported by `layers/` and the target.
 - `payloads/` – what gets built and installed: the HeliOS services and tools
@@ -200,4 +201,6 @@ cross-build image lives under `gaia/docker/`.
   `helios-data-setup`) or in `/run`.
 - Pin git sources with `rev`. `pin = "locked"` alone only stops re-fetching;
   the revision is not recorded anywhere.
-- Paths use `@assets/...` or are relative to the repository root.
+- Files are Gaia config v3 (`config = 3`); `gaia migrate --check` on both builds
+  must stay clean. Tokens are `${...}` only: paths use `${assets}/...`,
+  `${self}/...` or are relative to the repository root.

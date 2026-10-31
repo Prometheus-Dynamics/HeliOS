@@ -1,3 +1,4 @@
+config = 3
 description = "Aggregated full payload layer: the UI's static build and the peripherals binary."
 
 imports = [

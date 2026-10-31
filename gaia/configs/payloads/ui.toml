@@ -1,3 +1,4 @@
+config = 3
 description = "UI payload layer: the HeliOS UI's static build (ui/, SvelteKit with adapter-static, built with bun by tools/build-os.sh), served by helios-api on :5800 next to the API."
 
 [stage]

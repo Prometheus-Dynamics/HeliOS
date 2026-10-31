@@ -1,8 +1,9 @@
+config = 3
 description = "Shared backend-core runtime-service layer: core backend units, sockets, tightly-coupled service assets, and HeliOS's settings for Orion's orion-node unit."
 
 [[stage.files]]
 id = "runtime-api-startup"
-src = "@assets/runtime-services/core/etc/helios/startup.toml"
+src = "${assets}/runtime-services/core/etc/helios/startup.toml"
 dest = "/etc/helios/startup.toml"
 origin = "static-asset"
 
@@ -13,7 +14,7 @@ origin = "static-asset"
 # and state on the data partition (/var/lib/helios is bound from /data/helios).
 [[stage.files]]
 id = "orion-node-env"
-src = "@assets/runtime-services/core/etc/default/orion-node.env"
+src = "${assets}/runtime-services/core/etc/default/orion-node.env"
 dest = "/etc/default/orion-node.env"
 mode = 420
 origin = "static-asset"
@@ -21,7 +22,7 @@ origin = "static-asset"
 # The owners board-data-owners keeps right on /data (orion-node's state).
 [[stage.files]]
 id = "helios-data-owners"
-src = "@assets/runtime-services/core/usr/lib/board/data-owners.d/helios.conf"
+src = "${assets}/runtime-services/core/usr/lib/board/data-owners.d/helios.conf"
 dest = "/usr/lib/board/data-owners.d/helios.conf"
 mode = 420
 origin = "static-asset"
@@ -29,28 +30,28 @@ origin = "static-asset"
 [[stage.services]]
 id = "helios-api-service"
 name = "helios-api.service"
-unit_path = "@assets/runtime-services/core/systemd/helios-api.service"
+unit_path = "${assets}/runtime-services/core/systemd/helios-api.service"
 
 [[stage.services]]
 id = "helios-engine-service"
 name = "helios-engine.service"
-unit_path = "@assets/runtime-services/core/systemd/helios-engine.service"
+unit_path = "${assets}/runtime-services/core/systemd/helios-engine.service"
 
 [[stage.services]]
 id = "helios-engine-socket"
 name = "helios-engine.socket"
-unit_path = "@assets/runtime-services/core/systemd/helios-engine.socket"
+unit_path = "${assets}/runtime-services/core/systemd/helios-engine.socket"
 
 [[stage.files]]
 id = "helios-robot-env"
-src = "@assets/robot/robot-env"
+src = "${assets}/robot/robot-env"
 dest = "/usr/lib/helios/robot-env"
 mode = 493
 origin = "static-asset"
 
 [[stage.files]]
 id = "orion-node-robot-dropin"
-src = "@assets/runtime-services/core/systemd/orion-node.service.d/20-helios-robot.conf"
+src = "${assets}/runtime-services/core/systemd/orion-node.service.d/20-helios-robot.conf"
 dest = "/etc/systemd/system/orion-node.service.d/20-helios-robot.conf"
 mode = 420
 origin = "static-asset"
@@ -58,7 +59,7 @@ origin = "static-asset"
 [[stage.services]]
 id = "helios-robot-service"
 name = "helios-robot.service"
-unit_path = "@assets/runtime-services/core/systemd/helios-robot.service"
+unit_path = "${assets}/runtime-services/core/systemd/helios-robot.service"
 
 [image]
 kind = "buildroot"

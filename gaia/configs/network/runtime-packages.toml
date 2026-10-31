@@ -1,3 +1,4 @@
+config = 3
 description = "Shared network runtime package layer: networkd for the product layers. The USB gadget network (and its dnsmasq) comes from the device package."
 
 [image]

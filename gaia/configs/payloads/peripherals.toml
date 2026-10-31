@@ -1,3 +1,4 @@
+config = 3
 description = "Shared peripherals payload layer: installs the helios-peripherals binary."
 
 [providers.rust]
