@@ -75,10 +75,11 @@ here waits for a later release. Every item: what, why, done when, blocked by.
       and use them properly). Done when: camera settings show menu controls as typed choices
       (names, not raw values) end to end, from Styx through helios-api to the UI, checked with real
       clicks on a Raze. Blocked by: Styx's typed-menu API.
-- [ ] **CM5 tag speed model.** Why: predict per-camera tag speed on weaker chips (A55, A53, A7,
-      C908). Done when: Eidos's sweep on the Raze (scalar vs NEON, CPU clock pinned, tracked vs
-      full, one thread) gives a ms-per-frame model, recorded in docs and sent to the PCB session.
-      Blocked by: a Raze slot.
+- [x] **CM5 tag speed model.** Eidos's sweep on the Raze (2026-10-30): a frame costs a fixed
+      number of cycles (NEON full search 1.83 Mcycles p50, tracked 1.02), so ms ≈ C / (GHz × k).
+      Tags alone fit 120 fps on every target (A7 tightest at 60–70%). In Eidos
+      docs/performance-model.md (6a4dc810), sent to the PCB session. Still to do: the same sweep
+      for tags + live_map once the front end lands, and measured k values from the CI dev board.
 - [ ] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done when: the two
       read-after-apply tests pass 200 runs under load. Blocked by: nothing.
 
