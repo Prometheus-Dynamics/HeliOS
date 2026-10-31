@@ -1,5 +1,91 @@
 # HeliOS TODO
 
+## Next release (2026.2.0)
+
+The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
+added on 2026-10-30 (the last addition). Anything not here waits for a later release. Every item:
+what, why, done when, blocked by.
+
+### 1. Freeze items still open
+
+- [ ] **Role UI.** Why: the frozen PIT/ROBOT role split. Done when: role switching works with real
+      clicks on a Raze through the SystemCore, and the UI is reviewed visually. Blocked by: nothing.
+- [ ] **Field test day.** Why: the release has to hold up on a robot. Done when: a full session on a
+      robot behind a SystemCore (tags, field pose, NT4, an update, a reboot) with no manual fixes,
+      and its notes are in docs. Blocked by: robot access (user).
+- [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
+      client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
+      and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.
+- [ ] **Robot time.** Why: poses must line up with the robot's clock. Done when: the published
+      timestamps match the SystemCore's time within a measured bound, and that bound is in docs.
+      Blocked by: nothing.
+- [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
+      Done when: a prior is loaded per camera model and self-calibration converges from it on the
+      Raze. Blocked by: nothing.
+- [ ] **SystemCore coexistence.** Why: HeliOS runs next to the SystemCore's own services. Done when:
+      the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
+      services, with no port or USB conflicts. Blocked by: the Gaia .ipk path.
+- [ ] **Gaia profiles and the layered slot.** Why: small updates and per-device builds. Done when:
+      every board profile builds its layered slot and Atlas installs a layer delta on a Raze.
+      Blocked by: nothing.
+- [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
+      or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches.
+      Blocked by: nothing.
+
+### 2. Hardware support, memory and GPU (added 2026-10-30)
+
+- [ ] **Chunked dense mesh.** Why: bounded dense memory; Eidos removes the whole-mesh port after
+      this. Done when: both dense graphs, the stored-graph migration, the API chunk store (with a
+      byte-cap knob) and the UI run from `mesh_chunk`/`transforms`/`status` on a Raze; Eidos is
+      told `mesh` is unused. Blocked by: nothing (branch `dense-chunks` in progress).
+- [ ] **Trajectory store.** Why: Eidos stops keeping per-frame pose history; HeliOS holds a
+      decimated, byte-capped path. Done when: the map pane draws from HeliOS's store, corrections
+      apply by frame range, and an epoch change clears it. Blocked by: Eidos's corrections port.
+- [ ] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
+      every boot and logs it every time. Done when: a refreshed stored graph is written back once
+      and the warning doesn't repeat on the next boot. Blocked by: nothing.
+- [ ] **Per-device camera knobs.** Why: lean is the default; trade-offs are explicit. Done when: the
+      device config sets Styx's raw/output buffer counts and queue depth, and its accelerators
+      (ISP path, RGA, VPU) per board; on the K230D start at raw 3, output 2, queue 1. Blocked by:
+      Styx's knobs (done) and its accelerator backends.
+- [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU (wgpu now, CUDA
+      possibly later), like NEON/SIMD. Done when: the pipeline config selects the CPU or GPU
+      backend per Eidos operation, dense depth runs on the GPU on a Raze, and the plan shows no
+      CPU→GPU→CPU round trips. Blocked by: Eidos M1, Daedalus's GPU work.
+- [ ] **Memory slimming.** Why: the K230D has 128 MB for everything. Done when: tags-only at
+      1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5 (2026-10-30: about 67 MiB
+      plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
+      remaining targets. Blocked by: nothing.
+- [ ] **K230D device support.** Why: the cheap single-camera tier. Done when: an image for the
+      K230D (two slots plus data on SPI-NAND), vision pinned to CPU1 (the only RVV core),
+      services on CPU0, and HeliOS running tags + pose on the OV9782 inside 128 MB. Blocked by: a
+      board, the Gaia BSP (option A), Styx's K230 path, Eidos's RVV kernels.
+- [ ] **Rockchip and Flame device support** (RK3588S, RK3576, RK3566 or RK3562, RV1106G2; Flame is a 32-bit Cortex-A7, so it needs an armv7 build). Why: the
+      module tiers. Done when: each module boots a HeliOS image and runs a camera pipeline, with
+      per-camera CPU and RAM figures reported to the PCB session from the CI dev board. Blocked by:
+      boards, the Gaia BSPs, Styx's rkisp/RGA/MPP, the user's RK3562 decision.
+- [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
+      without SSH. Done when: Atlas installs its agent on the SystemCore and flashes the second
+      Raze (e5226d57) through it. Blocked by: Atlas.
+- [ ] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done when: the two
+      read-after-apply tests pass 200 runs under load. Blocked by: nothing.
+
+### 3. Release mechanics
+
+- [ ] Every dependency pinned to its release tag, not a `dev` revision: Daedalus, Styx, Eidos,
+      Orion, Lemnos, and the Gaia sources in `gaia/configs/builds/*.toml`.
+- [ ] Version 2026.2.0 in os-release, the slot version and the UI; CHANGELOG.md for the release.
+- [ ] A release image for every supported board from one commit, with sizes reported against each
+      board's slot budget; Atlas's signing key in place (user decision).
+- [ ] Gates: clippy, tests, UI checks and an image build, green on the release commit.
+
+### Not this release
+
+- NPU and AI models (Coral, RKNN, the K230 KPU): HeliOS uses the NPU once Coral and AI-model
+  support return.
+
+## Backlog
+
 State of HeliOS and the Raze work as of 2026-10-09.
 
 ## Where things stand
