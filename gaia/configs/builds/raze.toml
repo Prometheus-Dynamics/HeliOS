@@ -134,7 +134,7 @@ rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "45cb3a31d2950c70d0182017f121fbaf1b3f8a89"
+rev = "33eafe0a73b99e990c076be897cc57ee86b2e1b9"
 
 [[sources]]
 id = "orion"
