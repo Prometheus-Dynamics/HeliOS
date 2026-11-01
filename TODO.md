@@ -3,11 +3,24 @@
 ## Next release (2027.0.0)
 
 The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
-added on 2026-10-30 (the last addition). Release targets agreed with the user on 2026-10-30, tagged
-when this feature push is done: HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 4.0.0, Lemnos
-1.0.0, Gaia 3.0.0, Orion 1.0.0. Every backend gets full support wherever the hardware allows
+added on 2026-10-30 (the last addition). Version targets agreed with the user on 2026-10-30:
+HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 4.0.0, Lemnos 1.0.0, Gaia 3.0.0, Orion 1.0.0.
+Only the user decides when anything is released or tagged, and what blocks it; until then every
+repo stays on its dev version. Every backend gets full support wherever the hardware allows
 (scalar, x86 SIMD, aarch64 and armv7 NEON, RVV, GPU); no partial implementations. Anything not
-here waits for a later release. Every item: what, why, done when, blocked by.
+here waits for a later release. Every item: what, why, done when, blocked by. Board code is written
+now and marked untested on board; only its test waits for the board.
+
+### 0. Next up
+
+- [ ] **Pin round and Raze deploy.** Why: Raze #1 runs older dependencies than dev, so the fixes
+      below are unproven on the board. Done when: `backend/Cargo.lock`, the Gaia sources and the
+      image take Eidos dev, Styx 475e07a or newer (image and Cargo, with `queue_safe` 220aff5),
+      Daedalus 03f55c5, Atlas 058c53c, Gaia 17c20df and Orion dev; `BOARD_PACKAGE_COUNT`
+      (`${source.atlas.commit_count}`, Gaia b47a9e5) sits beside `BOARD_PACKAGE_COMMIT` in
+      `gaia/configs/identity/base.toml`; and on Raze #1 `/sys/module/pisp_be/parameters/queue_safe`
+      prints Y, `dmesg | grep "not safe"` is empty, the real capture allocations are counted for
+      Styx, and Daedalus's stale-graph refresh (bb07e3b) is confirmed. Blocked by: nothing.
 
 ### 1. Freeze items still open
 
@@ -40,22 +53,33 @@ here waits for a later release. Every item: what, why, done when, blocked by.
 - [ ] **Chunked dense mesh.** Why: bounded dense memory; Eidos removes the whole-mesh port after
       this. Done when: both dense graphs, the stored-graph migration, the API chunk store (with a
       byte-cap knob) and the UI run from `mesh_chunk`/`transforms`/`status` on a Raze; Eidos is
-      told `mesh` is unused. Blocked by: nothing (branch `dense-chunks` in progress).
+      told `mesh` is unused. Not started: the `dense-chunks` branch has no commits of its own, and
+      the API, both graphs, the tests and the UI still read `dense_mesh`. Blocked by: nothing; Eidos
+      is waiting on this.
 - [ ] **Trajectory store.** Why: Eidos stops keeping per-frame pose history; HeliOS holds a
-      decimated, byte-capped path. Done when: the map pane draws from HeliOS's store, corrections
-      apply by frame range, and an epoch change clears it. Blocked by: Eidos's corrections port.
+      decimated, byte-capped path. Partly done: the UI reads Eidos's `map_trajectory` stream, with
+      run/epoch reset and corrections by revision (`StreamedTrajectory`, 213a68b0, Eidos c38f5075).
+      Left: decimation and a byte cap, and drawing from the store directly instead of writing it
+      into `snapshot.trajectory` (`live.svelte.ts`, `three/map-scene.ts`), now that Eidos e90719a9
+      drops that field; keyframe markers must still draw. Blocked by: nothing.
 - [ ] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
       every boot and logs it every time. Done when: a refreshed stored graph is written back once
       and the warning doesn't repeat on the next boot. Blocked by: nothing.
 - [ ] **Per-device camera knobs.** Why: lean is the default; trade-offs are explicit. Done when: the
       device config sets Styx's raw/output buffer counts and queue depth, and its accelerators
-      (ISP path, RGA, VPU) per board; on the K230D start at raw 3, output 2, queue 1. Blocked by:
-      Styx's knobs (done) and its accelerator backends.
+      (ISP path, RGA, VPU) per board; on the K230D start at raw 3, output 2, queue 1. Styx's knobs
+      are done (450cebc: `StyxConfig::with_accelerators`, each `Auto`/`Off`/`Required`); HeliOS
+      doesn't use them yet. Blocked by: the pin round for the wiring; each board's setting follows
+      Styx's backend for it.
 - [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
       Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
-      node asks (7630c661). Left: dense on the GPU by default on the Raze once Eidos's real-time gate
-      passes (late frames, tick p99 and keyframes no worse than CPU; round 5 is the best so far),
-      with the pipeline cache in /var/lib/helios/gpu-cache. Blocked by: Eidos's GPU dense rounds.
+      node asks (7630c661). Left: dense on the GPU by default on the Raze, by `wants_gpu` also firing
+      on `auto`, with the pipeline cache in /var/lib/helios/gpu-cache. The gate judges keyframes
+      processed and mesh delivered. Eidos's v3d17 run on the full recording (CM5, CPU vs GPU):
+      keyframes 6 vs 7, mesh 5–6 vs 6, tick p99 2.88–2.96 vs 2.92–3.01 ms, max 3.51–3.75 vs
+      4.45–6.36 ms, ticks over 4 ms 0 vs 3, over 8.33 ms 0 vs 0, vision core per keyframe about 705
+      vs 180 ms. The `auto` probe chose the GPU every time but costs 27.5 s per start. Blocked by:
+      Eidos landing it on dev with that setup cached.
 - [ ] **Memory slimming.** Why: the K230D has 128 MB for everything. Done when: tags-only at
       1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5 (2026-10-30: about 67 MiB
       plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
@@ -64,19 +88,20 @@ here waits for a later release. Every item: what, why, done when, blocked by.
       K230D (two slots plus data on SPI-NAND), vision pinned to CPU1 (the only RVV core),
       services on CPU0, and HeliOS running tags + pose on the OV9782 inside 128 MB. The picture
       comes from the hardware ISP running Styx's own 3A (decided 2026-10-30), with the RVV software
-      ISP as the fallback. Blocked by: a board, the Gaia BSP (option A), Styx's K230 path, Eidos's
-      RVV kernels.
+      ISP as the fallback. Blocked by: the Gaia BSP (option A), Styx's K230 path and Eidos's RVV
+      kernels for the code; a board only for the test.
 - [ ] **Rockchip and Flame device support** (RK3588S, RK3576, RK3566 and RK3562, both
       low-cost modules being built; Flame RV1106G2 is a 32-bit Cortex-A7, so it gets a full armv7
       build including Eidos's armv7 NEON). Why: the module tiers. Done when: each module boots a
       HeliOS image and runs a camera pipeline, with per-camera CPU and RAM figures reported to the
-      PCB session from the CI dev board. Blocked by: boards (off-the-shelf dev boards can stand in:
-      ROCK 5C, ROCK 4D, ZERO 3W, Firefly AIO-3562JQ, Luckfox Pico), the Gaia BSPs, Styx's
-      rkisp/RGA/MPP.
+      PCB session from the CI dev board. Blocked by: the Gaia BSPs and Styx's rkisp/RGA/MPP for the
+      code; boards only for the test (off-the-shelf dev boards can stand in: ROCK 5C, ROCK 4D,
+      ZERO 3W, Firefly AIO-3562JQ, Luckfox Pico).
 - [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
       without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
       (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
-      agent under Orion). Blocked by: e5226d57 replugged into a SystemCore port; Orion's four asks.
+      agent under Orion). Blocked by: e5226d57 moved to a 3-1.x SystemCore port (user, hardware) for
+      the flash; Orion's four Atlas features (Orion TODO, the coordinator's) for step 2.
 - [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
       end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
       real-click check on a Raze. Blocked by: nothing.
@@ -89,6 +114,8 @@ here waits for a later release. Every item: what, why, done when, blocked by.
       read-after-apply tests pass 200 runs under load. Blocked by: nothing.
 
 ### 3. Release mechanics
+
+For when the user calls the release; not work to start before that.
 
 - [ ] Every dependency pinned to its release tag, not a `dev` revision: Daedalus, Styx, Eidos,
       Orion, Lemnos, and the Gaia sources in `gaia/configs/builds/*.toml`.
@@ -107,8 +134,10 @@ here waits for a later release. Every item: what, why, done when, blocked by.
 ### Pinned for later (user, 2026-10-30)
 
 - Atlas's release signing key.
-- Image publishing: GHCR registry and owner, the CI runner token and fork-PR approval, the
-  minisign/cosign install.
+- Image publishing: GHCR is approved (2026-11-01, owner still to be named) and so are
+  minisign/cosign (Gaia finishes the proof); the CI runner token and fork-PR policy are the user's.
+- The pispbe `queue_safe` patch stays carried in Styx's images; no upstream filing for now (user,
+  2026-11-01).
 - On hold: OV9782 ColorChecker tuning (chart and lighting being ordered, 2026-10-31); Styx's bench tests (mains-lamp
   anti-flicker, C270 YUYV fallback).
 
@@ -124,9 +153,9 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [ ] A/B and read-only root on hardware: first boot (data.ext4 grows to the eMMC, `/data` binds, machine-id and SSH host keys persist across a reboot and an update, hostname `helios-<serial8>`, `manage_url` `http://helios-<serial8>.local:5800/`), the UI on :5800, an update from the UI and from Atlas (stage, trial reboot, update-health confirms; a broken image rolls back), `rootfs.erofs` size vs. the 512 MiB slot, boot time with an LZMA root, journald after the machine-id bind (restarted once per boot), nothing writing to `/` (`journalctl -b | grep -i 'read-only'`).
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (the per-board serial-hash-v1 address on `usbbr0`, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `board/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
 - [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
-- [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, helios-engine and helios-peripherals connect with `Group=orion`, helios-api (root) and `orionctl` from a root shell are admitted (`ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root`; `orionctl` from Orion's `packaging/gaia/orionctl.toml`).
+- [ ] Check `orionctl` from a root shell is admitted (`ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root`; `orionctl` from Orion's `packaging/gaia/orionctl.toml`). Orion's unit itself is checked: on Raze #1 under HeliOS's load, `Type=notify`, watchdog on, 0 restarts in 7 days (Orion TODO, 2026-10-31).
 - [ ] helios-api live metrics on the CM5: `GET /v1/metrics` and SSE `metrics` from Orion's host metrics (CPU per core, the hottest thermal zone; `ORION_NODE_HOST_FACTS_REFRESH_MS=2000`), `pipeline`/`resource` events within one sample, and the event stream surviving an orion-node restart.
-- [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
+- [x] Transparent huge pages: not applicable, the Raze kernel has none (Orion TODO, 2026-10-31). Memory is tracked under "Memory slimming", per-frame timings under "Measure the Eidos plugin graph".
 - [x] Hostname: `helios-{serial8}` through the device package's hostname policy (`/etc/board/hostname.env`); no static hostname.
 
 ## HeliOS image
@@ -135,7 +164,7 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [x] Stage the new `ui/` (served by helios-api on :5800, the port in `manage_url`); lighttpd and the old `frontend/` are no longer in the image.
 - [ ] Remove the old `frontend/` tree (tools/deploy-live.sh now deploys `ui/`). The device test tools `run-device-template*.sh` and `run-device-isolated-runtime.sh` still call the pre-v1 API (`/v1/templates`, `helios-node`): port them to `/v1/pipelines` or remove them.
 - [ ] Machine ID: systemd generates a transient one before /data mounts, so helios-data-setup binds the kept one and restarts journald each boot. If that proves noisy, ask Atlas for a package-level answer (e.g. an early generator).
-- [ ] Generate `os-release`, `/etc/helios/version` and `build-id` from `version` in `builds/raze.toml` instead of keeping static copies.
+- [ ] Generate `/etc/helios/version` and `build-id` from the build version instead of the static copies in `gaia/assets/identity` (`os-release` already is, 78638b74).
 
 ## Backend
 
@@ -162,11 +191,11 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [x] helios-api camera controls: `GET`/`PATCH`/`DELETE /v1/cameras/{id}/settings` on a Styx `ControlClient` per camera (no frames, no plan change, no buffers), changes as SSE `camera` events; the UI's camera pane uses them in live mode.
 - [x] Camera settings persist across reboots (HeliOS owns it): values set through the API are stored in `/var/lib/helios/api/camera-settings.json` and re-applied whenever a camera service appears (boot, service restart); `DELETE` resets to defaults and forgets them (docs/docs/api/http.md).
 - [ ] Camera controls on hardware: check the OV9782's controls (exposure, gain, AE, frame rate by capture restart) through the API, that the stored values come back after a reboot and a `helios-peripherals` restart (deferred until capture starts), and that the control client never shows up in the camera's `clients`.
-- [ ] helios-api: backends for the 501 endpoints (calibration capture, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions.
+- [ ] helios-api: backends for the remaining 501 endpoints (`routes/tests.rs`): safe mode, process affinity, fan/LEDs/IMU, slot switch. Calibration capture and the node catalog are done.
 - [x] Pose and field pose on Eidos d3e4b4a5b: the stored templates (Eidos's template API alone: tracked group, `aruco.pose` tail, for 36h11 the `aruco.multi_tag_pose` tail against the FRC 2026 layout) take the camera and extrinsics as held structured host inputs `camera` and `extrinsics`. Calibration (per camera and image size) and mount go into camera bindings as `camera.*`/`mount.*` context (Orion F64, unit in the key) and the engine pushes one `eidos:camera_calibration` and one `eidos:camera_extrinsics` value without recompiling (the lens model too; the compile-time lens workaround is gone). The pipeline `pose` summary takes `camera_in_field`/`robot_in_field` from `multi_tag_pose` (`reference_from_camera`, `reference_from_rig`).
 - [x] Field layer (`helios-field`, HeliOS's FRC code): WPILib AprilTag JSON and Limelight `.fmap` to Eidos known tag poses (reference = WPILib's blue-origin field; WPILib tag frame to Eidos's by the fixed rotation documented in the crate, `q = (1/2, -1/2, -1/2, 1/2)`), the mount as `CameraExtrinsics::from_flu_pose` (WPILib robot frame). Tests: a synthetic round trip through Eidos's solver (corners built from WPILib's convention alone; camera and robot recovered), the 2026 layout's normals. `/v1/field-layouts`: the 2026 AndyMark field built in, uploads, a selected layout and a per-pipeline `field_layout`, written into the graph's `known_tags` constant on deploy.
-- [ ] UI: a field-layout pane on `/v1/field-layouts` (upload, select, per pipeline); the UI's field store still keeps its own layouts.
-- [ ] Calibration capture on the device (`POST /v1/cameras/{id}/calibration/capture`, 501): board detection on the camera's frames and an Eidos calibration solve.
+- [ ] UI: choose a field layout per pipeline. The field store already loads, uploads and selects the device's layouts on `/v1/field-layouts` (7f35f835); the spec carries `field_layout`, but no pane sets it.
+- [x] Calibration capture on the device: `POST /v1/cameras/{id}/calibration/capture` and `/solve` (`calibration_capture.rs`).
 - [ ] Field layout: check the converted 2026 layout against a measured tag and camera pose on hardware. A layout change recompiles the pipeline's graph (the layout is the `known_tags` constant; see Upstream: Eidos).
 - [x] Search mode: `search_mode` (`tracked`/`full`), `full_search_every`, `loss_full_search_after` and `margin_growth_misses` in the pipeline spec and DTO; camera pipelines and the stored templates default to tracked with a full search every 8th frame, no loss escalation and window growth over 6 misses (k0g6, the user's choice), with Eidos's defaults for dormant tracks. CM5, Eidos 2bbad728d, one thread, the recorded test video (3149 reference tags): N=4 0.40–0.41 ms mean per frame, p99 about 1.0 ms, 3012 found; full search every frame 3034 at 0.84 ms; N=8 2988 at 0.33 ms; N=16 2967 at 0.28–0.29 ms. New tags are found at most N−1 frames after they appear. Round 7 (Eidos 3546efbf9, on the CM5): k0g6 (N=8) finds 3463 (98.1%) of full search's 3531 at 0.324 ms per frame, against about 0.76 ms p50 (0.94 ms p99) for full search every frame.
 - [x] libcamera control reads can block for up to a frame period (Styx): no HeliOS code reads camera controls on a frame or engine thread. helios-engine and helios-vision-probe only request frames (`FrameClient`); helios-peripherals hosts the Styx `CameraService` and never reads its controls; helios-api reads and sets controls through its own `ControlClient` per camera on its async runtime. Whether a control read stalls the camera service's own frame path is Styx's to keep apart.
