@@ -78,8 +78,10 @@ now and marked untested on board; only its test waits for the board.
       processed and mesh delivered. Eidos's v3d17 run on the full recording (CM5, CPU vs GPU):
       keyframes 6 vs 7, mesh 5–6 vs 6, tick p99 2.88–2.96 vs 2.92–3.01 ms, max 3.51–3.75 vs
       4.45–6.36 ms, ticks over 4 ms 0 vs 3, over 8.33 ms 0 vs 0, vision core per keyframe about 705
-      vs 180 ms. The `auto` probe chose the GPU every time but costs 27.5 s per start. Blocked by:
-      Eidos landing it on dev with that setup cached.
+      vs 180 ms. On the 700-frame clip the GPU still fails the gate: mesh delivered 1 vs the CPU's 2.
+      The `auto` probe chose the GPU every time but costs 27.5 s per start. Blocked by: Eidos passing
+      the gate and landing `auto` on dev with that setup cached (local 651e1071, v3d18 not yet run on
+      the board).
 - [ ] **Memory slimming.** Why: the K230D has 128 MB for everything. Done when: tags-only at
       1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5 (2026-10-30: about 67 MiB
       plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
