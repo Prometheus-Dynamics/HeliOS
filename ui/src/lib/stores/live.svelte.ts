@@ -16,7 +16,7 @@ import { defaultsFrom, type DefaultTemplate } from "#lib/core/defaults.js";
 import { hasLiveMap } from "#lib/maps/mapping.js";
 
 /** The live mapper's outputs: Eidos's template names and the older ones. */
-const MAP_PORTS = new Set(["map_pose", "map_snapshot", "map_timing", "pose", "snapshot", "timing"]);
+const MAP_PORTS = new Set(["map_pose", "map_snapshot", "map_timing", "map_trajectory", "pose", "snapshot", "timing", "trajectory"]);
 /** The dense mapper's outputs (`eidos:dense.map`). */
 const DENSE_PORTS = new Set(["dense_mesh", "dense_depth", "dense_timing"]);
 /** The tag poses and the field pose of a pose graph. */
@@ -26,7 +26,7 @@ const INTRINSICS_TTL_MS = 60_000;
 import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
-import { parseMapPose, parseMapSnapshot, parseMapTiming, TimingWindow, type MapView } from "#lib/vision/map.js";
+import { parseMapPose, parseMapSnapshot, parseMapTiming, parseMapTrajectory, StreamedTrajectory, TimingWindow, type MapView } from "#lib/vision/map.js";
 import { parseDenseDepth, parseDenseMesh, parseDenseTiming, type DenseView } from "#lib/vision/dense.js";
 import { parseFieldPose, parseTagPoses, type Intrinsics, type PoseView } from "#lib/vision/pose.js";
 import { pickFile } from "#lib/files.js";
@@ -171,6 +171,7 @@ export class LiveCluster {
   private trailBooks = new Map<string, TrailBook>();
   /** The latest live-map outputs per pipeline (`pose`, `snapshot`, `timing`), for the Map pane. */
   private maps = $state<Record<string, MapView>>({});
+  private trajectories = new Map<string, StreamedTrajectory>();
   /** The frame timings of each live-map pipeline over the last second, for the Map pane's p50s. */
   private mapTimings = new Map<string, TimingWindow>();
   /** The dense mapper's latest mesh, depth and timing per pipeline (`dense_*`). */
@@ -587,9 +588,30 @@ export class LiveCluster {
     const pose = parseMapPose(value("map_pose") ?? value("pose"));
     const snapshot = parseMapSnapshot(value("map_snapshot") ?? value("snapshot"));
     const timing = parseMapTiming(value("map_timing") ?? value("timing"));
+    const stream = parseMapTrajectory(value("map_trajectory") ?? value("trajectory"));
+    if (stream) this.trajectoryOf(pipelineId).apply(stream);
+    this.withStreamedTrajectory(pipelineId, snapshot);
     if (!pose && !snapshot && !timing) return null;
     if (timing) this.mapWindow(pipelineId).push(performance.now(), timing.frame_ms, timing.map_ms);
     return { pose, snapshot, timing };
+  }
+
+  /** The whole trajectory kept from a pipeline's `map_trajectory` stream. */
+  private trajectoryOf(pipelineId: string): StreamedTrajectory {
+    let t = this.trajectories.get(pipelineId);
+    if (!t) {
+      t = new StreamedTrajectory();
+      this.trajectories.set(pipelineId, t);
+    }
+    return t;
+  }
+
+  /** The snapshot with the streamed whole trajectory in place of its own, once the stream has frames
+   *  (Eidos keeps the snapshot's trajectory only until consumers read the stream). */
+  private withStreamedTrajectory(pipelineId: string, snapshot: MapView["snapshot"]): MapView["snapshot"] {
+    const streamed = this.trajectories.get(pipelineId)?.poses();
+    if (snapshot && streamed && streamed.length) snapshot.trajectory = streamed;
+    return snapshot;
   }
 
   private mapWindow(pipelineId: string): TimingWindow {
@@ -610,13 +632,20 @@ export class LiveCluster {
         this.maps = rest;
       }
       this.mapTimings.delete(pipelineId);
+      this.trajectories.delete(pipelineId);
       return;
     }
     const current = this.maps[pipelineId] ?? { pose: null, snapshot: null, timing: null };
     const raw = data.value.value;
     port = port.replace(/^map_/, "");
     if (port === "pose") current.pose = parseMapPose(raw);
-    else if (port === "snapshot") current.snapshot = parseMapSnapshot(raw) ?? current.snapshot;
+    else if (port === "snapshot") current.snapshot = this.withStreamedTrajectory(pipelineId, parseMapSnapshot(raw)) ?? current.snapshot;
+    else if (port === "trajectory") {
+      const stream = parseMapTrajectory(raw);
+      if (!stream) return;
+      this.trajectoryOf(pipelineId).apply(stream);
+      if (current.snapshot) current.snapshot = this.withStreamedTrajectory(pipelineId, { ...current.snapshot });
+    }
     else if (port === "timing") {
       current.timing = parseMapTiming(raw);
       if (current.timing) this.mapWindow(pipelineId).push(performance.now(), current.timing.frame_ms, current.timing.map_ms);

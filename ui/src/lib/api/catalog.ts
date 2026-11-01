@@ -407,6 +407,7 @@ export const CATALOG: NodeType[] = [
       { name: "delta", type: "eidos:map_delta" },
       { name: "snapshot", type: "eidos:map_snapshot" },
       { name: "timing", type: "eidos:map_timing" },
+      { name: "trajectory", type: "eidos:map_trajectory" },
     ],
     params: [
       { name: "tag_size_m", kind: "float", default: 0.1651, min: 0.001, max: 10, step: 0.0001, help: "Side of the tags, in metres (the outer black border)." },

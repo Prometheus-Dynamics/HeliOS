@@ -212,6 +212,122 @@ export function parseMapSnapshot(value: unknown): MapSnapshot | null {
   };
 }
 
+/** One frame of the trajectory stream: its first pose and the corrections it already includes. */
+export interface MapTrajectoryPose extends MapPosedFrame {
+  revision: number;
+}
+
+/** A correction of frames `from_seq ..= to_seq`: a similarity of the reference frame. */
+export interface MapTrajectoryCorrection {
+  epoch: number;
+  from_seq: number;
+  to_seq: number;
+  scale: number;
+  rotation: Quat;
+  translation: Vec3;
+  revision: number;
+}
+
+/** The trajectory stream (`eidos:map_trajectory`): the last ticks' new poses and corrections. */
+export interface MapTrajectoryDelta {
+  run_id: number;
+  epoch: number;
+  from_seq: number;
+  to_seq: number;
+  poses: MapTrajectoryPose[];
+  corrections: MapTrajectoryCorrection[];
+}
+
+/** The trajectory output (`eidos:map_trajectory`), or null when the value is not one. */
+export function parseMapTrajectory(value: unknown): MapTrajectoryDelta | null {
+  if (!isObject(value) || !("poses" in value) || !("corrections" in value)) return null;
+  return {
+    run_id: num(value.run_id),
+    epoch: num(value.epoch),
+    from_seq: num(value.from_seq),
+    to_seq: num(value.to_seq),
+    poses: list(value.poses).map((f) => {
+      const frame = isObject(f) ? f : {};
+      return { frame: num(frame.frame), pose: transformOf(frame.pose), sigma: sigmaOf(frame.sigma), keyframe: frame.keyframe === true, revision: num(frame.revision) };
+    }),
+    corrections: list(value.corrections).map((c) => {
+      const corr = isObject(c) ? c : {};
+      const t = transformOf(corr.transform);
+      const scale = isObject(corr.transform) ? num(corr.transform.scale, 1) : 1;
+      return { epoch: num(corr.epoch), from_seq: num(corr.from_seq), to_seq: num(corr.to_seq), scale, rotation: t.rotation, translation: t.translation, revision: num(corr.revision) };
+    }),
+  };
+}
+
+const qmul = (a: Quat, b: Quat): Quat => ({
+  w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+  y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+  z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+});
+function qrot(q: Quat, v: Vec3): Vec3 {
+  const p = qmul(qmul(q, { w: 0, x: v.x, y: v.y, z: v.z }), { w: q.w, x: -q.x, y: -q.y, z: -q.z });
+  return { x: p.x, y: p.y, z: p.z };
+}
+
+/** A pose moved by a correction: the camera's position as a point (`s R p + t`), its orientation turned by `R`. */
+export function applyCorrection(c: MapTrajectoryCorrection, pose: MapTransform): MapTransform {
+  const r = qrot(c.rotation, pose.translation);
+  return {
+    rotation: qmul(c.rotation, pose.rotation),
+    translation: { x: c.scale * r.x + c.translation.x, y: c.scale * r.y + c.translation.y, z: c.scale * r.z + c.translation.z },
+  };
+}
+
+/**
+ * The whole trajectory of one run, kept from the stream (Eidos's `StreamedTrajectory`, in TypeScript): new
+ * frames are stored once, each correction moves the stored frames of its range that predate it, and a new run
+ * or epoch starts over. Re-reading the same ticks changes nothing; ticks never read are missing.
+ */
+export class StreamedTrajectory {
+  private frames: MapTrajectoryPose[] = [];
+  private applied = 0;
+  private run = -1;
+  private epoch = -1;
+
+  apply(delta: MapTrajectoryDelta) {
+    if (delta.run_id !== this.run || delta.epoch !== this.epoch) {
+      this.frames = [];
+      this.applied = 0;
+      this.run = delta.run_id;
+      this.epoch = delta.epoch;
+    }
+    for (const p of delta.poses) {
+      const i = this.lower(p.frame);
+      if (this.frames[i]?.frame !== p.frame) this.frames.splice(i, 0, { ...p });
+    }
+    for (const c of delta.corrections) {
+      if (c.revision <= this.applied) continue;
+      this.applied = c.revision;
+      for (let i = this.lower(c.from_seq); i < this.frames.length && this.frames[i].frame <= c.to_seq; i++) {
+        const f = this.frames[i];
+        if (f.revision < c.revision) f.pose = applyCorrection(c, f.pose);
+      }
+    }
+  }
+
+  /** The poses, by frame. */
+  poses(): MapPosedFrame[] {
+    return this.frames;
+  }
+
+  private lower(frame: number): number {
+    let lo = 0;
+    let hi = this.frames.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.frames[mid].frame < frame) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+}
+
 /** The timing output (`eidos:map_timing`), or null when the value is not one. */
 export function parseMapTiming(value: unknown): MapTiming | null {
   if (!isObject(value) || !("frame_ms" in value)) return null;
