@@ -2,6 +2,11 @@ config = 3
 description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, the device services and the A/B update writer; this file adds HeliOS's own boot files, kernel options, image scripts and the A/B disk assembly shared with the PhotonVision Raze image."
 target = "raze"
 
+# The CM5's Cortex-A76 ISA for every aarch64 artifact (Gaia G10): aes, crc, dotprod, fp16, lse, rcpc,
+# rdm, sha2 beyond plain NEON; C code and Buildroot get -mcpu=cortex-a76 / BR2_cortex_a76.
+[cpu]
+profile = "cortex-a76"
+
 [image]
 kind = "buildroot"
 # Device tree first, so its @source: token resolves; Gaia takes one value and
