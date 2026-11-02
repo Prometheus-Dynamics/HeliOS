@@ -137,6 +137,8 @@ pub fn router(state: SharedState) -> Router {
         // Updates (OTA)
         .route("/v1/update/uploads/{id}", delete(update::delete_upload))
         .route("/v1/update/apply", post(update::apply))
+        .route("/v1/update/confirm", post(update::confirm))
+        .route("/v1/update/rollback", post(update::rollback))
         .route("/v1/update/status", get(update::status))
         .route("/v1/update/events", get(update::events))
         .route("/v1/update/slots/switch", post(update::switch_slot))

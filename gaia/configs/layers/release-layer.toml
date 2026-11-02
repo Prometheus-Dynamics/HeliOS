@@ -1,5 +1,5 @@
 config = 3
-description = "Release layer: product identity, defaults, env policy, the A/B update hooks and Orion's state on /data, diagnostics, maintenance, and release-specific service policy. Fan, LED ring and sensor description come from the Raze device package."
+description = "Release layer: product identity, defaults, env policy, the slot update health check and Orion's state on /data, diagnostics, maintenance, and release-specific service policy. Fan, LED ring and sensor description come from the Raze device package."
 target = "aarch64-linux"
 
 imports = [

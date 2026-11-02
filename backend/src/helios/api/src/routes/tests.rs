@@ -18,7 +18,6 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
             identity_file: dir.join("identity.json"),
             update_tool: dir.join("no-board-update"),
             update_status: dir.join("update.json"),
-            update_progress: dir.join("update-progress"),
             ..helios_layout::BoardContract::image()
         }),
         board_update_systemd_run: false,
@@ -75,6 +74,8 @@ async fn missing_backends_answer_501_with_what_they_need() {
         ("GET", "/v1/peripherals/leds"),
         ("GET", "/v1/peripherals/imu"),
         ("POST", "/v1/update/slots/switch"),
+        ("POST", "/v1/update/confirm"),
+        ("POST", "/v1/update/rollback"),
     ];
     for (method, uri) in cases {
         let (status, body) = call(&state, method, uri, None).await;
@@ -137,7 +138,7 @@ async fn update_status_works_without_the_writer() {
 async fn raw_upload_then_apply_needs_the_device_package_writer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
-    let request = Request::builder().method("POST").uri("/v1/update/uploads?filename=helios-raze-v9.img").body(Body::from(vec![7u8; 1024])).expect("request");
+    let request = Request::builder().method("POST").uri("/v1/update/uploads?filename=helios-raze-v9.slot.tar").body(Body::from(vec![7u8; 1024])).expect("request");
     let response = router(state.clone()).oneshot(request).await.expect("response");
     assert_eq!(response.status(), StatusCode::CREATED);
     let upload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.expect("body")).expect("json");
@@ -145,10 +146,12 @@ async fn raw_upload_then_apply_needs_the_device_package_writer() {
     let (status, list) = call(&state, "GET", "/v1/update/uploads", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list.as_array().map(Vec::len), Some(1));
-    // No /usr/lib/board/update here: applying is not available, and the upload stays.
+    // No /usr/lib/board/slots here: applying is not available, and the upload stays.
     let (status, body) = call(&state, "POST", "/v1/update/apply", Some(serde_json::json!({ "upload_id": upload["id"] }))).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
     assert_eq!(body["error"]["code"], "not_available");
+    let (status, body) = call(&state, "POST", "/v1/update/apply", Some(serde_json::json!({}))).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
     let (status, _) = call(&state, "DELETE", &format!("/v1/update/uploads/{}", upload["id"].as_str().expect("id")), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }

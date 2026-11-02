@@ -133,7 +133,7 @@ pub struct OrionReport {
     pub control_stream_socket: bool,
 }
 
-/// The device package's A/B updater (`/usr/lib/board/update`).
+/// The device package's slots writer (`/usr/lib/board/slots`).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateReport {
     /// The device has a device package with an updater (the image). A guest has none: the other
@@ -148,7 +148,8 @@ pub struct UpdateReport {
     pub slot_staged: Option<String>,
     pub version_active: Option<String>,
     pub error: Option<String>,
-    pub ab_layout: bool,
+    /// The writer reports the dynamic-slots layout (`layout` is `slots` in `/run/board/update.json`).
+    pub slots_layout: bool,
     pub issues: Vec<String>,
 }
 

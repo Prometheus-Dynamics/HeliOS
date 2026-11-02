@@ -646,20 +646,22 @@ export interface Upload {
 
 export interface ApplyResponse {
   update_id: string;
-  version: string;
-  sha256: string;
-  image_url: string;
+  /** Null when the apply boots the already-staged slot (no upload). */
+  version: string | null;
+  sha256: string | null;
+  image_url: string | null;
   reboot: boolean;
   message: string;
 }
 
-/** What helios-api last asked the board update writer (A/B) to do. */
+/** What helios-api last asked the board's slots writer to do. */
 export interface UpdateTask {
   update_id: string;
-  upload_id: string;
-  version: string;
-  sha256: string;
-  /** staging, staged, applying (rebooting into the new slot on trial), failed */
+  /** Null for a confirm or a rollback. */
+  upload_id: string | null;
+  version: string | null;
+  sha256: string | null;
+  /** staging, staged, applying (rebooting into the new slot on trial), confirming, rolling-back, done, failed */
   step: string;
   reboot: boolean;
   error: string | null;
@@ -667,7 +669,7 @@ export interface UpdateTask {
 }
 
 export interface UpdateStatus {
-  /** The board update writer's state: idle, staging, staged, trying, confirmed, rolled-back, error, unknown. */
+  /** The slots writer's state: idle, staging, staged, trying (a trial reboot or judgment), confirmed, rolled-back, error, unknown. */
   phase: string;
   stage: string;
   progress_percent: number | null;
@@ -676,7 +678,7 @@ export interface UpdateStatus {
   slots: {
     active: string | null;
     staged: string | null;
-    /** `slots` on a dynamic-slots board, `ab` otherwise. */
+    /** `slots` on a dynamic-slots board, `none` on a guest. */
     layout?: string;
     default?: string | null;
     previous?: string | null;

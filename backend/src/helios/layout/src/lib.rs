@@ -77,16 +77,12 @@ impl Profile {
 pub struct BoardContract {
     /// Written by the device package's identity tool.
     pub identity_file: PathBuf,
-    /// The device package's update CLI.
+    /// The device package's slots writer (`slots status|stage|apply|confirm|rollback`).
     pub update_tool: PathBuf,
-    /// The update CLI's state file.
+    /// The slots writer's state file (`slots status` rewrites it).
     pub update_status: PathBuf,
-    /// The update CLI's copy progress while an image is staged (0..1000).
-    pub update_progress: PathBuf,
-    /// The health check that keeps a trial boot.
+    /// The health check the writer's `confirm` runs before it keeps a trial slot.
     pub update_health: PathBuf,
-    /// The hook run before a reboot.
-    pub update_pre_reboot: PathBuf,
     /// The device package's description (`BOARD_PACKAGE_VERSION`, ...).
     pub device_package_env: PathBuf,
     /// The camera module's description (its lens and prior).
@@ -95,8 +91,7 @@ pub struct BoardContract {
     pub camera_streams_file: PathBuf,
     /// The board's configuration directory (for snapshot globs).
     pub etc_dir: PathBuf,
-    /// Where uploaded updates are kept: the board's writer installs a `file://` image from here in
-    /// place (`update stage-url`), and refuses any other directory.
+    /// Where uploaded slot bundles are kept until they are staged (helios-api's `/v1/update/uploads`).
     pub upload_dir: PathBuf,
 }
 
@@ -105,11 +100,9 @@ impl BoardContract {
     pub fn image() -> Self {
         Self {
             identity_file: "/run/board/identity.json".into(),
-            update_tool: "/usr/lib/board/update".into(),
+            update_tool: "/usr/lib/board/slots".into(),
             update_status: "/run/board/update.json".into(),
-            update_progress: "/run/board/update/progress".into(),
             update_health: "/etc/board/update-health".into(),
-            update_pre_reboot: "/etc/board/update.d/pre-reboot".into(),
             device_package_env: "/usr/lib/board/board-package.env".into(),
             camera_file: "/usr/share/board/raze/camera.toml".into(),
             camera_streams_file: "/run/board/camera-streams.json".into(),
@@ -596,11 +589,9 @@ mod tests {
         let board = Layout::image().board().cloned().expect("the image has a board contract");
         assert_eq!(board, BoardContract::image());
         assert_eq!(board.identity_file, PathBuf::from("/run/board/identity.json"));
-        assert_eq!(board.update_tool, PathBuf::from("/usr/lib/board/update"));
+        assert_eq!(board.update_tool, PathBuf::from("/usr/lib/board/slots"));
         assert_eq!(board.update_status, PathBuf::from("/run/board/update.json"));
-        assert_eq!(board.update_progress, PathBuf::from("/run/board/update/progress"));
         assert_eq!(board.update_health, PathBuf::from("/etc/board/update-health"));
-        assert_eq!(board.update_pre_reboot, PathBuf::from("/etc/board/update.d/pre-reboot"));
         assert_eq!(board.device_package_env, PathBuf::from("/usr/lib/board/board-package.env"));
         assert_eq!(board.camera_file, PathBuf::from("/usr/share/board/raze/camera.toml"));
         assert_eq!(board.camera_streams_file, PathBuf::from("/run/board/camera-streams.json"));

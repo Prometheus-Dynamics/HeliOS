@@ -33,7 +33,7 @@ The API keeps very little state of its own. It reads other parts of the device a
 | CPU (total and per core), temperatures, memory, load, uptime | **Orion**'s host metrics (`orion-node` samples `/proc` and `/sys`) |
 | Firmware throttling, disk, processes | the **kernel** (`/proc`, `/sys`) |
 | Identity | the **Raze device package** (`/run/board/identity.json`) |
-| OS updates | the Raze board package's A/B writer (board update) (`/usr/lib/board/update`) |
+| OS updates | the Raze board package's slots writer (`/usr/lib/board/slots`) |
 
 The API stores only a few things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`, on
 the data partition): pipeline revision history (used for rollback), camera mounts, camera
@@ -623,57 +623,68 @@ addresses.
 
 ### Updates (OTA)
 
-OS updates go through the Raze board package's A/B writer (board update) (`/usr/lib/board/update`, Atlas
-`docs/ota.md`); HeliOS has no updater of its own. The writer takes the same `.img.xz` that is
-flashed over USB: `stage` checks its SHA-256 and copies the image's boot slot A (p2) and root slot
-A (p5) into the board's inactive slot, `apply` runs the image's pre-reboot hook (which stops the
-HeliOS services) and reboots into that slot on trial, and `board-update-confirm.service`
-keeps it once `/etc/board/update-health` passes (orion-node, helios-engine and helios-api
-active, the API answering). Otherwise the board restarts into the previous slot by itself.
+OS updates go through the Raze board package's slots writer (`/usr/lib/board/slots`, Atlas
+`docs/slots.md`); HeliOS has no updater of its own. The Raze boots from dynamic slots: root slots
+are EROFS image files on the data partition, and the firmware boots the default slot. The writer
+takes a **slot bundle**, a tar of `slot.json`, the slot's root image (`rootfs.erofs`, or `layers/`)
+and its `boot/` files. It does not take the `.img.xz` that is flashed over USB, so an upload is a
+bundle, not an image. `slots stage` checks the bundle against `--sha256` and against its own
+contents, then installs the slot next to the running one. `slots apply` boots that slot once on
+trial (the next boot only). `slots confirm` keeps a healthy trial as the default, and runs at
+every boot from `board-update-confirm.service`: a trial whose `/etc/board/update-health` check
+fails (orion-node, helios-engine and helios-api active, the API answering) goes back to the default
+slot. `slots rollback` makes the previous slot the default again and reboots into it.
 
-| Method | Path | Notes |
-|---|---|---|
-| `POST` | `/v1/update/uploads` | Raw image body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/data/updates` on a board (the board's writer installs a `file://` image from there in place) or HeliOS's state directory on a guest, and hashed. Uploads older than an hour are removed; returns 201 with an upload |
-| `GET` | `/v1/update/uploads` | Uploads, newest first |
-| `DELETE` | `/v1/update/uploads/{id}` | Delete an upload |
-| `POST` | `/v1/update/apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Starts staging and answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot` (default `true`) applies the update once staged; `false` stops after staging |
-| `GET` | `/v1/update/status` | Update status (below) |
-| `GET` | `/v1/update/events` | SSE `update` events, starting with the current status |
-| `POST` | `/v1/update/slots/switch` | **501** |
+| Method | Path | Writer command | Notes |
+|---|---|---|---|
+| `POST` | `/v1/update/uploads` | none | Raw bundle body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/data/updates` on a board (or HeliOS's state directory on a guest), and hashed. Uploads older than an hour are removed; returns 201 with an upload |
+| `GET` | `/v1/update/uploads` | none | Uploads, newest first |
+| `DELETE` | `/v1/update/uploads/{id}` | none | Delete an upload |
+| `POST` | `/v1/update/apply` | `slots stage <bundle> --sha256 <hex>`, then `slots apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Stages the upload and boots its slot on trial; answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot: false` stops after staging. With no body (`{}`) it boots the already staged slot on trial; 409 when no slot is staged |
+| `POST` | `/v1/update/confirm` | `slots confirm` | Keeps the trial slot the board is running, once `update-health` passes. The check runs in the background (up to two minutes); the outcome is in `/v1/update/status`. 202 `{update_id, action, message}`. 409 when no slot is on trial, or the trial has not booted yet |
+| `POST` | `/v1/update/rollback` | `slots rollback` | Makes the previous slot the default and reboots into it. 202 `{update_id, action, message}`. 409 when there is no previous slot, or a trial is pending |
+| `GET` | `/v1/update/status` | `slots status` (only when none has run this boot) | Update status (below) |
+| `GET` | `/v1/update/events` | none | SSE `update` events, starting with the current status |
+| `POST` | `/v1/update/slots/switch` | none | **501** |
 
 An upload: `{id, filename, size_bytes, sha256, image_url, uploaded_at_ms, version}`. The `id` is
 the first 16 hex digits of the sha256, and `image_url` is a `file://` URL inside the upload
-directory. Apply accepts only images that were uploaded here, checks `sha256` against the upload
-when given, and refuses with 409 while an update is staging or on trial, with 422 off the A/B
-layout, and with 501 when the board update writer is not installed.
+directory. Apply accepts only bundles that were uploaded here, checks `sha256` against the upload
+when given (422), and refuses with 409 while an update is staging or on trial, with 422 off the
+slots layout, and with 501 when the device package's writer is not installed.
 
-The API runs `update stage <image> --sha256 <hex>` and then `update apply` through
-`systemd-run`, so they live in their own units: the pre-reboot hook stops helios-api, and that
-must not stop the update. A staged upload is deleted (the slot holds the image now); a failed
-one is kept. The version shown is the first of these that is set: the requested `version`, the
-upload's `version`, the `v…` part of the file name, or `upload-<sha256 prefix>`; the writer
-itself takes the version from the new root's os-release.
+Stage, apply, confirm and rollback run through `systemd-run`, so each lives in its own unit: a
+reboot that `slots apply` or `slots rollback` asks for does not depend on helios-api. Only one of
+them runs at a time (409 otherwise). A staged upload is deleted (the slot holds the bundle now); a
+failed one is kept. The version shown is the first of these that is set: the requested `version`,
+the upload's `version`, the `v…` part of the file name, or `upload-<sha256 prefix>`; the writer
+itself takes the version from the bundle's `slot.json`.
 
 Update status (from the writer's `/run/board/update.json`):
 
 ```json
 {
-  "phase": "staging", "stage": "installing", "progress_percent": 52, "last_error": null,
+  "phase": "trying", "stage": "rebooting", "progress_percent": 100, "last_error": null,
   "updater_available": true,
-  "slots": { "active": "A", "staged": "B" },
-  "version_active": "v2026.2.0", "version_staged": null,
+  "slots": { "active": "helios-a", "staged": "helios-b", "layout": "slots", "default": "helios-a",
+             "previous": null, "trial": "helios-b", "free_bytes": 2147483648, "reserve_bytes": 2147483648,
+             "installed": [{ "id": "helios-a", "version": "v2026.2.0" }, { "id": "helios-b", "version": "v2026.3.0" }] },
+  "version_active": "v2026.2.0", "version_staged": "v2026.3.0",
   "task": { "update_id": "1f2e3d4c5b6a7980-1791345524926", "upload_id": "1f2e3d4c5b6a7980",
-            "version": "v2026.3.0", "sha256": "…", "step": "staging", "reboot": true,
+            "version": "v2026.3.0", "sha256": "…", "step": "applying", "reboot": true,
             "error": null, "started_at_ms": 1791345524926 }
 }
 ```
 
-`phase` is the writer's state: `idle`, `staging`, `staged`, `trying` (the trial boot, before and
-after the reboot), `confirmed`, `rolled-back` or `error`; `unknown` when it has published none.
-`stage` is the same in Atlas's vocabulary, `progress_percent` the writer's own progress (0 to 10
-% is the SHA-256 check, then the slot copy). `task` is what helios-api last asked the writer to
-do: its `step` is `staging`, `staged`, `applying` (rebooting into the new slot) or `failed`, with
-the writer's reason in `error`.
+`phase` is the writer's state: `idle`, `staging`, `staged`, `rebooting` (a reboot is under way),
+`trying` (a trial boot before its verdict; a reboot into a trial shows as `trying`), `confirmed`,
+`rolled-back`, or `error`; `unknown` when it has published none. `stage` is the same in Atlas's
+vocabulary, and `progress_percent` the writer's own progress. `slots` lists the writer's slots:
+`active` is the slot this system booted from, `staged` the slot holding an update, `default` the one
+a plain boot starts, `previous` the one `rollback` returns to, `trial` the slot on trial. `task` is
+what helios-api last asked the writer to do: its `step` is `staging`, `staged`, `applying`
+(rebooting into the new slot on trial), `confirming`, `rolling-back`, `done` or `failed`, with the
+writer's reason in `error`.
 
 #### Atlas's HTTP OTA path
 
@@ -686,10 +697,10 @@ These routes speak the contract of Atlas Hardware Manager's HTTP OTA client:
 | `GET` | `/v1/ota/state` | `{"state": {update_id, stage, phase, progress_percent, last_error}, "slots": ..., "version_active", "version_staged"}` |
 | `GET` | `/v1/health`, `/v1/device/os` | Reconnect probes after the reboot |
 
-Stage mapping: `idle` stays `idle`; `staging` is `verifying` during the SHA-256 check and
-`installing` during the copy; `staged` becomes `committing`; `trying` is `rebooting` until the
-board runs the new slot and `finalizing` until it is confirmed; `confirmed` becomes `complete`,
-`rolled-back` becomes `rolled_back`, and `error` becomes `failed`.
+Stage mapping: `idle` stays `idle`; `staging` is `verifying` until the writer writes its first state
+(its SHA-256 check) and `installing` during the install; `staged` becomes `committing`; `rebooting`
+(a trial reboot) is `rebooting`; `trying` is `finalizing` until it is confirmed; `confirmed`
+becomes `complete`, `rolled-back` becomes `rolled_back`, and `error` becomes `failed`.
 
 ## Device security
 
@@ -818,7 +829,7 @@ On a secured device a caller without a session or token gets the same document w
 | `HELIOS_API_STATE_DIR` | `/var/lib/helios/api` |
 | `HELIOS_API_STARTUP_FILE` | `/etc/helios/startup.toml` (the first-boot [default pipeline](#first-boot-default-pipeline)) |
 | `HELIOS_API_UPLOAD_DIR` | `/data/updates` on a board; `<state>/updates` on a guest |
-| `HELIOS_BOARD_UPDATE_TOOL` | `/usr/lib/board/update` (the board update writer) |
+| `HELIOS_BOARD_UPDATE_TOOL` | `/usr/lib/board/slots` (the board slots writer) |
 | `HELIOS_API_UI_DIR` | `/usr/share/helios/ui`; `off` serves the API only |
 | `HELIOS_BOARD_IDENTITY_PATH` | `/run/board/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |

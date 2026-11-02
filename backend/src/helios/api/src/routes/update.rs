@@ -1,16 +1,19 @@
-//! OS updates (OTA): upload an image, stage and apply it, follow it.
+//! OS updates (OTA): upload a slot bundle, stage it, boot it on trial, then confirm it or roll back.
 //!
-//! HeliOS has no updater of its own. The Raze device package's A/B writer
-//! (`/usr/lib/board/update`, Atlas `docs/ota.md`) takes the same `.img.xz` that is flashed:
-//! `stage` checks its SHA-256 and copies its boot and root slot A into the board's inactive
-//! slot, `apply` runs the image's pre-reboot hook and trial-boots that slot, and
-//! `board-update-confirm.service` keeps it once `/etc/board/update-health` passes (or
-//! the board falls back by itself). This module is a thin adapter: it stores uploads on the data
-//! partition, runs `stage` and `apply` through `systemd-run` (outside helios-api's cgroup: the
-//! pre-reboot hook stops helios-api), and reports the writer's `/run/board/update.json`.
+//! HeliOS has no updater of its own. The Raze device package's slots writer (`/usr/lib/board/slots`,
+//! Atlas `docs/slots.md`) installs a slot bundle (a tar of `slot.json`, the slot's root image and its
+//! boot files): `slots stage <bundle> --sha256 <hex>` checks it and writes its slot into an inactive
+//! slot, `slots apply` boots that slot once on trial, `slots confirm` keeps a healthy trial (run on
+//! every boot by `board-update-confirm.service`, and by `POST /v1/update/confirm`), and `slots
+//! rollback` makes the previous slot the default again. The writer takes no `.img.xz`: an image is
+//! flashed over USB, and the slot bundles are what Atlas's gateway and this API upload.
 //!
-//! `/v1/ota/*` is the contract Atlas Hardware Manager's HTTP OTA client speaks (multipart
-//! upload, `image_url` apply, lenient state polling).
+//! This module is a thin adapter: it stores uploads on the data partition, runs the writer through
+//! `systemd-run` (its own unit, so a reboot it asks for does not depend on helios-api), and reports
+//! the writer's `/run/board/update.json`.
+//!
+//! `/v1/ota/*` is the contract Atlas Hardware Manager's HTTP OTA client speaks (multipart upload,
+//! `image_url` apply, lenient state polling).
 
 use std::{convert::Infallible, path::PathBuf, sync::Arc};
 
@@ -62,7 +65,7 @@ pub fn sanitize_filename(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let clean: String = base.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' }).collect();
     let clean = clean.trim_start_matches('.').to_string();
-    if clean.is_empty() { "helios-update.img.xz".into() } else { clean.chars().take(128).collect() }
+    if clean.is_empty() { "helios-update.slot.tar".into() } else { clean.chars().take(128).collect() }
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -203,7 +206,7 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 /// `POST /v1/update/uploads`: the image as the raw request body (`application/octet-stream`).
 pub async fn upload_raw(State(state): State<SharedState>, Query(params): Query<UploadParams>, headers: HeaderMap, body: Body) -> ApiResult<(StatusCode, Json<Upload>)> {
     capabilities::require(&state, feature::UPDATES).await?;
-    let filename = params.filename.or_else(|| header(&headers, "x-helios-filename")).unwrap_or_else(|| "helios-update.img.xz".into());
+    let filename = params.filename.or_else(|| header(&headers, "x-helios-filename")).unwrap_or_else(|| "helios-update.slot.tar".into());
     let sha256 = params.sha256.or_else(|| header(&headers, "x-helios-sha256"));
     let version = params.version.or_else(|| header(&headers, "x-helios-version"));
     let upload = store_upload(&state.config, &filename, sha256.as_deref(), version, body.into_data_stream()).await?;
@@ -223,15 +226,17 @@ pub async fn delete_upload(State(state): State<SharedState>, Path(id): Path<Stri
 
 // --- stage and apply -----------------------------------------------------------
 
-/// What helios-api is doing with the device package's writer right now (or did last).
+/// What helios-api is doing with the slots writer right now (or did last).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UpdateTask {
     pub update_id: String,
-    pub upload_id: String,
-    pub version: String,
-    pub sha256: String,
-    /// staging, staged (no reboot asked), applying (`update apply` started: the board reboots
-    /// into the staged slot on trial), failed.
+    /// The upload being staged (`None` for a confirm or a rollback).
+    pub upload_id: Option<String>,
+    pub version: Option<String>,
+    pub sha256: Option<String>,
+    /// staging, staged (no reboot asked), applying (`slots apply` started: the board reboots into
+    /// the staged slot on trial), confirming, rolling-back, done (the confirm or rollback ran),
+    /// failed.
     pub step: String,
     pub reboot: bool,
     pub error: Option<String>,
@@ -243,20 +248,30 @@ pub struct UpdateTask {
 pub struct ApplyRequest {
     pub upload_id: Option<String>,
     pub image_url: Option<String>,
-    /// Informational; the writer takes the version from the new root's os-release.
+    /// Informational; the writer takes the version from the slot bundle's `slot.json`.
     pub version: Option<String>,
     pub sha256: Option<String>,
-    /// Reboot into the staged slot once staged (default). `false` stops after staging.
+    /// With an upload: stage it, then boot the slot on trial (default). `false` stops after staging.
+    /// Without one: boot the staged slot on trial (the default, and the only choice).
     pub reboot: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct ApplyResponse {
     pub update_id: String,
-    pub version: String,
-    pub sha256: String,
-    pub image_url: String,
+    pub version: Option<String>,
+    pub sha256: Option<String>,
+    pub image_url: Option<String>,
     pub reboot: bool,
+    pub message: String,
+}
+
+/// `POST /v1/update/confirm` and `/rollback`: the writer's command has started in the background.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct ActionResponse {
+    pub update_id: String,
+    /// `confirm` or `rollback`.
+    pub action: String,
     pub message: String,
 }
 
@@ -268,24 +283,24 @@ pub fn version_for(upload: &Upload, requested: Option<String>) -> String {
         .unwrap_or_else(|| format!("upload-{}", &upload.sha256[..12]))
 }
 
-/// The device package's updater is installed and runnable. A device without a device package (a
-/// guest) has none.
+/// The device package's slots writer is installed and runnable. A device without a device package
+/// (a guest) has none.
 fn tool_installed(config: &ApiConfig) -> bool {
     use std::os::unix::fs::PermissionsExt;
     config.board.as_ref().is_some_and(|board| std::fs::metadata(&board.update_tool).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
-/// `update <args>`, through `systemd-run` on the device so the command lives in its own unit.
-/// `wait`: block until it ends (stage); otherwise only start it (apply, which reboots). Without a
-/// device package this is an error: there is no updater to run.
-fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> std::io::Result<tokio::process::Command> {
+/// `slots <args>`, through `systemd-run` on the device so the command lives in its own unit (a
+/// reboot it asks for does not depend on helios-api). `wait`: block until it ends; otherwise only
+/// start it (apply and rollback reboot). Without a device package this is an error.
+fn slots_command(config: &ApiConfig, args: &[&str], wait: bool) -> std::io::Result<tokio::process::Command> {
     let Some(board) = config.board.as_ref() else {
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "the device package updater is not available on this device"));
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "the device package writer is not available on this device"));
     };
     let mut command;
     if config.board_update_systemd_run {
         command = tokio::process::Command::new("systemd-run");
-        command.args(["--quiet", "--collect", "--description=HeliOS OS update (board update)"]);
+        command.args(["--quiet", "--collect", "--description=HeliOS OS update (slots writer)"]);
         if wait {
             command.args(["--wait", "--pipe"]);
         }
@@ -297,7 +312,7 @@ fn board_update_command(config: &ApiConfig, args: &[&str], wait: bool) -> std::i
     Ok(command)
 }
 
-/// The writer's last words on stderr (it logs `update: <reason>`), else the exit status.
+/// The writer's last words on stderr (it logs `slots: <reason>`), else the exit status.
 fn command_error(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     stderr
@@ -305,8 +320,21 @@ fn command_error(output: &std::process::Output) -> String {
         .rev()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .map(|line| line.trim_start_matches("update:").trim_start_matches("board:").trim().to_string())
-        .unwrap_or_else(|| format!("the device package updater exited with {}", output.status))
+        .map(|line| line.trim_start_matches("slots:").trim().to_string())
+        .unwrap_or_else(|| format!("the device package writer exited with {}", output.status))
+}
+
+/// Runs one `slots` command; its error is the writer's reason (or why it could not run).
+async fn run_writer(config: &ApiConfig, args: &[&str], wait: bool) -> Result<(), String> {
+    let output = match slots_command(config, args, wait) {
+        Ok(mut command) => command.output().await,
+        Err(error) => Err(error),
+    };
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(command_error(&output)),
+        Err(error) => Err(format!("could not run the device package writer: {error}")),
+    }
 }
 
 fn set_task(state: &SharedState, task: UpdateTask) {
@@ -322,123 +350,220 @@ fn publish_status(state: &SharedState, change: &str) {
     state.events.publish("update", data);
 }
 
-async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTask, _guard: tokio::sync::OwnedMutexGuard<()>) {
-    let image = upload.path(&state.config).display().to_string();
-    let result = match board_update_command(&state.config, &["stage", &image, "--sha256", &upload.sha256], true) {
-        Ok(mut command) => command.output().await,
-        Err(error) => Err(error),
-    };
-    match result {
-        Ok(output) if output.status.success() => {
-            tracing::info!(version = %task.version, "update staged");
-            // The slot holds the image now; free the data partition.
-            let _ = tokio::fs::remove_dir_all(state.config.upload_dir.join(&upload.id)).await;
-            task.step = if task.reboot { "applying".into() } else { "staged".into() };
-        }
-        Ok(output) => {
-            task.step = "failed".into();
-            task.error = Some(command_error(&output));
-        }
-        Err(error) => {
-            task.step = "failed".into();
-            task.error = Some(format!("could not run the device package updater: {error}"));
-        }
-    }
-    set_task(&state, task.clone());
-    publish_status(&state, if task.step == "failed" { "failed" } else { "staged" });
-    if task.step != "applying" {
-        if let Some(error) = &task.error {
-            tracing::warn!(%error, "update stage failed");
-        }
-        return;
-    }
-    // `update apply` runs the pre-reboot hook (which stops helios-api, among others) and
-    // reboots into the staged slot on trial; it is started in its own unit and not awaited.
-    let result = match board_update_command(&state.config, &["apply"], false) {
-        Ok(mut command) => command.output().await,
-        Err(error) => Err(error),
-    };
-    match result {
-        Ok(output) if output.status.success() => tracing::info!(version = %task.version, "update applied; rebooting into the staged slot on trial"),
-        Ok(output) => {
-            task.step = "failed".into();
-            task.error = Some(command_error(&output));
-        }
-        Err(error) => {
-            task.step = "failed".into();
-            task.error = Some(format!("could not run the device package updater: {error}"));
-        }
-    }
-    if task.step == "failed" {
-        set_task(&state, task);
-        publish_status(&state, "failed");
+fn new_task(id_prefix: &str, upload: Option<&Upload>, version: Option<String>, step: &str, reboot: bool) -> UpdateTask {
+    UpdateTask {
+        update_id: format!("{}-{}", upload.map_or(id_prefix, |u| u.id.as_str()), now_ms()),
+        upload_id: upload.map(|u| u.id.clone()),
+        version,
+        sha256: upload.map(|u| u.sha256.clone()),
+        step: step.into(),
+        reboot,
+        error: None,
+        started_at_ms: now_ms(),
     }
 }
 
+/// The update lock: one stage, apply, confirm or rollback at a time from helios-api (the writer has
+/// its own lock too).
+fn take_update_lock(state: &SharedState) -> ApiResult<tokio::sync::OwnedMutexGuard<()>> {
+    state.update_lock.clone().try_lock_owned().map_err(|_| ApiError::conflict("another update command is still running"))
+}
+
+/// What every writer command needs: the writer installed, nothing staging, and a slots board. A
+/// trial is an error unless `allow_trial` (only a confirm is asked of one).
+fn ensure_writer_ready(config: &ApiConfig, allow_trial: bool) -> ApiResult<Option<BoardUpdateStatus>> {
+    if !tool_installed(config) {
+        return Err(match config.board.as_ref() {
+            Some(board) => ApiError::not_available(
+                format!("the device package writer ({}) is not installed", board.update_tool.display()),
+                "the Raze board package's slots writer (/usr/lib/board/slots, Atlas devices/raze with the dynamic slots layout)",
+            ),
+            None => ApiError::not_available("device updates are not available on this device", "a device package with an update writer (the owner image)"),
+        });
+    }
+    let current = read_board_status(config);
+    if let Some(current) = &current {
+        if current.state == "staging" {
+            return Err(ApiError::conflict("an update is being staged"));
+        }
+        if !allow_trial && current.on_trial() {
+            return Err(ApiError::conflict("the last update is still on trial; wait for it to be confirmed or rolled back"));
+        }
+        if !current.on_slots_layout() {
+            return Err(ApiError::unprocessable("this board is not on the slots layout; reflash it over USB with a current image first"));
+        }
+    }
+    Ok(current)
+}
+
+/// Runs one writer command in the background for `task`, holding the update lock until it ends.
+/// `done_step` is the task's step when the command succeeds.
+fn spawn_writer(state: &SharedState, mut task: UpdateTask, args: Vec<String>, wait: bool, done_step: &'static str, guard: tokio::sync::OwnedMutexGuard<()>) {
+    set_task(state, task.clone());
+    publish_status(state, "started");
+    let state = state.clone();
+    tokio::spawn(async move {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let result = run_writer(&state.config, &args, wait).await;
+        let change = match result {
+            Ok(()) => {
+                task.step = done_step.into();
+                done_step
+            }
+            Err(error) => {
+                tracing::warn!(%error, step = %task.step, "slots writer command failed");
+                task.step = "failed".into();
+                task.error = Some(error);
+                "failed"
+            }
+        };
+        set_task(&state, task);
+        publish_status(&state, change);
+        drop(guard);
+    });
+}
+
+async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTask, guard: tokio::sync::OwnedMutexGuard<()>) {
+    let bundle = upload.path(&state.config).display().to_string();
+    match run_writer(&state.config, &["stage", &bundle, "--sha256", &upload.sha256], true).await {
+        Ok(()) => {
+            tracing::info!(version = ?task.version, "update staged");
+            // The slot holds the bundle now; free the data partition.
+            let _ = tokio::fs::remove_dir_all(state.config.upload_dir.join(&upload.id)).await;
+            task.step = if task.reboot { "applying".into() } else { "staged".into() };
+        }
+        Err(error) => {
+            tracing::warn!(%error, "update stage failed");
+            task.step = "failed".into();
+            task.error = Some(error);
+        }
+    }
+    set_task(&state, task.clone());
+    if task.step == "failed" {
+        publish_status(&state, "failed");
+        drop(guard);
+        return;
+    }
+    publish_status(&state, if task.step == "applying" { "applying" } else { "staged" });
+    if task.step != "applying" {
+        drop(guard);
+        return;
+    }
+    // `slots apply` boots the staged slot once (on trial) and reboots: started in its own unit and not
+    // awaited.
+    match run_writer(&state.config, &["apply"], false).await {
+        Ok(()) => tracing::info!(version = ?task.version, "update applied; rebooting into the staged slot on trial"),
+        Err(error) => {
+            task.step = "failed".into();
+            task.error = Some(error);
+            set_task(&state, task);
+            publish_status(&state, "failed");
+        }
+    }
+    drop(guard);
+}
+
+/// Stages an uploaded slot bundle, and with `reboot` boots the slot on trial.
 async fn apply_upload(state: &SharedState, upload: Upload, version: Option<String>, sha256: Option<String>, reboot: bool) -> ApiResult<ApplyResponse> {
     if let Some(expected) = sha256.filter(|s| !s.is_empty())
         && !expected.eq_ignore_ascii_case(&upload.sha256)
     {
         return Err(ApiError::unprocessable(format!("checksum mismatch: expected {expected}, upload has {}", upload.sha256)));
     }
-    if !tool_installed(&state.config) {
-        return Err(match state.config.board.as_ref() {
-            Some(board) => ApiError::not_available(
-                format!("the device package updater ({}) is not installed", board.update_tool.display()),
-                "the Raze board package's A/B writer (/usr/lib/board/update, Atlas devices/raze at 3c97fa0 or newer) and an A/B disk layout",
-            ),
-            None => ApiError::not_available("device updates are not available on this device", "a device package with an update writer (the owner image)"),
-        });
-    }
-    if let Some(current) = read_board_status(&state.config) {
-        if current.state == "trying" {
-            return Err(ApiError::conflict("the last update is still on trial; wait for it to be confirmed or rolled back"));
-        }
-        if current.state == "staging" {
-            return Err(ApiError::conflict("an update is being staged"));
-        }
-        if !current.on_ab_layout() {
-            return Err(ApiError::unprocessable("this board is not on the A/B layout; reflash it over USB with an A/B image first"));
-        }
-    }
-    let guard = state.update_lock.clone().try_lock_owned().map_err(|_| ApiError::conflict("another update is being staged"))?;
+    ensure_writer_ready(&state.config, false)?;
+    let guard = take_update_lock(state)?;
     let version = version_for(&upload, version);
-    let task = UpdateTask {
-        update_id: format!("{}-{}", upload.id, now_ms()),
-        upload_id: upload.id.clone(),
-        version: version.clone(),
-        sha256: upload.sha256.clone(),
-        step: "staging".into(),
+    let task = new_task("", Some(&upload), Some(version.clone()), "staging", reboot);
+    let response = ApplyResponse {
+        update_id: task.update_id.clone(),
+        version: Some(version),
+        sha256: Some(upload.sha256.clone()),
+        image_url: Some(upload.image_url.clone()),
         reboot,
-        error: None,
-        started_at_ms: now_ms(),
+        message: if reboot {
+            "staging the slot bundle into an inactive slot; the board then reboots into it on trial and keeps it once healthy".into()
+        } else {
+            "staging the slot bundle into an inactive slot; boot it later with POST /v1/update/apply (no body)".into()
+        },
     };
     set_task(state, task.clone());
     publish_status(state, "staging");
-    let response = ApplyResponse {
-        update_id: task.update_id.clone(),
-        version,
-        sha256: upload.sha256.clone(),
-        image_url: upload.image_url.clone(),
-        reboot,
-        message: if reboot {
-            "staging the image into the inactive slot; the board then reboots into it on trial and keeps it once healthy".into()
-        } else {
-            "staging the image into the inactive slot; apply it later with `update apply` or POST /v1/update/apply".into()
-        },
-    };
     tokio::spawn(stage_and_apply(state.clone(), upload, task, guard));
+    Ok(response)
+}
+
+/// Boots the slot the writer has staged, once, on trial.
+async fn apply_staged(state: &SharedState) -> ApiResult<ApplyResponse> {
+    let current = ensure_writer_ready(&state.config, false)?;
+    let staged = current.as_ref().and_then(|current| current.slot_staged.clone());
+    let Some(staged) = staged else {
+        return Err(ApiError::conflict("no slot is staged: upload a slot bundle and apply it"));
+    };
+    let guard = take_update_lock(state)?;
+    let version = current.and_then(|current| current.version_staged);
+    let task = new_task(&staged, None, version.clone(), "applying", true);
+    let response =
+        ApplyResponse { update_id: task.update_id.clone(), version, sha256: None, image_url: None, reboot: true, message: format!("booting slot {staged} on trial; the board keeps it once healthy") };
+    spawn_writer(state, task, vec!["apply".into()], false, "applying", guard);
+    Ok(response)
+}
+
+/// Keeps the trial slot the board is running (`slots confirm`, the same as the boot-time check).
+async fn start_confirm(state: &SharedState) -> ApiResult<ActionResponse> {
+    let current = ensure_writer_ready(&state.config, true)?;
+    let on_trial_now = current.as_ref().is_some_and(|c| c.on_trial() && c.slot_trial == c.slot_active);
+    if !on_trial_now {
+        let on_trial = current.as_ref().is_some_and(BoardUpdateStatus::on_trial);
+        return Err(ApiError::conflict(if on_trial {
+            "the trial slot has not booted yet; it can be confirmed only once the board runs it"
+        } else {
+            "no slot is on trial; there is nothing to confirm"
+        }));
+    }
+    let guard = take_update_lock(state)?;
+    let task = new_task("confirm", None, None, "confirming", false);
+    let response = ActionResponse { update_id: task.update_id.clone(), action: "confirm".into(), message: "checking the trial slot's health; it is kept when healthy".into() };
+    spawn_writer(state, task, vec!["confirm".into()], true, "done", guard);
+    Ok(response)
+}
+
+/// Makes the previous slot the default again and reboots into it.
+async fn start_rollback(state: &SharedState) -> ApiResult<ActionResponse> {
+    let current = ensure_writer_ready(&state.config, false)?;
+    if current.as_ref().and_then(|c| c.slot_previous.clone()).is_none() {
+        return Err(ApiError::conflict("there is no previous slot to go back to"));
+    }
+    let guard = take_update_lock(state)?;
+    let task = new_task("rollback", None, None, "rolling-back", false);
+    let response = ActionResponse { update_id: task.update_id.clone(), action: "rollback".into(), message: "making the previous slot the default and rebooting into it".into() };
+    spawn_writer(state, task, vec!["rollback".into()], true, "done", guard);
     Ok(response)
 }
 
 pub async fn apply(State(state): State<SharedState>, Json(request): Json<ApplyRequest>) -> ApiResult<(StatusCode, Json<ApplyResponse>)> {
     capabilities::require(&state, feature::UPDATES).await?;
     let upload = match (&request.upload_id, &request.image_url) {
-        (Some(id), _) => find_upload(&state.config, id).await?,
-        (None, Some(url)) => upload_for_url(&state.config, url).await?,
-        (None, None) => return Err(ApiError::bad_request("upload_id or image_url is required")),
+        (Some(id), _) => Some(find_upload(&state.config, id).await?),
+        (None, Some(url)) => Some(upload_for_url(&state.config, url).await?),
+        (None, None) => None,
     };
-    Ok((StatusCode::ACCEPTED, Json(apply_upload(&state, upload, request.version, request.sha256, request.reboot.unwrap_or(true)).await?)))
+    let reboot = request.reboot.unwrap_or(true);
+    let response = match upload {
+        Some(upload) => apply_upload(&state, upload, request.version, request.sha256, reboot).await?,
+        None if reboot => apply_staged(&state).await?,
+        None => return Err(ApiError::bad_request("reboot: false stages an upload; give upload_id or image_url")),
+    };
+    Ok((StatusCode::ACCEPTED, Json(response)))
+}
+
+pub async fn confirm(State(state): State<SharedState>) -> ApiResult<(StatusCode, Json<ActionResponse>)> {
+    capabilities::require(&state, feature::UPDATES).await?;
+    Ok((StatusCode::ACCEPTED, Json(start_confirm(&state).await?)))
+}
+
+pub async fn rollback(State(state): State<SharedState>) -> ApiResult<(StatusCode, Json<ActionResponse>)> {
+    capabilities::require(&state, feature::UPDATES).await?;
+    Ok((StatusCode::ACCEPTED, Json(start_rollback(&state).await?)))
 }
 
 pub async fn switch_slot(State(state): State<SharedState>) -> axum::response::Response {
@@ -454,33 +579,34 @@ pub async fn switch_slot(State(state): State<SharedState>) -> axum::response::Re
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Slots {
-    /// The slot this system booted from: A or B on the A/B layout, a slot id on a slots board.
+    /// The slot this system booted from.
     pub active: Option<String>,
     /// The slot holding a staged (or on-trial) update.
     pub staged: Option<String>,
-    /// `slots` (a dynamic-slots board) or `ab`.
+    /// `slots` (the dynamic-slots layout) or `none` (a guest).
     pub layout: String,
-    /// Slots boards: the slot a plain boot starts, the one before it, and a pending trial.
+    /// The slot a plain boot starts, the one before it, and a pending trial.
     pub default: Option<String>,
     pub previous: Option<String>,
     pub trial: Option<String>,
-    /// Slots boards: room for more slots, and the space installs must leave free.
+    /// Room for more slots, and the space installs must leave free.
     pub free_bytes: Option<u64>,
     pub reserve_bytes: Option<u64>,
-    /// Slots boards: every installed slot, as the device package's writer lists it.
+    /// Every installed slot, as the device package's writer lists it.
     pub installed: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UpdateStatus {
-    /// The device package writer's state: idle, staging, staged, trying, confirmed,
-    /// rolled-back, error; `unknown` when it has published none.
+    /// The writer's state: idle, staging, staged, rebooting, trying, confirmed, rolled-back, error.
+    /// A reboot into a trial shows as `trying` (until the trial is judged); `unknown` when the writer
+    /// has published none.
     pub phase: String,
     /// The same, in Atlas's stage vocabulary.
     pub stage: String,
     pub progress_percent: Option<u8>,
     pub last_error: Option<String>,
-    /// `/usr/lib/board/update` is installed.
+    /// The device package's slots writer is installed.
     pub updater_available: bool,
     pub slots: Slots,
     pub version_active: Option<String>,
@@ -491,7 +617,7 @@ pub struct UpdateStatus {
 
 fn read_board_status(config: &ApiConfig) -> Option<BoardUpdateStatus> {
     let board = config.board.as_ref()?;
-    board_update::read_status_at(&board.update_status, &board.update_progress)
+    board_update::read_status(&board.update_status)
 }
 
 fn current_task(state: &SharedState) -> Option<UpdateTask> {
@@ -502,9 +628,10 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
     let board = read_board_status(config);
     let running = task.as_ref().is_some_and(|t| t.step == "staging");
     let (phase, stage, progress_percent) = match &board {
-        // Staging asked for, but the writer has not written its first state yet.
+        // Staging asked for, but the writer has not written its first state yet: it checks the
+        // bundle's SHA-256 first.
         Some(board) if running && !matches!(board.state.as_str(), "staging" | "error") => ("staging".to_string(), "verifying".to_string(), Some(0)),
-        Some(board) => (board.state.clone(), board.atlas_stage().to_string(), board.percent()),
+        Some(board) => (board.phase(), board.atlas_stage().to_string(), board.percent()),
         None if running => ("staging".to_string(), "verifying".to_string(), Some(0)),
         None => ("unknown".to_string(), "unknown".to_string(), None),
     };
@@ -519,8 +646,7 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
         slots: Slots {
             active: board.as_ref().and_then(|board| board.slot_active.clone()),
             staged: board.as_ref().and_then(|board| board.slot_staged.clone()),
-            // A guest has no boot slots at all; the owner's default is the A/B layout.
-            layout: board.as_ref().and_then(|board| board.layout.clone()).unwrap_or_else(|| if config.board.is_some() { "ab" } else { "none" }.into()),
+            layout: board.as_ref().and_then(|board| board.layout.clone()).unwrap_or_else(|| if config.board.is_some() { "slots" } else { "none" }.into()),
             default: board.as_ref().and_then(|board| board.slot_default.clone()),
             previous: board.as_ref().and_then(|board| board.slot_previous.clone()),
             trial: board.as_ref().and_then(|board| board.slot_trial.clone()),
@@ -534,8 +660,8 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
     }
 }
 
-/// Before the writer has run on this boot `/run/board/update.json` may be missing;
-/// `update status` writes it (it reads the state kept on p1).
+/// Before the writer has run on this boot `/run/board/update.json` may be missing; `slots status`
+/// writes it.
 async fn ensure_board_status(config: &ApiConfig) {
     let Some(board) = config.board.as_ref() else {
         return;
@@ -574,14 +700,14 @@ pub struct AtlasUploadResponse {
     pub sha256: String,
 }
 
-/// `POST /v1/ota/upload`: multipart/form-data with the image in a part named `file`.
+/// `POST /v1/ota/upload`: multipart/form-data with the slot bundle in a part named `file`.
 pub async fn atlas_upload(State(state): State<SharedState>, mut multipart: Multipart) -> ApiResult<Json<AtlasUploadResponse>> {
     capabilities::require(&state, feature::UPDATES).await?;
     while let Some(field) = multipart.next_field().await.map_err(|error| ApiError::bad_request(error.to_string()))? {
         if field.name() != Some("file") {
             continue;
         }
-        let filename = field.file_name().map(str::to_string).unwrap_or_else(|| "helios-update.img.xz".into());
+        let filename = field.file_name().map(str::to_string).unwrap_or_else(|| "helios-update.slot.tar".into());
         let stream = field.map_err(|error| error.to_string());
         let upload = store_upload(&state.config, &filename, None, None, Box::pin(stream)).await?;
         state.events.publish("update", serde_json::json!({ "change": "uploaded", "upload": upload }));
@@ -639,7 +765,7 @@ pub async fn atlas_state(State(state): State<SharedState>) -> Json<serde_json::V
     }))
 }
 
-/// Shared by the API state: one stage at a time from helios-api (the writer has its own lock).
+/// Shared by the API state: one update command at a time from helios-api (the writer has its own lock).
 pub fn new_update_lock() -> Arc<tokio::sync::Mutex<()>> {
     Arc::new(tokio::sync::Mutex::new(()))
 }
@@ -650,16 +776,33 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn config(dir: &std::path::Path) -> ApiConfig {
-        ApiConfig { upload_dir: dir.join("uploads"), board: Some(test_board(dir)), board_update_systemd_run: false, ui_dir: None, max_upload_bytes: 64, ..ApiConfig::default() }
+        ApiConfig { upload_dir: dir.join("uploads"), board: Some(test_board(dir)), board_update_systemd_run: false, ui_dir: None, max_upload_bytes: 4096, ..ApiConfig::default() }
     }
 
-    /// The image's board contract, with the updater's files in `dir`.
+    /// The image's board contract, with the writer's files in `dir`.
     fn test_board(dir: &std::path::Path) -> helios_layout::BoardContract {
-        helios_layout::BoardContract { update_tool: dir.join("board-update"), update_status: dir.join("update.json"), update_progress: dir.join("progress"), ..helios_layout::BoardContract::image() }
+        helios_layout::BoardContract { update_tool: dir.join("slots"), update_status: dir.join("update.json"), ..helios_layout::BoardContract::image() }
     }
 
     fn chunks(parts: &[&'static [u8]]) -> impl Stream<Item = Result<Bytes, Infallible>> + Unpin {
         futures_util::stream::iter(parts.iter().map(|p| Ok(Bytes::from_static(p))).collect::<Vec<_>>())
+    }
+
+    /// A writer status as `slots status` prints it (the fields the API reads).
+    fn writer_status(state: &str, active: &str, staged: &str, default: &str, previous: &str, trial: &str) -> String {
+        let staged_version = if staged.is_empty() { "" } else { "v2" };
+        serde_json::json!({
+            "state": state, "layout": "slots", "slot_active": active, "slot_staged": staged, "slot_default": default,
+            "slot_previous": previous, "slot_trial": trial, "version_active": "v1", "version_staged": staged_version,
+            "progress": if state == "staged" { 1000 } else { 0 }, "error": "", "free_bytes": 1 << 30, "reserve_bytes": 1 << 20,
+            "slots": [{ "id": active, "version": "v1" }],
+        })
+        .to_string()
+    }
+
+    /// Nothing staged, booted from `helios-a`.
+    fn idle() -> String {
+        writer_status("idle", "helios-a", "", "helios-a", "", "")
     }
 
     #[tokio::test]
@@ -679,18 +822,18 @@ mod tests {
     async fn uploads_hash_verify_and_list() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
-        let upload = store_upload(&config, "../helios-full-raze-v2026.4.0.img.xz", None, None, chunks(&[b"hello ", b"world"])).await.expect("upload");
+        let upload = store_upload(&config, "../helios-full-raze-v2026.4.0.slot.tar", None, None, chunks(&[b"hello ", b"world"])).await.expect("upload");
         assert_eq!(upload.sha256, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
-        assert_eq!(upload.filename, "helios-full-raze-v2026.4.0.img.xz");
+        assert_eq!(upload.filename, "helios-full-raze-v2026.4.0.slot.tar");
         assert_eq!(upload.size_bytes, 11);
         assert!(upload.image_url.starts_with("file://"));
         assert_eq!(read_uploads(&config).await, vec![upload.clone()]);
         assert_eq!(upload_for_url(&config, &upload.image_url).await.expect("by url").id, upload.id);
         assert_eq!(version_for(&upload, None), "v2026.4.0");
 
-        let wrong = store_upload(&config, "x.img", Some(&"0".repeat(64)), None, chunks(&[b"abc"])).await.expect_err("checksum mismatch");
+        let wrong = store_upload(&config, "x.slot.tar", Some(&"0".repeat(64)), None, chunks(&[b"abc"])).await.expect_err("checksum mismatch");
         assert_eq!(wrong.code, crate::error::ErrorCode::Unprocessable);
-        let big = store_upload(&config, "x.img", None, None, chunks(&[&[0u8; 65]])).await.expect_err("too large");
+        let big = store_upload(&config, "x.slot.tar", None, None, chunks(&[&[0u8; 4097]])).await.expect_err("too large");
         assert_eq!(big.code, crate::error::ErrorCode::PayloadTooLarge);
         assert!(upload_for_url(&config, "file:///etc/passwd").await.is_err());
     }
@@ -702,58 +845,74 @@ mod tests {
         assert_eq!(status.phase, "unknown");
         assert!(!status.updater_available);
         assert_eq!(status.slots.active, None);
+        assert_eq!(status.slots.layout, "slots");
     }
 
     #[test]
     fn status_follows_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
+        let board = config.board.as_ref().expect("board");
         std::fs::write(
-            &config.board.as_ref().expect("board").update_status,
-            r#"{"state":"staging","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"","progress":100,"error":""}"#,
+            &board.update_status,
+            r#"{"state":"staging","layout":"slots","slot_active":"helios-a","slot_staged":"helios-b","version_active":"v1","version_staged":"","progress":600,"error":""}"#,
         )
         .expect("write");
-        std::fs::write(&config.board.as_ref().expect("board").update_progress, "1000").expect("write");
         let status = status_from(&config, None);
         assert_eq!(status.phase, "staging");
         assert_eq!(status.stage, "installing");
-        assert_eq!(status.progress_percent, Some(95));
-        assert_eq!(status.slots.staged.as_deref(), Some("B"));
+        assert_eq!(status.progress_percent, Some(60));
+        assert_eq!(status.slots.staged.as_deref(), Some("helios-b"));
 
-        std::fs::write(
-            &config.board.as_ref().expect("board").update_status,
-            r#"{"state":"rolled-back","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":"the health check failed on v2"}"#,
-        )
-        .expect("write");
+        std::fs::write(&board.update_status, r#"{"state":"rolled-back","layout":"slots","slot_active":"helios-a","slot_staged":"helios-b","version_active":"v1","version_staged":"v2","progress":1000,"error":"slot helios-b failed its health check"}"#).expect("write");
         let status = status_from(&config, None);
         assert_eq!(status.stage, "rolled_back");
-        assert_eq!(status.last_error.as_deref(), Some("the health check failed on v2"));
+        assert_eq!(status.last_error.as_deref(), Some("slot helios-b failed its health check"));
     }
 
-    /// A stand-in for `/usr/lib/board/update` that records its arguments and writes the
-    /// writer's state file as the real one does.
-    fn fake_writer(dir: &std::path::Path, stage_ok: bool) -> PathBuf {
-        let log = dir.join("calls.log");
-        let status = dir.join("update.json");
-        let stage = if stage_ok {
-            format!(r#"printf '%s\n' '{{"state":"staged","slot_active":"A","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}}' > {}"#, status.display())
-        } else {
-            "echo 'update: the image failed its SHA-256 check (damaged or incomplete copy)' >&2; exit 1".to_string()
+    /// A stand-in for `/usr/lib/board/slots`: it records its arguments, and each command writes the
+    /// state the test gave it (`after-<command>.json`), as the real writer rewrites `update.json`.
+    /// `stage` checks its bundle against `--sha256` as the real one does (exit 3: refused, nothing
+    /// changed). With `stage_error`, `stage` fails with that reason instead.
+    fn fake_writer(dir: &std::path::Path, stage_error: Option<&str>) -> PathBuf {
+        // A command is logged once it has written its state, so a logged call is a finished one.
+        let script = r#"#!/bin/sh
+dir='DIR'
+case "$1" in
+status) cat "$dir/update.json"; exit 0 ;;
+stage)
+	STAGE_FAILURE
+	if [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$4" ]; then
+		echo "slots: the bundle doesn't match --sha256; nothing changed" >&2
+		exit 3
+	fi
+	cp "$dir/after-stage.json" "$dir/update.json" ;;
+apply | confirm | rollback) cp "$dir/after-$1.json" "$dir/update.json" ;;
+*) echo "slots: unknown command $1" >&2; exit 2 ;;
+esac
+echo "$*" >> "$dir/calls.log"
+"#;
+        let failure = match stage_error {
+            Some(reason) => format!(r#"echo "slots: {reason}" >&2; exit 1"#),
+            None => String::new(),
         };
-        let script = format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$1\" in\nstage) {stage} ;;\napply) printf '%s\\n' '{{\"state\":\"trying\",\"slot_active\":\"A\",\"slot_staged\":\"B\",\"version_active\":\"v1\",\"version_staged\":\"v2\",\"progress\":1000,\"error\":\"\"}}' > {status} ;;\nesac\n",
-            log = log.display(),
-            status = status.display(),
-        );
-        let path = dir.join("board-update");
-        std::fs::write(&path, script).expect("write");
+        let text = script.replace("DIR", &dir.display().to_string()).replace("STAGE_FAILURE", &failure);
+        let path = dir.join("slots");
+        std::fs::write(&path, text).expect("write");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-        std::fs::write(&status, r#"{"state":"idle","slot_active":"A","slot_staged":"","version_active":"v1","version_staged":"","progress":0,"error":""}"#).expect("write");
         path
     }
 
+    fn calls(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("calls.log")).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+
+    fn set_writer_state(dir: &std::path::Path, name: &str, json: &str) {
+        std::fs::write(dir.join(name), json).expect("write");
+    }
+
     async fn wait_for_step(state: &SharedState, step: &str) -> UpdateTask {
-        for _ in 0..200 {
+        for _ in 0..300 {
             if let Some(task) = current_task(state)
                 && task.step == step
             {
@@ -764,71 +923,215 @@ mod tests {
         panic!("task never reached {step}: {:?}", current_task(state));
     }
 
-    #[tokio::test]
-    async fn apply_stages_then_applies_through_the_writer() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = config(dir.path());
-        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), true);
-        let state = crate::AppState::new(config.clone());
-        let upload = store_upload(&config, "helios-full-raze-v2.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
-        let response = apply_upload(&state, upload.clone(), None, Some(upload.sha256.clone()), true).await.expect("apply");
-        assert_eq!(response.version, "v2");
-        wait_for_step(&state, "applying").await;
-        for _ in 0..200 {
-            if std::fs::read_to_string(dir.path().join("calls.log")).unwrap_or_default().lines().count() == 2 {
-                break;
+    /// Waits until the fake writer has logged `count` commands.
+    async fn wait_for_calls(dir: &std::path::Path, count: usize) -> Vec<String> {
+        for _ in 0..300 {
+            let logged = calls(dir);
+            if logged.len() >= count {
+                return logged;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        let calls = std::fs::read_to_string(dir.path().join("calls.log")).expect("calls");
-        let image = upload.path(&config).display().to_string();
-        assert_eq!(calls, format!("stage {image} --sha256 {}\napply\n", upload.sha256));
+        calls(dir)
+    }
+
+    #[tokio::test]
+    async fn apply_stages_the_bundle_then_boots_it_on_trial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &idle());
+        set_writer_state(dir.path(), "after-stage.json", &writer_status("staged", "helios-a", "helios-b", "helios-a", "", ""));
+        set_writer_state(dir.path(), "after-apply.json", &writer_status("rebooting", "helios-a", "helios-b", "helios-a", "", "helios-b"));
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "helios-raze-v2.slot.tar", None, None, chunks(&[b"bundle"])).await.expect("upload");
+
+        let response = apply_upload(&state, upload.clone(), None, Some(upload.sha256.clone()), true).await.expect("apply");
+        assert_eq!(response.version.as_deref(), Some("v2"));
+        wait_for_step(&state, "applying").await;
+        let logged = wait_for_calls(dir.path(), 2).await;
+        let bundle = upload.path(&config).display().to_string();
+        assert_eq!(logged, vec![format!("stage {bundle} --sha256 {}", upload.sha256), "apply".to_string()]);
         assert!(!upload.path(&config).exists(), "a staged upload is removed");
         let status = status_from(&config, current_task(&state));
         assert_eq!(status.phase, "trying");
         assert_eq!(status.stage, "rebooting");
+        assert_eq!(status.slots.trial.as_deref(), Some("helios-b"));
     }
 
     #[tokio::test]
-    async fn a_failed_stage_is_reported_and_not_applied() {
+    async fn a_refused_stage_is_reported_and_nothing_boots() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = config(dir.path());
-        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), false);
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), Some("the bundle doesn't unpack"));
+        set_writer_state(dir.path(), "update.json", &idle());
         let state = crate::AppState::new(config.clone());
-        let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
         apply_upload(&state, upload.clone(), None, None, true).await.expect("apply");
         let task = wait_for_step(&state, "failed").await;
-        assert_eq!(task.error.as_deref(), Some("the image failed its SHA-256 check (damaged or incomplete copy)"));
-        let calls = std::fs::read_to_string(dir.path().join("calls.log")).expect("calls");
-        assert!(!calls.contains("apply"));
+        assert_eq!(task.error.as_deref(), Some("the bundle doesn't unpack"));
+        assert!(!calls(dir.path()).iter().any(|c| c == "apply"), "nothing is booted");
         assert!(upload.path(&config).exists(), "a failed upload is kept");
-        assert_eq!(status_from(&config, Some(task)).last_error.as_deref(), Some("the image failed its SHA-256 check (damaged or incomplete copy)"));
+        assert_eq!(status_from(&config, Some(task)).last_error.as_deref(), Some("the bundle doesn't unpack"));
     }
 
     #[tokio::test]
-    async fn apply_refuses_without_the_writer_or_during_a_trial() {
+    async fn a_bundle_that_changed_after_the_upload_is_refused_by_the_writer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &idle());
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
+        std::fs::write(upload.path(&config), b"tampered").expect("tamper");
+        apply_upload(&state, upload.clone(), None, None, true).await.expect("apply");
+        let task = wait_for_step(&state, "failed").await;
+        assert_eq!(task.error.as_deref(), Some("the bundle doesn't match --sha256; nothing changed"));
+        assert!(!calls(dir.path()).iter().any(|c| c == "apply"));
+    }
+
+    #[tokio::test]
+    async fn a_wrong_checksum_is_refused_before_the_writer_runs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &idle());
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
+        let error = apply_upload(&state, upload, None, Some("0".repeat(64)), true).await.expect_err("checksum");
+        assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
+        assert!(calls(dir.path()).is_empty(), "the writer is not run");
+    }
+
+    #[tokio::test]
+    async fn apply_without_a_staged_slot_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &idle());
+        let state = crate::AppState::new(config);
+        let error = apply_staged(&state).await.expect_err("nothing staged");
+        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
+        assert!(error.message.contains("no slot is staged"), "{}", error.message);
+        assert!(calls(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_of_a_staged_slot_boots_it_on_trial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &writer_status("staged", "helios-a", "helios-b", "helios-a", "", ""));
+        set_writer_state(dir.path(), "after-apply.json", &writer_status("rebooting", "helios-a", "helios-b", "helios-a", "", "helios-b"));
+        let state = crate::AppState::new(config);
+        let response = apply_staged(&state).await.expect("apply");
+        assert_eq!(response.version.as_deref(), Some("v2"));
+        wait_for_step(&state, "applying").await;
+        assert_eq!(wait_for_calls(dir.path(), 1).await, vec!["apply".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_trial_blocks_a_new_update_and_a_rollback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &writer_status("rebooting", "helios-a", "helios-b", "helios-a", "helios-a", "helios-b"));
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
+        assert_eq!(apply_upload(&state, upload, None, None, true).await.expect_err("on trial").code, crate::error::ErrorCode::Conflict);
+        assert_eq!(apply_staged(&state).await.expect_err("on trial").code, crate::error::ErrorCode::Conflict);
+        assert_eq!(start_rollback(&state).await.expect_err("on trial").code, crate::error::ErrorCode::Conflict);
+        assert!(calls(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn confirm_keeps_a_healthy_trial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        // The board runs the trial slot now.
+        set_writer_state(dir.path(), "update.json", &writer_status("trying", "helios-b", "helios-b", "helios-a", "helios-a", "helios-b"));
+        set_writer_state(dir.path(), "after-confirm.json", &writer_status("confirmed", "helios-b", "", "helios-b", "helios-a", ""));
+        let state = crate::AppState::new(config.clone());
+        let response = start_confirm(&state).await.expect("confirm");
+        assert_eq!(response.action, "confirm");
+        wait_for_step(&state, "done").await;
+        assert_eq!(calls(dir.path()), vec!["confirm".to_string()]);
+        let status = status_from(&config, current_task(&state));
+        assert_eq!(status.phase, "confirmed");
+        assert_eq!(status.slots.trial, None);
+        assert_eq!(status.slots.default.as_deref(), Some("helios-b"));
+    }
+
+    #[tokio::test]
+    async fn confirm_refuses_when_no_trial_is_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        let state = crate::AppState::new(config.clone());
+        // Nothing on trial.
+        set_writer_state(dir.path(), "update.json", &idle());
+        assert_eq!(start_confirm(&state).await.expect_err("no trial").code, crate::error::ErrorCode::Conflict);
+        // A trial the board has not booted yet: the old slot is still running.
+        set_writer_state(dir.path(), "update.json", &writer_status("rebooting", "helios-a", "helios-b", "helios-a", "", "helios-b"));
+        let error = start_confirm(&state).await.expect_err("trial not booted");
+        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
+        assert!(calls(dir.path()).is_empty(), "the writer is not asked to judge a trial that has not run");
+    }
+
+    #[tokio::test]
+    async fn rollback_makes_the_previous_slot_the_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &writer_status("confirmed", "helios-b", "", "helios-b", "helios-a", ""));
+        set_writer_state(dir.path(), "after-rollback.json", &writer_status("rebooting", "helios-b", "", "helios-a", "helios-b", ""));
+        let state = crate::AppState::new(config);
+        let response = start_rollback(&state).await.expect("rollback");
+        assert_eq!(response.action, "rollback");
+        wait_for_step(&state, "done").await;
+        assert_eq!(calls(dir.path()), vec!["rollback".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn rollback_without_a_previous_slot_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        set_writer_state(dir.path(), "update.json", &idle());
+        let state = crate::AppState::new(config);
+        let error = start_rollback(&state).await.expect_err("no previous");
+        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
+        assert!(calls(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_board_off_the_slots_layout_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = config(dir.path());
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), None);
+        // An A/B image's writer state: no slots layout.
+        set_writer_state(dir.path(), "update.json", r#"{"state":"idle","slot_active":"A","slot_staged":"","version_active":"v1","progress":0,"error":""}"#);
+        let state = crate::AppState::new(config.clone());
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
+        let error = apply_upload(&state, upload, None, None, true).await.expect_err("not slots");
+        assert_eq!(error.code, crate::error::ErrorCode::Unprocessable);
+        assert!(calls(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_refuses_without_the_writer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
         let state = crate::AppState::new(config.clone());
-        let upload = store_upload(&config, "image.img.xz", None, None, chunks(&[b"image"])).await.expect("upload");
-        let error = apply_upload(&state, upload.clone(), None, None, true).await.expect_err("no writer");
+        let upload = store_upload(&config, "image.slot.tar", None, None, chunks(&[b"image"])).await.expect("upload");
+        let error = apply_upload(&state, upload, None, None, true).await.expect_err("no writer");
         assert_eq!(error.code, crate::error::ErrorCode::NotAvailable);
-
-        let mut config = config.clone();
-        config.board.as_mut().expect("board").update_tool = fake_writer(dir.path(), true);
-        std::fs::write(
-            &config.board.as_ref().expect("board").update_status,
-            r#"{"state":"trying","slot_active":"B","slot_staged":"B","version_active":"v1","version_staged":"v2","progress":1000,"error":""}"#,
-        )
-        .expect("write");
-        let state = crate::AppState::new(config);
-        let error = apply_upload(&state, upload, None, None, true).await.expect_err("on trial");
-        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
     }
 
     #[test]
     fn filenames_are_sanitized() {
-        assert_eq!(sanitize_filename("/tmp/../evil name.img"), "evil_name.img");
-        assert_eq!(sanitize_filename(".."), "helios-update.img.xz");
+        assert_eq!(sanitize_filename("/tmp/../evil name.tar"), "evil_name.tar");
+        assert_eq!(sanitize_filename(".."), "helios-update.slot.tar");
     }
 }

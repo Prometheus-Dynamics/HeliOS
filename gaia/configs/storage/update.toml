@@ -1,25 +1,17 @@
 config = 3
-description = "A/B updates with the Raze device package's writer: the OS hooks it runs (health check, pre-reboot), and orion-node's state on the data partition."
+description = "Slot updates with the Raze device package's slots writer: the health check its confirm runs, and orion-node's state on the data partition."
 
-# The device package's writer (/usr/lib/board/update, Atlas docs/ota.md)
-# takes the same .img.xz that is flashed: `stage` copies its boot and root
-# slot A into the board's inactive slot, `apply` runs update.d/pre-reboot and
-# trial-boots it, and board-update-confirm keeps it once update-health
-# passes (else the board restarts into the previous slot). helios-api drives
-# it for /v1/update/* and /v1/ota/*. pre-stage, post-stage and post-boot hooks
-# are not needed: staging touches only the inactive slot.
+# The device package's slots writer (/usr/lib/board/slots, Atlas docs/slots.md)
+# installs a slot bundle that helios-api uploads and stages (`slots stage`),
+# trial-boots it (`slots apply`) and keeps it once update-health passes
+# (`slots confirm`, from board-update-confirm.service); a failed trial falls back
+# to the default slot. The writer runs no update.d hooks, so there are none here.
+# helios-api drives it for /v1/update/*.
 
 [[stage.files]]
 id = "update-health"
 src = "${assets}/update/etc/board/update-health"
 dest = "/etc/board/update-health"
-origin = "static-asset"
-mode = 493
-
-[[stage.files]]
-id = "update-pre-reboot"
-src = "${assets}/update/etc/board/update.d/pre-reboot"
-dest = "/etc/board/update.d/pre-reboot"
 origin = "static-asset"
 mode = 493
 
@@ -35,4 +27,4 @@ origin = "static-asset"
 kind = "buildroot"
 
 [image.feed]
-stage_files = ["update-health", "update-pre-reboot", "orion-node-state"]
+stage_files = ["update-health", "orion-node-state"]

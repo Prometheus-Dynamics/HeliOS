@@ -19,7 +19,7 @@ pub struct DiagnosticsConfig {
     pub base_dir: PathBuf,
     pub plugin_dir: PathBuf,
     pub orion_run_dir: PathBuf,
-    /// The data partition (p7), kept across A/B updates.
+    /// The data partition (p7), kept across OS updates.
     pub data_mount: PathBuf,
     /// HeliOS state, bind-mounted from the data partition.
     pub writable_store_mount: PathBuf,
@@ -65,7 +65,6 @@ impl DiagnosticsConfig {
         ];
         if let Some(board) = &board {
             expected_executables.push(board.update_health.clone());
-            expected_executables.push(board.update_pre_reboot.clone());
             snapshot_files.push(board.identity_file.display().to_string());
             snapshot_files.push(board.update_status.display().to_string());
             snapshot_files.push(board.device_package_env.display().to_string());

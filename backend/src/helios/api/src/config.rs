@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(config.lemnos_socket, PathBuf::from("/run/lemnos/lemnosd.sock"));
         assert_eq!(config.playback.stream_dir, PathBuf::from("/run/helios/streams"));
         let board = config.board.as_ref().expect("the image has a board contract");
-        assert_eq!(board.update_tool, PathBuf::from("/usr/lib/board/update"));
+        assert_eq!(board.update_tool, PathBuf::from("/usr/lib/board/slots"));
         assert_eq!(board.identity_file, PathBuf::from("/run/board/identity.json"));
     }
 

@@ -256,7 +256,7 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [x] Device security, off by default: open (FRC) or secured with a device password (session cookie + CSRF) and API tokens; `/v1/auth/*`, the UI's Open/Secured indicator, Settings toggle and first-run step; state in `/var/lib/helios/auth/auth.json`; recovery with `helios-api auth reset` (docs/docs/api/http.md, Device security).
 - [ ] Security follow-ups: check on hardware that `/var/lib/helios/auth` survives an OTA and a rootfs reflash; Atlas to send a bearer token when `helios.auth.mode` is `secured` (and to its `/v1/device/os` reconnect probe); end open SSE streams on logout/revoke; optional signed-out read-only view; TLS (per-device certificate) as a later option.
 - [x] helios-api serves the UI and the API on :5800, the port `manage_url` names.
-- [x] OTA through the device package's writer: `/v1/update/*` and `/v1/ota/*` stage an uploaded `.img.xz` with its sha256 (`update stage`), apply it (`update apply`, through systemd-run) and report `/run/board/update.json`.
+- [x] OTA through the device package's slots writer: `/v1/update/*` and `/v1/ota/*` stage an uploaded slot bundle (a tar of `slot.json`, the root image and `boot/`) with its sha256 (`slots stage <bundle> --sha256`), boot it on trial (`slots apply`), confirm it (`slots confirm`, also `POST /v1/update/confirm`) or roll back (`slots rollback`, `POST /v1/update/rollback`), all through systemd-run, and report `/run/board/update.json`. The A/B writer, its `update.d` hooks and `pre-reboot` are gone.
 - [ ] OTA: optional image signatures (Atlas open question: where the key lives).
 
 ## Multi-camera (planned, not built)

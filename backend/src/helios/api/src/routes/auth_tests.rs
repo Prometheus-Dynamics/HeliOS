@@ -19,7 +19,6 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
             identity_file: dir.join("identity.json"),
             update_tool: dir.join("no-board-update"),
             update_status: dir.join("update.json"),
-            update_progress: dir.join("update-progress"),
             ..helios_layout::BoardContract::image()
         }),
         board_update_systemd_run: false,
@@ -101,6 +100,8 @@ async fn secured_mode_rejects_unauthenticated_requests() {
         ("POST", "/v1/system/processes/1/signal"),
         ("POST", "/v1/update/uploads"),
         ("POST", "/v1/update/apply"),
+        ("POST", "/v1/update/confirm"),
+        ("POST", "/v1/update/rollback"),
         ("POST", "/v1/ota/upload"),
         ("POST", "/v1/ota/apply"),
         ("DELETE", "/v1/cameras/cam0/mount"),

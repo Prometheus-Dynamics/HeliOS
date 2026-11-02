@@ -366,7 +366,7 @@ fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
     let confirm_service_loaded = systemd_unit_load_state("board-update-confirm.service").is_some_and(|state| state == "loaded");
     let health_check_installed = is_executable(&board.update_health);
     let slot_active = field("slot_active");
-    let ab_layout = matches!(slot_active.as_deref(), Some("A" | "B"));
+    let slots_layout = field("layout").as_deref() == Some("slots");
     let state = field("state");
     let mut issues = Vec::new();
     if !tool_installed {
@@ -380,8 +380,8 @@ fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
     }
     if status.is_none() {
         issues.push("update_status_missing".to_string());
-    } else if !ab_layout {
-        issues.push("not_on_ab_layout".to_string());
+    } else if !slots_layout {
+        issues.push("not_on_slots_layout".to_string());
     }
     if matches!(state.as_deref(), Some("error" | "rolled-back")) {
         issues.push(format!("last_update_{}", state.as_deref().unwrap_or_default()));
@@ -396,7 +396,7 @@ fn collect_update_report(board: Option<&BoardContract>) -> UpdateReport {
         slot_staged: field("slot_staged"),
         version_active: field("version_active"),
         error: field("error"),
-        ab_layout,
+        slots_layout,
         issues,
     }
 }

@@ -19,7 +19,6 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
             identity_file: dir.join("identity.json"),
             update_tool: dir.join("no-board-update"),
             update_status: dir.join("update.json"),
-            update_progress: dir.join("update-progress"),
             ..helios_layout::BoardContract::image()
         }),
         board_update_systemd_run: false,
