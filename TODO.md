@@ -133,8 +133,60 @@ For when the user calls the release; not work to start before that.
 ### Not this release
 
 - NPU and AI models (Coral, RKNN, the K230 KPU): HeliOS uses the NPU once Coral and AI-model
-  support return.
+  support return. Built on the layers below, not as per-vendor paths (see "AI accelerators").
 - Field test day on a robot behind a SystemCore: robot access is unlikely before the release.
+
+## After the release: dependency layers (planned 2026-11-02)
+
+Slated, not started. Each item may move into the release if the user says so. Why: as the
+dependencies grow they reach into each other's areas (three USB stacks, two hotplug watchers, two
+DMA buffer allocators); every building block needs one owner so the stack stays modular and a new
+device or feature has one obvious home.
+
+**Layers.** A dependency uses only layers below it; links between dependencies are small
+feature-gated edge crates (`styx::daedalus`, `lemnos-orion`); lower layers hand over fds and handles,
+never copies; no product names below HeliOS.
+
+| Layer | Dependency | Is | Is not |
+|---|---|---|---|
+| L4 | HeliOS | the product: API, UI, pipelines, NT4/FRC, wiring the stack together | home for generic code |
+| L4 | Atlas | the device package and the fleet/flash tool | its own USB stack or messaging layer |
+| L3 | Eidos | vision: detectors, pose, mapping, calibration, later models; ops as Daedalus nodes on every backend | capture, buffers, devices, FRC specifics |
+| L2 | Daedalus | the compute runtime: graphs, planner, types and adapters, residency, CPU SIMD/GPU/RGA (later NPU) | camera capture, algorithms, device discovery |
+| L2 | Styx | cameras and media: sensors, ISP (hardware, software, GPU), V4L2/UVC, codecs, frame pools and leases | its own USB, hotplug or GPU runtime |
+| L1 | Lemnos | user-space hardware access: buses, USB, later PCIe/MMIO, hotplug, board files, drivers, device ownership (lemnosd), DMA buffer basics, MCU drivers | a memory manager, a decider of data movement, camera or vision code |
+| L1 | Orion | messaging between processes and nodes: state, status, actions/jobs, blobs, discovery, MCU links | a frame or tensor data path, hardware access |
+| L0 | Gaia | building images | anything at run time |
+
+**Transfers** split four ways:
+- Daedalus decides whether and how data moves (only the planner sees the graph).
+- Lemnos moves bytes over a bus or a general DMA engine (USB bulk, PCIe DMA, SPI/I2C, RP1 DMA, cache
+  sync) through one generic interface, and provides the DMA buffer basics (heap allocation, dmabuf
+  sync, mapping, fences) as library code; lemnosd arbitrates ownership and is never in the data path.
+- A compute device's own driver moves bytes that are commands in its queue (Vulkan copy, RGA blit,
+  ISP output, NPU input), so they stay ordered with its work: Daedalus for GPU/RGA/NPU, Styx for ISP
+  and codecs.
+- Styx, the producer, owns frame buffers and their lifetime.
+Zero-copy fd hand-off, with no transfer at all, is the default.
+
+Items (each: owner, done when; each needs the user's go before it starts):
+- [ ] **Architecture doc.** HeliOS writes docs/architecture.md from the table above, and each
+      dependency's README states its scope (is / is not). Each dependency's agent first checks the
+      overlap list against its own code.
+- [ ] **One USB transport** (Lemnos). One USB layer that also builds for Windows and macOS (Atlas);
+      Lemnos (today rusb/libusb), Atlas's USB boot (nusb) and Styx's UVC (raw usbdevfs) move onto it.
+- [ ] **One hotplug watcher** (Lemnos). Styx's uevent watcher moves onto Lemnos's.
+- [ ] **DMA buffer basics and bus transfers** (Lemnos). Heap allocation, dmabuf sync, mapping and
+      fences, plus the generic bus/DMA-engine transfer interface; Styx and Daedalus move their
+      dma-heap and dmabuf code onto it. Pools stay in Styx, residency in Daedalus.
+- [ ] **One Vulkan device per process** (Daedalus, Styx). Check whether Styx's gpuisp and Daedalus's
+      gpu crate share one device and queue in a process; make them share it if they don't.
+- [ ] **AI accelerators** (Lemnos, Daedalus, Eidos), our own stack rather than vendor runtimes:
+      Lemnos transports (USB, PCIe, on-chip blocks; firmware load and re-enumeration; ownership),
+      a Daedalus accelerator interface (load program, import buffers, submit, fence) with one thin
+      driver per device (Coral, our own MCU accelerator, Hailo, Rockchip NPU, K230 KPU), and Eidos
+      lowering its ops to it as one more backend. Design doc first, for the user's sign-off; vendor
+      model compilers that are closed (Edge TPU, Hailo) are the known hard part.
 
 ### Pinned for later (user, 2026-10-30)
 
