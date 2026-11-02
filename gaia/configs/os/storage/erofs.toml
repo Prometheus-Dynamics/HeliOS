@@ -1,9 +1,10 @@
 config = 3
-description = "Read-only EROFS root and the /data partition: the root slot image (LZMA, large pclusters), /var on tmpfs, /data (p7) mounted early with the persistent state bound into place, the machine ID on /data (sshd host keys are the device package's, per board), and the device hostname."
+description = "Read-only EROFS root and the /data partition: rootfs.erofs (LZMA, large pclusters), the root the dynamic slot boots, /var on tmpfs, /data mounted early with the persistent state bound into place, the machine ID on /data (sshd host keys are the device package's, per board), and the device hostname."
 
-# The root filesystem is one A/B slot (p5/p6, 512 MiB, targets/raze.toml) that
-# the device package's writer replaces wholesale, so it is read-only: EROFS,
-# mounted by the kernel (rootfstype=erofs ro; the Raze package builds EROFS
+# The root filesystem is rootfs.erofs, which the slots fragment (Atlas
+# devices/raze/gaia/slots.toml) puts under dm-verity and packs into the slot
+# bundle and the first-flash image. Slots are the only Raze layout: there is no
+# fixed root partition. It is read-only (EROFS; the Raze package builds EROFS
 # in). Nothing writes to / at runtime: what changes lives on /data (kept
 # across updates) or in /run and the /var tmpfs. gaia/configs/README.md
 # ("Read-only root") lists every runtime write and where it goes.
@@ -77,19 +78,13 @@ config_overrides = [
   # by systemd-tmpfiles (helios-data-setup binds the persistent parts into it).
   ["BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW", "n"],
   ["BR2_INIT_SYSTEMD_VAR_FACTORY", "y"],
-  # mkfs.ext4 for the empty /data image (post-image.sh).
+  # mkfs.ext4 for the data partition (the slots' data.ext4).
   ["BR2_PACKAGE_HOST_E2FSPROGS", "y"],
 ]
 
 [[image.expected_images]]
 name = "rootfs.erofs"
 format = "erofs"
-required = true
-
-# The empty /data filesystem post-image.sh makes; the disk assembly places it.
-[[image.expected_images]]
-name = "data.ext4"
-format = "ext4"
 required = true
 
 [image.feed]
@@ -101,12 +96,3 @@ stage_files = [
   "board-hostname-env",
 ]
 stage_services = ["data-setup-service"]
-
-[outputs]
-# Keep provider work/output collection isolated per build, but place release
-# compressed raw disk images in a repo-level output folder for flashing/distribution.
-# The same .img.xz updates a running board (the device package's writer).
-archive_name = "${outputs.dir}/${build.name}-${build.version}.img.xz"
-# The A/B disk is the main image; the slots fragment's first-flash disk and bundle
-# are published next to it.
-disk = "sdcard"

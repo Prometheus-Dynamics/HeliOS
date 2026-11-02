@@ -41,14 +41,11 @@ imports = [
   # Expected contents of a full image, in its own file so emptying a layer
   # can't also remove the check.
   { path = "../layers/expect-full.toml", when = { profile = "full" } },
-  # Dynamic slots: the device package's slot initramfs and slots fragment (a verity'd slot
-  # root, <id>.slot.tar and the slot first-flash disk next to the A/B image).
+  # Dynamic slots, the only Raze layout: the device package's slot initramfs (slot-init) and
+  # slots fragment. The image is the first-flash <id>.img.xz (helios-<ver>-styx-<commit>.img.xz)
+  # plus the <id>.slot.tar bundle, both in outputs.dir; the root is a verity'd slot.
   { source = "atlas", path = "devices/raze/gaia/initramfs.toml", when = { profile = "full", target = "raze" } },
   { source = "atlas", path = "devices/raze/gaia/slots.toml", when = { profile = "full", target = "raze" } },
-  # Layered slots: the root as base, platform and app layers (image-layers.toml), and the
-  # <id>.layered.slot.tar bundle next to the one-image one; an app change ships as one layer.
-  { path = "../layers/image-layers.toml", when = { profile = "full", target = "raze" } },
-  { source = "atlas", path = "devices/raze/gaia/slots-layered.toml", when = { profile = "full", target = "raze" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
   # A registry build cache (OCI checkpoints): pull what another machine built, push what this

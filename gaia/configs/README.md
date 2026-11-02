@@ -71,32 +71,30 @@ absolute).
 
 ## Disk layout and updates
 
-The same MBR A/B layout as the PhotonVision Raze image (`targets/raze.toml`):
+The image is Atlas's dynamic slots layout (`devices/raze/gaia/slots.toml`,
+with `initramfs.toml`, both imported by `builds/raze.toml` for the full
+profile). Raze boards use the slots layout only: there is no A/B disk and no
+fixed root partition. The build's deliverable is the first-flash image
+`helios-<version>-styx-<commit>.img.xz` in `outputs.dir`, next to the
+`<id>.slot.tar` bundle.
 
-| # | Size | Content |
-|---|---|---|
-| p1 | 16 MiB FAT | `autoboot.txt` (`tryboot_a_b=1`, boot A = p2, `[tryboot]` p3); the writer's state (`board-update.env`) and opt-in SSH keys |
-| p2, p3 | 128 MiB FAT each | boot A/B (kernel, DTBs, overlays, `config.txt`, `cmdline.txt` with `root=/dev/mmcblk0p5 rootfstype=erofs ro`); both ship the same image |
-| p4 | extended | |
-| p5, p6 | 512 MiB each | root A/B: read-only EROFS (LZMA, 256 KiB pclusters); B ships empty |
-| p7 | rest, ext4 | `/data` (64 MiB in the image, grown to fill the eMMC on first boot) |
+The first-flash disk is an MBR with two partitions:
 
-The root slots are 512 MiB. A HeliOS root is about a quarter of that (the
-last squashfs root was 58 MB, and EROFS LZMA plus the GPU/Vulkan userspace
-adds some), so it has room to grow; `post-image.sh` fails the build if
-`rootfs.erofs` ever exceeds the slot. Slot sizes are fixed once a board is
-flashed: growing them later needs a USB reflash.
+| Part | Content |
+|---|---|
+| FAT (`slots-boot`, 1 GiB) | the firmware, `config.txt`, `tryboot.txt`, `default.txt` and `trial.txt` (both point `os_prefix` at the slot), the default slot's kernel, initramfs (slot-init), DTBs and overlays, and the slot itself under `slots/<id>/` |
+| ext4 `data` | the slot image `slots/<id>.erofs` and its `slots/<id>.json`, the slot state `board/slots/state.json`, and the `/data` the board grows to fill the eMMC on first boot |
 
-Updates use the device package's writer with the same `.img.xz` that is
-flashed: `update stage <image> --sha256 <hex>` copies p2 and p5 of the image
-into the inactive slot, `update apply` runs `update.d/pre-reboot` (stops
-helios-engine, helios-peripherals, helios-api and orion-node) and reboots into
-it on trial, and `board-update-confirm` keeps it once `update-health`
-passes (orion-node, helios-engine and helios-api active, `GET /v1/health` on
-:5800 answering within 120 s); otherwise the board restarts into the old slot.
-helios-api drives the writer for `/v1/update/*` and `/v1/ota/*`; on the board,
-run `/usr/lib/board/update` directly. Moving a board from the old squashfs layout to this
-one is a USB reflash.
+The root is `rootfs.erofs` (LZMA, 1 MiB clusters), put under dm-verity by the
+slots fragment; the slot's cmdline carries `atlas.roothash`, `atlas.slot` and
+`atlas.data`. The slot has no fixed size: the data partition holds the slot
+plus 256 MiB free.
+
+Updates to running boards are not wired to this layout yet. The A/B writer
+the device package still ships (`/usr/lib/board/update`, `update stage` and
+`update apply` on p2/p5 of an image) and the hooks in `storage/update.toml`
+belong to the removed A/B layout and are not valid for the slots image. Slot
+updates go through Atlas's slot management.
 
 ## Read-only root
 
@@ -104,8 +102,8 @@ The root filesystem is never written at runtime. Everything that changes
 lives on `/data` (kept across updates) or in `/run` and the `/var` tmpfs
 (lost at reboot). `helios-data-setup.service` mounts `/data` before
 `local-fs.target` (so before the device package's SSH keys, hostname and USB
-gadget services) and binds it into place; if p7 is missing or will not mount,
-`/data` is a tmpfs and nothing persists.
+gadget services) and binds it into place; if the data partition is missing or will not
+mount, `/data` is a tmpfs and nothing persists.
 
 | What | Where | Mechanism |
 |---|---|---|
@@ -172,8 +170,8 @@ the port the device identity's `manage_url` names
     config and ops.
 - `targets/raze.toml` – what HeliOS adds on the device: the combined Buildroot
   external tree (device tree first, then `gaia/assets/buildroot`), kernel
-  fragments, `config.txt`, `cmdline.txt`, `autoboot.txt`, the post-build and
-  post-image scripts, and the A/B disk assembly.
+  fragments, `config.txt`, `cmdline.txt`, the post-build and post-fakeroot
+  scripts, and the boot tree the slots are built from.
 - `workspace/` – `root_dir`, `build_dir` (`gaia/build/${build.name}`), `outputs.dir`
   (`gaia/output/${build.name}`), the `assets` alias, reporting, failure policy,
   the Buildroot build-speed settings (parallel packages) and the `[cache]` table

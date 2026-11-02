@@ -23,8 +23,9 @@ the pinned git source `atlas` in `gaia/configs/builds/raze.toml`. `orion-node`
 comes from Orion's own Gaia layer (`packaging/gaia/orion-node.toml`),
 imported from the pinned git source `orion`. HeliOS adds its own OS on top:
 the read-only EROFS root with its `/data` partition, the HeliOS services and
-the vision plugin (built from `backend/`), the UI (built from `ui/`), the A/B
-update hooks, and its own `config.txt`/`cmdline.txt`/`autoboot.txt`.
+the vision plugin (built from `backend/`), the UI (built from `ui/`), the update
+hooks, and its own `config.txt`/`cmdline.txt`. The image is the dynamic slots
+layout from Atlas's slots fragment; there is no A/B disk.
 
 You also need Docker (Gaia cross-compiles the Rust artifacts in an image it
 builds from `gaia/docker/aarch64/Dockerfile.aarch64-rpi4` when missing) and Bun
@@ -77,9 +78,10 @@ For build `helios-<profile>-raze` (for example `helios-full-raze`):
 
 - Build state: `gaia/build/helios-full-raze/`
 - Rust artifacts: `gaia/output/helios-full-raze/artifacts/`
-- Images: `gaia/output/helios-full-raze/images/` (`sdcard.img`, `boot.vfat`,
-  `rootfs.erofs`, `data.ext4`)
-- Compressed image: `gaia/output/helios-full-raze/helios-full-raze-<version>.img.xz`
+- Images: `gaia/output/helios-full-raze/images/` (`rootfs.erofs` and the other
+  Buildroot outputs)
+- Flashable image: `gaia/output/helios-full-raze/helios-<version>-styx-<commit>.img.xz`,
+  the slots first-flash disk, with the `<id>.slot.tar` bundle next to it
 - Reports: `gaia/output/helios-full-raze/.gaia/reports/`
 
 All of these except the build state follow `outputs.dir`, so one override moves
@@ -87,30 +89,22 @@ every output, for example onto a faster disk:
 `tools/build-os.sh raze full --set outputs.dir=/mnt/fast/helios-full-raze`
 (`--set workspace.build_dir=...` moves the build state).
 
-The disk is the Raze A/B layout shared with the PhotonVision image: p1
-autoboot (16M), p2/p3 boot A/B (128M), p5/p6 root A/B (512M, read-only
-EROFS), p7 `/data` (grown to fill the eMMC on first boot). See
-`gaia/configs/README.md` for the layout, the update flow and where everything
-HeliOS writes at runtime goes.
+The image is the Raze dynamic slots layout (the only Raze layout): a FAT boot
+partition with the slot's kernel, initramfs and overlays, and an ext4 `data`
+partition holding the slot (`slots/<id>.erofs`) and its state, grown to fill
+the eMMC on first boot. The root is `rootfs.erofs` under dm-verity. See
+`gaia/configs/README.md` ("Disk layout and updates") for the layout and where
+everything HeliOS writes at runtime goes.
 
 ## 4) Flashing and updating
 
-Flash `sdcard.img` (or the `.img.xz`) with Atlas Hardware Manager over USB
-boot. A board still on the old two-partition squashfs layout must be
-reflashed this way once.
+Flash the `.img.xz` with Atlas Hardware Manager over USB boot (the first
+flash of a board).
 
-A running board updates from the same `.img.xz`:
-
-- from the HeliOS UI or the API: upload it (`POST /v1/update/uploads`), then
-  `POST /v1/update/apply` (docs/docs/api/http.md, "Updates");
-- from Atlas, over SSH or HTTP (`/v1/ota/*`);
-- on the board: copy it to `/data`, then
-  `/usr/lib/board/update stage /data/<image>.img.xz --sha256 <hex>` and
-  `/usr/lib/board/update apply` (the device package's A/B writer).
-
-The board reboots into the new slot on trial and keeps it once
-`/etc/board/update-health` passes; otherwise it falls back to the previous
-slot by itself.
+Updates on a running board are not wired to the slots image yet. The A/B
+update writer (`/usr/lib/board/update`, helios-api's `/v1/update/*` and
+`/v1/ota/*`, the hooks in `storage/update.toml`) still assumes the removed A/B
+layout. Slot updates go through Atlas's slot management.
 
 On the device, `/etc/default/helios-image.env` records the image version and
 the exact HeliOS, device package and Orion commits it was built from.

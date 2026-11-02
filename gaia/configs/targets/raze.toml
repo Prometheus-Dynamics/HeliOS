@@ -1,5 +1,5 @@
 config = 3
-description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, the device services and the A/B update writer; this file adds HeliOS's own boot files, kernel options, image scripts and the A/B disk assembly shared with the PhotonVision Raze image."
+description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays, and the device services; this file adds HeliOS's own boot files, kernel options and image scripts. The image is the dynamic slots (builds/raze.toml imports Atlas's slots fragment), so this file has no disk of its own."
 target = "raze"
 
 # The CM5's Cortex-A76 ISA for every aarch64 artifact (Gaia G10): aes, crc, dotprod, fp16, lse, rcpc,
@@ -34,52 +34,24 @@ config_overrides = [
   # on a Raze runs the same kernel.
   ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"$(BR2_EXTERNAL_RAZE_DEVICE_PATH)/linux/raze.config\""],
   # post-build: the read-only root's fstab, mount points and /run links.
-  # post-image: checks rootfs.erofs fits its 512 MiB slot, makes data.ext4.
   ["BR2_ROOTFS_POST_BUILD_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-build.sh\""],
   # post-fakeroot: /etc/slot.json from the slot identity Gaia stages (slots fragment).
   ["BR2_ROOTFS_POST_FAKEROOT_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-fakeroot.sh\""],
-  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"${project.root_dir}/gaia/assets/buildroot/scripts/post-image.sh\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/config.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/raze/cmdline.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4", "y"],
 ]
 
-[[image.expected_images]]
-name = "sdcard.img"
-format = "raw"
-required = true
-
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
 out_dir = "${provider.images}"
 
-# --- p1: autoboot --------------------------------------------------------------
-# autoboot.txt only. The bootloader reads it first: boot A (p2) by default,
-# boot B (p3) once on a tryboot. The device package's writer rewrites it,
-# keeps its state there (board-update.env), and reads opt-in SSH keys from
-# board/authorized_keys on it, so p1 is shared by both slots.
-[[image.assembly.trees]]
-id = "autoboot"
-path = "${assembly.work}/autoboot"
-
-[[image.assembly.files]]
-tree = "autoboot"
-src = "${assets}/buildroot/boards/raze/autoboot.txt"
-dest = "autoboot.txt"
-
-[[image.assembly.filesystems]]
-id = "autoboot"
-kind = "vfat"
-source_tree = "autoboot"
-output = "${assembly.work}/autoboot.vfat"
-size = "16M"
-
-# --- p2/p3: boot A/B -----------------------------------------------------------
-# The device package adds raze-device.txt, its overlays (ov9782, raze-fan,
-# raze-usb-power) and the stock overlays it loads (dwc2, i2c1-pi5, i2c-gpio,
-# ws2812-pio, vc4-kms-v3d-pi5) to this tree; config.txt includes it. One boot
-# image serves both slots: the writer rewrites root= in the slot it writes
-# (cmdline.txt here says root A, /dev/mmcblk0p5).
+# --- boot tree -----------------------------------------------------------------
+# The boot payload the dynamic slots are built from (the slots fragment's slots-payload and
+# slots-fat trees read kernel8.img, the DTBs, the overlays and raze-device.txt from here). The
+# device package adds raze-device.txt, its overlays (ov9782, raze-fan, raze-usb-power) and the
+# stock overlays it loads to this tree. config.txt, cmdline.txt and os_config.json are the
+# board's own copies; the slots use the slot cmdline the fragment writes.
 [[image.assembly.trees]]
 id = "boot"
 path = "${assembly.work}/boot"
@@ -161,61 +133,7 @@ src = "${provider.buildroot_output}/images/Image"
 dest = "${assembly.tree.boot}/kernel8.img"
 deterministic = true
 
-[[image.assembly.filesystems]]
-id = "boot"
-kind = "vfat"
-source_tree = "boot"
-output = "${provider.images}/boot.vfat"
-size = "128M"
 
-# --- the disk ------------------------------------------------------------------
-# The A/B layout of the device package's writer (Atlas docs/ota.md), the same
-# as the PhotonVision Raze image's: p1 autoboot, p2/p3 boot A/B, p4 extended
-# (added by Gaia), p5/p6 root A/B (512 MiB each, read-only EROFS), p7 /data
-# (64 MiB here, grown to fill the eMMC on first boot). Slot B's root ships
-# empty. Unwritten space stays sparse, so the .img.xz stays small. The writer
-# updates a running board from this same image: it copies p2 and p5 into the
-# inactive slot.
-[[image.assembly.disks]]
-id = "sdcard"
-output = "${provider.images}/sdcard.img"
-partition_table = "mbr"
-signature = "0x48454c49"
-first_lba = 2048
-alignment_lba = 2048
-
-[[image.assembly.disks.partitions]]
-name = "autoboot"
-type_alias = "fat32-lba"
-bootable = true
-image = "${assembly.work}/autoboot.vfat"
-size = "16M"
-
-[[image.assembly.disks.partitions]]
-name = "boot-a"
-type_alias = "fat32-lba"
-image = "${provider.images}/boot.vfat"
-size = "128M"
-
-[[image.assembly.disks.partitions]]
-name = "boot-b"
-type_alias = "fat32-lba"
-image = "${provider.images}/boot.vfat"
-size = "128M"
-
-[[image.assembly.disks.partitions]]
-name = "rootfs-a"
-type_alias = "linux"
-image = "${provider.images}/rootfs.erofs"
-size = "512M"
-
-[[image.assembly.disks.partitions]]
-name = "rootfs-b"
-type_alias = "linux"
-size = "512M"
-wipe = true
-
-[[image.assembly.disks.partitions]]
-name = "data"
-type_alias = "linux"
-image = "${provider.images}/data.ext4"
+# No disk here: the Raze image is the dynamic slots (devices/raze/gaia/slots.toml, Atlas), which
+# builds its own boot FAT and data partition from the boot tree above and rootfs.erofs, and
+# publishes the first-flash .img.xz and the <id>.slot.tar bundle into outputs.dir.
