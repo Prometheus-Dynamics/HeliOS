@@ -1,0 +1,66 @@
+config = 3
+description = "QEMU -M virt variant of the Raze image (input.machine=qemu): the Raze kernel with its qemu fragment (BR2_RAZE_KERNEL_QEMU), helios-peripherals with simulated cameras (Styx, /etc/styx/sim-cameras), lemnosd in sim mode (Lemnos's own sim drop-in and script), and the USB gadget off. Never a board image."
+
+# Feature patches: an artifact with only id + features replaces that artifact's feature list.
+# lemnosd: `sim` only. The Orion bridge is lemnos-orion, its own artifact and build group (lemnos-orion.toml),
+# so lemnosd keeps no `orion` feature (Lemnos builds the two apart on purpose).
+[[artifacts]]
+id = "lemnosd"
+features = ["sim"]
+
+[[artifacts]]
+id = "helios-peripherals"
+features = ["sim"]
+
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_RAZE_KERNEL_QEMU", "y"],
+]
+
+# lemnosd --sim: Lemnos's own drop-in (ExecStart with --sim --sim-script) and its simulated board script,
+# copies of Lemnos f8039759's files (assets/qemu). The board definition stays the device package's /etc/lemnos/board.toml.
+[[stage.files]]
+id = "qemu-sim-lemnosd-dropin"
+src = "${assets}/qemu/lemnosd-sim.conf"
+dest = "/etc/systemd/system/lemnosd.service.d/sim.conf"
+mode = 420
+origin = "static-asset"
+
+[[stage.files]]
+id = "qemu-sim-lemnosd-script"
+src = "${assets}/qemu/lemnos-sim.toml"
+dest = "/etc/lemnos/sim.toml"
+mode = 420
+origin = "static-asset"
+
+# Simulated cameras: build-os.sh --machine qemu writes the scene and the spec next to the image inputs.
+[[stage.files]]
+id = "qemu-sim-scene"
+src = "${project.root_dir}/gaia/build/qemu-sim/scene.glb"
+dest = "/usr/share/helios/sim/scene.glb"
+mode = 420
+origin = "static-asset"
+
+[[stage.files]]
+id = "qemu-sim-cameras"
+src = "${project.root_dir}/gaia/build/qemu-sim/sim-cameras"
+dest = "/etc/styx/sim-cameras"
+mode = 420
+origin = "static-asset"
+
+[[stage.files]]
+id = "qemu-sim-helios-peripherals-dropin"
+src = "${assets}/qemu/helios-peripherals-sim.conf"
+dest = "/etc/systemd/system/helios-peripherals.service.d/50-sim.conf"
+mode = 420
+origin = "static-asset"
+
+# No USB device controller under QEMU: the gadget is off, or every trial rolls back (Atlas's
+# slot sanity check). Overrides Atlas's default in /usr/lib/board/usb-gadget.env.
+[[stage.files]]
+id = "qemu-usb-gadget-env"
+src = "${assets}/qemu/usb-gadget.env"
+dest = "/etc/board/usb-gadget.env"
+mode = 420
+origin = "static-asset"

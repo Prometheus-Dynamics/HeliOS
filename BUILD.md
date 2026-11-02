@@ -158,6 +158,30 @@ over `cargo test`. Optimizing dependencies in the test profile was not
 adopted either: it adds compile time to save test time the suite does not
 spend.
 
+## 6) QEMU Variant (Simulated Board, Never A Board Image)
+
+`tools/build-os.sh raze full --machine qemu` builds the Raze image for QEMU's
+`-M virt` (the Gaia layer `gaia/configs/layers/qemu-sim.toml`): the Raze kernel
+with its qemu fragment, `lemnosd --sim` (Lemnos's sim drop-in and script),
+`helios-peripherals` with simulated cameras (`/etc/styx/sim-cameras`, rendered
+on the host from `tools/sim`'s default scene), and the USB gadget off. Its slot
+id carries `-styx-qemu` (for example `helios-2026.2.0-dev.N-styx-qemu-<commit>.img.xz`),
+which no board installs. Build it on the host with `CARGO_TARGET_DIR` on fast
+storage; the board build (`tools/build-os.sh raze full`) is unchanged.
+
+Run it with Gaia's runner (`scripts/qemu-rpi-slots.sh` in Gaia's repository):
+
+```bash
+scripts/qemu-rpi-slots.sh --state <dir> [--fresh] gaia/output/helios-full-raze/images/helios-*-styx-qemu-*.img.xz
+```
+
+- Networking defaults to a network namespace (no root needed). The guest is
+  reached from inside it: `nsenter -t "$(cat <dir>/netns.pid)" -U -n --preserve-credentials <cmd>`,
+  at `10.77.0.50`.
+- `--net user` forwards host ports 15800, 15899, 19200 and 2222 to the guest's
+  5800 (Orion/Atlas), 5899, 9200 and 22.
+- `--fresh` starts again from the image; the image itself is never written.
+
 ## Notes
 
 - Image customization lives in `gaia/configs` and `gaia/assets`; see
