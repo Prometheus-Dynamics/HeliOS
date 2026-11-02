@@ -70,12 +70,7 @@ now and marked untested on board; only its test waits for the board.
 - [ ] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
       every boot and logs it every time. Done when: a refreshed stored graph is written back once
       and the warning doesn't repeat on the next boot. Blocked by: nothing.
-- [ ] **Per-device camera knobs.** Why: lean is the default; trade-offs are explicit. Done when: the
-      device config sets Styx's raw/output buffer counts and queue depth, and its accelerators
-      (ISP path, RGA, VPU) per board; on the K230D start at raw 3, output 2, queue 1. Styx's knobs
-      are done (450cebc: `StyxConfig::with_accelerators`, each `Auto`/`Off`/`Required`); HeliOS
-      doesn't use them yet. Blocked by: the pin round for the wiring; each board's setting follows
-      Styx's backend for it.
+- [x] **Per-device camera knobs.** Done (f1a5b109): `HELIOS_CAMERA_QUEUE_DEPTH`, `_RAW_BUFFERS`, `_OUTPUT_BUFFERS`, `_ACCEL_ISP|SCALER|ENCODER|PYRAMID` set Styx's knobs per device (unset = Styx default; K230D entry 3/2/1 untested on board, `docs/device-profiles.md`).
 - [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
       Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
       node asks (7630c661). Left: dense on the GPU by default on the Raze, by `wants_gpu` also firing
