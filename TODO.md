@@ -52,15 +52,17 @@ now and marked untested on board; only its test waits for the board.
 
 ### 2. Hardware support, memory and GPU (added 2026-10-30)
 
-- [x] **Chunked dense mesh.** Why: bounded dense memory; Eidos removes the whole-mesh port after
-      this. Done: the dense graphs read `mesh_chunk`, `transforms` and `status`
-      (`helios_maps::dense::wire_dense_chunks`: at compile, at deploy, and once per board in
-      Orion, marker `dense-chunks-migration.json`); helios-api keeps the submap chunks under a byte
-      cap (`HELIOS_API_DENSE_CHUNK_BYTES`, default 16 MiB, 1 to 256 MiB) and serves the changes by
-      cursor (`GET /v1/pipelines/{id}/dense`); the UI draws one mesh per submap, placed by its
-      pose. No HeliOS code reads `mesh` or `dense_mesh` now (only the migration names it).
-      e14f3bc0, 14bdf431, 9b673d95. Still to do: the Raze run (the user deploys), and telling Eidos
-      the whole-mesh port is unused. Blocked by: nothing.
+- [x] **Chunked dense mesh.** Why: bounded dense memory; Eidos removed the whole-mesh port
+      (`dense_mesh`, `DenseMesh`, 2ce34123). Done: the dense graphs read Eidos's host ports
+      `dense_mesh_chunk`, `dense_transforms` and `dense_status` (`ports::DENSE_*`, Eidos a53bad55),
+      and no HeliOS code reads the whole mesh. Stored graphs: once per board in Orion
+      (`dense-ports-migration.json`, `helios_maps::dense::migrate_dense_ports`) maps both older
+      forms (the whole mesh `dense_mesh`, and HeliOS's earlier `mesh_chunk`/`transforms`/`status`
+      host ports) to Eidos's names; the compile-time and deploy-time rewires are gone.
+      helios-api keeps the submap chunks under a byte cap (`HELIOS_API_DENSE_CHUNK_BYTES`, default
+      16 MiB, 1 to 256 MiB) and serves the changes by cursor (`GET /v1/pipelines/{id}/dense`); the
+      UI draws one mesh per submap, placed by its pose. e14f3bc0, 14bdf431, 9b673d95. Still to do:
+      the Raze run (the user deploys). Blocked by: nothing.
 - [x] **Trajectory store.** Why: Eidos stops keeping per-frame pose history; HeliOS holds a
       decimated, byte-capped path. Done: `StreamedTrajectory` keeps every fourth frame
       (`TRAJECTORY_DECIMATE`) and every keyframe, at most `TRAJECTORY_MAX_BYTES` (1 MiB); the

@@ -105,7 +105,7 @@ const enc = encodeURIComponent;
 export function liveOutputsUrl(): string {
   const address = new URL(url("/v1/live/ws"), typeof location === "undefined" ? "http://localhost/" : location.href);
   address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
-  address.searchParams.set("exclude", "mesh_chunk,transforms");
+  address.searchParams.set("exclude", "dense_mesh_chunk,dense_transforms");
   return address.toString();
 }
 

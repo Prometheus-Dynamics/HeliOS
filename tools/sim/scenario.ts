@@ -167,7 +167,7 @@ let firstTs: number | undefined;
 let wallStopped = false;
 await new Promise<void>((resolve, reject) => {
   // The mapper's outputs under Eidos's template names (map_pose, map_timing) and the older ones.
-  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=map_pose,map_timing,pose,timing,dense_timing,mesh_chunk,dense_depth`);
+  const socket = new WebSocket(`${WS_BASE}/v1/live/ws?pipelines=${PIPELINE_ID}&ports=map_pose,map_timing,pose,timing,dense_timing,dense_mesh_chunk,dense_depth`);
   const finish = () => {
     clearTimeout(timer);
     socket.close();
@@ -180,10 +180,10 @@ await new Promise<void>((resolve, reject) => {
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     for (const line of event.data.split("\n").filter(Boolean)) {
-      if (line.includes('"port":"mesh_chunk"') || line.includes('"port":"dense_depth"')) {
+      if (line.includes('"port":"dense_mesh_chunk"') || line.includes('"port":"dense_depth"')) {
         const value = JSON.parse(line).value;
         if (!value) continue;
-        if (line.includes('"port":"mesh_chunk"')) {
+        if (line.includes('"port":"dense_mesh_chunk"')) {
           // A batch of submap chunks: the mesh is their sum (each chunk in submap-local coordinates).
           const chunks: { vertices?: number; triangles?: number }[] = Array.isArray(value.chunks) ? value.chunks : [];
           denseOutputs.mesh += 1;

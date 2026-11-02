@@ -13,8 +13,9 @@ use super::{
 
 /// The dense graph as a stored document (`localization_map::map_document`): the live map graph
 /// with the dense mapper on the mapper's pose. Host outputs: the live map's and the dense mapper's
-/// `mesh_chunk`, `transforms`, `status`, `dense_timing` and `dense_depth` (its inverse-depth preview). `config` is the dense
-/// mapper's settings (`DenseConfig::default()` for its defaults, budget mode included).
+/// `dense_mesh_chunk`, `dense_transforms`, `dense_status`, `dense_timing` and `dense_depth` (its
+/// inverse-depth preview). `config` is the dense mapper's settings (`DenseConfig::default()` for its
+/// defaults, budget mode included).
 pub(super) fn dense_map_document(registry: &PluginRegistry, config: DenseConfig) -> String {
     super::localization_map::map_document(registry, None, Some(config))
 }
@@ -60,10 +61,10 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
 
     // The mesh is the submap chunks, moved to the world by their transforms: the batch's chunks
     // carry the byte layout the whole mesh had, and the status counts them.
-    let status = json_with_keys(&artifacts, "host_output:status", &["frame", "t_ns", "epoch", "keyframes", "submaps", "bytes"]);
+    let status = json_with_keys(&artifacts, "host_output:dense_status", &["frame", "t_ns", "epoch", "keyframes", "submaps", "bytes"]);
     assert!(status["keyframes"].as_u64().is_some_and(|keyframes| keyframes >= 1), "keyframes are finished: {status}");
-    let batch = json_with_keys(&artifacts, "host_output:mesh_chunk", &["frame", "t_ns", "epoch", "chunks"]);
-    let transforms = json_with_keys(&artifacts, "host_output:transforms", &["frame", "t_ns", "epoch", "entries"]);
+    let batch = json_with_keys(&artifacts, "host_output:dense_mesh_chunk", &["frame", "t_ns", "epoch", "chunks"]);
+    let transforms = json_with_keys(&artifacts, "host_output:dense_transforms", &["frame", "t_ns", "epoch", "entries"]);
     let entries = transforms["entries"].as_array().expect("transform entries");
     assert!(!entries.is_empty(), "every submap has its pose: {transforms}");
     let chunks = batch["chunks"].as_array().expect("chunks");

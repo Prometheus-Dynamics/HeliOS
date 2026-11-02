@@ -134,13 +134,9 @@ fn graph_document_for(workload: &ExecutionWorkload) -> Result<GraphDocument, Exe
     match &workload.graph_ref {
         GraphRef::InlineSpec(json) => {
             // A live mapper's map and save ports are wired here too, so a graph stored before they
-            // existed saves and loads without a redeploy, and a dense mapper that still wires the
-            // whole mesh reads its chunks instead (`helios_maps::dense`). Idempotent: a wired graph
-            // is unchanged.
+            // existed saves and loads without a redeploy. Idempotent: a wired graph is unchanged.
             let mut value: serde_json::Value = serde_json::from_str(json).map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
-            let map_wired = helios_maps::wire_map_ports(&mut value);
-            let dense_wired = helios_maps::dense::wire_dense_chunks(&mut value);
-            if map_wired || dense_wired {
+            if helios_maps::wire_map_ports(&mut value) {
                 let wired = value.to_string();
                 return GraphDocument::from_json(&wired).map_err(|error| ExecutionError::GraphDocument(error.to_string()));
             }

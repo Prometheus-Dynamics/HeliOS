@@ -307,16 +307,19 @@ pub fn spawn(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
     }))
 }
 
-/// The dense mapper's wiring change: stored graphs read the submap chunks, not the whole mesh
-/// (`helios_maps::dense`). Its own marker, so the node id migration's stays as it is.
-pub const DENSE_MARKER_FILE: &str = "dense-chunks-migration.json";
-/// What the dense marker records: the port the graphs read before, and the one they read now.
-const DENSE_FROM: &str = "dense_mesh";
-const DENSE_TO: &str = "mesh_chunk";
+/// The dense mapper's port names (`helios_maps::dense::migrate_dense_ports`): stored graphs that read
+/// the whole mesh (`dense_mesh`) or HeliOS's own chunk ports (`mesh_chunk`, `transforms`, `status`)
+/// move to Eidos's `dense_mesh_chunk`, `dense_transforms` and `dense_status`. Its own marker, so the
+/// node id migration's stays as it is. The file name is new because what it does is new: a board
+/// marked by the old `dense-chunks-migration.json` still runs this one.
+pub const DENSE_MARKER_FILE: &str = "dense-ports-migration.json";
+/// What the dense marker records: the port names the graphs read before, and the one they read now.
+const DENSE_FROM: &str = "dense_mesh,mesh_chunk";
+const DENSE_TO: &str = "dense_mesh_chunk";
 
-/// Rewrite the desired pipelines of Orion whose graph wires the whole mesh (`dense_mesh`) to read the
-/// chunk outputs instead (their graph and the artifact that holds it). Returns how many changed.
-pub async fn rewire_dense_orion(state: &SharedState) -> ApiResult<usize> {
+/// Rewrite the desired pipelines of Orion whose graph reads an older dense port name to Eidos's (their
+/// graph and the artifact that holds it). Returns how many changed.
+pub async fn migrate_dense_orion(state: &SharedState) -> ApiResult<usize> {
     let _deploys = state.deploys.lock().await;
     let snapshot = state.orion.snapshot().await?;
     let desired = &snapshot.state.desired;
@@ -325,7 +328,7 @@ pub async fn rewire_dense_orion(state: &SharedState) -> ApiResult<usize> {
     for workload in desired.workloads.values() {
         let Some(text) = workload.config.as_ref().and_then(|config| config.string(GRAPH_FIELD)) else { continue };
         let Ok(mut graph) = serde_json::from_str::<serde_json::Value>(text) else { continue };
-        if !helios_maps::dense::wire_dense_chunks(&mut graph) {
+        if !helios_maps::dense::migrate_dense_ports(&mut graph) {
             continue;
         }
         let rewired = graph.to_string();
@@ -352,7 +355,7 @@ pub async fn rewire_dense_orion(state: &SharedState) -> ApiResult<usize> {
     Ok(count)
 }
 
-/// Starts the dense wiring migration of the stored pipelines, once per board: it retries until it has
+/// Starts the dense port migration of the stored pipelines, once per board: it retries until it has
 /// succeeded (Orion may not be there yet), then writes its marker. `None` when the marker is there.
 pub fn spawn_dense(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
     if read_named_marker(&state.config.state_dir, DENSE_MARKER_FILE).is_some_and(|m| m.from == DENSE_FROM && m.to == DENSE_TO) {
@@ -361,13 +364,13 @@ pub fn spawn_dense(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
     Some(tokio::spawn(async move {
         let mut delay = RETRY_MIN;
         loop {
-            let result = match rewire_dense_orion(&state).await {
+            let result = match migrate_dense_orion(&state).await {
                 Ok(count) => write_named_marker(&state.config.state_dir, DENSE_MARKER_FILE, DENSE_FROM, DENSE_TO, now_ms()).map(|()| count).map_err(|error| error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
             match result {
                 Ok(count) => {
-                    info!(count, "dense graphs read the submap chunks");
+                    info!(count, "dense graphs read Eidos's chunk ports");
                     return;
                 }
                 Err(error) => {

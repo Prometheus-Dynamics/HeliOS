@@ -316,8 +316,8 @@ mod tests {
 
     #[test]
     fn an_exclusion_drops_the_ports_named() {
-        let chunk = concat!(r#"{"pipeline":"front","port":"mesh_chunk","value":{}}"#, "\n", r#"{"pipeline":"front","port":"detections","value":{}}"#, "\n");
-        let kept = LiveFilter { exclude: Some("mesh_chunk,transforms".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
+        let chunk = concat!(r#"{"pipeline":"front","port":"dense_mesh_chunk","value":{}}"#, "\n", r#"{"pipeline":"front","port":"detections","value":{}}"#, "\n");
+        let kept = LiveFilter { exclude: Some("dense_mesh_chunk,dense_transforms".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
         assert_eq!(kept.lines().count(), 1);
         assert!(kept.contains("\"detections\""));
     }

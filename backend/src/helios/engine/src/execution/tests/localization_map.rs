@@ -4,8 +4,8 @@
 //! pose on the same detector (localization) and the dense mapper on the mapper's pose. Everything
 //! Eidos does for a camera stays in one pipeline on one core. Host outputs are Eidos's names:
 //! `detections`, `map_pose`, `map_snapshot`, `map_timing`, with localization `poses`,
-//! `pose_solutions` and `multi_tag_pose`, with the dense mapper's `mesh_chunk`, `transforms`,
-//! `status`, `dense_timing` and `dense_depth` (its inverse-depth preview).
+//! `pose_solutions` and `multi_tag_pose`, with the dense mapper's `dense_mesh_chunk`,
+//! `dense_transforms`, `dense_status`, `dense_timing` and `dense_depth` (its inverse-depth preview).
 
 use eidos_daedalus::{dense::DenseConfig, mapping::MappingConfig};
 
@@ -50,10 +50,7 @@ pub(super) fn map_document(registry: &PluginRegistry, localization: Option<&Fiel
     }
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("map template graph"));
     document.metadata.insert("title".into(), title.into());
-    let mut value: serde_json::Value = serde_json::from_str(&stored_form(&document)).expect("stored form is JSON");
-    // Eidos's template still wires the whole mesh (`dense_mesh`); HeliOS reads the chunks instead.
-    helios_maps::dense::wire_dense_chunks(&mut value);
-    value.to_string()
+    stored_form(&document)
 }
 
 /// The localization-and-map templates (the AprilTag templates' tag and field pose on the live
@@ -92,7 +89,7 @@ fn localization_map_templates_pose_tags_and_map_in_one_pipeline() {
         assert_eq!(pose["state"], "tracking", "dense {dense}: {pose}");
         if dense {
             json_with_keys(&artifacts, "host_output:dense_timing", &["state", "processed", "keyframes"]);
-            json_with_keys(&artifacts, "host_output:status", &["frame", "t_ns", "epoch", "keyframes", "submaps", "bytes"]);
+            json_with_keys(&artifacts, "host_output:dense_status", &["frame", "t_ns", "epoch", "keyframes", "submaps", "bytes"]);
         }
     }
 }

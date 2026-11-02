@@ -824,10 +824,8 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
         return Err(ApiError::unprocessable("name must be 1 to 120 characters"));
     }
     let mut graph = effective_graph(spec, view)?;
-    // A live mapper takes a saved map and saves one: its host ports (see `helios_maps`). A dense
-    // mapper reads the submap chunks, not the whole mesh (`helios_maps::dense`).
+    // A live mapper takes a saved map and saves one: its host ports (see `helios_maps`).
     helios_maps::wire_map_ports(&mut graph);
-    helios_maps::dense::wire_dense_chunks(&mut graph);
     if let Some(layout) = layout {
         field_layouts::apply_layout(&mut graph, &layout.layout)?;
     }

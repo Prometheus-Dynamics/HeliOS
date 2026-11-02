@@ -1,5 +1,5 @@
-//! The dense mapper's submap chunks, kept for the UI (`eidos:dense.map`'s `mesh_chunk`, `transforms`
-//! and `status`). The whole mesh is no longer read: a submap's geometry is in submap-local
+//! The dense mapper's submap chunks, kept for the UI (`eidos:dense.map`'s chunk outputs, which Eidos
+//! wires to the host as `dense_mesh_chunk`, `dense_transforms` and `dense_status`). The whole mesh is no longer read: a submap's geometry is in submap-local
 //! coordinates, its pose in `transforms`, and the UI draws each submap where its pose puts it.
 //!
 //! The store takes the engine's live lines for the dense pipelines (the relay is read only while a
@@ -38,7 +38,7 @@ pub const CHUNK_BYTES_RANGE: std::ops::RangeInclusive<usize> = (1 << 20)..=(256 
 
 /// Whether a live line is one of the dense mapper's chunk outputs (the cheap test before a parse).
 fn wanted_line(line: &str) -> bool {
-    line.contains("\"mesh_chunk\"") || line.contains("\"transforms\"") || line.contains("\"status\"")
+    line.contains("\"dense_mesh_chunk\"") || line.contains("\"dense_transforms\"") || line.contains("\"dense_status\"")
 }
 
 /// One live line's header; its value is kept as it came.
@@ -50,7 +50,7 @@ struct Line<'a> {
     value: &'a RawValue,
 }
 
-/// A batch of chunks (`mesh_chunk`): the run's epoch and each chunk as it came.
+/// A batch of chunks (`dense_mesh_chunk`): the run's epoch and each chunk as it came.
 #[derive(Deserialize)]
 struct ChunkBatch<'a> {
     epoch: u64,
@@ -231,13 +231,13 @@ impl DenseChunks {
         let mut runs = self.runs();
         let run = runs.entry(pipeline.to_string()).or_default();
         match port {
-            "status" => {
+            "dense_status" => {
                 let Ok(head) = serde_json::from_str::<EpochOnly>(value.get()) else { return };
                 run.begin(head.epoch);
                 run.status = Some(value.to_owned());
                 run.status_seq = run.bump();
             }
-            "transforms" => {
+            "dense_transforms" => {
                 let Ok(batch) = serde_json::from_str::<PoseBatch>(value.get()) else { return };
                 run.begin(batch.epoch);
                 for raw in batch.entries {
@@ -246,7 +246,7 @@ impl DenseChunks {
                     }
                 }
             }
-            "mesh_chunk" => {
+            "dense_mesh_chunk" => {
                 let Ok(batch) = serde_json::from_str::<ChunkBatch>(value.get()) else { return };
                 run.begin(batch.epoch);
                 for raw in batch.chunks {
@@ -386,8 +386,8 @@ mod tests {
     #[test]
     fn chunks_and_poses_are_read_incrementally_by_cursor() {
         let store = DenseChunks::new(DEFAULT_CHUNK_BYTES);
-        store.ingest_lines(&line("dense", "transforms", &poses(7, &[(0, 0)])));
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(7, &[chunk(0, 0, "frozen", 8)])));
+        store.ingest_lines(&line("dense", "dense_transforms", &poses(7, &[(0, 0)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(7, &[chunk(0, 0, "frozen", 8)])));
         let first = read(&store, 0, None);
         assert_eq!(first["epoch"], 7);
         assert_eq!(first["submaps"].as_array().expect("submaps").len(), 1);
@@ -396,7 +396,7 @@ mod tests {
         let cursor = first["seq"].as_u64().expect("seq");
 
         assert_eq!(read(&store, cursor, Some(7))["submaps"].as_array().expect("submaps").len(), 0, "nothing new since the cursor");
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(7, &[chunk(1, 1, "current", 8)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(7, &[chunk(1, 1, "current", 8)])));
         let next = read(&store, cursor, Some(7));
         let changed: Vec<u64> = next["submaps"].as_array().expect("submaps").iter().map(|s| s["submap"].as_u64().expect("id")).collect();
         assert_eq!(changed, [1], "only the submap that changed is sent");
@@ -405,13 +405,13 @@ mod tests {
     #[test]
     fn a_frozen_chunk_supersedes_the_current_one_and_a_stale_one_is_ignored() {
         let store = DenseChunks::new(DEFAULT_CHUNK_BYTES);
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(0, 3, "current", 4)])));
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 6)])));
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(0, 9, "current", 4)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(0, 3, "current", 4)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 6)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(0, 9, "current", 4)])));
         let out = read(&store, 0, None);
         assert_eq!(out["submaps"][0]["chunk"]["kind"], "frozen", "frozen supersedes whatever the current revision");
-        store.ingest_lines(&line("dense", "transforms", &poses(1, &[(5, 2)])));
-        store.ingest_lines(&line("dense", "transforms", &poses(1, &[(5, 1)])));
+        store.ingest_lines(&line("dense", "dense_transforms", &poses(1, &[(5, 2)])));
+        store.ingest_lines(&line("dense", "dense_transforms", &poses(1, &[(5, 1)])));
         let out = read(&store, 0, None);
         let entry = out["submaps"].as_array().expect("submaps").iter().find(|s| s["submap"] == 5).expect("pose kept");
         assert_eq!(entry["transform"]["revision"], 2, "an older pose does not replace a newer one");
@@ -420,9 +420,9 @@ mod tests {
     #[test]
     fn a_new_epoch_starts_the_run_over_and_a_reader_on_the_old_one_is_told() {
         let store = DenseChunks::new(DEFAULT_CHUNK_BYTES);
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 4)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 4)])));
         let old = read(&store, 0, None);
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(2, &[chunk(4, 0, "frozen", 4)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(2, &[chunk(4, 0, "frozen", 4)])));
         let reader_on_old = read(&store, old["seq"].as_u64().expect("seq"), Some(1));
         assert_eq!(reader_on_old["reset"], true, "the reader's epoch is no longer the run's");
         assert_eq!(reader_on_old["epoch"], 2);
@@ -434,7 +434,7 @@ mod tests {
     fn the_byte_cap_drops_the_oldest_chunks_and_says_so_newest_always_kept() {
         let store = DenseChunks::new(100);
         for submap in 0..4 {
-            store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(submap, 0, "frozen", 40)])));
+            store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(submap, 0, "frozen", 40)])));
         }
         let out = read(&store, 0, None);
         let held: Vec<(u64, bool)> = out["submaps"].as_array().expect("submaps").iter().map(|s| (s["submap"].as_u64().expect("id"), s["removed"] == true)).collect();
@@ -446,14 +446,14 @@ mod tests {
     #[test]
     fn a_chunk_bigger_than_the_cap_is_still_the_newest_and_kept() {
         let store = DenseChunks::new(10);
-        store.ingest_lines(&line("dense", "mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 200)])));
+        store.ingest_lines(&line("dense", "dense_mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 200)])));
         assert!(store.geometry_bytes() > 10, "the one chunk is kept whatever its size");
     }
 
     #[test]
     fn status_is_kept_and_sent_once_per_change() {
         let store = DenseChunks::new(DEFAULT_CHUNK_BYTES);
-        store.ingest_lines(&line("dense", "status", r#"{"frame":3,"t_ns":4,"epoch":9,"keyframes":5,"submaps":2,"bytes":100}"#));
+        store.ingest_lines(&line("dense", "dense_status", r#"{"frame":3,"t_ns":4,"epoch":9,"keyframes":5,"submaps":2,"bytes":100}"#));
         let out = read(&store, 0, None);
         assert_eq!(out["status"]["keyframes"], 5);
         let cursor = out["seq"].as_u64().expect("seq");
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn lines_of_other_ports_and_pipelines_are_separate() {
         let store = DenseChunks::new(DEFAULT_CHUNK_BYTES);
-        store.ingest_lines(&line("other", "mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 4)])));
+        store.ingest_lines(&line("other", "dense_mesh_chunk", &batch(1, &[chunk(0, 0, "frozen", 4)])));
         store.ingest_lines(&line("dense", "detections", r#"{"detections":[]}"#));
         assert!(read(&store, 0, None)["submaps"].as_array().expect("submaps").is_empty());
         assert!(!store.read("other", 0, None).is_empty());

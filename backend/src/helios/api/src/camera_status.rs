@@ -561,11 +561,11 @@ fn depth_stage(pipelines: &[PipelineFacts]) -> Stage {
         return Stage::off(STAGE.0, STAGE.1, "No dense mapper on this camera");
     };
     if dense.output("dense_depth").is_some() {
-        let keyframes = dense.output("status").and_then(|status| status.get("keyframes")).and_then(|v| v.as_u64());
+        let keyframes = dense.output("dense_status").and_then(|status| status.get("keyframes")).and_then(|v| v.as_u64());
         let reason = keyframes.map_or_else(|| "Depth is being built".into(), |k| format!("Depth from {k} keyframes"));
         return Stage::new(STAGE.0, STAGE.1, StageState::Ok, reason);
     }
-    let keyframes = dense.output("status").and_then(|status| status.get("keyframes")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let keyframes = dense.output("dense_status").and_then(|status| status.get("keyframes")).and_then(|v| v.as_u64()).unwrap_or(0);
     let tracking = dense.map_pose().and_then(|pose| pose.get("state")).and_then(|v| v.as_str()) == Some("tracking");
     let hint = if tracking { "Depth needs motion: move the camera slowly so keyframes are taken from new views." } else { "The dense mapper needs the live map tracking first. See the Map stage." };
     Stage::new(STAGE.0, STAGE.1, StageState::Waiting, format!("No depth yet: {keyframes} keyframes")).hint(hint)
@@ -864,7 +864,7 @@ mod tests {
     fn depth_says_it_needs_motion_when_the_map_tracks_but_no_depth_came() {
         let pose = json!({ "state": "tracking", "reason": "", "valid": true });
         let status = json!({ "keyframes": 2 });
-        let p = PipelineFacts { name: "dense", enabled: true, state: "running", dense: true, outputs: BTreeMap::from([("map_pose", &pose), ("status", &status)]), ..PipelineFacts::default() };
+        let p = PipelineFacts { name: "dense", enabled: true, state: "running", dense: true, outputs: BTreeMap::from([("map_pose", &pose), ("dense_status", &status)]), ..PipelineFacts::default() };
         let depth = stage(&derive(&served(None), std::slice::from_ref(&p)), "depth").clone();
         assert_eq!(depth.state, StageState::Waiting);
         assert_eq!(depth.reason, "No depth yet: 2 keyframes");
