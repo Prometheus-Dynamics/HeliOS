@@ -923,9 +923,11 @@ echo "$*" >> "$dir/calls.log"
         panic!("task never reached {step}: {:?}", current_task(state));
     }
 
-    /// Waits until the fake writer has logged `count` commands.
+    /// Waits until the fake writer has logged `count` commands. The wait is for that condition, with
+    /// a generous budget: a loaded machine can run the writer's shell script long after the task's
+    /// step changed.
     async fn wait_for_calls(dir: &std::path::Path, count: usize) -> Vec<String> {
-        for _ in 0..300 {
+        for _ in 0..2000 {
             let logged = calls(dir);
             if logged.len() >= count {
                 return logged;

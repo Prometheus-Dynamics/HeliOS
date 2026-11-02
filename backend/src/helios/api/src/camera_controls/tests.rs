@@ -242,15 +242,17 @@ async fn settings_persist_and_are_reapplied_when_the_camera_service_returns() {
     let _ = std::fs::remove_file(&socket);
     let service = camera_service(&socket);
     wait_for_values(&client, 5000, 4).await;
+    // The sequence starts at the restart's `offline`: a `restored` from the first connection (its
+    // stored values, applied as the client first connected) may still be in the stream.
     let (changes, restored) = tokio::time::timeout(Duration::from_secs(5), async {
         let mut changes = Vec::new();
         loop {
             let event = events.recv().await.expect("event");
             let change = event.data["change"].as_str().unwrap_or_default().to_string();
-            if ["offline", "online", "restored"].contains(&change.as_str()) {
-                changes.push(change);
+            if change == "offline" || !changes.is_empty() && ["online", "restored"].contains(&change.as_str()) {
+                changes.push(change.clone());
             }
-            if event.data["change"] == "restored" {
+            if change == "restored" && !changes.is_empty() {
                 return (changes, event);
             }
         }

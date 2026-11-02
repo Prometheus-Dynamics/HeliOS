@@ -94,6 +94,11 @@ pub struct CameraClient {
     online: Arc<AtomicBool>,
     /// Follows the camera's control changes and re-applies the stored values on (re)connect.
     follower: Option<JoinHandle<()>>,
+    /// Held by every write of this camera's values: an API `apply`/`reset`, and the follower's
+    /// re-apply of the stored values. A re-apply reads the stored values and sets them under it, so
+    /// it never sets a value an API write has just replaced (or forgotten) with the one it read
+    /// before.
+    writes: Arc<Mutex<()>>,
 }
 
 /// What a batch of changes did: each applied in order, the values to store and the keys to
@@ -129,7 +134,15 @@ impl CameraControls {
             return Ok(client.clone());
         }
         let control = ControlClient::options(socket).timeout(CONTROL_TIMEOUT).reconnecting().controls_nonblocking().map_err(|error| control_error("", &[], error))?;
-        let mut client = CameraClient { camera_id: camera_id.to_string(), socket: socket.to_path_buf(), client: Arc::new(control), store: self.store.clone(), online: Arc::default(), follower: None };
+        let mut client = CameraClient {
+            camera_id: camera_id.to_string(),
+            socket: socket.to_path_buf(),
+            client: Arc::new(control),
+            store: self.store.clone(),
+            online: Arc::default(),
+            follower: None,
+            writes: Arc::default(),
+        };
         client.follower = Some(tokio::spawn(follow(client.detached(), self.events.clone())));
         let client = Arc::new(client);
         clients.insert(camera_id.to_string(), client.clone());
@@ -146,7 +159,15 @@ impl CameraControls {
 impl CameraClient {
     /// The same camera client without the follower (for the follower itself).
     fn detached(&self) -> Self {
-        Self { camera_id: self.camera_id.clone(), socket: self.socket.clone(), client: self.client.clone(), store: self.store.clone(), online: self.online.clone(), follower: None }
+        Self {
+            camera_id: self.camera_id.clone(),
+            socket: self.socket.clone(),
+            client: self.client.clone(),
+            store: self.store.clone(),
+            online: self.online.clone(),
+            follower: None,
+            writes: self.writes.clone(),
+        }
     }
 
     /// Whether the client is connected to the camera service: set on Styx's `Connected`,
@@ -233,6 +254,7 @@ impl CameraClient {
     /// after a reboot; a forgotten control's stored value is removed. A refusal stops there (the
     /// changes before it stay applied, stored or forgotten, and were announced as events).
     pub async fn apply(&self, changes: Vec<ControlChange>) -> ApiResult<Vec<AppliedCameraControl>> {
+        let _writing = self.writes.lock().await;
         let batch = self.set_all(changes).await;
         if !batch.stored.is_empty() {
             self.store.persist_camera_settings(&self.camera_id, batch.stored).await?;
@@ -248,6 +270,7 @@ impl CameraClient {
 
     /// Put every writable control back to its default and forget the stored values.
     pub async fn reset(&self) -> ApiResult<Vec<AppliedCameraControl>> {
+        let _writing = self.writes.lock().await;
         self.store.clear_camera_settings(&self.camera_id).await?;
         let descriptors = self.client.controls_async().await.map_err(|error| control_error("", &[], error))?;
         // The frame rate and duration are not reset here: the pipelines' frame requests carry the
@@ -284,6 +307,7 @@ impl CameraClient {
     /// alone apply the rate from the first frame of every connection, so the control is left out.
     /// A camera with no pipeline runs at its default rate after its service restarts.
     async fn reapply(&self) -> (Vec<AppliedCameraControl>, Vec<String>) {
+        let _writing = self.writes.lock().await;
         let stored = match self.store.camera_settings(&self.camera_id).await {
             Ok(stored) => stored,
             Err(error) => return (Vec::new(), vec![error.message]),
