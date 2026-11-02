@@ -116,6 +116,39 @@ the reason for a peer that is not routed.
 The controller's firewall is never edited: the driver station reaches the SystemCore, and the
 SystemCore reaches the Raze over the link it already shares.
 
+## Per-device camera settings
+
+Each device sets its cameras' Styx capture knobs in its environment for helios-peripherals (the
+Raze: `/etc/default/helios-peripherals.env`, read by the unit; SystemCore: the shared
+`/usr/local/etc/helios/local.env`). An unset knob keeps Styx's default, so a device that sets
+none captures as Styx does, and the Raze sets none today.
+
+| Variable | What it sets (Styx) | Values | Styx default |
+|---|---|---|---|
+| `HELIOS_CAMERA_QUEUE_DEPTH` | `capture_queue_depth`: frames the capture queues | 1 or more | 2 |
+| `HELIOS_CAMERA_RAW_BUFFERS` | `native_raw_buffers`: raw sensor buffers in flight (one raw frame each) | 2 or more | 4 |
+| `HELIOS_CAMERA_OUTPUT_BUFFERS` | `native_output_buffers`: buffers per native ISP output | 2 or more | 6 |
+| `HELIOS_CAMERA_ACCEL_ISP` | `accelerators.isp`: the native ISP (PiSP, Rockchip ISP) against the software ISP | `auto`, `off`, `required` | `auto` |
+| `HELIOS_CAMERA_ACCEL_SCALER` | `accelerators.scaler`: scaling to the requested size in hardware against the CPU | `auto`, `off`, `required` | `auto` |
+| `HELIOS_CAMERA_ACCEL_ENCODER` | `accelerators.encoder`: hardware encoders (V4L2 M2M, VA-API) against software ones | `auto`, `off`, `required` | `auto` |
+| `HELIOS_CAMERA_ACCEL_PYRAMID` | `accelerators.pyramid`: pyramid levels from the ISP against the CPU box filter | `auto`, `off`, `required` | `auto` |
+
+- `auto` is the platform's choice; `off` is the CPU path; `required` fails the capture rather
+  than falling back to the CPU.
+- A value that does not parse, or is below its minimum, stops helios-peripherals at start (the
+  unit's log names the variable), instead of running with Styx's default.
+- The knobs are read when a camera service starts. Change them, then restart helios-peripherals.
+- Buffers are memory: each raw buffer is one sensor frame (1 MB for RAW8 at 1280x800), each
+  output buffer one processed frame (1.5 MB for NV12 at 1280x800).
+
+Per device:
+
+- **Raze** (owner image, CM5): nothing set. Styx's defaults.
+- **K230D** (the single-camera tier, 128 MB total RAM; `TODO.md`, K230D device support):
+  `HELIOS_CAMERA_RAW_BUFFERS=3`, `HELIOS_CAMERA_OUTPUT_BUFFERS=2`, `HELIOS_CAMERA_QUEUE_DEPTH=1`,
+  to fit the 128 MB budget. **Written now, untested on board**; the K230D image does not exist yet,
+  so this entry is not yet installed by any build.
+
 ## The install layout
 
 Every path HeliOS uses comes from one layout, never a literal in the code:

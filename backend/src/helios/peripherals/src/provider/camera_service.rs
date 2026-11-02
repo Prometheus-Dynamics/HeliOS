@@ -13,7 +13,7 @@ use styx::{
 use tracing::{info, warn};
 
 use crate::{
-    config::PeripheralConfig,
+    config::{AcceleratorMode, AcceleratorModes, PeripheralConfig},
     model::{ResourceDescriptor, ResourceKind, ResourceStatus},
     resources::probe_capture_devices,
 };
@@ -114,8 +114,38 @@ impl CameraServices {
 /// buffers beyond the first few are allocated as clients hold frames, not up front (Styx's
 /// default since 373d703; CM5: 37.6 MiB against 70.6 MiB per camera). Sensor raw frames are on permanently: a raw
 /// consumer (a recording) then joins the running capture, and joining or leaving never restarts it.
+///
+/// The device's `camera_tuning` (queue depth, raw and output buffers, accelerators) is applied on
+/// top; each unset knob leaves Styx's default in place.
 fn camera_capture_config(config: &PeripheralConfig) -> styx::capture_api::StyxConfig {
-    styx::capture_api::StyxConfig::new().native_slice_line(Some(CAMERA_SLICE_LINE)).native_deliver_slices(true).native_sensor_raw(config.camera_sensor_raw)
+    let tuning = &config.camera_tuning;
+    let mut styx = styx::capture_api::StyxConfig::new()
+        .native_slice_line(Some(CAMERA_SLICE_LINE))
+        .native_deliver_slices(true)
+        .native_sensor_raw(config.camera_sensor_raw)
+        .with_accelerators(styx_accelerators(&tuning.accelerators));
+    if let Some(depth) = tuning.queue_depth {
+        styx = styx.capture_queue_depth(depth);
+    }
+    if let Some(buffers) = tuning.raw_buffers {
+        styx = styx.native_raw_buffers(buffers);
+    }
+    if let Some(buffers) = tuning.output_buffers {
+        styx = styx.native_output_buffers(buffers);
+    }
+    styx
+}
+
+/// Styx's `Accelerators` from the device's modes; a stage without a mode keeps Styx's `Auto`.
+fn styx_accelerators(modes: &AcceleratorModes) -> styx::planner::Accelerators {
+    let hardware = |mode: Option<AcceleratorMode>| {
+        mode.map_or(styx::planner::Hardware::Auto, |mode| match mode {
+            AcceleratorMode::Auto => styx::planner::Hardware::Auto,
+            AcceleratorMode::Off => styx::planner::Hardware::Off,
+            AcceleratorMode::Required => styx::planner::Hardware::Required,
+        })
+    };
+    styx::planner::Accelerators { isp: hardware(modes.isp), scaler: hardware(modes.scaler), encoder: hardware(modes.encoder), pyramid: hardware(modes.pyramid) }
 }
 
 fn find_capture_device<'a>(devices: &'a [ProbedDevice], resource: &ResourceDescriptor) -> Option<&'a ProbedDevice> {
@@ -162,6 +192,36 @@ mod tests {
         assert!(camera_capture_config(&config).backends.native.sensor_raw);
         let off = PeripheralConfig { camera_sensor_raw: false, ..PeripheralConfig::default() };
         assert!(!camera_capture_config(&off).backends.native.sensor_raw);
+    }
+
+    #[test]
+    fn unset_camera_tuning_keeps_styx_defaults() {
+        let styx_default = styx::capture_api::StyxConfig::new();
+        let config = camera_capture_config(&PeripheralConfig::default());
+        assert_eq!(config.capture.queue_depth, styx_default.capture.queue_depth);
+        assert_eq!(config.backends.native.raw_buffers, styx_default.backends.native.raw_buffers);
+        assert_eq!(config.backends.native.output_buffers, styx_default.backends.native.output_buffers);
+        assert_eq!(config.accelerators, styx_default.accelerators);
+    }
+
+    #[test]
+    fn camera_tuning_reaches_styx_capture_config() {
+        let mut config = PeripheralConfig::default();
+        config.camera_tuning.queue_depth = Some(1);
+        config.camera_tuning.raw_buffers = Some(3);
+        config.camera_tuning.output_buffers = Some(2);
+        config.camera_tuning.accelerators = AcceleratorModes { isp: Some(AcceleratorMode::Required), scaler: Some(AcceleratorMode::Off), encoder: None, pyramid: Some(AcceleratorMode::Auto) };
+        let styx = camera_capture_config(&config);
+        assert_eq!(styx.capture.queue_depth, 1);
+        assert_eq!(styx.backends.native.raw_buffers, 3);
+        assert_eq!(styx.backends.native.output_buffers, 2);
+        assert_eq!(styx.accelerators.isp, styx::planner::Hardware::Required);
+        assert_eq!(styx.accelerators.scaler, styx::planner::Hardware::Off);
+        assert_eq!(styx.accelerators.encoder, styx::planner::Hardware::Auto);
+        assert_eq!(styx.accelerators.pyramid, styx::planner::Hardware::Auto);
+        // The rest of the capture is unchanged.
+        assert!(styx.backends.native.sensor_raw);
+        assert_eq!(styx.backends.native.slice_line, Some(CAMERA_SLICE_LINE));
     }
 
     #[test]

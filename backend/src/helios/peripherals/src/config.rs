@@ -1,6 +1,6 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow, bail};
 use helios_layout::Layout;
 
 pub const DEFAULT_NODE_ID: &str = "node-local";
@@ -38,6 +38,59 @@ pub struct PeripheralConfig {
     /// the preview, a calibration capture, a recording and its capture-last ring. Each costs one
     /// more set of the capture's buffers (5.8 MB at 1280x800 with NV12 + a 640x400 output).
     pub camera_spare_clients: usize,
+    /// Styx's capture knobs for the cameras (queue depth, buffers, accelerators). Each unset value
+    /// keeps Styx's default, so a device that sets none captures exactly as Styx does.
+    pub camera_tuning: CameraTuning,
+}
+
+/// Styx's capture knobs for a device's cameras, each set per device (`HELIOS_CAMERA_*` in its
+/// environment). `None` keeps Styx's default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CameraTuning {
+    /// Frames the capture queues (`HELIOS_CAMERA_QUEUE_DEPTH`, at least 1; Styx: 2).
+    pub queue_depth: Option<usize>,
+    /// Raw sensor buffers the native receiver cycles through (`HELIOS_CAMERA_RAW_BUFFERS`, at
+    /// least 2; Styx: 4). Each is one raw frame of memory.
+    pub raw_buffers: Option<u32>,
+    /// Buffers of each native ISP output (`HELIOS_CAMERA_OUTPUT_BUFFERS`, at least 2; Styx: 6).
+    pub output_buffers: Option<u32>,
+    /// Which hardware blocks each stage may use (`HELIOS_CAMERA_ACCEL_*`).
+    pub accelerators: AcceleratorModes,
+}
+
+/// Whether one hardware block may serve a stage: Styx's `Hardware`. `auto` is the platform's
+/// choice (Styx's default), `off` the CPU path, `required` fails rather than falling back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcceleratorMode {
+    Auto,
+    Off,
+    Required,
+}
+
+impl FromStr for AcceleratorMode {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "off" => Ok(Self::Off),
+            "required" => Ok(Self::Required),
+            other => bail!("expected auto, off or required, not {other:?}"),
+        }
+    }
+}
+
+/// Styx's `Accelerators`, stage by stage. Each unset stage keeps Styx's `Auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AcceleratorModes {
+    /// `HELIOS_CAMERA_ACCEL_ISP`: the native ISP (PiSP, Rockchip ISP) against the software ISP.
+    pub isp: Option<AcceleratorMode>,
+    /// `HELIOS_CAMERA_ACCEL_SCALER`: scaling to the requested size in hardware against the CPU.
+    pub scaler: Option<AcceleratorMode>,
+    /// `HELIOS_CAMERA_ACCEL_ENCODER`: hardware encoders (V4L2 M2M, VA-API) against software ones.
+    pub encoder: Option<AcceleratorMode>,
+    /// `HELIOS_CAMERA_ACCEL_PYRAMID`: pyramid levels from the ISP against the CPU's box filter.
+    pub pyramid: Option<AcceleratorMode>,
 }
 
 impl Default for PeripheralConfig {
@@ -66,6 +119,7 @@ impl PeripheralConfig {
             camera_idle_pause_ms: 2_000,
             camera_sensor_raw: true,
             camera_spare_clients: 4,
+            camera_tuning: CameraTuning::default(),
         }
     }
 
@@ -119,8 +173,42 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_CAMERA_SPARE_CLIENTS").and_then(|v| v.parse::<usize>().ok()) {
             config.camera_spare_clients = value;
         }
+        config.camera_tuning = camera_tuning_from_env(&env)?;
         Ok(config)
     }
+}
+
+/// The `HELIOS_CAMERA_*` capture knobs. A value that does not parse, or is below Styx's minimum,
+/// fails the start rather than silently running with Styx's default.
+fn camera_tuning_from_env(env: &BTreeMap<String, String>) -> Result<CameraTuning> {
+    fn number<T>(env: &BTreeMap<String, String>, key: &str, min: T) -> Result<Option<T>>
+    where
+        T: FromStr + PartialOrd + std::fmt::Display + Copy,
+        T::Err: std::fmt::Display,
+    {
+        let Some(value) = env.get(key) else {
+            return Ok(None);
+        };
+        let number = value.trim().parse::<T>().map_err(|error| anyhow!("{key}={value}: {error}"))?;
+        if number < min {
+            bail!("{key}={value}: must be at least {min}");
+        }
+        Ok(Some(number))
+    }
+    fn mode(env: &BTreeMap<String, String>, key: &str) -> Result<Option<AcceleratorMode>> {
+        env.get(key).map(|value| value.parse::<AcceleratorMode>().map_err(|error| anyhow!("{key}: {error}"))).transpose()
+    }
+    Ok(CameraTuning {
+        queue_depth: number(env, "HELIOS_CAMERA_QUEUE_DEPTH", 1)?,
+        raw_buffers: number(env, "HELIOS_CAMERA_RAW_BUFFERS", 2)?,
+        output_buffers: number(env, "HELIOS_CAMERA_OUTPUT_BUFFERS", 2)?,
+        accelerators: AcceleratorModes {
+            isp: mode(env, "HELIOS_CAMERA_ACCEL_ISP")?,
+            scaler: mode(env, "HELIOS_CAMERA_ACCEL_SCALER")?,
+            encoder: mode(env, "HELIOS_CAMERA_ACCEL_ENCODER")?,
+            pyramid: mode(env, "HELIOS_CAMERA_ACCEL_PYRAMID")?,
+        },
+    })
 }
 
 fn default_stream_dir_for(root: impl Into<PathBuf>) -> PathBuf {
@@ -169,6 +257,45 @@ mod tests {
         let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
         assert!(config.camera_sensor_raw);
         assert_eq!(config.camera_spare_clients, 4);
+    }
+
+    #[test]
+    fn camera_tuning_is_unset_by_default() {
+        let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
+        assert_eq!(config.camera_tuning, CameraTuning::default());
+        assert_eq!(config.camera_tuning.queue_depth, None);
+        assert_eq!(config.camera_tuning.accelerators, AcceleratorModes::default());
+    }
+
+    #[test]
+    fn camera_tuning_reads_buffers_queue_and_each_accelerator() {
+        let config = PeripheralConfig::from_env_iter([
+            (DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals"),
+            ("HELIOS_CAMERA_QUEUE_DEPTH", "1"),
+            ("HELIOS_CAMERA_RAW_BUFFERS", "3"),
+            ("HELIOS_CAMERA_OUTPUT_BUFFERS", "2"),
+            ("HELIOS_CAMERA_ACCEL_ISP", "Required"),
+            ("HELIOS_CAMERA_ACCEL_SCALER", "off"),
+            ("HELIOS_CAMERA_ACCEL_ENCODER", " auto "),
+        ])
+        .expect("config");
+        let tuning = config.camera_tuning;
+        assert_eq!(tuning.queue_depth, Some(1));
+        assert_eq!(tuning.raw_buffers, Some(3));
+        assert_eq!(tuning.output_buffers, Some(2));
+        assert_eq!(tuning.accelerators.isp, Some(AcceleratorMode::Required));
+        assert_eq!(tuning.accelerators.scaler, Some(AcceleratorMode::Off));
+        assert_eq!(tuning.accelerators.encoder, Some(AcceleratorMode::Auto));
+        assert_eq!(tuning.accelerators.pyramid, None);
+    }
+
+    #[test]
+    fn camera_tuning_rejects_values_styx_cannot_run() {
+        let parse = |key: &str, value: &str| PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals"), (key, value)]).map(|config| config.camera_tuning);
+        assert!(format!("{:#}", parse("HELIOS_CAMERA_QUEUE_DEPTH", "0").expect_err("zero queue")).contains("HELIOS_CAMERA_QUEUE_DEPTH=0"));
+        assert!(parse("HELIOS_CAMERA_RAW_BUFFERS", "1").is_err());
+        assert!(parse("HELIOS_CAMERA_OUTPUT_BUFFERS", "one").is_err());
+        assert!(parse("HELIOS_CAMERA_ACCEL_ISP", "sometimes").is_err());
     }
 
     #[test]

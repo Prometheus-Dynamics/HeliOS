@@ -79,6 +79,8 @@ src/
   engine and API read frames without owning camera capture. Services start and
   stop with hotplug refreshes; a camera pauses after
   `HELIOS_CAMERA_IDLE_PAUSE_MS` (default 2000) without a reading client.
+  The per-device Styx capture knobs (`HELIOS_CAMERA_QUEUE_DEPTH`, `_RAW_BUFFERS`,
+  `_OUTPUT_BUFFERS`, `_ACCEL_*`) are in `docs/device-profiles.md`; unset keeps Styx's default.
 - the `camera.device` resource advertises its service socket as
   `styx-frames+unix://<stream_dir>/<resource id>.styx.sock` (absolute path);
   consumers connect with a Styx `FrameClient`. There is no derived
