@@ -307,6 +307,91 @@ pub fn spawn(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
     }))
 }
 
+/// The dense mapper's wiring change: stored graphs read the submap chunks, not the whole mesh
+/// (`helios_maps::dense`). Its own marker, so the node id migration's stays as it is.
+pub const DENSE_MARKER_FILE: &str = "dense-chunks-migration.json";
+/// What the dense marker records: the port the graphs read before, and the one they read now.
+const DENSE_FROM: &str = "dense_mesh";
+const DENSE_TO: &str = "mesh_chunk";
+
+/// Rewrite the desired pipelines of Orion whose graph wires the whole mesh (`dense_mesh`) to read the
+/// chunk outputs instead (their graph and the artifact that holds it). Returns how many changed.
+pub async fn rewire_dense_orion(state: &SharedState) -> ApiResult<usize> {
+    let _deploys = state.deploys.lock().await;
+    let snapshot = state.orion.snapshot().await?;
+    let desired = &snapshot.state.desired;
+    let mut workloads = Vec::new();
+    let mut artifacts: BTreeMap<String, ArtifactRecord> = BTreeMap::new();
+    for workload in desired.workloads.values() {
+        let Some(text) = workload.config.as_ref().and_then(|config| config.string(GRAPH_FIELD)) else { continue };
+        let Ok(mut graph) = serde_json::from_str::<serde_json::Value>(text) else { continue };
+        if !helios_maps::dense::wire_dense_chunks(&mut graph) {
+            continue;
+        }
+        let rewired = graph.to_string();
+        let mut record = workload.clone();
+        if let Some(config) = record.config.as_mut() {
+            config.payload.insert(GRAPH_FIELD.into(), TypedConfigValue::String(rewired.clone()));
+        }
+        if let Some(artifact) = desired.artifacts.get(&record.artifact_id) {
+            let mut artifact = artifact.clone();
+            if artifact.size_bytes.is_some() {
+                artifact.size_bytes = Some(rewired.len() as u64);
+            }
+            artifacts.insert(artifact.artifact_id.to_string(), artifact);
+        }
+        workloads.push(record);
+    }
+    if workloads.is_empty() {
+        return Ok(0);
+    }
+    let count = workloads.len();
+    let mut mutations: Vec<DesiredStateMutation> = artifacts.into_values().map(DesiredStateMutation::PutArtifact).collect();
+    mutations.extend(workloads.into_iter().map(DesiredStateMutation::PutWorkload));
+    state.orion.apply(mutations).await?;
+    Ok(count)
+}
+
+/// Starts the dense wiring migration of the stored pipelines, once per board: it retries until it has
+/// succeeded (Orion may not be there yet), then writes its marker. `None` when the marker is there.
+pub fn spawn_dense(state: SharedState) -> Option<tokio::task::JoinHandle<()>> {
+    if read_named_marker(&state.config.state_dir, DENSE_MARKER_FILE).is_some_and(|m| m.from == DENSE_FROM && m.to == DENSE_TO) {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        let mut delay = RETRY_MIN;
+        loop {
+            let result = match rewire_dense_orion(&state).await {
+                Ok(count) => write_named_marker(&state.config.state_dir, DENSE_MARKER_FILE, DENSE_FROM, DENSE_TO, now_ms()).map(|()| count).map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            match result {
+                Ok(count) => {
+                    info!(count, "dense graphs read the submap chunks");
+                    return;
+                }
+                Err(error) => {
+                    warn!(%error, retry_in = ?delay, "dense graph migration not done yet; retrying");
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(RETRY_MAX);
+                }
+            }
+        }
+    }))
+}
+
+/// The marker `file` in `state_dir`, or `None` when there is none (or it cannot be read).
+fn read_named_marker(state_dir: &Path, file: &str) -> Option<Marker> {
+    let bytes = std::fs::read(state_dir.join(file)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_named_marker(state_dir: &Path, file: &str, from: &str, to: &str, migrated_at_ms: u64) -> io::Result<()> {
+    let marker = Marker { from: from.to_string(), to: to.to_string(), migrated_at_ms };
+    let bytes = serde_json::to_vec_pretty(&marker).map_err(io::Error::other)?;
+    write_atomic(&state_dir.join(file), &bytes)
+}
+
 /// How often the old id's records are looked for again while any are left.
 const RETIRE_INTERVAL: Duration = Duration::from_secs(5);
 

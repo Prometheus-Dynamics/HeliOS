@@ -121,6 +121,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/pipelines/{id}/bindings/{input}", put(pipelines::bind_input))
         .route("/v1/pipelines/{id}/map/save", post(maps::save_pipeline_map))
         .route("/v1/pipelines/{id}/outputs", get(pipelines::pipeline_outputs))
+        .route("/v1/pipelines/{id}/dense", get(crate::dense_chunks::read_route))
         .route("/v1/pipelines/{id}/plan", get(pipelines::pipeline_plan))
         .route("/v1/outputs", get(pipelines::outputs))
         // Resources and peripherals

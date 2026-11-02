@@ -236,11 +236,13 @@ async fn follow(relay: &LiveRelay, mut stream: UnixStream) {
     }
 }
 
-/// What a client asks for: only these pipelines and/or ports (all when absent), comma-separated.
+/// What a client asks for: only these pipelines and/or ports (all when absent), comma-separated, and
+/// not these ports (`exclude`, for outputs read another way: the dense mapper's submap chunks).
 #[derive(Debug, Default, Deserialize)]
 pub struct LiveFilter {
     pub pipelines: Option<String>,
     pub ports: Option<String>,
+    pub exclude: Option<String>,
 }
 
 impl LiveFilter {
@@ -250,14 +252,14 @@ impl LiveFilter {
 
     /// The lines of `chunk` this filter keeps (all of them without a filter).
     fn keep(&self, chunk: &str) -> Option<String> {
-        let (pipelines, ports) = (Self::parts(&self.pipelines), Self::parts(&self.ports));
-        if pipelines.is_empty() && ports.is_empty() {
+        let (pipelines, ports, exclude) = (Self::parts(&self.pipelines), Self::parts(&self.ports), Self::parts(&self.exclude));
+        if pipelines.is_empty() && ports.is_empty() && exclude.is_empty() {
             return None;
         }
         let mut out = String::new();
         for line in chunk.lines() {
             let Ok(head) = serde_json::from_str::<LineHead>(line) else { continue };
-            if (pipelines.is_empty() || pipelines.contains(&head.pipeline)) && (ports.is_empty() || ports.contains(&head.port)) {
+            if (pipelines.is_empty() || pipelines.contains(&head.pipeline)) && (ports.is_empty() || ports.contains(&head.port)) && !exclude.contains(&head.port) {
                 out.push_str(line);
                 out.push('\n');
             }
@@ -313,6 +315,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_exclusion_drops_the_ports_named() {
+        let chunk = concat!(r#"{"pipeline":"front","port":"mesh_chunk","value":{}}"#, "\n", r#"{"pipeline":"front","port":"detections","value":{}}"#, "\n");
+        let kept = LiveFilter { exclude: Some("mesh_chunk,transforms".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
+        assert_eq!(kept.lines().count(), 1);
+        assert!(kept.contains("\"detections\""));
+    }
+
+    #[test]
     fn a_filter_keeps_the_lines_asked_for() {
         let chunk = concat!(
             r#"{"pipeline":"front","port":"detections","value":{}}"#,
@@ -325,7 +335,7 @@ mod tests {
         assert!(LiveFilter::default().keep(chunk).is_none(), "no filter: everything as is");
         let ports = LiveFilter { ports: Some("detections".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
         assert_eq!(ports.lines().count(), 2);
-        let both = LiveFilter { pipelines: Some("front".into()), ports: Some("tracks".into()) }.keep(chunk).expect("filtered");
+        let both = LiveFilter { pipelines: Some("front".into()), ports: Some("tracks".into()), ..LiveFilter::default() }.keep(chunk).expect("filtered");
         assert_eq!(both.lines().count(), 1);
         assert!(both.contains("\"tracks\""));
     }

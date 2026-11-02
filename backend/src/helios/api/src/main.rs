@@ -94,10 +94,14 @@ async fn run() -> anyhow::Result<()> {
     let _node_id_migration = helios_api::migration::spawn(state.clone());
     // And what the old id left in Orion, removed once the new one is live (`migration::spawn_retire`).
     let _node_id_retire = helios_api::migration::spawn_retire(state.clone());
+    // The stored dense pipelines read the submap chunks (`migration::spawn_dense`, once per board).
+    let _dense_migration = helios_api::migration::spawn_dense(state.clone());
     // The robot controller's team and NetworkTables server, kept current (`host_facts`).
     let _controller = helios_api::host_facts::spawn_refresh(state.clone());
     // Pipeline outputs every tick from helios-engine, while anyone follows the event stream.
     let _live_outputs = helios_api::live_outputs::spawn(state.live.clone(), helios_api::live_outputs::socket_path(&state.config.layout));
+    // The dense mapper's submap chunks, from the live relay while a dense pipeline is deployed.
+    let _dense_chunks = helios_api::dense_chunks::spawn(state.clone());
     // The LED director: HeliOS's state on the status ring, through lemnosd.
     helios_api::leds::start(&state, state.config.layout.lemnos_socket());
     // Stored camera settings are applied whenever a camera service appears.

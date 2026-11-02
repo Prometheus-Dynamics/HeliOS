@@ -821,8 +821,10 @@ pub fn validate_spec(spec: &PipelineSpec, view: &StateView, node_id: &str, layou
         return Err(ApiError::unprocessable("name must be 1 to 120 characters"));
     }
     let mut graph = effective_graph(spec, view)?;
-    // A live mapper takes a saved map and saves one: its host ports (see `helios_maps`).
+    // A live mapper takes a saved map and saves one: its host ports (see `helios_maps`). A dense
+    // mapper reads the submap chunks, not the whole mesh (`helios_maps::dense`).
     helios_maps::wire_map_ports(&mut graph);
+    helios_maps::dense::wire_dense_chunks(&mut graph);
     if let Some(layout) = layout {
         field_layouts::apply_layout(&mut graph, &layout.layout)?;
     }
@@ -982,6 +984,12 @@ pub fn live_map_pipelines(view: &StateView) -> Vec<String> {
         .filter(|w| config_string(w, "graph.inline").and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).is_some_and(|graph| helios_maps::has_live_map(&graph)))
         .map(|w| pipeline_id(w.workload_id.as_str()))
         .collect()
+}
+
+/// The running-or-deployed pipelines whose graph has the dense mapper (its chunks are kept by
+/// `dense_chunks` while any is deployed).
+pub fn dense_map_pipelines(view: &StateView) -> Vec<String> {
+    engine_workloads(view).filter(|w| config_string(w, "graph.inline").is_some_and(|graph| graph.contains(helios_maps::dense::DENSE_NODE))).map(|w| pipeline_id(w.workload_id.as_str())).collect()
 }
 
 /// The pipelines that start from saved map `id`.

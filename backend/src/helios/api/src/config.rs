@@ -66,6 +66,9 @@ pub struct ApiConfig {
     /// Bytes of pipeline outputs kept for slow `/v1/live/ws` readers (`live_outputs`): more lets a
     /// reader fall further behind before it skips ahead, at that much memory while one does.
     pub live_buffer_bytes: usize,
+    /// Bytes of the dense mapper's submap geometry kept for the UI (`dense_chunks`): past this the
+    /// geometry changed longest ago goes, and the UI is told (`HELIOS_API_DENSE_CHUNK_BYTES`).
+    pub dense_chunk_bytes: usize,
     /// The networks the robot's links are on. The gateway reaches a peer only over one of these
     /// (`peers.rs`); none means no peer is reached.
     pub peer_nets: Vec<crate::peers::Ipv4Net>,
@@ -111,6 +114,7 @@ impl ApiConfig {
             playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
             live_streams: crate::live_streams::LiveStreamSettings::default(),
             live_buffer_bytes: crate::live_outputs::DEFAULT_BUFFER_BYTES,
+            dense_chunk_bytes: crate::dense_chunks::DEFAULT_CHUNK_BYTES,
             peer_nets: Vec::new(),
             peer_ports: crate::peers::DEFAULT_PEER_PORTS.to_vec(),
             board_agent_port: crate::peers::DEFAULT_BOARD_AGENT_PORT,
@@ -191,6 +195,11 @@ impl ApiConfig {
             anyhow::ensure!((64 << 10..=256 << 20).contains(&bytes), "HELIOS_API_LIVE_BUFFER_BYTES must be 64 KiB to 256 MiB, got {value}");
             config.live_buffer_bytes = bytes;
         }
+        if let Some(value) = env.get("HELIOS_API_DENSE_CHUNK_BYTES") {
+            let bytes: usize = value.parse()?;
+            anyhow::ensure!(crate::dense_chunks::CHUNK_BYTES_RANGE.contains(&bytes), "HELIOS_API_DENSE_CHUNK_BYTES must be 1 MiB to 256 MiB, got {value}");
+            config.dense_chunk_bytes = bytes;
+        }
         if let Some(value) = env.get("HELIOS_API_STARTUP_FILE") {
             config.startup_file = value.into();
         }
@@ -246,6 +255,16 @@ impl ApiConfig {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_dense_chunk_bytes_have_a_default_and_a_range() {
+        let default = ApiConfig::from_vars([("HELIOS_API_LIVE_BUFFER_BYTES", "1048576")]).expect("config");
+        assert_eq!(default.dense_chunk_bytes, crate::dense_chunks::DEFAULT_CHUNK_BYTES);
+        let set = ApiConfig::from_vars([("HELIOS_API_DENSE_CHUNK_BYTES", "4194304")]).expect("config");
+        assert_eq!(set.dense_chunk_bytes, 4 << 20);
+        assert!(ApiConfig::from_vars([("HELIOS_API_DENSE_CHUNK_BYTES", "1024")]).is_err(), "below 1 MiB");
+        assert!(ApiConfig::from_vars([("HELIOS_API_DENSE_CHUNK_BYTES", "999999999999")]).is_err(), "above 256 MiB");
+    }
+
     use super::*;
 
     #[test]

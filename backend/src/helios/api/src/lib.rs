@@ -17,6 +17,7 @@ pub mod camera_controls;
 pub mod camera_preview;
 pub mod camera_streams;
 pub mod config;
+pub mod dense_chunks;
 pub mod device_settings;
 pub mod error;
 pub mod events;
@@ -89,6 +90,8 @@ pub struct AppState {
     pub leds: leds::LedHandle,
     /// Every pipeline output of every tick, relayed from helios-engine (`GET /v1/live/ws`).
     pub live: Arc<live_outputs::LiveRelay>,
+    /// The dense mapper's submap chunks, read from the live relay by the UI (`dense_chunks`).
+    pub dense: Arc<dense_chunks::DenseChunks>,
     /// Saved maps (`maps`): the map files a live mapper saved, and the ones pipelines start from.
     pub maps: maps::MapStore,
     /// The open playback players (recordings and image folders served as cameras).
@@ -128,6 +131,7 @@ impl AppState {
             update_task: std::sync::Mutex::new(None),
             leds: leds::LedHandle::new(),
             live: live_outputs::LiveRelay::new(config.live_buffer_bytes),
+            dense: Arc::new(dense_chunks::DenseChunks::new(config.dense_chunk_bytes)),
             maps: maps::MapStore::new(config.layout.data_dir().join("maps")),
             playback: playback::Players::new(::orion::client::LocalNodeRuntime::new(config.orion_socket.clone(), config.orion_stream_socket.clone()), &config.node_id, config.playback.clone()),
             config,
