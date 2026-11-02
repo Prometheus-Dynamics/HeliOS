@@ -330,7 +330,16 @@ export class StreamedTrajectory {
       if (p.frame <= this.floor) continue;
       if (!p.keyframe && p.frame % this.decimate !== 0) continue;
       const i = this.lower(p.frame);
-      if (this.frames[i]?.frame === p.frame) continue;
+      const stored = this.frames[i];
+      if (stored?.frame === p.frame) {
+        // The mapper admits a keyframe when it leaves its window, up to ~1.3 s after the frame was
+        // streamed, and re-sends the frame with `keyframe: true`. A frame never goes back to plain.
+        if (p.keyframe && !stored.keyframe) {
+          stored.keyframe = true;
+          changed = true;
+        }
+        continue;
+      }
       this.frames.splice(i, 0, { ...p });
       changed = true;
     }

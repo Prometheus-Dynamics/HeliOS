@@ -150,6 +150,21 @@ describe("streamed trajectory: decimation and the byte cap", () => {
     expect(store.poses().map((p) => p.frame)).toEqual([1, 4, 5, 6]);
   });
 
+  test("a frame promoted to a keyframe after it was streamed is marked, stored or not", () => {
+    const store = new StreamedTrajectory();
+    store.apply(delta([0, 1, 2, 3, 4, 5]));
+    expect(store.keyframes().map((p) => p.frame)).toEqual([]);
+    const version = store.version;
+    // Frame 4 was kept as a decimated pose, frame 5 was not kept at all.
+    store.apply(delta([4, 5], [4, 5]));
+    expect(store.keyframes().map((p) => p.frame)).toEqual([4, 5]);
+    expect(store.poses().map((p) => p.frame)).toEqual([0, 4, 5]);
+    expect(store.version).toBeGreaterThan(version);
+    // A later plain repeat does not demote it.
+    store.apply(delta([4, 5]));
+    expect(store.keyframes().map((p) => p.frame)).toEqual([4, 5]);
+  });
+
   test("a keyframe is dropped only when plain poses cannot make the room", () => {
     const store = new StreamedTrajectory({ decimate: 1, maxBytes: 2 * TRAJECTORY_BYTES_PER_POSE });
     store.apply(delta([0, 1, 2], [0, 1, 2]));
