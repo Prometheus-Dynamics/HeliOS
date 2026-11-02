@@ -111,8 +111,9 @@ pub fn read_status(status_path: &Path) -> Option<BoardUpdateStatus> {
     BoardUpdateStatus::parse(&fs::read_to_string(status_path).ok()?)
 }
 
-/// The version from an image or bundle name (`helios-full-raze-v2026.4.0.slot.tar` ->
-/// `v2026.4.0`, `helios-full-raze-v2026.4.0.img.xz` likewise).
+/// The version from an image or bundle name: the build's own name
+/// (`helios-2026.2.0-dev.867-styx-ef4f1f2f.img.xz` -> `2026.2.0-dev.867`), or a `v` part
+/// (`helios-full-raze-v2026.4.0.img.xz` -> `v2026.4.0`).
 pub fn infer_version_from_path(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
     let mut stem = name;
@@ -122,7 +123,18 @@ pub fn infer_version_from_path(path: &Path) -> Option<String> {
     for suffix in [".img", ".slot"] {
         stem = stem.strip_suffix(suffix).unwrap_or(stem);
     }
-    stem.rsplit('-').find(|part| part.starts_with('v') && part.len() > 1 && part[1..].starts_with(|c: char| c.is_ascii_digit())).map(str::to_string)
+    let parts: Vec<&str> = stem.split('-').collect();
+    // A dotted release (`2026.2.0`), with a following pre-release part (`dev.867`, `rc.1`).
+    if let Some(i) = parts.iter().position(|part| part.starts_with(|c: char| c.is_ascii_digit()) && part.contains('.')) {
+        let pre = parts
+            .get(i + 1)
+            .filter(|next| next.split_once('.').is_some_and(|(tag, n)| tag.chars().all(|c| c.is_ascii_lowercase()) && !tag.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty()));
+        return Some(match pre {
+            Some(pre) => format!("{}-{pre}", parts[i]),
+            None => parts[i].to_string(),
+        });
+    }
+    parts.iter().rev().find(|part| part.starts_with('v') && part.len() > 1 && part[1..].starts_with(|c: char| c.is_ascii_digit())).map(|part| part.to_string())
 }
 
 #[cfg(test)]
@@ -185,5 +197,8 @@ mod tests {
         assert_eq!(infer_version_from_path(Path::new("helios-raze-v2026.4.0.img")).as_deref(), Some("v2026.4.0"));
         assert_eq!(infer_version_from_path(Path::new("helios-raze-v2026.4.0.slot.tar")).as_deref(), Some("v2026.4.0"));
         assert_eq!(infer_version_from_path(Path::new("image.img.zst")), None);
+        assert_eq!(infer_version_from_path(Path::new("helios-2026.2.0-dev.867-styx-ef4f1f2f.img.xz")).as_deref(), Some("2026.2.0-dev.867"));
+        assert_eq!(infer_version_from_path(Path::new("helios-2027.0.0-styx-0123abcd.img.xz")).as_deref(), Some("2027.0.0"));
+        assert_eq!(infer_version_from_path(Path::new("helios-2026.2.0-dev.867-styx-qemu-ef4f1f2f.img.xz")).as_deref(), Some("2026.2.0-dev.867"));
     }
 }
