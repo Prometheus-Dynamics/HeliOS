@@ -429,7 +429,9 @@ export const CATALOG: NodeType[] = [
       { name: "calibration", type: "eidos:camera_calibration" },
     ],
     outputs: [
-      { name: "mesh", type: "eidos:dense_mesh" },
+      { name: "mesh_chunk", type: "eidos:dense_mesh_chunks" },
+      { name: "transforms", type: "eidos:dense_transforms" },
+      { name: "status", type: "eidos:dense_status" },
       { name: "timing", type: "eidos:dense_timing" },
     ],
     params: [

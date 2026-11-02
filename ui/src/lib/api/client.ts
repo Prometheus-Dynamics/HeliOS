@@ -98,10 +98,14 @@ function url(path: string, query?: Query): string {
 const enc = encodeURIComponent;
 
 /** The camera's live MJPEG preview (`GET /v1/cameras/{id}/preview`), for an `<img>`. */
-/** The live outputs' WebSocket (`GET /v1/live/ws`): every pipeline output of every tick. */
+/**
+ * The live outputs' WebSocket (`GET /v1/live/ws`): every pipeline output of every tick, except the
+ * dense mapper's submap chunks, which are read from `GET /v1/pipelines/{id}/dense` instead.
+ */
 export function liveOutputsUrl(): string {
   const address = new URL(url("/v1/live/ws"), typeof location === "undefined" ? "http://localhost/" : location.href);
   address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
+  address.searchParams.set("exclude", "mesh_chunk,transforms");
   return address.toString();
 }
 
@@ -267,6 +271,8 @@ function methods(at: (path: string) => string) {
   revisions: (id: string) => call<Revision[]>("GET", `/v1/pipelines/${enc(id)}/revisions`),
   bindInput: (id: string, input: string, binding: Binding) => call<Pipeline>("PUT", `/v1/pipelines/${enc(id)}/bindings/${enc(input)}`, { body: binding }),
   outputs: () => call<PipelineOutput[]>("GET", "/v1/outputs"),
+  /** The dense mapper's submap chunk changes since a cursor (`seq`) of a run (`epoch`), as `parseDenseRead` reads them. */
+  denseChunks: (id: string, after: number, epoch: number | null) => call<unknown>("GET", `/v1/pipelines/${enc(id)}/dense?after=${after}${epoch === null ? "" : `&epoch=${epoch}`}`),
   plugins: () => call<{ engine_running: boolean; plugins: string[] }>("GET", "/v1/plugins"),
   catalog: () => call<DeviceCatalog>("GET", "/v1/catalog"),
   nt4: () => call<Nt4State>("GET", "/v1/device/nt4"),

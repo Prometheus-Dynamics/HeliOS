@@ -9,9 +9,8 @@ import { entityKey } from "./peers";
 import type { Camera, CameraControlInfo, ClusterNode, MenuChoice, FeatureTrack, FeatureTracks, GraphDocument, GraphEdge, GraphNode, LogLine, Resource, Service, Slot, Stream, Workload } from "./model";
 import type { CameraStatus, StatusStage } from "./types";
 import { TRAIL_LENGTH, TrailBook, type CameraFeatures, type TrailPoint } from "../vision/features";
-import type { MapPoints, MapPosedFrame, MapSnapshot, MapTag, MapTransform, MapView } from "../vision/map";
-import { encodeBase64, type DenseMeshView, type DenseView } from "../vision/dense";
-import { parseDenseDepth, parseDenseMesh, parseDenseTiming } from "../vision/dense";
+import { StreamedTrajectory, type MapPoints, type MapPosedFrame, type MapSnapshot, type MapTag, type MapTransform, type MapView } from "../vision/map";
+import { DenseChunkStore, encodeBase64, parseDenseDepth, parseDenseRead, parseDenseStatus, parseDenseTiming, type DenseView } from "../vision/dense";
 import { scaleIntrinsics, type Intrinsics, type PoseView, type TagPose, type TagPoses } from "../vision/pose";
 
 const now = Date.now();
@@ -896,23 +895,25 @@ export function mockMapView(tick: number): MapView {
   mockPoints ??= buildMockPoints();
   const position = mockCameraAt(tick);
   const sigmaPos = 0.08 + 0.02 * Math.sin(tick * 0.09);
-  const trajectory: MapPosedFrame[] = [];
+  const path: MapPosedFrame[] = [];
   for (let i = Math.max(0, tick - 240); i <= tick; i += 2) {
-    trajectory.push({
+    path.push({
       frame: i,
       pose: lookAtCentre(mockCameraAt(i)),
       sigma: { position_m: [0.08, 0.08, 0.06], rotation_deg: [2, 2, 1] },
       keyframe: i % 16 === 0,
     });
   }
+  // The path comes as the live map's trajectory stream does: poses once, by frame.
+  const trajectory = new StreamedTrajectory({ decimate: 1 });
+  trajectory.apply({ run_id: 7, epoch: 1, from_seq: path[0]?.frame ?? 0, to_seq: tick, poses: path.map((f) => ({ ...f, revision: 0 })), corrections: [] });
   const snapshot: MapSnapshot = {
     seq: Math.floor(tick / (MOCK_MAP_HZ / 2)),
     run_id: 7,
     tag_size_m: 0.1651,
     aligned: true,
     estimated: true,
-    trajectory,
-    keyframes: trajectory.filter((f) => f.keyframe).map((f) => f.frame),
+    keyframes: path.filter((f) => f.keyframe).map((f) => f.frame),
     points: mockPoints,
     tags: MOCK_TAGS.map((tag) => ({ id: tag.id, pose: mockTagPose(tag), placed: tag.placed }) satisfies MapTag),
   };
@@ -937,6 +938,7 @@ export function mockMapView(tick: number): MapView {
       alignment: { aligned: true, matched_tags: 6, residual_m: 0.012 },
     },
     snapshot,
+    trajectory,
     timing: {
       frame: tick,
       t_ns,
@@ -1009,7 +1011,7 @@ function mockRoomMesh(): MockMesh {
   return mesh;
 }
 
-/** The mesh at tick `tick`, in the device's wire format (base64 of little-endian values). */
+/** The room as one submap's chunk at tick `tick`, in the device's wire format (base64 of little-endian values). */
 function mockMeshWire(tick: number): Record<string, unknown> {
   const mesh = mockRoomMesh();
   const [ox, oy, oz] = MOCK_ORIGIN;
@@ -1022,11 +1024,11 @@ function mockMeshWire(tick: number): Record<string, unknown> {
   const f32 = (values: number[]) => new Uint8Array(new Float32Array(values).buffer);
   const u32 = (values: number[]) => new Uint8Array(new Uint32Array(values).buffer);
   return {
-    seq: Math.floor(tick / MOCK_MESH_EVERY) + 1,
+    submap: 0,
+    revision: Math.floor(tick / MOCK_MESH_EVERY) + 1,
+    kind: "current",
     frame: tick,
     t_ns: Math.round((tick * 1e9) / MOCK_MAP_HZ),
-    keyframes: Math.floor(tick / 16) + 1,
-    submaps: 1,
     voxel_m: 0.05,
     vertices,
     triangles: mesh.indices.length / 3,
@@ -1075,15 +1077,27 @@ function mockDepthWire(tick: number, pose: MapTransform): Record<string, unknown
 }
 
 /** Each output is made once per its period; `at` is when it was made (its age starts there). */
-let meshMemo: { key: number; at: number; view: DenseMeshView } | null = null;
+let meshMemo: { key: number; at: number; chunks: DenseChunkStore } | null = null;
 let depthMemo: { key: number; at: number; view: NonNullable<DenseView["depth"]> } | null = null;
 
-/** The mock robot's dense outputs at tick `tick`: a mesh each second, a depth each two seconds. */
+/** The mock robot's dense outputs at tick `tick`: the room's chunk each second, a depth each two seconds. */
 export function mockDenseView(tick: number): DenseView {
   const meshKey = Math.floor(tick / MOCK_MESH_EVERY);
   if (!meshMemo || meshMemo.key !== meshKey) {
-    const view = parseDenseMesh(mockMeshWire(meshKey * MOCK_MESH_EVERY));
-    if (view) meshMemo = { key: meshKey, at: performance.now(), view };
+    // The room is one submap at the origin, as the device's read of the chunk store gives it.
+    const chunks = meshMemo?.chunks ?? new DenseChunkStore();
+    const identity = { translation: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } };
+    const chunk = mockMeshWire(meshKey * MOCK_MESH_EVERY);
+    chunks.apply(
+      parseDenseRead({
+        epoch: 1,
+        seq: meshKey + 1,
+        reset: false,
+        status: null,
+        submaps: [{ submap: 0, removed: false, transform: { submap: 0, revision: 0, pose: identity }, chunk }],
+      }) ?? { epoch: 1, seq: meshKey + 1, reset: false, status: null, submaps: [] },
+    );
+    meshMemo = { key: meshKey, at: performance.now(), chunks };
   }
   const depthKey = Math.floor(tick / MOCK_DEPTH_EVERY);
   if (!depthMemo || depthMemo.key !== depthKey) {
@@ -1113,7 +1127,8 @@ export function mockDenseView(tick: number): DenseView {
     blocks: 1200,
     volume_bytes: 4_200_000,
   });
-  return { mesh: meshMemo?.view ?? null, depth: depthMemo?.view ?? null, timing, depthAt: depthMemo?.at ?? 0, meshAt: meshMemo?.at ?? 0 };
+  const status = parseDenseStatus({ frame: tick, t_ns: Math.round((tick * 1e9) / MOCK_MAP_HZ), epoch: 1, keyframes: Math.floor(tick / 16) + 1, submaps: 1, bytes: 0 });
+  return { chunks: meshMemo?.chunks ?? new DenseChunkStore(), depth: depthMemo?.view ?? null, timing, status, depthAt: depthMemo?.at ?? 0, meshAt: meshMemo?.at ?? 0 };
 }
 
 /** The tag poses at tick `tick`: the tags the camera faces and sees, camera-from-tag, and the camera in the field. */

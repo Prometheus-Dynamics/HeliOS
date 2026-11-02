@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEPTH_COLOURS, bufferOf, decodeBase64, depthRgba, encodeBase64, greyColours, meshBounds, parseDenseDepth, parseDenseMesh, parseDenseTiming } from "../src/lib/vision/dense";
+import { DEPTH_COLOURS, DenseChunkStore, bufferOf, decodeBase64, depthRgba, encodeBase64, greyColours, meshBounds, parseDenseChunk, parseDenseDepth, parseDenseMesh, parseDenseRead, parseDensePose, parseDenseStatus, parseDenseTiming } from "../src/lib/vision/dense";
 
 /** Base64 of little-endian f32 values, as the device sends a buffer of positions or normals. */
 const f32 = (values: number[]) => Buffer.from(new Float32Array(values).buffer).toString("base64");
@@ -8,15 +8,12 @@ const u32 = (values: number[]) => Buffer.from(new Uint32Array(values).buffer).to
 /** Base64 of raw bytes. */
 const bytes = (values: number[]) => Buffer.from(Uint8Array.from(values)).toString("base64");
 
-/** A minimal `dense_mesh` value; override the fields a test needs. */
+/** A minimal submap chunk (`mesh_chunk`'s entry); override the fields a test needs. */
 function mesh(extra: Record<string, unknown> = {}) {
   return {
-    seq: 3,
-    frame: 42,
-    t_ns: 1_000,
-    keyframes: 5,
-    submaps: 2,
-    voxel_m: 0.05,
+    submap: 3,
+    revision: 2,
+    kind: "current",
     vertices: 3,
     triangles: 1,
     positions: f32([0, 0, 0, 1, 0, 0, 0, 1, 0]),
@@ -31,8 +28,9 @@ describe("dense mesh", () => {
   test("decodes positions, normals, grey and indices from base64 little-endian buffers", () => {
     const view = parseDenseMesh(mesh());
     expect(view).not.toBeNull();
-    expect(view!.seq).toBe(3);
-    expect(view!.frame).toBe(42);
+    expect(view!.submap).toBe(3);
+    expect(view!.revision).toBe(2);
+    expect(view!.frozen).toBe(false);
     expect(view!.vertices).toBe(3);
     expect(view!.triangles).toBe(1);
     expect(Array.from(view!.positions)).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -92,7 +90,7 @@ describe("dense mesh", () => {
     expect(empty!.indices.length).toBe(0);
     expect(meshBounds(empty!)).toBeNull();
     expect(parseDenseMesh(null)).toBeNull();
-    expect(parseDenseMesh({ seq: 1 })).toBeNull();
+    expect(parseDenseMesh({ submap: 1 })).toBeNull();
   });
 
   test("the bounds are the min and max of the finite vertices", () => {
@@ -158,3 +156,68 @@ describe("dense timing and bytes", () => {
     expect(bufferOf(42)).toBeNull();
   });
 });
+
+describe("dense chunks", () => {
+  const identity = { translation: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } };
+  const pose = (submap: number, revision: number, x = 0) => ({ submap, revision, pose: { translation: { x, y: 0, z: 0 }, rotation: identity.rotation } });
+  const chunk = (submap: number, revision: number, kind = "current", extra: Record<string, unknown> = {}) => mesh({ submap, revision, kind, ...extra });
+
+  test("a pose and a chunk read as their submap's entry; a frozen chunk is frozen", () => {
+    expect(parseDensePose(pose(4, 1, 2.5))).toEqual({ submap: 4, revision: 1, transform: { translation: { x: 2.5, y: 0, z: 0 }, rotation: identity.rotation } });
+    expect(parseDenseChunk(chunk(4, 0, "frozen"))?.frozen).toBe(true);
+    expect(parseDenseChunk({ positions: "" })).toBeNull();
+  });
+
+  test("a read applies the changes since the cursor, in place, and bumps the version only when something changed", () => {
+    const store = new DenseChunkStore();
+    store.apply(parseDenseRead({ epoch: 9, seq: 3, reset: false, status: null, submaps: [{ submap: 0, removed: false, transform: pose(0, 0), chunk: chunk(0, 0, "frozen") }] })!);
+    expect(store.cursor).toBe(3);
+    expect(store.epoch).toBe(9);
+    expect(store.chunkCount).toBe(1);
+    const before = store.version;
+    const held = store.submaps.get(0);
+
+    store.apply(parseDenseRead({ epoch: 9, seq: 3, reset: false, status: null, submaps: [] })!);
+    expect(store.version).toBe(before);
+    expect(store.submaps.get(0)).toBe(held);
+
+    store.apply(parseDenseRead({ epoch: 9, seq: 5, reset: false, status: null, submaps: [{ submap: 1, removed: false, transform: pose(1, 0, 4), chunk: chunk(1, 1) }] })!);
+    expect(store.version).toBeGreaterThan(before);
+    expect(store.submaps.get(0)).toBe(held, "an unchanged submap keeps its object");
+    expect(store.totals()).toEqual({ vertices: 6, triangles: 2, submaps: 2 });
+  });
+
+  test("a removed submap loses its geometry and keeps its pose, which the next chunk brings back", () => {
+    const store = new DenseChunkStore();
+    store.apply(parseDenseRead({ epoch: 1, seq: 1, reset: false, status: null, submaps: [{ submap: 2, removed: false, transform: pose(2, 0), chunk: chunk(2, 0, "frozen") }] })!);
+    store.apply(parseDenseRead({ epoch: 1, seq: 2, reset: false, status: null, submaps: [{ submap: 2, removed: true, transform: pose(2, 0), chunk: null }] })!);
+    expect(store.submaps.get(2)?.chunk).toBeNull();
+    expect(store.submaps.get(2)?.pose?.revision).toBe(0);
+    store.apply(parseDenseRead({ epoch: 1, seq: 3, reset: false, status: null, submaps: [{ submap: 2, removed: false, transform: null, chunk: chunk(2, 1) }] })!);
+    expect(store.submaps.get(2)?.chunk?.revision).toBe(1);
+    expect(store.submaps.get(2)?.pose).not.toBeNull();
+  });
+
+  test("a new epoch, or a read marked reset, starts the store over", () => {
+    const store = new DenseChunkStore();
+    store.apply(parseDenseRead({ epoch: 1, seq: 1, reset: false, status: null, submaps: [{ submap: 0, removed: false, transform: pose(0, 0), chunk: chunk(0, 0) }] })!);
+    store.apply(parseDenseRead({ epoch: 2, seq: 1, reset: true, status: null, submaps: [{ submap: 7, removed: false, transform: pose(7, 0), chunk: chunk(7, 0) }] })!);
+    expect([...store.submaps.keys()]).toEqual([7]);
+    expect(store.epoch).toBe(2);
+  });
+
+  test("an older pose does not replace a newer one", () => {
+    const store = new DenseChunkStore();
+    store.apply(parseDenseRead({ epoch: 1, seq: 1, reset: false, status: null, submaps: [{ submap: 0, removed: false, transform: pose(0, 3, 9), chunk: null }] })!);
+    store.apply(parseDenseRead({ epoch: 1, seq: 2, reset: false, status: null, submaps: [{ submap: 0, removed: false, transform: pose(0, 1, 1), chunk: null }] })!);
+    expect(store.submaps.get(0)?.pose?.revision).toBe(3);
+  });
+
+  test("the status is read with the changes, and a read that is not one is null", () => {
+    const status = parseDenseStatus({ frame: 1, t_ns: 2, epoch: 3, keyframes: 4, submaps: 5, bytes: 6 });
+    expect(status).toEqual({ frame: 1, tNs: 2, epoch: 3, keyframes: 4, submaps: 5, bytes: 6 });
+    expect(parseDenseRead({ seq: 1 })).toBeNull();
+    expect(parseDenseRead({ epoch: 1, seq: 2, reset: false, submaps: [{ nothing: true }], status: null })!.submaps).toEqual([]);
+  });
+});
+

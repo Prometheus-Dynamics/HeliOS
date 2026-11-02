@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mockMapView } from "../src/lib/api/mock";
-import { parseMapPose, parseMapSnapshot, parseMapTiming, TimingWindow } from "../src/lib/vision/map";
+import { StreamedTrajectory, TRAJECTORY_BYTES_PER_POSE, parseMapPose, parseMapSnapshot, parseMapTiming, TimingWindow, type MapTrajectoryDelta } from "../src/lib/vision/map";
 
 /** Little-endian bytes of `values`, as the host sends them: a JSON array of byte values. */
 const bytes = (view: DataView) => Array.from(new Uint8Array(view.buffer));
@@ -21,7 +21,6 @@ describe("live map outputs", () => {
       tag_size_m: 0.1651,
       aligned: false,
       estimated: true,
-      trajectory: [],
       keyframes: [],
       tags: [],
       points: {
@@ -44,7 +43,7 @@ describe("live map outputs", () => {
   });
 
   test("cuts short point buffers to whole rows", () => {
-    const points = parseMapSnapshot({ trajectory: [], points: { count: 2, ids: [1, 0, 0, 0, 9], xyz: [], observations: [], grey: [1, 2] } })!.points;
+    const points = parseMapSnapshot({ points: { count: 2, ids: [1, 0, 0, 0, 9], xyz: [], observations: [], grey: [1, 2] } })!.points;
     expect(points.count).toBe(0);
     expect(points.ids.length).toBe(0);
   });
@@ -99,5 +98,70 @@ describe("live map outputs", () => {
     expect(view.snapshot?.points.xyz.length).toBe(view.snapshot!.points.count * 3);
     expect(view.snapshot?.tags.length).toBe(6);
     expect(view.timing?.stages.length).toBeGreaterThan(0);
+  });
+
+  test("the mock live map's path comes from its trajectory stream, not the snapshot", () => {
+    const view = mockMapView(40);
+    expect(view.trajectory?.poses().length).toBeGreaterThan(0);
+    expect(view.snapshot && "trajectory" in view.snapshot).toBe(false);
+  });
+});
+
+/** A trajectory delta of poses at `frames` (keyframes at the given frames), at `revision` 0. */
+function delta(frames: number[], keyframes: number[] = [], extra: Partial<MapTrajectoryDelta> = {}): MapTrajectoryDelta {
+  const identity = { translation: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } };
+  return {
+    run_id: 1,
+    epoch: 1,
+    from_seq: frames[0] ?? 0,
+    to_seq: frames[frames.length - 1] ?? 0,
+    poses: frames.map((frame) => ({ frame, pose: { ...identity, translation: { x: frame, y: 0, z: 0 } }, sigma: { position_m: [], rotation_deg: [] }, keyframe: keyframes.includes(frame), revision: 0 })),
+    corrections: [],
+    ...extra,
+  };
+}
+
+describe("streamed trajectory: decimation and the byte cap", () => {
+  test("every fourth frame is kept by default, and keyframes always are", () => {
+    const store = new StreamedTrajectory();
+    store.apply(delta([0, 1, 2, 3, 4, 5, 6, 7, 8], [5]));
+    expect(store.poses().map((p) => p.frame)).toEqual([0, 4, 5, 8]);
+  });
+
+  test("the stream repeats its last ticks: a pose is stored once", () => {
+    const store = new StreamedTrajectory({ decimate: 1 });
+    store.apply(delta([0, 1, 2]));
+    const version = store.version;
+    store.apply(delta([1, 2, 3]));
+    expect(store.poses().map((p) => p.frame)).toEqual([0, 1, 2, 3]);
+    expect(store.version).toBeGreaterThan(version);
+    const again = store.version;
+    store.apply(delta([1, 2, 3]));
+    expect(store.version).toBe(again, "nothing new is a change to nobody");
+  });
+
+  test("past the byte cap the oldest plain poses go first, then the oldest keyframes, and dropped frames do not come back", () => {
+    const store = new StreamedTrajectory({ decimate: 1, maxBytes: 4 * TRAJECTORY_BYTES_PER_POSE });
+    store.apply(delta([0, 1, 2, 3, 4, 5], [1]));
+    expect(store.poses().map((p) => p.frame)).toEqual([1, 3, 4, 5], "keyframe 1 stays, the oldest plain poses went");
+    expect(store.bytes).toBeLessThanOrEqual(4 * TRAJECTORY_BYTES_PER_POSE);
+    // The stream's repeat of frame 0 (dropped) is ignored; a new frame is kept and trims again.
+    store.apply(delta([0, 1, 2, 3, 4, 5, 6]));
+    expect(store.poses().map((p) => p.frame)).toEqual([1, 4, 5, 6]);
+  });
+
+  test("a keyframe is dropped only when plain poses cannot make the room", () => {
+    const store = new StreamedTrajectory({ decimate: 1, maxBytes: 2 * TRAJECTORY_BYTES_PER_POSE });
+    store.apply(delta([0, 1, 2], [0, 1, 2]));
+    expect(store.poses().map((p) => p.frame)).toEqual([1, 2]);
+  });
+
+  test("corrections still move the poses kept, and a new run starts over", () => {
+    const store = new StreamedTrajectory({ decimate: 1 });
+    store.apply(delta([0, 1, 2]));
+    store.apply(delta([3], [], { corrections: [{ epoch: 1, from_seq: 0, to_seq: 2, scale: 1, rotation: { w: 1, x: 0, y: 0, z: 0 }, translation: { x: 10, y: 0, z: 0 }, revision: 1 }] }));
+    expect(store.poses().map((p) => p.pose.translation.x)).toEqual([10, 11, 12, 3]);
+    store.apply(delta([7], [], { run_id: 2 }));
+    expect(store.poses().map((p) => p.frame)).toEqual([7]);
   });
 });

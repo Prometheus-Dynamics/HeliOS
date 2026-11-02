@@ -49,7 +49,9 @@
   const cameraPose = $derived(aligned && fieldPose?.cameraInField ? fieldPose.cameraInField : (estimate?.reference_from_camera ?? null));
   const robotPose = $derived(aligned ? (fieldPose?.robotInField ?? null) : null);
   const lens = $derived(intrinsics ? fieldOfView(intrinsics) : null);
-  const mesh = $derived(dense?.mesh ?? null);
+  /** The dense mesh as its submap chunks add up (null before any). */
+  const mesh = $derived(dense && dense.chunks.chunkCount > 0 ? dense.chunks.totals() : null);
+  const keyframeCount = $derived(dense?.status?.keyframes ?? 0);
   const fieldCount = $derived(field.layout.tags.length);
   const placedCount = $derived(snapshot ? snapshot.tags.filter((t) => !(aligned && field.layout.tags.some((f) => f.id === t.id))).length : 0);
 
@@ -82,7 +84,8 @@
       robot: robotPose,
       fieldTags: field.layout.tags,
       aligned,
-      mesh,
+      chunks: dense?.chunks ?? null,
+      trajectory: view?.trajectory ?? null,
       lens,
       mode,
       shading,
@@ -243,7 +246,7 @@
       <div class="cell">
         <dt>Dense mesh</dt>
         <dd>{mesh ? `${count(mesh.vertices)} vertices` : "–"}</dd>
-        <small>{mesh ? `${count(mesh.triangles)} triangles · ${mesh.keyframes} keyframes · ${fixed(mesh.voxelM, 2)} m voxels` : "waiting for a mesh"}</small>
+        <small>{mesh ? `${count(mesh.triangles)} triangles · ${mesh.submaps} submaps · ${keyframeCount} keyframes` : "waiting for a mesh"}</small>
       </div>
       <div class="cell sigma" data-tip="The largest 1σ of the pose's position and rotation, from the mapper's covariance. Checked against ground truth over many runs: it covers the real error and errs on the wide side.">
         <dt>Pose σ</dt>

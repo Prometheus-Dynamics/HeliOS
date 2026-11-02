@@ -17,8 +17,10 @@ import { hasLiveMap } from "#lib/maps/mapping.js";
 
 /** The live mapper's outputs: Eidos's template names and the older ones. */
 const MAP_PORTS = new Set(["map_pose", "map_snapshot", "map_timing", "map_trajectory", "pose", "snapshot", "timing", "trajectory"]);
-/** The dense mapper's outputs (`eidos:dense.map`). */
-const DENSE_PORTS = new Set(["dense_mesh", "dense_depth", "dense_timing"]);
+/** The dense mapper's outputs on the live stream (`eidos:dense.map`). Its submap chunks come from `GET /v1/pipelines/{id}/dense`. */
+const DENSE_PORTS = new Set(["dense_depth", "dense_timing"]);
+/** The submap chunks are read this often, from the cursor the last read left. */
+const DENSE_CHUNK_MS = 1000;
 /** The tag poses and the field pose of a pose graph. */
 const POSE_PORTS = new Set(["pose_solutions", "multi_tag_pose"]);
 /** A camera's intrinsics are read again after this long (a recalibration shows within a minute). */
@@ -27,7 +29,7 @@ import type * as W from "#lib/api/types.js";
 import { mergeDeviceCatalog } from "#lib/api/catalog.js";
 import { toFeatureTracks, TrailBook, type CameraFeatures } from "#lib/vision/features.js";
 import { parseMapPose, parseMapSnapshot, parseMapTiming, parseMapTrajectory, StreamedTrajectory, TimingWindow, type MapView } from "#lib/vision/map.js";
-import { parseDenseDepth, parseDenseMesh, parseDenseTiming, type DenseView } from "#lib/vision/dense.js";
+import { DenseChunkStore, parseDenseDepth, parseDenseRead, parseDenseTiming, type DenseView } from "#lib/vision/dense.js";
 import { parseFieldPose, parseTagPoses, type Intrinsics, type PoseView } from "#lib/vision/pose.js";
 import { pickFile } from "#lib/files.js";
 import { clampedNote } from "#lib/camera/controls.js";
@@ -176,6 +178,8 @@ export class LiveCluster {
   private mapTimings = new Map<string, TimingWindow>();
   /** The dense mapper's latest mesh, depth and timing per pipeline (`dense_*`). */
   private dense = $state<Record<string, DenseView>>({});
+  /** The pipelines whose chunks are being read now. */
+  private denseReads = new Set<string>();
   /** The latest tag poses and field pose per pipeline (`pose_solutions`, `multi_tag_pose`). */
   private poses = $state<Record<string, PoseView>>({});
   /** Each camera's intrinsics from its calibration (null: none yet); read again after INTRINSICS_TTL_MS. */
@@ -226,6 +230,7 @@ export class LiveCluster {
     this.timers.push(window.setInterval(() => void this.refreshCameras(), 5_000));
     this.timers.push(window.setInterval(() => void this.refreshPipelines(), 15_000));
     this.timers.push(window.setInterval(() => void this.refreshPeers(), 5_000));
+    this.timers.push(window.setInterval(() => void this.refreshDenseChunks(), DENSE_CHUNK_MS));
     this.timers.push(
       window.setInterval(() => {
         const local = performance.now() - this.lastOutputEvent > OUTPUTS_FALLBACK_MS;
@@ -590,10 +595,9 @@ export class LiveCluster {
     const timing = parseMapTiming(value("map_timing") ?? value("timing"));
     const stream = parseMapTrajectory(value("map_trajectory") ?? value("trajectory"));
     if (stream) this.trajectoryOf(pipelineId).apply(stream);
-    this.withStreamedTrajectory(pipelineId, snapshot);
     if (!pose && !snapshot && !timing) return null;
     if (timing) this.mapWindow(pipelineId).push(performance.now(), timing.frame_ms, timing.map_ms);
-    return { pose, snapshot, timing };
+    return { pose, snapshot, timing, trajectory: this.trajectories.get(pipelineId) ?? null };
   }
 
   /** The whole trajectory kept from a pipeline's `map_trajectory` stream. */
@@ -604,14 +608,6 @@ export class LiveCluster {
       this.trajectories.set(pipelineId, t);
     }
     return t;
-  }
-
-  /** The snapshot with the streamed whole trajectory in place of its own, once the stream has frames
-   *  (Eidos keeps the snapshot's trajectory only until consumers read the stream). */
-  private withStreamedTrajectory(pipelineId: string, snapshot: MapView["snapshot"]): MapView["snapshot"] {
-    const streamed = this.trajectories.get(pipelineId)?.poses();
-    if (snapshot && streamed && streamed.length) snapshot.trajectory = streamed;
-    return snapshot;
   }
 
   private mapWindow(pipelineId: string): TimingWindow {
@@ -635,16 +631,16 @@ export class LiveCluster {
       this.trajectories.delete(pipelineId);
       return;
     }
-    const current = this.maps[pipelineId] ?? { pose: null, snapshot: null, timing: null };
+    const current = this.maps[pipelineId] ?? { pose: null, snapshot: null, timing: null, trajectory: null };
     const raw = data.value.value;
     port = port.replace(/^map_/, "");
     if (port === "pose") current.pose = parseMapPose(raw);
-    else if (port === "snapshot") current.snapshot = this.withStreamedTrajectory(pipelineId, parseMapSnapshot(raw)) ?? current.snapshot;
+    else if (port === "snapshot") current.snapshot = parseMapSnapshot(raw) ?? current.snapshot;
     else if (port === "trajectory") {
       const stream = parseMapTrajectory(raw);
       if (!stream) return;
       this.trajectoryOf(pipelineId).apply(stream);
-      if (current.snapshot) current.snapshot = this.withStreamedTrajectory(pipelineId, { ...current.snapshot });
+      current.trajectory = this.trajectoryOf(pipelineId);
     }
     else if (port === "timing") {
       current.timing = parseMapTiming(raw);
@@ -668,6 +664,7 @@ export class LiveCluster {
 
   /** Drops a pipeline's dense and pose state (it stopped, or its output went). */
   private forgetDense(pipelineId: string) {
+    this.dense[pipelineId]?.chunks.clear();
     if (pipelineId in this.dense) {
       const { [pipelineId]: _, ...rest } = this.dense;
       this.dense = rest;
@@ -680,8 +677,8 @@ export class LiveCluster {
   }
 
   /**
-   * A `dense_mesh`, `dense_depth` or `dense_timing` event. The mesh comes at most once a second and
-   * the depth at most twice a second, so a null value (nothing new this tick) keeps the latest of each.
+   * A `dense_depth` or `dense_timing` event. The depth comes at most twice a second, so a null value
+   * (nothing new this tick) keeps the latest.
    */
   private applyDense(pipelineId: string, port: string, data: { change: string; value?: W.PipelineOutput }) {
     const pipeline = this.pipelines.get(pipelineId);
@@ -690,18 +687,40 @@ export class LiveCluster {
     if (raw === null || raw === undefined) return;
     if (this.seen(`${pipelineId}/${port}`, data.value?.observed_at_ms ?? 0)) return;
     const now = performance.now();
-    const current: DenseView = this.dense[pipelineId] ?? { mesh: null, depth: null, timing: null, depthAt: 0, meshAt: 0 };
+    const current: DenseView = this.dense[pipelineId] ?? { chunks: new DenseChunkStore(), depth: null, timing: null, status: null, depthAt: 0, meshAt: 0 };
     let next: DenseView = current;
-    if (port === "dense_mesh") {
-      const mesh = parseDenseMesh(raw);
-      if (mesh) next = { ...current, mesh, meshAt: now };
-    } else if (port === "dense_depth") {
+    if (port === "dense_depth") {
       const depth = parseDenseDepth(raw);
       if (depth) next = { ...current, depth, depthAt: now };
     } else {
       next = { ...current, timing: parseDenseTiming(raw) };
     }
     if (next !== current) this.dense = { ...this.dense, [pipelineId]: next };
+  }
+
+  /**
+   * Reads the dense mapper's submap chunks of each pipeline that has one, from the cursor each left
+   * (`GET /v1/pipelines/{id}/dense`): only what changed since the last read crosses the wire.
+   */
+  private async refreshDenseChunks() {
+    for (const pipelineId of Object.keys(this.dense)) {
+      const view = this.dense[pipelineId];
+      if (!view || this.denseReads.has(pipelineId)) continue;
+      this.denseReads.add(pipelineId);
+      try {
+        const read = parseDenseRead(await api.denseChunks(pipelineId, view.chunks.cursor, view.chunks.epoch));
+        const latest = this.dense[pipelineId];
+        if (!read || !latest || latest.chunks !== view.chunks) continue;
+        const before = view.chunks.version;
+        view.chunks.apply(read);
+        const changed = view.chunks.version !== before;
+        if (changed || read.status) this.dense = { ...this.dense, [pipelineId]: { ...latest, status: read.status ?? latest.status, meshAt: changed ? performance.now() : latest.meshAt } };
+      } catch {
+        // Not on this device (a peer's pipeline), or not yet: the next read tries again.
+      } finally {
+        this.denseReads.delete(pipelineId);
+      }
+    }
   }
 
   /** A `pose_solutions` (tag poses) or `multi_tag_pose` (the camera in the field) event: that output alone changes. */

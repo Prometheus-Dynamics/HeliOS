@@ -1,6 +1,7 @@
 // The 3D scene of a live map: the point cloud (grey per point), the camera's path, the keyframes
-// as small frustums, the mapper's tags, the dense mesh (grey or normal shaded), the field's tags and
-// the robot once the map is aligned to the field. Two views: Field (orbit the field, z up as WPILib
+// as small frustums, the mapper's tags, the dense mesh (grey or normal shaded: one mesh per submap,
+// each placed by its pose), the field's tags and the robot once the map is aligned to the field.
+// The path and the keyframes are drawn from the trajectory store, not from the snapshot. Two views: Field (orbit the field, z up as WPILib
 // has it) and Camera (from the camera's own pose, with its lens' field of view). Layers toggle one
 // by one. Aligned, the map is in WPILib's field frame and is turned into the scene's y-up frame; not
 // aligned, up is unknown, so there is no floor and no field. The view frames the content once per
@@ -10,8 +11,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import type { MapSnapshot, MapTransform } from "#lib/vision/map.js";
-import { greyColours, type DenseMeshView } from "#lib/vision/dense.js";
+import type { MapSnapshot, MapTransform, StreamedTrajectory } from "#lib/vision/map.js";
+import { greyColours, type DenseChunkStore, type DenseMeshView } from "#lib/vision/dense.js";
 import type { FieldTag } from "#lib/stores/field.svelte.js";
 import { cssVarColor } from "./colors";
 
@@ -59,7 +60,10 @@ export interface SceneData {
   fieldTags: FieldTag[];
   /** Whether the map is aligned to the field: the field's tags and the robot are drawn only then. */
   aligned: boolean;
-  mesh: DenseMeshView | null;
+  /** The trajectory store: the path and the keyframes are drawn from it. */
+  trajectory: StreamedTrajectory | null;
+  /** The dense mapper's submap chunks, each a mesh placed by its pose. */
+  chunks: DenseChunkStore | null;
   /** The camera's lens: vertical field of view (radians) and aspect; null when it is not known. */
   lens: { fovY: number; aspect: number } | null;
   mode: SceneMode;
@@ -110,6 +114,13 @@ function fieldTagQuaternion(tag: FieldTag): THREE.Quaternion {
   return yaw.multiply(pitch);
 }
 
+/** One submap's mesh in the scene: the chunk and pose it was built from (a change rebuilds it). */
+interface DenseSlot {
+  mesh: THREE.Mesh;
+  chunk: DenseMeshView | null;
+  pose: unknown;
+}
+
 export class MapScene {
   private renderer: THREE.WebGLRenderer;
   private labels: CSS2DRenderer;
@@ -122,9 +133,12 @@ export class MapScene {
   private cloud: THREE.Points | null = null;
   private cloudSource: MapSnapshot["points"] | null = null;
   private path: THREE.Line | null = null;
-  private pathSource: MapSnapshot | null = null;
+  /** The trajectory store and its version the path and keyframes were built from. */
+  private trajectorySource: StreamedTrajectory | null = null;
+  private trajectoryVersion = -1;
+  private keyframesSource: StreamedTrajectory | null = null;
+  private keyframesVersion = -1;
   private keyframes: THREE.LineSegments;
-  private keyframesSource: MapSnapshot | null = null;
   private current: THREE.LineSegments;
   private currentDot: THREE.Mesh;
   private robot: THREE.Group;
@@ -135,8 +149,11 @@ export class MapScene {
   private fieldTagKey = "";
   private mapTagLabels: CSS2DObject[] = [];
   private fieldTagLabels: CSS2DObject[] = [];
-  private mesh: THREE.Mesh;
-  private meshSource: DenseMeshView | null = null;
+  /** The dense mesh: a group of one mesh per submap, in the map's frame. */
+  private dense = new THREE.Group();
+  private denseSlots = new Map<number, DenseSlot>();
+  private denseSource: DenseChunkStore | null = null;
+  private denseVersion = -1;
   private meshGrey: THREE.MeshStandardMaterial;
   private meshNormal: THREE.MeshNormalMaterial;
   private axes = new THREE.AxesHelper(0.5);
@@ -206,11 +223,10 @@ export class MapScene {
 
     this.meshGrey = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
     this.meshNormal = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
-    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.meshGrey);
-    this.mesh.visible = false;
+    this.dense.visible = false;
     this.disposables.push(this.meshGrey, this.meshNormal);
 
-    this.world.add(this.keyframes, this.current, this.currentDot, this.robot, this.mapTags, this.fieldTags, this.mesh);
+    this.world.add(this.keyframes, this.current, this.currentDot, this.robot, this.mapTags, this.fieldTags, this.dense);
     this.scene.add(this.world);
 
     this.axes.visible = false;
@@ -249,11 +265,11 @@ export class MapScene {
     this.floor.visible = aligned && layers.floor;
     const snapshot = data.snapshot;
     this.updatePoints(snapshot?.points ?? null, layers.points);
-    this.updatePath(snapshot, layers.path);
-    this.updateKeyframes(snapshot, layers.keyframes);
+    this.updatePath(data.trajectory, layers.path);
+    this.updateKeyframes(data.trajectory, layers.keyframes);
     this.updateFieldTags(data.fieldTags, aligned && layers.fieldTags, snapshot?.tag_size_m ?? 0.1651);
     this.updateMapTags(snapshot, aligned ? new Set(data.fieldTags.map((t) => t.id)) : new Set(), layers.mapTags);
-    this.updateMesh(data.mesh, data.shading, layers.mesh);
+    this.updateDense(data.chunks, data.shading, layers.mesh);
     this.updateCurrent(data.camera, layers.camera);
     this.updateRobot(data.robot, aligned && layers.robot);
     this.frameOnce(snapshot, aligned);
@@ -300,7 +316,7 @@ export class MapScene {
   private contentBox(): THREE.Box3 | null {
     const box = new THREE.Box3();
     let any = false;
-    for (const object of [this.cloud, this.mesh, this.path, this.fieldTags, this.mapTags]) {
+    for (const object of [this.cloud, this.dense, this.path, this.fieldTags, this.mapTags]) {
       if (!object?.visible) continue;
       const b = new THREE.Box3().setFromObject(object);
       if (b.isEmpty()) continue;
@@ -341,9 +357,13 @@ export class MapScene {
     }
   }
 
-  private updatePath(snapshot: MapSnapshot | null, visible: boolean) {
-    const path = snapshot?.trajectory ?? [];
-    if (path.length < 2) {
+  /**
+   * The path, from the trajectory store's poses (decimated, and the corrections applied). Rebuilt only
+   * when the store changed; the positions are read from it, not copied per frame.
+   */
+  private updatePath(trajectory: StreamedTrajectory | null, visible: boolean) {
+    const poses = trajectory?.poses() ?? [];
+    if (poses.length < 2) {
       if (this.path) this.path.visible = false;
       return;
     }
@@ -355,20 +375,27 @@ export class MapScene {
       this.world.add(this.path);
     }
     this.path.visible = visible;
-    if (this.pathSource === snapshot) return;
-    this.pathSource = snapshot;
-    const positions = new Float32Array(path.length * 3);
-    path.forEach((f, i) => positions.set([f.pose.translation.x, f.pose.translation.y, f.pose.translation.z], i * 3));
+    if (this.trajectorySource === trajectory && this.trajectoryVersion === trajectory?.version) return;
+    this.trajectorySource = trajectory;
+    this.trajectoryVersion = trajectory?.version ?? -1;
+    const positions = new Float32Array(poses.length * 3);
+    poses.forEach((f, i) => {
+      positions[i * 3] = f.pose.translation.x;
+      positions[i * 3 + 1] = f.pose.translation.y;
+      positions[i * 3 + 2] = f.pose.translation.z;
+    });
     this.path.geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     this.path.geometry.computeBoundingSphere();
   }
 
-  private updateKeyframes(snapshot: MapSnapshot | null, visible: boolean) {
+  /** The keyframes as frustums, from the trajectory store's keyframe poses (the same version rule as the path). */
+  private updateKeyframes(trajectory: StreamedTrajectory | null, visible: boolean) {
     this.keyframes.visible = visible;
-    if (this.keyframesSource === snapshot) return;
-    this.keyframesSource = snapshot;
+    if (this.keyframesSource === trajectory && this.keyframesVersion === (trajectory?.version ?? -1)) return;
+    this.keyframesSource = trajectory;
+    this.keyframesVersion = trajectory?.version ?? -1;
     const vertices: number[] = [];
-    for (const f of snapshot?.trajectory ?? []) if (f.keyframe) appendFrustum(vertices, f.pose, KEYFRAME_DEPTH);
+    for (const f of trajectory?.poses() ?? []) if (f.keyframe) appendFrustum(vertices, f.pose, KEYFRAME_DEPTH);
     this.keyframes.geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     this.keyframes.geometry.computeBoundingSphere();
   }
@@ -447,28 +474,76 @@ export class MapScene {
     }
   }
 
-  /** The dense mesh: grey-shaded (the grey of each vertex) or by its normals. A new mesh is uploaded once. */
-  private updateMesh(mesh: DenseMeshView | null, shading: MeshShading, visible: boolean) {
-    if (!mesh || mesh.vertices === 0 || mesh.indices.length === 0) {
-      this.mesh.visible = false;
+  /**
+   * The dense mesh, one mesh per submap: each chunk is in submap-local coordinates and its pose places
+   * it in the map's frame. Only what the store changed is rebuilt; a submap's geometry is uploaded once.
+   */
+  private updateDense(store: DenseChunkStore | null, shading: MeshShading, visible: boolean) {
+    const material = shading === "normal" ? this.meshNormal : this.meshGrey;
+    if (!store) {
+      this.clearDense();
+      this.dense.visible = false;
+      this.denseSource = null;
       return;
     }
-    this.mesh.visible = visible;
-    this.mesh.material = shading === "normal" ? this.meshNormal : this.meshGrey;
-    if (this.meshSource === mesh) return;
-    this.meshSource = mesh;
+    if (store !== this.denseSource || store.version !== this.denseVersion) {
+      this.denseSource = store;
+      this.denseVersion = store.version;
+      for (const [id, slot] of this.denseSlots) {
+        const entry = store.submaps.get(id);
+        if (!entry?.chunk) this.dropDenseSlot(id, slot);
+      }
+      for (const entry of store.submaps.values()) {
+        if (!entry.chunk) continue;
+        let slot = this.denseSlots.get(entry.submap);
+        if (!slot) {
+          slot = { mesh: new THREE.Mesh(new THREE.BufferGeometry(), this.meshGrey), chunk: null, pose: null };
+          this.dense.add(slot.mesh);
+          this.denseSlots.set(entry.submap, slot);
+        }
+        if (slot.chunk !== entry.chunk) {
+          slot.chunk = entry.chunk;
+          this.uploadChunk(slot.mesh, entry.chunk);
+        }
+        if (slot.pose !== entry.pose) {
+          slot.pose = entry.pose;
+          if (entry.pose) {
+            slot.mesh.position.copy(positionOf(entry.pose.transform));
+            slot.mesh.quaternion.copy(quaternionOf(entry.pose.transform));
+          }
+        }
+        slot.mesh.visible = entry.pose !== null && entry.chunk.indices.length > 0;
+      }
+    }
+    for (const slot of this.denseSlots.values()) slot.mesh.material = material;
+    this.dense.visible = visible && this.denseSlots.size > 0;
+  }
+
+  /** A chunk's geometry, uploaded into `mesh` (its previous geometry freed). */
+  private uploadChunk(mesh: THREE.Mesh, chunk: DenseMeshView) {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    if (mesh.normals) geometry.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+    geometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
+    geometry.setIndex(new THREE.BufferAttribute(chunk.indices, 1));
+    if (chunk.normals) geometry.setAttribute("normal", new THREE.BufferAttribute(chunk.normals, 3));
     else geometry.computeVertexNormals();
     // Vertices without a grey are a neutral grey, so the grey shading still reads.
-    const colours = mesh.grey ? greyColours(mesh.grey) : new Float32Array(mesh.vertices * 3).fill(0.62);
+    const colours = chunk.grey ? greyColours(chunk.grey) : new Float32Array(chunk.vertices * 3).fill(0.62);
     geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
     geometry.computeBoundingSphere();
-    const previous = this.mesh.geometry;
-    this.mesh.geometry = geometry;
+    const previous = mesh.geometry;
+    mesh.geometry = geometry;
     previous.dispose();
+  }
+
+  private dropDenseSlot(id: number, slot: DenseSlot) {
+    this.dense.remove(slot.mesh);
+    slot.mesh.geometry.dispose();
+    this.denseSlots.delete(id);
+  }
+
+  private clearDense() {
+    for (const [id, slot] of this.denseSlots) this.dropDenseSlot(id, slot);
+    this.denseSource = null;
   }
 
   private updateCurrent(camera: MapTransform | null, visible: boolean) {
@@ -560,7 +635,7 @@ export class MapScene {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     this.controls.dispose();
-    this.mesh.geometry.dispose();
+    this.clearDense();
     this.clearTags(this.mapTags, this.mapTagLabels);
     this.clearTags(this.fieldTags, this.fieldTagLabels);
     for (const d of this.disposables) d.dispose();

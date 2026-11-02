@@ -1,17 +1,19 @@
-// The dense mapper's outputs as the UI reads them (Eidos's `dense.map`): `dense_mesh` (at most
-// 1 Hz), `dense_depth` (a keyframe's inverse depth, half the sweep size) and `dense_timing` (the
-// mapper's work per tick). Byte buffers arrive as base64 text (a JSON array of bytes is accepted
-// too). Each message is decoded once into typed arrays: positions, normals and indices ready for
-// a three.js BufferGeometry, and the depth as RGBA pixels with a colour map. Malformed input
-// (wrong lengths, a missing grey, indices past the vertices) is dropped, never drawn.
+// The dense mapper's outputs as the UI reads them (Eidos's `dense.map`). The whole mesh is not
+// read any more: the submaps' geometry (`mesh_chunk`, in submap-local coordinates) comes from
+// helios-api's chunk store (`GET /v1/pipelines/{id}/dense`), with each submap's pose (`transforms`).
+// The mapper's `status` comes with it, and `dense_depth` (a keyframe's inverse depth, half the sweep
+// size) and `dense_timing` (the mapper's work per tick) still come on the live stream. Byte buffers
+// arrive as base64 text (a JSON array of bytes is accepted too). Each buffer is decoded once into
+// typed arrays ready for a three.js BufferGeometry; the depth becomes RGBA pixels with a colour map.
+// Malformed input (wrong lengths, a missing grey, indices past the vertices) is dropped, never drawn.
+
+import { transformOf, type MapTransform } from "./map";
 
 export interface DenseMeshView {
-  seq: number;
-  frame: number;
-  tNs: number;
-  keyframes: number;
-  submaps: number;
-  voxelM: number;
+  /** The submap this geometry belongs to, its revision and whether it is frozen (a chunk). */
+  submap: number;
+  revision: number;
+  frozen: boolean;
   /** Vertices and triangles as decoded (the buffers' whole rows). */
   vertices: number;
   triangles: number;
@@ -25,6 +27,23 @@ export interface DenseMeshView {
   indices: Uint32Array;
   /** Triangles dropped for an index past the vertices or a non-finite corner. */
   droppedTriangles: number;
+}
+
+/** A submap's pose: its world-from-submap transform (`eidos:dense_transforms`'s entries). */
+export interface DensePose {
+  submap: number;
+  revision: number;
+  transform: MapTransform;
+}
+
+/** The mapper's status (`eidos:dense_status`, every tick). */
+export interface DenseStatusView {
+  frame: number;
+  tNs: number;
+  epoch: number;
+  keyframes: number;
+  submaps: number;
+  bytes: number;
 }
 
 export interface DenseDepthView {
@@ -110,8 +129,8 @@ function uint32s(bytes: Uint8Array): Uint32Array {
 }
 
 /**
- * The `dense_mesh` value as typed arrays. The vertex count is what the positions hold (whole
- * vertices, 12 bytes each). Normals must be as long as the positions, grey one byte per vertex;
+ * A submap's geometry (a `mesh_chunk` chunk) as typed arrays, in submap-local coordinates. The
+ * vertex count is what the positions hold (whole vertices, 12 bytes each). Normals must be as long as the positions, grey one byte per vertex;
  * otherwise they are dropped and the scene derives or omits them. Triangles with an index past
  * the vertices, or a non-finite corner, are dropped and counted. Null when the value is not a mesh.
  */
@@ -145,12 +164,9 @@ export function parseDenseMesh(value: unknown): DenseMeshView | null {
   }
 
   return {
-    seq: num(value.seq),
-    frame: num(value.frame),
-    tNs: num(value.t_ns),
-    keyframes: num(value.keyframes),
-    submaps: num(value.submaps),
-    voxelM: num(value.voxel_m),
+    submap: num(value.submap),
+    revision: num(value.revision),
+    frozen: value.kind === "frozen",
     vertices,
     triangles,
     positions,
@@ -278,11 +294,147 @@ export function meshBounds(mesh: Pick<DenseMeshView, "positions" | "vertices">):
   return Number.isFinite(min[0]) ? { min, max } : null;
 }
 
+/** The `mesh_chunk` entry of a read (one submap's geometry), or null when it is not a chunk. */
+export function parseDenseChunk(value: unknown): DenseMeshView | null {
+  if (!isObject(value) || typeof value.submap !== "number") return null;
+  return parseDenseMesh(value);
+}
+
+/** A `transforms` entry (a submap's pose), or null when it is not one. */
+export function parseDensePose(value: unknown): DensePose | null {
+  if (!isObject(value) || typeof value.submap !== "number") return null;
+  return { submap: num(value.submap), revision: num(value.revision), transform: transformOf(value.pose) };
+}
+
+/** The `status` output, or null when it is not one. */
+export function parseDenseStatus(value: unknown): DenseStatusView | null {
+  if (!isObject(value) || !("keyframes" in value)) return null;
+  return { frame: num(value.frame), tNs: num(value.t_ns), epoch: num(value.epoch), keyframes: num(value.keyframes), submaps: num(value.submaps), bytes: num(value.bytes) };
+}
+
+/** One submap in a read: its pose and its geometry as the server sent them, or `removed` (its geometry was dropped for the byte cap). */
+export interface DenseReadSubmap {
+  submap: number;
+  removed: boolean;
+  pose: DensePose | null;
+  chunk: DenseMeshView | null;
+}
+
+/** A read of `GET /v1/pipelines/{id}/dense`: the changes since the reader's cursor (`seq`). */
+export interface DenseRead {
+  epoch: number | null;
+  seq: number;
+  /** The reader's epoch was not the run's: this is the run from its start. */
+  reset: boolean;
+  status: DenseStatusView | null;
+  submaps: DenseReadSubmap[];
+}
+
+/** A read, or null when it is not one. Entries that are neither a pose nor a chunk are dropped. */
+export function parseDenseRead(value: unknown): DenseRead | null {
+  if (!isObject(value) || !Array.isArray(value.submaps)) return null;
+  const submaps: DenseReadSubmap[] = [];
+  for (const entry of value.submaps) {
+    if (!isObject(entry) || typeof entry.submap !== "number") continue;
+    submaps.push({ submap: entry.submap, removed: entry.removed === true, pose: parseDensePose(entry.transform), chunk: parseDenseChunk(entry.chunk) });
+  }
+  return {
+    epoch: typeof value.epoch === "number" ? value.epoch : null,
+    seq: num(value.seq),
+    reset: value.reset === true,
+    status: parseDenseStatus(value.status),
+    submaps,
+  };
+}
+
+/** A submap as drawn: its latest pose and its geometry (either may be missing). */
+export interface DenseSubmap {
+  submap: number;
+  pose: DensePose | null;
+  chunk: DenseMeshView | null;
+}
+
+/**
+ * The submaps of one run, as the UI holds them: each read's changes applied in place. A run's
+ * submaps are replaced only where a read changes them (the same objects otherwise), so a scene
+ * rebuilds what changed. `version` counts the changes; the cursor and epoch are what the next read asks for.
+ */
+export class DenseChunkStore {
+  epoch: number | null = null;
+  cursor = 0;
+  version = 0;
+  readonly submaps = new Map<number, DenseSubmap>();
+
+  apply(read: DenseRead) {
+    if (read.reset || (read.epoch !== null && read.epoch !== this.epoch)) {
+      this.submaps.clear();
+      this.version++;
+    }
+    this.epoch = read.epoch;
+    this.cursor = read.seq;
+    let changed = false;
+    for (const change of read.submaps) {
+      const current = this.submaps.get(change.submap);
+      let next: DenseSubmap = current ?? { submap: change.submap, pose: null, chunk: null };
+      let touched = false;
+      if (change.removed) {
+        if (next.chunk) {
+          next = { ...next, chunk: null };
+          touched = true;
+        }
+      } else if (change.chunk) {
+        next = { ...next, chunk: change.chunk };
+        touched = true;
+      }
+      // A pose is kept at its newest revision; the server sends a submap's pose again only with a change.
+      if (change.pose && (!next.pose || change.pose.revision >= next.pose.revision)) {
+        next = { ...next, pose: change.pose };
+        touched = true;
+      }
+      if (touched) {
+        this.submaps.set(change.submap, next);
+        changed = true;
+      }
+    }
+    if (changed) this.version++;
+  }
+
+  /** Forgets the run (its epoch changed, or the device was lost). */
+  clear() {
+    this.submaps.clear();
+    this.epoch = null;
+    this.cursor = 0;
+    this.version++;
+  }
+
+  /** How many submaps hold geometry. */
+  get chunkCount(): number {
+    let count = 0;
+    for (const s of this.submaps.values()) if (s.chunk) count++;
+    return count;
+  }
+
+  /** The vertices and triangles held over every submap, and the submaps that hold any. */
+  totals(): { vertices: number; triangles: number; submaps: number } {
+    let vertices = 0;
+    let triangles = 0;
+    let submaps = 0;
+    for (const s of this.submaps.values()) {
+      if (!s.chunk) continue;
+      vertices += s.chunk.vertices;
+      triangles += s.chunk.triangles;
+      submaps++;
+    }
+    return { vertices, triangles, submaps };
+  }
+}
+
 /** A pipeline's latest dense mapper outputs. `depthAt` and `meshAt` are when the UI received them (performance.now()). */
 export interface DenseView {
-  mesh: DenseMeshView | null;
+  chunks: DenseChunkStore;
   depth: DenseDepthView | null;
   timing: DenseTimingView | null;
+  status: DenseStatusView | null;
   depthAt: number;
   meshAt: number;
 }

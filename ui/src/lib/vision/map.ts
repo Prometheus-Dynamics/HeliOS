@@ -76,13 +76,13 @@ export interface MapTag {
   placed: number;
 }
 
+/** The live map's snapshot. Its path is not here: it is the trajectory stream (`StreamedTrajectory`). */
 export interface MapSnapshot {
   seq: number;
   run_id: number;
   tag_size_m: number;
   aligned: boolean;
   estimated: boolean;
-  trajectory: MapPosedFrame[];
   keyframes: number[];
   points: MapPoints;
   tags: MapTag[];
@@ -116,7 +116,8 @@ export function bytesOf(value: unknown): Uint8Array {
   return new Uint8Array(0);
 }
 
-function transformOf(value: unknown): MapTransform {
+/** A `{translation, rotation}` transform as read; missing parts are the identity. */
+export function transformOf(value: unknown): MapTransform {
   const t = isObject(value) && isObject(value.translation) ? value.translation : {};
   const q = isObject(value) && isObject(value.rotation) ? value.rotation : {};
   return {
@@ -192,17 +193,13 @@ export function parsePoints(value: unknown): MapPoints {
 
 /** The snapshot output (`eidos:map_snapshot`), or null when the value is not one. */
 export function parseMapSnapshot(value: unknown): MapSnapshot | null {
-  if (!isObject(value) || !("trajectory" in value)) return null;
+  if (!isObject(value) || !("points" in value)) return null;
   return {
     seq: num(value.seq),
     run_id: num(value.run_id),
     tag_size_m: num(value.tag_size_m, 0.1651),
     aligned: value.aligned === true,
     estimated: value.estimated === true,
-    trajectory: list(value.trajectory).map((f) => {
-      const frame = isObject(f) ? f : {};
-      return { frame: num(frame.frame), pose: transformOf(frame.pose), sigma: sigmaOf(frame.sigma), keyframe: frame.keyframe === true };
-    }),
     keyframes: numbers(value.keyframes),
     points: parsePoints(value.points),
     tags: list(value.tags).map((t) => {
@@ -279,41 +276,117 @@ export function applyCorrection(c: MapTrajectoryCorrection, pose: MapTransform):
   };
 }
 
+/** Every this many frames of the path is kept (keyframes always are): the path's frame rate, not the camera's. */
+export const TRAJECTORY_DECIMATE = 4;
+/** The path's bytes kept. Past this the oldest plain poses go, then the oldest keyframes. */
+export const TRAJECTORY_MAX_BYTES = 1 << 20;
+/** The bytes a kept pose costs, estimated: its object, its frame and its transform's numbers. */
+export const TRAJECTORY_BYTES_PER_POSE = 96;
+
+export interface StreamedTrajectoryOptions {
+  /** Keep every this many frames (default `TRAJECTORY_DECIMATE`). */
+  decimate?: number;
+  /** The bytes kept (default `TRAJECTORY_MAX_BYTES`). */
+  maxBytes?: number;
+}
+
 /**
  * The whole trajectory of one run, kept from the stream (Eidos's `StreamedTrajectory`, in TypeScript): new
  * frames are stored once, each correction moves the stored frames of its range that predate it, and a new run
  * or epoch starts over. Re-reading the same ticks changes nothing; ticks never read are missing.
+ *
+ * Bounded for a long run: every `decimate`th frame is kept, and keyframes always are. Past `maxBytes` the
+ * oldest plain poses go first, then the oldest keyframes. A frame at or before the last one dropped is not
+ * stored again, so the ticks the stream repeats do not bring it back. `version` counts the changes.
  */
 export class StreamedTrajectory {
   private frames: MapTrajectoryPose[] = [];
   private applied = 0;
   private run = -1;
   private epoch = -1;
+  /** The newest frame dropped for the byte cap. */
+  private floor = -Infinity;
+  readonly decimate: number;
+  readonly maxPoses: number;
+  /** Bumped with each change to the stored poses (a scene rebuilds its path when it moves). */
+  version = 0;
+
+  constructor(options: StreamedTrajectoryOptions = {}) {
+    this.decimate = Math.max(1, Math.floor(options.decimate ?? TRAJECTORY_DECIMATE));
+    this.maxPoses = Math.max(1, Math.floor((options.maxBytes ?? TRAJECTORY_MAX_BYTES) / TRAJECTORY_BYTES_PER_POSE));
+  }
 
   apply(delta: MapTrajectoryDelta) {
+    let changed = false;
     if (delta.run_id !== this.run || delta.epoch !== this.epoch) {
       this.frames = [];
       this.applied = 0;
+      this.floor = -Infinity;
       this.run = delta.run_id;
       this.epoch = delta.epoch;
+      changed = true;
     }
     for (const p of delta.poses) {
+      if (p.frame <= this.floor) continue;
+      if (!p.keyframe && p.frame % this.decimate !== 0) continue;
       const i = this.lower(p.frame);
-      if (this.frames[i]?.frame !== p.frame) this.frames.splice(i, 0, { ...p });
+      if (this.frames[i]?.frame === p.frame) continue;
+      this.frames.splice(i, 0, { ...p });
+      changed = true;
     }
     for (const c of delta.corrections) {
       if (c.revision <= this.applied) continue;
       this.applied = c.revision;
+      changed = true;
       for (let i = this.lower(c.from_seq); i < this.frames.length && this.frames[i].frame <= c.to_seq; i++) {
         const f = this.frames[i];
         if (f.revision < c.revision) f.pose = applyCorrection(c, f.pose);
       }
     }
+    if (this.frames.length > this.maxPoses) {
+      this.trim();
+      changed = true;
+    }
+    if (changed) this.version++;
   }
 
-  /** The poses, by frame. */
+  /** The poses, by frame (the stored array: read, do not keep it past the next `apply`). */
   poses(): MapPosedFrame[] {
     return this.frames;
+  }
+
+  /** The keyframes' poses, by frame. */
+  keyframes(): MapPosedFrame[] {
+    return this.frames.filter((f) => f.keyframe);
+  }
+
+  /** The bytes the stored poses are estimated to cost. */
+  get bytes(): number {
+    return this.frames.length * TRAJECTORY_BYTES_PER_POSE;
+  }
+
+  /** Drops the oldest plain poses past the cap, then the oldest keyframes if plain ones are not enough. */
+  private trim() {
+    let excess = this.frames.length - this.maxPoses;
+    const drop = new Set<number>();
+    for (let i = 0; i < this.frames.length && excess > 0; i++) {
+      if (!this.frames[i].keyframe) {
+        drop.add(i);
+        excess--;
+      }
+    }
+    for (let i = 0; i < this.frames.length && excess > 0; i++) {
+      if (!drop.has(i)) {
+        drop.add(i);
+        excess--;
+      }
+    }
+    const kept: MapTrajectoryPose[] = [];
+    this.frames.forEach((f, i) => {
+      if (drop.has(i)) this.floor = Math.max(this.floor, f.frame);
+      else kept.push(f);
+    });
+    this.frames = kept;
   }
 
   private lower(frame: number): number {
@@ -377,9 +450,10 @@ export class TimingWindow {
   }
 }
 
-/** The view a Map pane draws: the latest of each output of one pipeline. */
+/** The view a Map pane draws: the latest of each output of one pipeline, and its whole trajectory. */
 export interface MapView {
   pose: MapPose | null;
   snapshot: MapSnapshot | null;
   timing: MapTiming | null;
+  trajectory: StreamedTrajectory | null;
 }
