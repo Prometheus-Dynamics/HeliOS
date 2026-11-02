@@ -25,7 +25,7 @@ profile = "${input.cargo_profile}"
 install_name = "helios-peripherals"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-peripherals"
-output_path = "gaia/output/${build.name}/artifacts/helios-peripherals"
+output_path = "${outputs.dir}/artifacts/helios-peripherals"
 
 [artifacts.execution]
 backend = "docker"

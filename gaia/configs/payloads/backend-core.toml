@@ -37,7 +37,7 @@ profile = "${input.cargo_profile}"
 install_name = "helios-api"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-api"
-output_path = "gaia/output/${build.name}/artifacts/helios-api"
+output_path = "${outputs.dir}/artifacts/helios-api"
 
 [artifacts.execution]
 backend = "docker"
@@ -62,7 +62,7 @@ profile = "${input.cargo_profile}"
 install_name = "helios-engine"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-engine"
-output_path = "gaia/output/${build.name}/artifacts/helios-engine"
+output_path = "${outputs.dir}/artifacts/helios-engine"
 
 [artifacts.execution]
 backend = "docker"
@@ -87,7 +87,7 @@ profile = "${input.cargo_profile}"
 install_name = "helios-diagnostics"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-diagnostics"
-output_path = "gaia/output/${build.name}/artifacts/helios-diagnostics"
+output_path = "${outputs.dir}/artifacts/helios-diagnostics"
 
 [artifacts.execution]
 backend = "docker"
@@ -123,7 +123,7 @@ target_name = "libhelios_eidos_plugin.so"
 install_name = "libhelios_eidos_plugin.so"
 install_class = "library"
 install_dest_hint = "/usr/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
-output_path = "gaia/output/${build.name}/artifacts/libhelios_eidos_plugin.so"
+output_path = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
 
 [artifacts.execution]
 backend = "docker"

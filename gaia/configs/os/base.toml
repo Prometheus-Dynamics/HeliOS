@@ -63,5 +63,5 @@ config_overrides = [
 ]
 
 [outputs]
-images_dir = "gaia/output/${build.name}/images"
+images_dir = "${outputs.dir}/images"
 report = true

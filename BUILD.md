@@ -79,8 +79,13 @@ For build `helios-<profile>-raze` (for example `helios-full-raze`):
 - Rust artifacts: `gaia/output/helios-full-raze/artifacts/`
 - Images: `gaia/output/helios-full-raze/images/` (`sdcard.img`, `boot.vfat`,
   `rootfs.erofs`, `data.ext4`)
-- Compressed image: `output/helios-full-raze-<version>.img.xz`
+- Compressed image: `gaia/output/helios-full-raze/helios-full-raze-<version>.img.xz`
 - Reports: `gaia/output/helios-full-raze/.gaia/reports/`
+
+All of these except the build state follow `outputs.dir`, so one override moves
+every output, for example onto a faster disk:
+`tools/build-os.sh raze full --set outputs.dir=/mnt/fast/helios-full-raze`
+(`--set workspace.build_dir=...` moves the build state).
 
 The disk is the Raze A/B layout shared with the PhotonVision image: p1
 autoboot (16M), p2/p3 boot A/B (128M), p5/p6 root A/B (512M, read-only
