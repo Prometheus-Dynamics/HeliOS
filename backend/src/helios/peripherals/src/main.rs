@@ -18,7 +18,7 @@ fn ansi_for_terminal() -> bool {
 }
 
 /// Log filter: `RUST_LOG` as `target=level,...` (`filter::Targets`: no regex in the binary), else
-/// `helios_peripherals=info`.
+/// `helios_peripherals=info,styx=info` (Styx logs its frame drops at info, by cause).
 fn log_filter() -> tracing_subscriber::filter::Targets {
-    std::env::var("RUST_LOG").ok().and_then(|value| value.parse().ok()).unwrap_or_else(|| "helios_peripherals=info".parse().expect("default filter"))
+    std::env::var("RUST_LOG").ok().and_then(|value| value.parse().ok()).unwrap_or_else(|| "helios_peripherals=info,styx=info".parse().expect("default filter"))
 }

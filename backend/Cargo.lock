@@ -3990,10 +3990,12 @@ dependencies = [
  "styx-pisp",
  "styx-sensor",
  "styx-softisp",
+ "styx-uvc",
  "styx-v4l2",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -4197,6 +4199,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-uvc"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3b3113906e360f91dd8ee0e57be90f170f332d14"
+dependencies = [
+ "lemnos-linux",
+ "libc",
+ "styx-graph",
+ "styx-kernel",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "styx-v4l2"
 version = "2.0.1-dev"
 source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#3b3113906e360f91dd8ee0e57be90f170f332d14"
@@ -4206,6 +4221,7 @@ dependencies = [
  "styx-capture",
  "styx-core-rs",
  "styx-kernel",
+ "tracing",
 ]
 
 [[package]]

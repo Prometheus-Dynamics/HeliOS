@@ -42,7 +42,7 @@ orion = { workspace = true, default-features = false, features = ["client"] }
 # lemnosd's client: sensors, the fan, the status light and raw GPIO/PWM/I2C/SPI. HeliOS opens no
 # hardware itself.
 lemnos-ipc = { workspace = true }
-styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg"] }
+styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg", "tracing"] }
 
 [features]
 # Simulated cameras (Styx's `sim`): the x86 sim (`tools/sim/up.sh`) serves them next to, or
