@@ -15,6 +15,12 @@
       "port": 5810
     },
     {
+      "name": "helios-ui-ao",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "ui", "dev", "--port", "5833", "--strictPort"],
+      "port": 5833
+    },
+    {
       "name": "pv-styx-ui",
       "runtimeExecutable": "env",
       "runtimeArgs": [
