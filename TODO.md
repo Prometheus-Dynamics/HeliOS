@@ -50,18 +50,21 @@ now and marked untested on board; only its test waits for the board.
 
 ### 2. Hardware support, memory and GPU (added 2026-10-30)
 
-- [ ] **Chunked dense mesh.** Why: bounded dense memory; Eidos removes the whole-mesh port after
-      this. Done when: both dense graphs, the stored-graph migration, the API chunk store (with a
-      byte-cap knob) and the UI run from `mesh_chunk`/`transforms`/`status` on a Raze; Eidos is
-      told `mesh` is unused. Not started: the `dense-chunks` branch has no commits of its own, and
-      the API, both graphs, the tests and the UI still read `dense_mesh`. Blocked by: nothing; Eidos
-      is waiting on this.
-- [ ] **Trajectory store.** Why: Eidos stops keeping per-frame pose history; HeliOS holds a
-      decimated, byte-capped path. Partly done: the UI reads Eidos's `map_trajectory` stream, with
-      run/epoch reset and corrections by revision (`StreamedTrajectory`, 213a68b0, Eidos c38f5075).
-      Left: decimation and a byte cap, and drawing from the store directly instead of writing it
-      into `snapshot.trajectory` (`live.svelte.ts`, `three/map-scene.ts`), now that Eidos e90719a9
-      drops that field; keyframe markers must still draw. Blocked by: nothing.
+- [x] **Chunked dense mesh.** Why: bounded dense memory; Eidos removes the whole-mesh port after
+      this. Done: the dense graphs read `mesh_chunk`, `transforms` and `status`
+      (`helios_maps::dense::wire_dense_chunks`: at compile, at deploy, and once per board in
+      Orion, marker `dense-chunks-migration.json`); helios-api keeps the submap chunks under a byte
+      cap (`HELIOS_API_DENSE_CHUNK_BYTES`, default 16 MiB, 1 to 256 MiB) and serves the changes by
+      cursor (`GET /v1/pipelines/{id}/dense`); the UI draws one mesh per submap, placed by its
+      pose. No HeliOS code reads `mesh` or `dense_mesh` now (only the migration names it).
+      e14f3bc0, 14bdf431, 9b673d95. Still to do: the Raze run (the user deploys), and telling Eidos
+      the whole-mesh port is unused. Blocked by: nothing.
+- [x] **Trajectory store.** Why: Eidos stops keeping per-frame pose history; HeliOS holds a
+      decimated, byte-capped path. Done: `StreamedTrajectory` keeps every fourth frame
+      (`TRAJECTORY_DECIMATE`) and every keyframe, at most `TRAJECTORY_MAX_BYTES` (1 MiB); the
+      scene draws the path and the keyframe markers from the store (`three/map-scene.ts`), and no
+      longer reads a snapshot's trajectory (Eidos e90719a9 drops it, and the pin round at a881fa5
+      carries `keyframe_poses`). 9b673d95. Blocked by: nothing.
 - [ ] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
       every boot and logs it every time. Done when: a refreshed stored graph is written back once
       and the warning doesn't repeat on the next boot. Blocked by: nothing.
