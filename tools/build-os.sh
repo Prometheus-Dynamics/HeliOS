@@ -79,7 +79,7 @@ prepare_qemu_sim() {
     --out "$out/scene.glb")" || { echo "error: helios-sim-scene failed" >&2; exit 1; }
   {
     echo "# Simulated cameras of the qemu image (Styx reads /etc/styx/sim-cameras): written by tools/build-os.sh --machine qemu."
-    echo "ov9782,scene=gltf,path=/usr/share/helios/sim/scene.glb,$lens,clock=lockstep,truth=/run/helios/sim-truth.jsonl"
+    echo "ov9782,scene=gltf,path=/usr/share/helios/sim/scene.glb,$lens,clock=lockstep,truth=/run/helios-sim/truth.jsonl"
   } > "$out/sim-cameras"
   echo "build-os: qemu scene and camera spec in $out" >&2
 }
