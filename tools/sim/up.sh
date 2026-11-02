@@ -9,7 +9,7 @@
 #   SIM_SKIP_BUILD=1          run prebuilt binaries (no cargo, no bun)
 #   SIM_PROFILE=NAME          the cargo profile (default dev; dev-release for timings and long runs)
 #   SIM_BIN_DIR=DIR           the HeliOS binaries and libhelios_eidos_plugin.so (default: that
-#                             profile's backend/target directory)
+#                             profile's directory under CARGO_TARGET_DIR, else backend/target)
 #   ORION_NODE_BIN=PATH       an orion-node binary (default: built from Orion at the rev in backend/Cargo.toml)
 #   SIM_UI_DIR=DIR            the UI's static build (default: ui/build, built with bun when missing)
 #   SIM_RUN_DIR=DIR           runtime dir (default: a fresh mktemp dir; kept after exit for its logs)
@@ -55,7 +55,9 @@ die() { printf '[sim] error: %s\n' "$*" >&2; exit 1; }
 
 SIM_PROFILE="${SIM_PROFILE:-dev}"
 if [[ "$SIM_PROFILE" == dev ]]; then PROFILE_DIR=debug; else PROFILE_DIR="$SIM_PROFILE"; fi
-SIM_BIN_DIR="${SIM_BIN_DIR:-$BACKEND/target/$PROFILE_DIR}"
+# Cargo's target directory: CARGO_TARGET_DIR when set (keep builds off slow disks), else backend/target.
+TARGET_ROOT="${CARGO_TARGET_DIR:-$BACKEND/target}"
+SIM_BIN_DIR="${SIM_BIN_DIR:-$TARGET_ROOT/$PROFILE_DIR}"
 if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
   command -v cargo >/dev/null || die "cargo not found"
   log "building HeliOS services ($SIM_PROFILE profile, Styx sim feature)"
@@ -70,13 +72,13 @@ fi
 if [[ -z "${ORION_NODE_BIN:-}" ]]; then
   ORION_REV="$(sed -n 's/^orion = .*rev = "\([0-9a-f]*\)".*/\1/p' "$BACKEND/Cargo.toml" | head -n1)"
   [[ -n "$ORION_REV" ]] || die "no orion rev in backend/Cargo.toml"
-  ORION_NODE_BIN="$ROOT/backend/target/sim/orion/bin/orion-node"
+  ORION_NODE_BIN="$TARGET_ROOT/sim/orion/bin/orion-node"
   if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
     command -v cargo >/dev/null || die "cargo not found"
-    log "installing orion-node $ORION_REV (dev profile, appliance features) to backend/target/sim/orion"
+    log "installing orion-node $ORION_REV (dev profile, appliance features) to $TARGET_ROOT/sim/orion"
     nice -n 10 cargo install --locked --debug --git https://github.com/Prometheus-Dynamics/Orion.git \
       --rev "$ORION_REV" --no-default-features --features peer-tcp,discovery-mdns,systemd-notify \
-      --root "$ROOT/backend/target/sim/orion" --target-dir "$ROOT/backend/target/sim/orion-build" \
+      --root "$TARGET_ROOT/sim/orion" --target-dir "$TARGET_ROOT/sim/orion-build" \
       -j "$SIM_JOBS" orion-node
   fi
 fi
@@ -88,13 +90,13 @@ SIM_LEMNOS="${SIM_LEMNOS:-1}"
 if [[ "$SIM_LEMNOS" != 0 && -z "${LEMNOSD_BIN_DIR:-}" ]]; then
   LEMNOS_REV="$(grep -A2 '^name = "lemnos-ipc"' "$BACKEND/Cargo.lock" | sed -n 's/.*#\([0-9a-f]*\)"$/\1/p' | head -n1)"
   [[ -n "$LEMNOS_REV" ]] || die "no lemnos-ipc commit in backend/Cargo.lock"
-  LEMNOSD_BIN_DIR="$ROOT/backend/target/sim/lemnos/bin"
+  LEMNOSD_BIN_DIR="$TARGET_ROOT/sim/lemnos/bin"
   if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
     command -v cargo >/dev/null || die "cargo not found"
-    log "installing lemnosd and lemnos-orion $LEMNOS_REV (dev profile, sim and orion) to backend/target/sim/lemnos"
+    log "installing lemnosd and lemnos-orion $LEMNOS_REV (dev profile, sim and orion) to $TARGET_ROOT/sim/lemnos"
     nice -n 10 cargo install --locked --debug --git https://github.com/Prometheus-Dynamics/Lemnos.git \
-      --rev "$LEMNOS_REV" --features sim,orion --root "$ROOT/backend/target/sim/lemnos" \
-      --target-dir "$ROOT/backend/target/sim/lemnos-build" -j "$SIM_JOBS" lemnosd
+      --rev "$LEMNOS_REV" --features sim,orion --root "$TARGET_ROOT/sim/lemnos" \
+      --target-dir "$TARGET_ROOT/sim/lemnos-build" -j "$SIM_JOBS" lemnosd
   fi
 fi
 if [[ "$SIM_LEMNOS" != 0 ]]; then
