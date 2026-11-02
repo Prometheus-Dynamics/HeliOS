@@ -3973,7 +3973,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4011,7 +4011,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4023,7 +4023,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "serde",
  "smallvec",
@@ -4033,7 +4033,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "parking_lot",
  "serde",
@@ -4049,7 +4049,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "crossbeam-queue",
  "daedalus-rs",
@@ -4068,7 +4068,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "styx-math",
  "thiserror 2.0.21",
@@ -4077,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "futures-core",
  "libc",
@@ -4087,7 +4087,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -4097,15 +4097,17 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
+ "lemnos-linux",
+ "lemnos-linux-sys",
  "libc",
 ]
 
 [[package]]
 name = "styx-math"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "libm",
 ]
@@ -4113,7 +4115,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -4129,7 +4131,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "bytemuck",
  "serde",
@@ -4150,7 +4152,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "bytemuck",
  "styx-kernel",
@@ -4160,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "styx-rkisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "bytemuck",
  "styx-algo",
@@ -4171,7 +4173,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -4183,7 +4185,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -4201,7 +4203,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "libc",
  "serde",
@@ -4212,7 +4214,7 @@ dependencies = [
 [[package]]
 name = "styx-uvc"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "lemnos-linux",
  "libc",
@@ -4225,7 +4227,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#2a4b7c76d665fb60ca42d619d754715c49868e2b"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#bddaa9227002a9928c8230ba1f37616050e209a3"
 dependencies = [
  "libc",
  "smallvec",
