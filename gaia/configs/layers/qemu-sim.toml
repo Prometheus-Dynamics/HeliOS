@@ -18,6 +18,18 @@ config_overrides = [
   ["BR2_RAZE_KERNEL_QEMU", "y"],
 ]
 
+# The imported layers feed explicit stage_files lists, and Gaia then feeds only listed ids (lists
+# merge across imports): every stage file below has to be listed here or it never reaches the rootfs.
+[image.feed]
+stage_files = [
+  "qemu-sim-lemnosd-dropin",
+  "qemu-sim-lemnosd-script",
+  "qemu-sim-scene",
+  "qemu-sim-cameras",
+  "qemu-sim-helios-peripherals-dropin",
+  "qemu-usb-gadget-env",
+]
+
 # lemnosd --sim: Lemnos's own drop-in (ExecStart with --sim --sim-script) and its simulated board script,
 # copies of Lemnos f8039759's files (assets/qemu). The board definition stays the device package's /etc/lemnos/board.toml.
 [[stage.files]]
