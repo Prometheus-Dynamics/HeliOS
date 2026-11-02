@@ -14,13 +14,15 @@ now and marked untested on board; only its test waits for the board.
 ### 0. Next up
 
 - [ ] **Pin round and Raze deploy.** Why: Raze #1 runs older dependencies than dev, so the fixes
-      below are unproven on the board. Done when: `backend/Cargo.lock`, the Gaia sources and the
-      image take Eidos dev, Styx 475e07a or newer (image and Cargo, with `queue_safe` 220aff5),
-      Daedalus 03f55c5, Atlas 058c53c, Gaia 17c20df and Orion dev; `BOARD_PACKAGE_COUNT`
-      (`${source.atlas.commit_count}`, Gaia b47a9e5) sits beside `BOARD_PACKAGE_COMMIT` in
-      `gaia/configs/identity/base.toml`; and on Raze #1 `/sys/module/pisp_be/parameters/queue_safe`
-      prints Y, `dmesg | grep "not safe"` is empty, the real capture allocations are counted for
-      Styx, and Daedalus's stale-graph refresh (bb07e3b) is confirmed. Blocked by: nothing.
+      below are unproven on the board. Partly done: pin round 1174c673 (Styx bcd29a7 with the PiSP
+      buffer-count fix, Daedalus 6900b97, Eidos f8d0ef8, Lemnos f803975), Eidos re-pin to dev head
+      in progress; dev.841 on Raze #1 confirmed `queue_safe` Y and no "not safe" lines, but its
+      camera failed ("pispbe-input gave 32 of 40 buffers", fixed in Styx bcd29a7). Left: deploy the
+      new image from its `.img.xz` through Atlas, the camera starting, the real capture
+      allocations, the stale-graph refresh, the dense map pane by real clicks. Then the Orion v7
+      pin together with Atlas's orion-v7 merge (robot-env `ORION_NODE_PEER_AUTO_TRUST` becomes
+      `private-link`). Blocked by: the SystemCore is stuck in its USB boot ROM since 2026-11-02
+      and needs a power cycle (user).
 
 ### 1. Freeze items still open
 
@@ -41,9 +43,9 @@ now and marked untested on board; only its test waits for the board.
       the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
       services, with no port or USB conflicts. The package exists (one .ipk with the whole stack,
       4f3333c1). Blocked by: nothing.
-- [ ] **Gaia profiles and the layered slot.** Why: small updates and per-device builds. Done when:
-      every board profile builds its layered slot and Atlas installs a layer delta on a Raze.
-      Blocked by: nothing.
+- [ ] **Gaia profiles.** Why: per-device builds. Done when: every board profile builds its image
+      from the shared base. The layered slot is dropped (user, 2026-11-02): the slots `.img.xz` is
+      the only build output, and Atlas makes the slot bundle from it. Blocked by: nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
       or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches.
       Blocked by: nothing.
