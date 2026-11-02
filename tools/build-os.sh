@@ -3,6 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 BUILDS_DIR="gaia/configs/builds"
+# Dev images are signed with Atlas's dev key when it is installed (Atlas keys/README.md); Gaia
+# itself has no home-path fallback, so the path is set here.
+if [[ -z "${ATLAS_DEV_SIGNING_KEY:-}" && -f "$HOME/.config/atlas/dev-signing/minisign.key" ]]; then
+  export ATLAS_DEV_SIGNING_KEY="$HOME/.config/atlas/dev-signing/minisign.key"
+fi
+if [[ -n "${ATLAS_DEV_SIGNING_KEY:-}" ]]; then
+  echo "build-os: signing images with the key at $ATLAS_DEV_SIGNING_KEY (Atlas dev/example key unless you set another)" >&2
+fi
 
 usage() {
   cat <<EOF

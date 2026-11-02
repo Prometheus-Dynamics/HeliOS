@@ -1,0 +1,9 @@
+config = 3
+description = "Signing layer: dev images are signed with Atlas's dev/example key (minisign, key id 1AB01E429EDCEAA6 in Atlas's keys/trusted-keys.json). The private key comes from ATLAS_DEV_SIGNING_KEY, which tools/build-os.sh sets when the key is installed; without it the image is unsigned and the run summary says so. A production key is the user's to make."
+target = "aarch64-linux"
+
+[image.signing]
+kind = "minisign"
+key = "env:ATLAS_DEV_SIGNING_KEY"
+outputs = ["*.img.xz"]
+optional = true
