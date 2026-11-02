@@ -69,9 +69,11 @@ now and marked untested on board; only its test waits for the board.
       scene draws the path and the keyframe markers from the store (`three/map-scene.ts`), and no
       longer reads a snapshot's trajectory (Eidos e90719a9 drops it, and the pin round at a881fa5
       carries `keyframe_poses`). 9b673d95. Blocked by: nothing.
-- [ ] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
-      every boot and logs it every time. Done when: a refreshed stored graph is written back once
-      and the warning doesn't repeat on the next boot. Blocked by: nothing.
+- [x] **Stored graphs persist their refresh.** Why: the engine drops Eidos's retired settings on
+      every boot and logs it every time. Done: the engine writes the refreshed graph beside its plan
+      and names it in the plan; helios-api stores it through deploy (a new revision) when a
+      snapshot names it and the stored digest matches; a test covers the write and the clean reload.
+      9ac1a79f. Blocked by: nothing.
 - [x] **Per-device camera knobs.** Done (f1a5b109): `HELIOS_CAMERA_QUEUE_DEPTH`, `_RAW_BUFFERS`, `_OUTPUT_BUFFERS`, `_ACCEL_ISP|SCALER|ENCODER|PYRAMID` set Styx's knobs per device (unset = Styx default; K230D entry 3/2/1 untested on board, `docs/device-profiles.md`).
 - [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
       Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
@@ -114,8 +116,11 @@ now and marked untested on board; only its test waits for the board.
       Tags alone fit 120 fps on every target (A7 tightest at 60–70%). In Eidos
       docs/performance-model.md (6a4dc810), sent to the PCB session. The tags + live_map figure is
       Eidos's 120 fps item.
-- [ ] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done when: the two
-      read-after-apply tests pass 200 runs under load. Blocked by: nothing.
+- [x] **Flaky camera_controls tests.** Why: a release gate can't be flaky. Done: the follower's
+      re-apply of stored settings now shares a lock with API writes (it had raced a read-after-apply:
+      7 of 200 failed under load, 0 after); the update test
+      `apply_stages_the_bundle_then_boots_it_on_trial` waited a fixed 3 s for the writer's calls and
+      now waits for them on a 20 s budget. Both pass 200 runs under load (busy loops as load). 3d2de631. Blocked by: nothing.
 
 ### 3. Release mechanics
 
