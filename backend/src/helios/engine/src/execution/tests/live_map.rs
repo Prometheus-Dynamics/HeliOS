@@ -186,10 +186,11 @@ fn live_map_graph_publishes_pose_snapshot_and_timing_through_the_frame_driver() 
     assert!(detections["detections"].as_array().is_some_and(|list| list.len() == 1 && list[0]["id"] == 586), "the scene's marker is detected: {detections}");
 
     // The snapshot is due on the first mapping tick and then at most twice a second: it exists
-    // with the tag and the trajectory, and its point buffers are packed as documented.
-    let snapshot = json_with_keys(&artifacts, "host_output:map_snapshot", &["seq", "run_id", "tag_size_m", "aligned", "estimated", "trajectory", "keyframes", "points", "tags"]);
+    // with the tag and the keyframe poses (the whole path is the `map_trajectory` stream), and its
+    // point buffers are packed as documented.
+    let snapshot = json_with_keys(&artifacts, "host_output:map_snapshot", &["seq", "run_id", "tag_size_m", "aligned", "estimated", "keyframe_poses", "keyframes", "points", "tags"]);
     assert_eq!(snapshot["estimated"], false, "the given calibration: {snapshot}");
-    assert!(snapshot["trajectory"].as_array().is_some_and(|trajectory| !trajectory.is_empty()), "{snapshot}");
+    assert!(snapshot["keyframe_poses"].as_array().is_some_and(|poses| !poses.is_empty()), "{snapshot}");
     assert!(snapshot["tags"].as_array().is_some_and(|tags| tags.iter().any(|tag| tag["id"] == 586)), "{snapshot}");
     let points = &snapshot["points"];
     let count = points["count"].as_u64().expect("point count") as usize;

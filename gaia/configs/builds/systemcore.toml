@@ -75,7 +75,7 @@ rev = "0703507a4b192abaca4ca501f2b4a22a7bc77db3"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
+rev = "49f8dce99b141d733d550e507067ffe17cc74527"
 
 [[artifacts]]
 id = "helios-api"

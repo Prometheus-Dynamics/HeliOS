@@ -92,9 +92,9 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "20cd0c490588a22b9f4c9e7cf7032b69d8f6fbc2"
+rev = "c3075b0ac8dcfffb01f0f01e8598c4d2fb8d6245"
 
-# Lemnos (dev b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
+# Lemnos (dev 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
 # replies return the granted period, boot-clock timestamps and the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
 # The Raze layer imports Lemnos's lemnosd layer from a
@@ -111,7 +111,7 @@ rev = "20cd0c490588a22b9f4c9e7cf7032b69d8f6fbc2"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
+rev = "49f8dce99b141d733d550e507067ffe17cc74527"
 
 # Orion dev 0703507 (Gaia config v3 packaging layers; code as 6a70758, the backend/Cargo.toml pin: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
@@ -127,14 +127,14 @@ rev = "b87f76c5ce97c2c3343d40dbe37f4b7869216f40"
 # kernel-modules/rp1-cfe: the receiver's mid-frame line event for sliced delivery;
 # kernel-modules/pispbe: back end job setup in ~7 us). HeliOS always runs Styx, so all three
 # ship, installed to /lib/modules/<ver>/updates over the stock drivers. The same Styx commit as
-# backend/Cargo.lock's styx crate. History: 45cb3a3 (typed camera menu entries) and e5d704d (M2M sessions, dma-heap tail slack) and 2fc1119 (RVV pyramid, RISC-V libjpeg-turbo) changed no kernel module; 373d703 (lazy back-end buffers by default, duplicate aliases removed) and fbe003e (Rockchip ISP30, the shared MMAP queue) changed only the rp1-cfe README; ab05a57 (simulated cameras: clock=lockstep) and
+# backend/Cargo.lock's styx crate (9559df6, with the pispbe queue_safe parameter 220aff5). History: 45cb3a3 (typed camera menu entries) and e5d704d (M2M sessions, dma-heap tail slack) and 2fc1119 (RVV pyramid, RISC-V libjpeg-turbo) changed no kernel module; 373d703 (lazy back-end buffers by default, duplicate aliases removed) and fbe003e (Rockchip ISP30, the shared MMAP queue) changed only the rp1-cfe README; ab05a57 (simulated cameras: clock=lockstep) and
 # a22bebd (simulated scenes: scene=gltf, a glTF scene the application builds; 53e873d had
 # scene=tags) changed no kernel module.
 [[sources]]
 id = "styx"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Styx.git"
-rev = "33eafe0a73b99e990c076be897cc57ee86b2e1b9"
+rev = "9559df6342e387401a15920c9acf7491cc7d4255"
 
 [[sources]]
 id = "orion"
