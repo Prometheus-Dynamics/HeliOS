@@ -210,6 +210,14 @@ export interface CameraMount {
   yaw: number;
 }
 
+export interface DropsByCause {
+  sensor_sequence_gaps: number;
+  queue_overflow: number;
+  corrupted: number;
+  isp_skipped: number;
+  raw_skipped: number;
+}
+
 export interface CaptureLive {
   name: string;
   backend: string;
@@ -218,6 +226,8 @@ export interface CaptureLive {
   fps_measured: number | null;
   frames_delivered: number;
   drops: number;
+  /** The same drops by cause; `raw_skipped` is not in `drops`. */
+  drops_by_cause: DropsByCause;
   latency_p50_ms: number | null;
   latency_p95_ms: number | null;
   cpu_per_frame_us: number | null;

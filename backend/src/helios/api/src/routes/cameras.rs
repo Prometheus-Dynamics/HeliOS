@@ -55,6 +55,9 @@ pub struct CaptureLive {
     pub fps_measured: Option<f64>,
     pub frames_delivered: u64,
     pub drops: u64,
+    /// The same drops split by cause (Styx's `Drops`): what each one cost, so a slow consumer,
+    /// a sensor that skips sequence numbers and an ISP short of buffers read apart.
+    pub drops_by_cause: DropsByCause,
     pub latency_p50_ms: Option<f64>,
     pub latency_p95_ms: Option<f64>,
     pub cpu_per_frame_us: Option<f64>,
@@ -64,6 +67,28 @@ pub struct CaptureLive {
     pub ae_state: Option<String>,
     /// The capture's last error (a failed open or start, a busy device); `null` when it has none.
     pub last_error: Option<String>,
+}
+
+/// A capture's dropped frames by cause. `drops` (the total) is Styx's own sum; `raw_skipped`
+/// is not in it (raw consumers, which the other consumers do not see).
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct DropsByCause {
+    /// Missing from the sensor's sequence numbers: lost before Styx got them.
+    pub sensor_sequence_gaps: u64,
+    /// The consumer was too slow: its queue was full, or a queued frame was replaced.
+    pub queue_overflow: u64,
+    /// Flagged corrupt by the receiver, or dropped as damaged by the backend.
+    pub corrupted: u64,
+    /// The ISP had no output buffer (consumers held them all).
+    pub isp_skipped: u64,
+    /// Raw frames a raw consumer did not get (not in `drops`).
+    pub raw_skipped: u64,
+}
+
+impl From<&styx::metrics::Drops> for DropsByCause {
+    fn from(drops: &styx::metrics::Drops) -> Self {
+        Self { sensor_sequence_gaps: drops.sensor_sequence_gaps, queue_overflow: drops.queue_overflow, corrupted: drops.corrupted, isp_skipped: drops.isp_skipped, raw_skipped: drops.raw_skipped }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -184,6 +209,7 @@ pub async fn live_facts(socket: PathBuf) -> Result<CameraLive, String> {
                     fps_measured: c.fps.measured,
                     frames_delivered: c.frames.delivered,
                     drops: c.drops.total,
+                    drops_by_cause: DropsByCause::from(&c.drops),
                     latency_p50_ms: c.latency.sensor_to_delivery.p50_ms,
                     latency_p95_ms: c.latency.sensor_to_delivery.p95_ms,
                     cpu_per_frame_us: c.cpu.per_frame_us,
@@ -592,6 +618,20 @@ pub async fn reset_calibration_views(State(state): State<SharedState>, Path(id):
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drops_split_by_cause_next_to_the_total() {
+        let drops = styx::metrics::Drops { sensor_sequence_gaps: 1, queue_overflow: 2, corrupted: 3, isp_skipped: 4, raw_skipped: 5, total: 10 };
+        let split = DropsByCause::from(&drops);
+        assert_eq!(split.sensor_sequence_gaps, 1);
+        assert_eq!(split.queue_overflow, 2);
+        assert_eq!(split.corrupted, 3);
+        assert_eq!(split.isp_skipped, 4);
+        assert_eq!(split.raw_skipped, 5);
+        let json = serde_json::to_value(&split).expect("serializes");
+        assert_eq!(json["queue_overflow"], 2);
+        assert_eq!(json.as_object().map(|o| o.len()), Some(5));
+    }
 
     #[test]
     fn frames_socket_from_endpoints() {

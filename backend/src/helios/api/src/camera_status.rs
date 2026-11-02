@@ -618,6 +618,7 @@ mod tests {
             fps_measured: fps,
             frames_delivered: delivered,
             drops: 0,
+            drops_by_cause: Default::default(),
             latency_p50_ms: None,
             latency_p95_ms: None,
             cpu_per_frame_us: None,
