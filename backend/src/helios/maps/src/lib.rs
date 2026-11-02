@@ -6,6 +6,8 @@
 //! the rising edge of `save`, giving `saved_map`. The graphs Eidos generates leave those ports out,
 //! so HeliOS wires them ([`wire_map_ports`]) where a graph is deployed.
 
+pub mod dense;
+
 use serde_json::{Value, json};
 
 /// The live mapper node (`eidos:mapping.live_map`).
@@ -145,7 +147,7 @@ pub fn wire_map_ports(graph: &mut Value) -> bool {
 }
 
 /// `value` (a JSON array of port names) with `port` appended, unless it has it.
-fn push_unique(value: &mut Value, port: &str) {
+pub(crate) fn push_unique(value: &mut Value, port: &str) {
     if let Some(list) = value.as_array_mut()
         && !list.iter().any(|entry| entry.as_str() == Some(port))
     {

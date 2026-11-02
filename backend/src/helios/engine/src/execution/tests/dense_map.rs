@@ -13,7 +13,7 @@ use super::{
 
 /// The dense graph as a stored document (`localization_map::map_document`): the live map graph
 /// with the dense mapper on the mapper's pose. Host outputs: the live map's and the dense mapper's
-/// `dense_mesh`, `dense_timing` and `dense_depth` (its inverse-depth preview). `config` is the dense
+/// `mesh_chunk`, `transforms`, `status`, `dense_timing` and `dense_depth` (its inverse-depth preview). `config` is the dense
 /// mapper's settings (`DenseConfig::default()` for its defaults, budget mode included).
 pub(super) fn dense_map_document(registry: &PluginRegistry, config: DenseConfig) -> String {
     super::localization_map::map_document(registry, None, Some(config))
@@ -47,7 +47,8 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     let frame_count = SHORT_CLIP_FRAMES;
     for index in 0..frame_count {
         frames.send(live_map_scene(586, index * 3, (index + 1) * 100_000_000)).expect("send frame");
-        wait_for("the pipeline to process the frame", || driver.stats().ticks_processed == index + 1);
+        // A dense keyframe takes more than the usual 10 s in a debug build (the same at HEAD).
+        wait_for_within(Duration::from_secs(120), "the pipeline to process the frame", || driver.stats().ticks_processed == index + 1);
     }
     assert!(driver.stats().last_error.is_none(), "{:?}", driver.stats().last_error);
 
@@ -57,15 +58,28 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
     assert_eq!(timing["state"], "running", "the live mapper posed the frames: {timing}");
     assert!(timing["keyframes"].as_u64().is_some_and(|keyframes| keyframes >= 1), "keyframes were integrated: {timing}");
 
-    let mesh = json_with_keys(&artifacts, "host_output:dense_mesh", &["seq", "frame", "t_ns", "keyframes", "submaps", "voxel_m", "vertices", "triangles", "positions", "normals", "grey", "indices"]);
-    let vertices = mesh["vertices"].as_u64().expect("vertex count") as usize;
-    let triangles = mesh["triangles"].as_u64().expect("triangle count") as usize;
-    assert!(vertices > 0 && triangles > 0, "the mesh has surface: {mesh} timing {timing}");
-    assert_eq!(base64_decoded_len(mesh["positions"].as_str().expect("positions")), vertices * 12, "f32 xyz per vertex");
-    assert_eq!(base64_decoded_len(mesh["normals"].as_str().expect("normals")), vertices * 12, "f32 xyz per vertex");
-    assert_eq!(base64_decoded_len(mesh["indices"].as_str().expect("indices")), triangles * 3 * 4, "u32 per corner");
-    let grey = base64_decoded_len(mesh["grey"].as_str().expect("grey"));
-    assert!(grey == 0 || grey == vertices, "grey is one byte per vertex or empty: {grey}");
+    // The mesh is the submap chunks, moved to the world by their transforms: the batch's chunks
+    // carry the byte layout the whole mesh had, and the status counts them.
+    let status = json_with_keys(&artifacts, "host_output:status", &["frame", "t_ns", "epoch", "keyframes", "submaps", "bytes"]);
+    assert!(status["keyframes"].as_u64().is_some_and(|keyframes| keyframes >= 1), "keyframes are finished: {status}");
+    let batch = json_with_keys(&artifacts, "host_output:mesh_chunk", &["frame", "t_ns", "epoch", "chunks"]);
+    let transforms = json_with_keys(&artifacts, "host_output:transforms", &["frame", "t_ns", "epoch", "entries"]);
+    let entries = transforms["entries"].as_array().expect("transform entries");
+    assert!(!entries.is_empty(), "every submap has its pose: {transforms}");
+    let chunks = batch["chunks"].as_array().expect("chunks");
+    assert!(!chunks.is_empty(), "the batch has the submaps' geometry: {batch}");
+    let mut vertices_total = 0;
+    for chunk in chunks {
+        let vertices = chunk["vertices"].as_u64().expect("vertex count") as usize;
+        let triangles = chunk["triangles"].as_u64().expect("triangle count") as usize;
+        assert_eq!(base64_decoded_len(chunk["positions"].as_str().expect("positions")), vertices * 12, "f32 xyz per vertex");
+        assert_eq!(base64_decoded_len(chunk["normals"].as_str().expect("normals")), vertices * 12, "f32 xyz per vertex");
+        assert_eq!(base64_decoded_len(chunk["indices"].as_str().expect("indices")), triangles * 3 * 4, "u32 per corner");
+        let grey = base64_decoded_len(chunk["grey"].as_str().expect("grey"));
+        assert!(grey == 0 || grey == vertices, "grey is one byte per vertex or empty: {grey}");
+        vertices_total += vertices;
+    }
+    assert!(vertices_total > 0 && chunks.iter().any(|chunk| chunk["triangles"].as_u64().is_some_and(|t| t > 0)), "the chunks have surface: {batch}");
 }
 
 /// Start a frame-driven pipeline on `bus` (its frames from the returned test camera).

@@ -317,8 +317,13 @@ fn marker_scene(kind: ArucoDictionaryKind, id: u32, timestamp: u64) -> FrameLeas
     grey_frame(width as u32, height as u32, &pixels, timestamp)
 }
 
-fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+fn wait_for(what: &str, done: impl FnMut() -> bool) {
+    wait_for_within(Duration::from_secs(10), what, done);
+}
+
+/// `wait_for` with its own deadline: a debug build takes longer than 10 s for a dense keyframe.
+fn wait_for_within(within: Duration, what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + within;
     while !done() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(10));
