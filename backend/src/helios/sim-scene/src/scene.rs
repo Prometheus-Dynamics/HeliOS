@@ -11,9 +11,7 @@ use eidos_aruco::{ArucoDictionaryKind, BitGrid, dictionary};
 use helios_field::FieldLayout;
 use serde::Deserialize;
 
-use crate::geometry::{
-    Mat3, Vec3, add, camera_node_rotation, matrix_to_quat, mul_v, quat_to_matrix, rotation_from_rpy_degrees, to_gltf,
-};
+use crate::geometry::{Mat3, Vec3, add, camera_node_rotation, matrix_to_quat, mul_v, quat_to_matrix, rotation_from_rpy_degrees, to_gltf};
 use crate::glb::{Builder, Filter, MeshAccessors, TARGET_ARRAY_BUFFER};
 use crate::scenery::{self, Scenery};
 
@@ -70,19 +68,13 @@ impl Calibration {
     /// Styx's lens keys for this calibration (`lens=...,fx=...`), for its `scene=gltf` spec.
     pub fn lens_spec(&self) -> Result<String> {
         let d = &self.distortion;
-        let common = format!(
-            "lens_width={},lens_height={},fx={},fy={},cx={},cy={}",
-            self.width, self.height, self.fx, self.fy, self.cx, self.cy
-        );
+        let common = format!("lens_width={},lens_height={},fx={},fy={},cx={},cy={}", self.width, self.height, self.fx, self.fy, self.cx, self.cy);
         match self.model.as_str() {
             "fisheye" => {
                 ensure!(d.k5 == 0.0 && d.k6 == 0.0 && d.p1 == 0.0 && d.p2 == 0.0, "a fisheye lens has k1..k4 only");
                 Ok(format!("lens=fisheye,{common},k1={},k2={},k3={},k4={}", d.k1, d.k2, d.k3, d.k4))
             }
-            "pinhole" => Ok(format!(
-                "lens=pinhole,{common},k1={},k2={},k3={},k4={},k5={},k6={},p1={},p2={}",
-                d.k1, d.k2, d.k3, d.k4, d.k5, d.k6, d.p1, d.p2
-            )),
+            "pinhole" => Ok(format!("lens=pinhole,{common},k1={},k2={},k3={},k4={},k5={},k6={},p1={},p2={}", d.k1, d.k2, d.k3, d.k4, d.k5, d.k6, d.p1, d.p2)),
             other => bail!("calibration model `{other}` is neither fisheye nor pinhole"),
         }
     }
@@ -240,8 +232,7 @@ pub fn build(layout: &FieldLayout, camera: &CameraPlan, calibration: &Calibratio
     for tag in &layout.tags {
         ensure!(ids.insert(tag.id), "tag {} is in the layout twice", tag.id);
         ensure!(tag.side_m.is_finite() && tag.side_m > 0.0, "tag {} has no size", tag.id);
-        let grid = BitGrid::from_marker(dictionary, tag.id, 0)
-            .with_context(|| format!("tag {} is not in AprilTag 36h11", tag.id))?;
+        let grid = BitGrid::from_marker(dictionary, tag.id, 0).with_context(|| format!("tag {} is not in AprilTag 36h11", tag.id))?;
         let texture = glb.texture_png(&tag_png(&grid)?, Filter::Nearest);
         let material = glb.material(texture);
 
@@ -341,8 +332,8 @@ fn dot4(a: &[f64; 4], b: &[f64; 4]) -> f64 {
 mod tests {
     use super::*;
 
-    use crate::glb::reader;
     use crate::geometry::quat_to_matrix;
+    use crate::glb::reader;
     use helios_field::FRC_TAG_SIDE_M;
 
     #[test]
@@ -370,16 +361,7 @@ mod tests {
 
     /// A pinhole at 1280x800 with f = 500 px, the principal point at the centre.
     fn pinhole() -> Calibration {
-        Calibration {
-            width: 1280,
-            height: 800,
-            model: "pinhole".into(),
-            fx: 500.0,
-            fy: 500.0,
-            cx: 640.0,
-            cy: 400.0,
-            distortion: Distortion::default(),
-        }
+        Calibration { width: 1280, height: 800, model: "pinhole".into(), fx: 500.0, fy: 500.0, cx: 640.0, cy: 400.0, distortion: Distortion::default() }
     }
 
     fn still_at_origin() -> CameraPlan {
@@ -497,11 +479,7 @@ mod tests {
 
     #[test]
     fn lens_keys_follow_the_model_and_refuse_keys_it_does_not_have() {
-        let fisheye = Calibration {
-            model: "fisheye".into(),
-            distortion: Distortion { k1: -0.01, k2: 0.02, k3: -0.003, k4: 0.0005, ..Distortion::default() },
-            ..pinhole()
-        };
+        let fisheye = Calibration { model: "fisheye".into(), distortion: Distortion { k1: -0.01, k2: 0.02, k3: -0.003, k4: 0.0005, ..Distortion::default() }, ..pinhole() };
         let keys = fisheye.lens_spec().expect("fisheye");
         assert!(keys.starts_with("lens=fisheye,lens_width=1280,lens_height=800,fx=500,fy=500,cx=640,cy=400,k1=-0.01,"), "{keys}");
         assert!(!keys.contains("p1="), "a fisheye has no tangential terms: {keys}");

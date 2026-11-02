@@ -19,10 +19,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use helios_maps::SAVED_MAP_PORT;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::{
-    sync::broadcast::error::RecvError,
-    time::Instant,
-};
+use tokio::{sync::broadcast::error::RecvError, time::Instant};
 
 use crate::{
     SharedState,

@@ -16,7 +16,13 @@ fn state_with_devices(dir: &std::path::Path, classes: &[&str]) -> crate::SharedS
         orion_socket: dir.join("no-orion.sock"),
         orion_stream_socket: dir.join("no-orion-stream.sock"),
         state_dir: dir.join("state"),
-        board: Some(helios_layout::BoardContract { identity_file: dir.join("identity.json"), update_tool: dir.join("no-board-update"), update_status: dir.join("update.json"), update_progress: dir.join("update-progress"), ..helios_layout::BoardContract::image() }),
+        board: Some(helios_layout::BoardContract {
+            identity_file: dir.join("identity.json"),
+            update_tool: dir.join("no-board-update"),
+            update_status: dir.join("update.json"),
+            update_progress: dir.join("update-progress"),
+            ..helios_layout::BoardContract::image()
+        }),
         board_update_systemd_run: false,
         ui_dir: None,
         upload_dir: dir.join("uploads"),

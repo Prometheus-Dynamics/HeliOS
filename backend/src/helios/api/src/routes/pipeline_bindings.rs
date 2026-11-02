@@ -139,7 +139,10 @@ mod tests {
     #[test]
     fn a_pipeline_input_names_a_pipeline_and_a_port_only() {
         let mut view = StateView::default();
-        view.workloads.insert("pipeline.live-map".into(), orion::control_plane::WorkloadRecord::builder(orion::core::WorkloadId::new("pipeline.live-map"), "helios.engine.execution.v1", orion::core::ArtifactId::new("a")).build());
+        view.workloads.insert(
+            "pipeline.live-map".into(),
+            orion::control_plane::WorkloadRecord::builder(orion::core::WorkloadId::new("pipeline.live-map"), "helios.engine.execution.v1", orion::core::ArtifactId::new("a")).build(),
+        );
         let good = Binding { source: BindingSource::Pipeline, pipeline: Some("live-map".into()), port: Some("pose".into()), ..Binding::default() };
         assert!(validate("pose", &good, &view).is_ok());
         let missing = Binding { source: BindingSource::Pipeline, pipeline: Some("nope".into()), port: Some("pose".into()), ..Binding::default() };
@@ -160,7 +163,10 @@ mod tests {
             map: None,
             name: "loop".into(),
             graph: serde_json::json!({}),
-            bindings: std::collections::BTreeMap::from([("pose".to_string(), Binding { source: BindingSource::Pipeline, pipeline: Some("loop".into()), port: Some("pose".into()), ..Binding::default() })]),
+            bindings: std::collections::BTreeMap::from([(
+                "pose".to_string(),
+                Binding { source: BindingSource::Pipeline, pipeline: Some("loop".into()), port: Some("pose".into()), ..Binding::default() },
+            )]),
             enabled: true,
             search_mode: None,
             full_search_every: None,

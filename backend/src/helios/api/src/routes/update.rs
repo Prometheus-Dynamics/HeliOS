@@ -445,7 +445,8 @@ pub async fn switch_slot(State(state): State<SharedState>) -> axum::response::Re
     use axum::response::IntoResponse;
     match capabilities::require(&state, feature::SLOTS).await {
         Err(error) => error.into_response(),
-        Ok(()) => ApiError::not_available("switching boot slots without an update is not available", "the board update writer offering a trial boot of the other slot without staging an image").into_response(),
+        Ok(()) => ApiError::not_available("switching boot slots without an update is not available", "the board update writer offering a trial boot of the other slot without staging an image")
+            .into_response(),
     }
 }
 

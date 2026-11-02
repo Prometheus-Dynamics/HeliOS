@@ -364,7 +364,8 @@ fn service_stage(camera: &CameraFacts) -> Stage {
         return Stage::off("service", "Camera service", "There is no camera service");
     }
     if let Some(error) = &camera.live_error {
-        return Stage::new("service", "Camera service", StageState::Blocked, format!("The camera service did not answer: {error}")).hint("Look at the camera service under System > Services, and at the Logs.");
+        return Stage::new("service", "Camera service", StageState::Blocked, format!("The camera service did not answer: {error}"))
+            .hint("Look at the camera service under System > Services, and at the Logs.");
     }
     if camera.service_online == Some(false) {
         return Stage::new("service", "Camera service", StageState::Blocked, "The API has lost the camera service").hint("It is restarting or stopped. Check System > Services.");
@@ -421,8 +422,7 @@ fn busy_stage(stage: (&'static str, &'static str), camera: &CameraFacts, device:
             .hint(format!("Find it with `fuser {device}` and stop its capture. HeliOS takes the camera once it is free."));
     }
     let holders: Vec<String> = camera.holders.iter().map(|name| holder_label(name)).collect();
-    Stage::new(stage.0, stage.1, StageState::Blocked, format!("In use by {}", holders.join(", ")))
-        .hint("Turn off that program's capture of this camera. HeliOS takes the camera once it is free.")
+    Stage::new(stage.0, stage.1, StageState::Blocked, format!("In use by {}", holders.join(", "))).hint("Turn off that program's capture of this camera. HeliOS takes the camera once it is free.")
 }
 
 fn detections_stage(camera: &CameraFacts, pipelines: &[PipelineFacts]) -> Stage {
@@ -464,7 +464,9 @@ fn detections_stage(camera: &CameraFacts, pipelines: &[PipelineFacts]) -> Stage 
     let frame = camera.capture.as_ref().and_then(|c| frame_size(&c.mode));
     if let (Some((width, height)), Some(permille)) = (frame, first.min_perimeter_permille) {
         let side = smallest_tag_side(width, height, first.detector_level.unwrap_or(0), permille);
-        return stage.hint(format!("Tags smaller than about {side} px across are not looked at: at {width}x{height} the detector keeps outlines of at least {permille}\u{2030} of the image. Move closer, or use larger tags."));
+        return stage.hint(format!(
+            "Tags smaller than about {side} px across are not looked at: at {width}x{height} the detector keeps outlines of at least {permille}\u{2030} of the image. Move closer, or use larger tags."
+        ));
     }
     stage.hint(format!("Point the camera at a tag, and check it is the {dictionary} family. Tags must be printed with a black border."))
 }

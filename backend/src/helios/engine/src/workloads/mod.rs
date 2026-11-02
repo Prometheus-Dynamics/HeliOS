@@ -219,7 +219,11 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
         if let Some(pipeline) = &binding.pipeline {
             let workload_id = record.workload_id.as_str().to_string();
             if binding.resource_id.is_some() {
-                return Err(WorkloadDecodeError::InvalidField { workload_id, field: format!("binding.{input}.resource_id"), message: "a pipeline input names a pipeline and port, not a resource".into() });
+                return Err(WorkloadDecodeError::InvalidField {
+                    workload_id,
+                    field: format!("binding.{input}.resource_id"),
+                    message: "a pipeline input names a pipeline and port, not a resource".into(),
+                });
             }
             let port = binding.port.clone().ok_or_else(|| WorkloadDecodeError::MissingField { workload_id, field: format!("binding.{input}.port") })?;
             let source = PipelineInputSource { pipeline: pipeline.clone(), port, max_wait_ms: binding.max_wait_ms.unwrap_or(DEFAULT_PIPELINE_INPUT_MAX_WAIT_MS) };
@@ -227,7 +231,8 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
             bindings.push(ExecutionBinding { input: input.clone(), node_id, pipeline: Some(source), ..ExecutionBinding::default() });
             continue;
         }
-        let resource_id = binding.resource_id.clone().ok_or_else(|| WorkloadDecodeError::MissingField { workload_id: record.workload_id.as_str().to_string(), field: format!("binding.{input}.resource_id") })?;
+        let resource_id =
+            binding.resource_id.clone().ok_or_else(|| WorkloadDecodeError::MissingField { workload_id: record.workload_id.as_str().to_string(), field: format!("binding.{input}.resource_id") })?;
         let node_id = bound_nodes.get(&resource_id).cloned().unwrap_or_else(|| record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default());
         let frame_request = decode_frame_request(record, input, binding)?;
         let context = decode_context(record, input, binding)?;
@@ -347,7 +352,13 @@ mod tests {
 
     #[test]
     fn decode_assigned_workload_reads_the_pinned_cpu() {
-        let with_cpu = |config: WorkloadConfig| WorkloadRecord::builder(WorkloadId::new("workload.cpu"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.cpu")).desired_state(DesiredState::Running).assigned_to(NODE_ID).config(config).build();
+        let with_cpu = |config: WorkloadConfig| {
+            WorkloadRecord::builder(WorkloadId::new("workload.cpu"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.cpu"))
+                .desired_state(DesiredState::Running)
+                .assigned_to(NODE_ID)
+                .config(config)
+                .build()
+        };
         let pinned = decode_assigned_workload(&with_cpu(WorkloadConfig::new("schema.exec").field("cpu", TypedConfigValue::Int(2))), NODE_ID).expect("decode");
         assert_eq!(pinned.cpu, Some(2));
         let unpinned = decode_assigned_workload(&with_cpu(WorkloadConfig::new("schema.exec")), NODE_ID).expect("decode");

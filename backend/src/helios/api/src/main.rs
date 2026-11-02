@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use helios_api::{ApiConfig, AppState, auth_state, events, playback, routes, server, startup};
 use tracing::info;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// The HeliOS application API. Without a subcommand it serves `/v1` and the UI.
 #[derive(Debug, Parser)]

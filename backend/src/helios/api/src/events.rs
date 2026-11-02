@@ -81,8 +81,6 @@ impl EventHub {
             self.subscribed.notified().await;
         }
     }
-
-
 }
 
 /// What the watcher compares between polls.

@@ -13,7 +13,11 @@
 //! a revision: the first converged pose of a pipeline since the API started), so the stored
 //! calibration changing the mapper's start does not store again.
 
-use std::{collections::{BTreeMap, HashMap}, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -443,12 +447,7 @@ mod tests {
     }
 
     fn test_state(dir: &std::path::Path) -> SharedState {
-        AppState::new(ApiConfig {
-            orion_socket: dir.join("no-orion.sock"),
-            orion_stream_socket: dir.join("no-orion-stream.sock"),
-            state_dir: dir.join("state"),
-            ..ApiConfig::default()
-        })
+        AppState::new(ApiConfig { orion_socket: dir.join("no-orion.sock"), orion_stream_socket: dir.join("no-orion-stream.sock"), state_dir: dir.join("state"), ..ApiConfig::default() })
     }
 
     fn mappers() -> BTreeMap<String, LiveMapper> {

@@ -32,7 +32,8 @@ fn producer_workload(plugins: &TestPlugins) -> ExecutionWorkload {
 /// The consumer takes the producer's `result` as its `upstream` input, with the frame of its own
 /// camera (`camera`).
 fn consumer_workload(plugins: &TestPlugins, max_wait_ms: u32) -> ExecutionWorkload {
-    let upstream = ExecutionBinding { input: "upstream".into(), pipeline: Some(PipelineInputSource { pipeline: "producer".into(), port: "result".into(), max_wait_ms }), ..ExecutionBinding::default() };
+    let upstream =
+        ExecutionBinding { input: "upstream".into(), pipeline: Some(PipelineInputSource { pipeline: "producer".into(), port: "result".into(), max_wait_ms }), ..ExecutionBinding::default() };
     workload("pipeline.consumer", fusion_document(plugins, "upstream"), vec![upstream])
 }
 

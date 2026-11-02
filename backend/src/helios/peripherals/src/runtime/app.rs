@@ -174,7 +174,10 @@ impl PeripheralRuntime {
         let Some(bridge) = &self.lemnosd else { return snapshot };
         let context = DiscoveryContext::new(NodeId::new(self.config.node_id.clone()), chrono::Utc::now().timestamp_millis().max(0) as u64);
         match bridge.probe().discover(&context) {
-            Ok(lemnosd) => DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw | ResourceKind::LemnosDevice)).collect()).merge(lemnosd),
+            Ok(lemnosd) => {
+                DiscoverySnapshot::new(snapshot.resources.into_iter().filter(|resource| !matches!(resource.kind, ResourceKind::Fan | ResourceKind::LemnosRaw | ResourceKind::LemnosDevice)).collect())
+                    .merge(lemnosd)
+            }
             Err(error) => {
                 warn!(probe = PROBE_NAME, error = %error, "lemnosd resources could not be built");
                 snapshot

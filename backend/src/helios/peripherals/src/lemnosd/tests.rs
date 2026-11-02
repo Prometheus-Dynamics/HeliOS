@@ -435,7 +435,13 @@ fn claims_are_taken_again_after_a_lemnosd_restart() {
 #[test]
 fn requests_fail_cleanly_without_lemnosd() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let not_started = LemnosdBridge::new(LemnosdOptions { socket: dir.path().join("none.sock"), client: "helios".into(), reading_interval: Duration::from_millis(20), startup_wait: Duration::ZERO, board_file: None });
+    let not_started = LemnosdBridge::new(LemnosdOptions {
+        socket: dir.path().join("none.sock"),
+        client: "helios".into(),
+        reading_interval: Duration::from_millis(20),
+        startup_wait: Duration::ZERO,
+        board_file: None,
+    });
     let rt = runtime();
     assert!(rt.block_on(not_started.fan_release("fan")).is_err());
 

@@ -31,7 +31,8 @@ pub(super) fn map_document(registry: &PluginRegistry, localization: Option<&Fiel
     }
     if let Some(layout) = localization {
         template.pose = Some(PoseConfig { tag_size_m: FRC_TAG_SIDE_M, ..PoseConfig::default() });
-        template.multi_tag_pose = Some(MultiTagPoseTemplate { config: MultiTagPoseConfig::default(), known_tags: KnownTagPoses::from_known_tags(&layout.known_tags()), extrinsics: StructuredInput::GraphInput });
+        template.multi_tag_pose =
+            Some(MultiTagPoseTemplate { config: MultiTagPoseConfig::default(), known_tags: KnownTagPoses::from_known_tags(&layout.known_tags()), extrinsics: StructuredInput::GraphInput });
     }
     let title = match (localization.is_some(), dense.is_some()) {
         (false, false) => "HeliOS live map",

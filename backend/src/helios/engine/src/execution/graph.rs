@@ -200,7 +200,12 @@ fn wants_gpu(document: &GraphDocument) -> bool {
         return false;
     }
     let Ok(graph) = serde_json::to_value(&document.graph) else { return false };
-    graph["nodes"].as_array().into_iter().flatten().flat_map(|node| node["const_inputs"].as_array().into_iter().flatten()).any(|input| input[0] == "backend" && input[1].to_string().contains("\"gpu\""))
+    graph["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|node| node["const_inputs"].as_array().into_iter().flatten())
+        .any(|input| input[0] == "backend" && input[1].to_string().contains("\"gpu\""))
 }
 
 /// Serial execution on the workload's own driver thread: no worker pool. The engine's GPU only

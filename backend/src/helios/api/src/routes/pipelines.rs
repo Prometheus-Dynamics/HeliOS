@@ -34,7 +34,10 @@ use crate::{
 };
 use styx::ipc::StandardControl;
 
-use super::{check_id, pipeline_bindings::{self, BindingSource, PipelineInputHint}};
+use super::{
+    check_id,
+    pipeline_bindings::{self, BindingSource, PipelineInputHint},
+};
 
 pub const ENGINE_RUNTIME: &str = "helios.engine.execution.v1";
 const ENGINE_CONFIG_SCHEMA: &str = "helios.engine.execution.config.v1";
@@ -1416,7 +1419,10 @@ mod tests {
             map: None,
             name: "Tags front".into(),
             graph: sample_document(),
-            bindings: BTreeMap::from([("camera".to_string(), Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None, ..Binding::default() })]),
+            bindings: BTreeMap::from([(
+                "camera".to_string(),
+                Binding { resource_id: "camera.front".into(), output_width: Some(640), output_height: Some(400), pyramid: Some(1), camera: None, ..Binding::default() },
+            )]),
             enabled: true,
             search_mode: None,
             full_search_every: None,
@@ -2003,7 +2009,19 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
         let pyramid = if capabilities.iter().any(|c| *c == "features" || *c == "map") { 3 } else { 1 };
         let (title, summary) = template_text(id);
         let pipeline_inputs = pipeline_bindings::template_pipeline_inputs(id);
-        out.push(Template { id: (*id).into(), family: family.into(), variant: variant.into(), dictionary: dictionary_of(&graph), camera_input: "frame".into(), pyramid, capabilities, title, summary, pipeline_inputs, graph });
+        out.push(Template {
+            id: (*id).into(),
+            family: family.into(),
+            variant: variant.into(),
+            dictionary: dictionary_of(&graph),
+            camera_input: "frame".into(),
+            pyramid,
+            capabilities,
+            title,
+            summary,
+            pipeline_inputs,
+            graph,
+        });
     }
     Ok(Json(out))
 }

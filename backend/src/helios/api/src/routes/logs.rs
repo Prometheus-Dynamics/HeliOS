@@ -20,8 +20,7 @@ use tokio::{
 };
 
 use crate::{
-    SharedState,
-    capabilities,
+    SharedState, capabilities,
     error::{ApiError, ApiResult},
     host::{self, LogLine, LogQuery},
 };

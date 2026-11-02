@@ -5,9 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use orion::control_plane::{
-    Backfill, ClientEventKind, SeriesKind, StatusSubject, StreamCursor, StreamRef, StreamSubscription,
-};
+use orion::control_plane::{Backfill, ClientEventKind, SeriesKind, StatusSubject, StreamCursor, StreamRef, StreamSubscription};
 use tokio::sync::oneshot;
 
 use super::{LiveStreams, codec};
@@ -20,7 +18,10 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 pub enum Step {
     Nothing,
     /// The stream's series, as a catalog text frame, and whether its publisher is there.
-    Catalog { text: String, live: bool },
+    Catalog {
+        text: String,
+        live: bool,
+    },
     /// A batch, encoded.
     Samples(codec::SamplesFrame),
     /// Something was lost, or the position no longer holds: subscribe again from this cursor
@@ -149,17 +150,11 @@ fn subscription(stream: &StreamRef, backfill: Backfill) -> StreamSubscription {
 }
 
 /// Connects to the node's stream socket and subscribes to its live stream, owned by the node.
-async fn connect(
-    live: &LiveStreams,
-    cursor: Option<StreamCursor>,
-) -> Result<(orion::client::ControlPlaneEventStream, StreamRef), String> {
+async fn connect(live: &LiveStreams, cursor: Option<StreamCursor>) -> Result<(orion::client::ControlPlaneEventStream, StreamRef), String> {
     let mut events = live.orion().live_stream_events().await.map_err(|error| error.message)?;
     let stream = StreamRef { owner: StatusSubject::Node(events.node_id().clone()), id: live.stream_id().to_string() };
     let backfill = cursor.map_or(Backfill::LastMs(live.backfill_ms()), Backfill::Since);
-    events
-        .subscribe_stream(subscription(&stream, backfill))
-        .await
-        .map_err(|error| format!("Orion refused the subscription: {error}"))?;
+    events.subscribe_stream(subscription(&stream, backfill)).await.map_err(|error| format!("Orion refused the subscription: {error}"))?;
     Ok((events, stream))
 }
 
@@ -184,13 +179,7 @@ mod tests {
     fn batch(epoch: u64, seq: u64, prev_seq: u64, backfill: bool, t_us: u64) -> StreamData {
         let mut builder = SampleChunkBuilder::new(0, SeriesKind::F32);
         builder.push(t_us, 9.5);
-        StreamData {
-            stream: StreamRef { owner: node(), id: "board.hardware".into() },
-            cursor: StreamCursor { epoch, seq },
-            prev_seq,
-            backfill,
-            chunks: vec![builder.take()],
-        }
+        StreamData { stream: StreamRef { owner: node(), id: "board.hardware".into() }, cursor: StreamCursor { epoch, seq }, prev_seq, backfill, chunks: vec![builder.take()] }
     }
 
     #[test]

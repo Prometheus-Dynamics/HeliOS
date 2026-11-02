@@ -161,9 +161,7 @@ mod tests {
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("address").port();
-        let app = Router::new()
-            .route("/v1/health", get(health))
-            .route("/v1/device", get(move || async move { Json(serde_json::json!({ "node_id": node })) }));
+        let app = Router::new().route("/v1/health", get(health)).route("/v1/device", get(move || async move { Json(serde_json::json!({ "node_id": node })) }));
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });

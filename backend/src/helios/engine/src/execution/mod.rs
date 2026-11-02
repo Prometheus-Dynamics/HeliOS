@@ -34,11 +34,11 @@ pub use graph::GraphSettings;
 
 use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, LoadedPlugin};
 use bindings::resolve_bindings;
-use pipeline_bus::PipelineBus;
 use driver::WorkloadDriver;
 use frame_source::{FrameSource, StyxFrameSource};
 use graph::compile_workload_graph;
 use outputs::session_id_for;
+use pipeline_bus::PipelineBus;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionSnapshot {

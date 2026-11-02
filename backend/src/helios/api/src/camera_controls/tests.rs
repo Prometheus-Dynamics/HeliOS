@@ -1,5 +1,5 @@
-use super::*;
 use super::values::backend_value;
+use super::*;
 use styx::{
     ipc::{AppliedControl, ControlDescriptor},
     prelude::{Access, ControlId, ControlMeta, ControlMetadata, ControlRect, MenuEntry},
@@ -308,12 +308,15 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
     flicker.menu = Some(MenuEntry::names(["off", "50 Hz", "60 Hz", "auto"]));
     let descriptor = ControlDescriptor { meta: flicker, current: Some(ControlValue::Int(3)), standard: None, writable: true, effective_min: None, effective_max: None };
     let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
-    assert_eq!(json["menu"], serde_json::json!([
-        { "value": 0, "label": "off", "kind": "name" },
-        { "value": 1, "label": "50 Hz", "kind": "name" },
-        { "value": 2, "label": "60 Hz", "kind": "name" },
-        { "value": 3, "label": "auto", "kind": "name" },
-    ]));
+    assert_eq!(
+        json["menu"],
+        serde_json::json!([
+            { "value": 0, "label": "off", "kind": "name" },
+            { "value": 1, "label": "50 Hz", "kind": "name" },
+            { "value": 2, "label": "60 Hz", "kind": "name" },
+            { "value": 3, "label": "auto", "kind": "name" },
+        ])
+    );
     assert_eq!(json["current_entry"], serde_json::json!({ "value": 3, "label": "auto", "kind": "name" }));
     assert!(json["standard"].is_null());
 

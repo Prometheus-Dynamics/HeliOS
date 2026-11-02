@@ -228,10 +228,8 @@ impl ApiConfig {
             config.playback.stream_dir = value.into();
         }
         if let Some(value) = env.get("HELIOS_API_PEER_PORTS") {
-            config.peer_ports = value
-                .split(',')
-                .map(|port| port.trim().parse::<u16>().map_err(|_| anyhow::anyhow!("HELIOS_API_PEER_PORTS takes port numbers, got {port:?}")))
-                .collect::<anyhow::Result<_>>()?;
+            config.peer_ports =
+                value.split(',').map(|port| port.trim().parse::<u16>().map_err(|_| anyhow::anyhow!("HELIOS_API_PEER_PORTS takes port numbers, got {port:?}"))).collect::<anyhow::Result<_>>()?;
         }
         if let Some(value) = env.get("HELIOS_BOARD_AGENT_PORT") {
             config.board_agent_port = value.trim().parse().map_err(|_| anyhow::anyhow!("HELIOS_BOARD_AGENT_PORT takes a port number, got {value:?}"))?;

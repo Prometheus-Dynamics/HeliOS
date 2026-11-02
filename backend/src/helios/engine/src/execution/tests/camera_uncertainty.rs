@@ -44,8 +44,15 @@ fn multi_tag_covariance(extra: Vec<(&'static str, ContextValue)>) -> Vec<f64> {
     pose.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &pose, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver =
-        WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("driver");
+    let mut driver = WorkloadDriver::start(
+        pose.clone(),
+        graph,
+        vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
+    )
+    .expect("driver");
     driver.update_camera_context(&pose);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);

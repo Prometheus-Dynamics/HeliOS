@@ -190,14 +190,8 @@ impl Builder {
         let input = self.floats(times, 1, None);
         let translation_output = self.floats(&translations.concat(), 3, None);
         let rotation_output = self.floats(&rotations.concat(), 4, None);
-        let samplers = vec![
-            json!({ "input": input, "output": translation_output, "interpolation": "LINEAR" }),
-            json!({ "input": input, "output": rotation_output, "interpolation": "LINEAR" }),
-        ];
-        let channels = vec![
-            json!({ "sampler": 0, "target": { "node": node, "path": "translation" } }),
-            json!({ "sampler": 1, "target": { "node": node, "path": "rotation" } }),
-        ];
+        let samplers = vec![json!({ "input": input, "output": translation_output, "interpolation": "LINEAR" }), json!({ "input": input, "output": rotation_output, "interpolation": "LINEAR" })];
+        let channels = vec![json!({ "sampler": 0, "target": { "node": node, "path": "translation" } }), json!({ "sampler": 1, "target": { "node": node, "path": "rotation" } })];
         self.animations.push(json!({ "channels": channels, "samplers": samplers }));
     }
 
@@ -276,8 +270,7 @@ pub mod reader {
         if bytes.get(16..20) != Some(b"JSON") || !json_len.is_multiple_of(4) {
             return Err("the first chunk is not an aligned JSON chunk".into());
         }
-        let json: Value = serde_json::from_slice(bytes.get(20..20 + json_len).ok_or("JSON chunk past the end")?)
-            .map_err(|e| format!("JSON: {e}"))?;
+        let json: Value = serde_json::from_slice(bytes.get(20..20 + json_len).ok_or("JSON chunk past the end")?).map_err(|e| format!("JSON: {e}"))?;
         let bin_at = 20 + json_len;
         let bin_len = u32_at(bytes, bin_at)? as usize;
         if bytes.get(bin_at + 4..bin_at + 8) != Some(b"BIN\0") || bin_at + 8 + bin_len != bytes.len() {

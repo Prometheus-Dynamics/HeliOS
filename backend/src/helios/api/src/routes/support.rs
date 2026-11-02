@@ -135,11 +135,7 @@ async fn file_member(name: &str, path: &str) -> (String, Vec<u8>) {
 async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>, String> {
     let child = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).output();
     let output = tokio::time::timeout(timeout, child).await.map_err(|_| format!("took longer than {} s", timeout.as_secs()))?.map_err(|error| error.to_string())?;
-    if output.status.success() || !output.stdout.is_empty() {
-        Ok(output.stdout)
-    } else {
-        Err(format!("{}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim()))
-    }
+    if output.status.success() || !output.stdout.is_empty() { Ok(output.stdout) } else { Err(format!("{}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim())) }
 }
 
 fn is_secret(name: &str) -> bool {

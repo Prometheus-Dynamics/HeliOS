@@ -44,26 +44,26 @@ use crate::{
     plugins::{PluginLoadResult, load_plugins},
 };
 
-/// The stored graph documents engine workloads run: Eidos's detector templates.
-/// The templates HeliOS deploys: the tracked detector as one node, which starts on a sliced
-/// frame's first rows (the fastest path).
-/// Playback players (a recording served as a camera, bound like a live one).
+/// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
 #[cfg(test)]
-mod playback;
+mod camera_uncertainty;
+mod dense_map;
 /// The feature-tracking template (`eidos:features.track`) and its golden document.
 #[cfg(test)]
 mod features;
 /// The live-map template (`eidos:mapping.live_map`) and its golden document.
 #[cfg(test)]
 mod live_map;
-mod saved_map;
-/// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
-#[cfg(test)]
-mod camera_uncertainty;
-mod dense_map;
 #[cfg(test)]
 mod localization_map;
 mod pipeline_feeds;
+/// The stored graph documents engine workloads run: Eidos's detector templates.
+/// The templates HeliOS deploys: the tracked detector as one node, which starts on a sliced
+/// frame's first rows (the fastest path).
+/// Playback players (a recording served as a camera, bound like a live one).
+#[cfg(test)]
+mod playback;
+mod saved_map;
 
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
@@ -206,7 +206,8 @@ fn stored_form(document: &daedalus::planner::GraphDocument) -> String {
     for node in value["graph"]["nodes"].as_array_mut().into_iter().flatten() {
         if let Some(metadata) = node.get_mut("metadata").and_then(serde_json::Value::as_object_mut) {
             metadata.retain(|key, _| {
-                let port = (key.starts_with("inputs.") || key.starts_with("outputs.")) && [".description", ".min", ".max", ".step", ".label", ".unit", ".group", ".advanced"].iter().any(|suffix| key.ends_with(suffix));
+                let port = (key.starts_with("inputs.") || key.starts_with("outputs."))
+                    && [".description", ".min", ".max", ".step", ".label", ".unit", ".group", ".advanced"].iter().any(|suffix| key.ends_with(suffix));
                 !port && !["daedalus.embedded_graph", "summary", "category", "stage_of", "eidos.operation", "eidos.operation_id"].contains(&key.as_str())
             });
         }
@@ -381,7 +382,8 @@ fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, inpu
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[input.to_string()], settings).expect("compile graph");
     let (sender, receiver) = test_camera();
     let driver =
-        WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
+        WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
+            .expect("start driver");
     (driver, sender)
 }
 
@@ -412,16 +414,8 @@ fn graph_documents_are_eidos_templates() {
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
         ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
         ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), eidos_daedalus::dense::DenseConfig::default()), DENSE_MAP_GRAPH_DOCUMENT),
-        (
-            "graphs/apriltag-36h11-map.graph.json",
-            localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), false),
-            LOCALIZATION_MAP_GRAPH_DOCUMENT,
-        ),
-        (
-            "graphs/apriltag-36h11-map-dense.graph.json",
-            localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), true),
-            LOCALIZATION_MAP_DENSE_GRAPH_DOCUMENT,
-        ),
+        ("graphs/apriltag-36h11-map.graph.json", localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), false), LOCALIZATION_MAP_GRAPH_DOCUMENT),
+        ("graphs/apriltag-36h11-map-dense.graph.json", localization_map::localization_map_document(plugins.registry(), &FieldLayout::frc_2026_andymark(), true), LOCALIZATION_MAP_DENSE_GRAPH_DOCUMENT),
     ] {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(manifest_dir.join(file), format!("{json}\n")).expect("write golden");
@@ -480,9 +474,8 @@ fn graph_thread_is_pinned_to_its_core_and_reports_it() {
     let mut missing = workload("workload.missing-core", document, Vec::new());
     missing.cpu = Some(5000);
     let mut resident = ResidentExecutionSet::default();
-    let snapshot = sync_until(&mut resident, &plugins.execution(), &[missing], None, "the unpinned graph to run", |snapshot| {
-        artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1
-    });
+    let snapshot =
+        sync_until(&mut resident, &plugins.execution(), &[missing], None, "the unpinned graph to run", |snapshot| artifact_json(&snapshot.artifacts, "execution.telemetry")["ticks_processed"] == 1);
     let telemetry = artifact_json(&snapshot.artifacts, "execution.telemetry");
     assert!(telemetry["cpu"].is_null(), "{telemetry}");
     assert!(telemetry["cpu_error"].as_str().is_some_and(|error| error.contains("does not exist")), "{telemetry}");
@@ -1019,8 +1012,15 @@ fn camera_context_feeds_pose_and_multi_tag_pose() {
         assert!(graph.input_ports.contains(&port.to_string()), "{port}: {:?}", graph.input_ports);
     }
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
-        .expect("driver");
+    let mut driver = WorkloadDriver::start(
+        apriltag.clone(),
+        graph,
+        vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
+    )
+    .expect("driver");
     driver.update_camera_context(&apriltag);
 
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
@@ -1064,8 +1064,15 @@ fn multi_tag_pose_gives_the_camera_and_robot_in_the_reference_frame() {
     pose.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &pose, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver =
-        WorkloadDriver::start(pose.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("driver");
+    let mut driver = WorkloadDriver::start(
+        pose.clone(),
+        graph,
+        vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
+    )
+    .expect("driver");
     driver.update_camera_context(&pose);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);
@@ -1104,8 +1111,15 @@ fn multi_tag_pose_runs_without_a_mount() {
     apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &apriltag, &["frame".to_string()], GraphSettings::default()).expect("compile");
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag.clone(), graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
-        .expect("driver");
+    let mut driver = WorkloadDriver::start(
+        apriltag.clone(),
+        graph,
+        vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
+    )
+    .expect("driver");
     driver.update_camera_context(&apriltag);
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 1, 1)).expect("send frame");
     wait_for("the frame", || driver.stats().ticks_processed == 1);

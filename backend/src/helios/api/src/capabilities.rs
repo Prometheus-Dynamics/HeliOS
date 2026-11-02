@@ -247,13 +247,7 @@ mod tests {
 
     /// SystemCore: a guest with the host's os-release and no lemnosd devices.
     fn systemcore() -> Facts {
-        Facts {
-            owner: false,
-            os_id: Some(SYSTEMCORE_OS_ID.into()),
-            os_name: Some("limelightosr-2027.0.0-alpha18".into()),
-            os_version: Some("aef8f2eb".into()),
-            ..Facts::default()
-        }
+        Facts { owner: false, os_id: Some(SYSTEMCORE_OS_ID.into()), os_name: Some("limelightosr-2027.0.0-alpha18".into()), os_version: Some("aef8f2eb".into()), ..Facts::default() }
     }
 
     #[test]

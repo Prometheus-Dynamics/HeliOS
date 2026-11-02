@@ -201,9 +201,14 @@ struct Connection {
 /// Work for the worker, which runs one job at a time (a start opens a camera).
 enum Job {
     Command(Command),
-    Enabled { enabled: bool, label: Option<String> },
+    Enabled {
+        enabled: bool,
+        label: Option<String>,
+    },
     /// `map/save`: the running live-map pipelines save, named `name` (the match, when known).
-    SaveMap { name: Option<String> },
+    SaveMap {
+        name: Option<String>,
+    },
 }
 
 struct Publishers {

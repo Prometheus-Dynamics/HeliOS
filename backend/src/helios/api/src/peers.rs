@@ -79,7 +79,8 @@ const RELAY_BUFFER: usize = 16 * 1024;
 /// Request headers the gateway passes on. Cookies are not: a peer's sign-in is its own.
 const FORWARDED_REQUEST_HEADERS: &[&str] = &["authorization", "content-type", "accept", "x-helios-csrf", "x-helios-sha256", "x-helios-filename", "x-helios-version"];
 /// Response headers the gateway passes back. `Set-Cookie` is not: it would replace the gateway's session.
-const FORWARDED_RESPONSE_HEADERS: &[&str] = &["content-type", "content-length", "content-disposition", "cache-control", "etag", "last-modified", "x-accel-buffering", "x-helios-build", "x-helios-version"];
+const FORWARDED_RESPONSE_HEADERS: &[&str] =
+    &["content-type", "content-length", "content-disposition", "cache-control", "etag", "last-modified", "x-accel-buffering", "x-helios-build", "x-helios-version"];
 
 /// The Orion cluster of the robot with `team`.
 pub fn robot_cluster(team: u32) -> String {
@@ -160,12 +161,7 @@ pub fn robot_peers(discovery: &DiscoverySnapshot, nets: &[Ipv4Net], open: bool, 
     if discovery.backend.is_empty() || discovery.cluster.is_empty() {
         return Robot { cluster: None, peers: Vec::new() };
     }
-    let peers = discovery
-        .peers
-        .iter()
-        .filter(|record| record.cluster == discovery.cluster)
-        .map(|record| peer_of(record, nets, open, &api_port))
-        .collect();
+    let peers = discovery.peers.iter().filter(|record| record.cluster == discovery.cluster).map(|record| peer_of(record, nets, open, &api_port)).collect();
     Robot { cluster: Some(discovery.cluster.clone()), peers }
 }
 
@@ -263,10 +259,7 @@ pub fn split_proxy_path(path: &str) -> Option<(&str, &str)> {
 /// `. _ - :`), no dot segments, no empty segments, no query or fragment. Percent-encoded ids (a
 /// resource id with a `:`) are accepted; an escape that decodes to `/`, `?` or `..` is not.
 pub fn is_api_path(rest: &str) -> bool {
-    !rest.is_empty()
-        && rest.split('/').all(|segment| {
-            decode_segment(segment).is_some_and(|decoded| valid_id(&decoded) && decoded != "." && decoded != "..")
-        })
+    !rest.is_empty() && rest.split('/').all(|segment| decode_segment(segment).is_some_and(|decoded| valid_id(&decoded) && decoded != "." && decoded != ".."))
 }
 
 fn decode_segment(segment: &str) -> Option<String> {
@@ -329,12 +322,7 @@ pub async fn align_cluster(state: &SharedState, team: u32) -> ApiResult<bool> {
 /// are plain HTTP on the robot's own links, so it loads no TLS roots (a SystemCore has no CA
 /// store, and loading the system's roots panicked there) and ignores proxy settings.
 pub fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .tls_certs_only([])
-        .no_proxy()
-        .build()
-        .expect("an HTTP client with no TLS roots builds")
+    reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT).tls_certs_only([]).no_proxy().build().expect("an HTTP client with no TLS roots builds")
 }
 
 /// This robot as the gateway sees it now: Orion's discovery and the synced node records, and the
@@ -574,7 +562,10 @@ pub async fn forward(client: &reqwest::Client, node: &str, url: &str, request: R
 mod tests {
     use super::*;
     use axum::{Router, http::Request as HttpRequest, routing::any};
-    use orion::{control_plane::DiscoveryMetricsSnapshot, core::{NodeId, PublicKeyHex}};
+    use orion::{
+        control_plane::DiscoveryMetricsSnapshot,
+        core::{NodeId, PublicKeyHex},
+    };
 
     fn record(node: &str, cluster: &str, state: DiscoveredPeerState, url: &str) -> DiscoveredPeerRecord {
         DiscoveredPeerRecord {
@@ -640,10 +631,7 @@ mod tests {
     fn only_the_robots_own_cluster_is_listed() {
         let discovery = snapshot(
             "robot-6390",
-            vec![
-                record("raze-1", "robot-6390", DiscoveredPeerState::Enrolled, RAZE_URL),
-                record("other-board", "robot-254", DiscoveredPeerState::Enrolled, "orion+tcp://172.31.12.90:9200"),
-            ],
+            vec![record("raze-1", "robot-6390", DiscoveredPeerState::Enrolled, RAZE_URL), record("other-board", "robot-254", DiscoveredPeerState::Enrolled, "orion+tcp://172.31.12.90:9200")],
         );
         let robot = robot_peers(&discovery, &links(), false, |_| Some(5800));
         assert_eq!(robot.cluster.as_deref(), Some("robot-6390"));
@@ -701,8 +689,26 @@ mod tests {
     #[test]
     fn routing_names_the_reason_a_peer_is_refused() {
         let peers = vec![
-            Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true, found_by: "orion".into() },
-            Peer { node_id: "found".into(), state: "discovered".into(), address: Some("172.31.12.82".into()), api_port: None, key_fingerprint: "sha256:x".into(), needs_enrollment: true, routed: false, found_by: "orion".into() },
+            Peer {
+                node_id: "raze-1".into(),
+                state: "enrolled".into(),
+                address: Some("172.31.12.81".into()),
+                api_port: Some(5800),
+                key_fingerprint: "sha256:x".into(),
+                needs_enrollment: false,
+                routed: true,
+                found_by: "orion".into(),
+            },
+            Peer {
+                node_id: "found".into(),
+                state: "discovered".into(),
+                address: Some("172.31.12.82".into()),
+                api_port: None,
+                key_fingerprint: "sha256:x".into(),
+                needs_enrollment: true,
+                routed: false,
+                found_by: "orion".into(),
+            },
         ];
         assert_eq!(routed_peer(&peers, "raze-1").expect("routed").address.as_deref(), Some("172.31.12.81"));
         assert_eq!(routed_peer(&peers, "nobody").unwrap_err().code.status(), axum::http::StatusCode::NOT_FOUND);
@@ -739,7 +745,16 @@ mod tests {
 
     #[test]
     fn a_peers_url_keeps_the_query_and_names_its_port() {
-        let peer = Peer { node_id: "raze-1".into(), state: "enrolled".into(), address: Some("172.31.12.81".into()), api_port: Some(5800), key_fingerprint: "sha256:x".into(), needs_enrollment: false, routed: true, found_by: "orion".into() };
+        let peer = Peer {
+            node_id: "raze-1".into(),
+            state: "enrolled".into(),
+            address: Some("172.31.12.81".into()),
+            api_port: Some(5800),
+            key_fingerprint: "sha256:x".into(),
+            needs_enrollment: false,
+            routed: true,
+            found_by: "orion".into(),
+        };
         assert_eq!(peer_url(&peer, "cameras/a%3Ab/preview", Some("fps=5")).as_deref(), Some("http://172.31.12.81:5800/v1/cameras/a%3Ab/preview?fps=5"));
         assert_eq!(peer_url(&peer, "device", None).as_deref(), Some("http://172.31.12.81:5800/v1/device"));
     }
@@ -748,10 +763,7 @@ mod tests {
     fn with_security_open_a_discovered_peer_is_routed_without_a_key() {
         let discovery = snapshot(
             "robot-6390",
-            vec![
-                record("found", "robot-6390", DiscoveredPeerState::Discovered, RAZE_URL),
-                record("gone", "robot-6390", DiscoveredPeerState::Revoked, "orion+tcp://172.31.12.83:9200"),
-            ],
+            vec![record("found", "robot-6390", DiscoveredPeerState::Discovered, RAZE_URL), record("gone", "robot-6390", DiscoveredPeerState::Revoked, "orion+tcp://172.31.12.83:9200")],
         );
         let open = robot_peers(&discovery, &links(), true, |_| Some(5800));
         assert_eq!(open.peers.iter().map(|p| (p.routed, p.needs_enrollment)).collect::<Vec<_>>(), [(true, false), (false, false)]);

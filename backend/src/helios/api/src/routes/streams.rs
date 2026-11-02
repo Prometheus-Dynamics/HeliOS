@@ -5,7 +5,10 @@
 //! falls behind and is told so, rather than holding the others up.
 
 use axum::{
-    extract::{State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
     response::Response,
 };
 use futures_util::StreamExt;

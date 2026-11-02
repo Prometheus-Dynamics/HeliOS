@@ -71,16 +71,7 @@ pub fn catalog_text(catalog: &StreamCatalog) -> String {
         owner: catalog.stream.owner.to_string(),
         epoch: catalog.epoch,
         live: catalog.live,
-        series: catalog
-            .series
-            .iter()
-            .map(|series| SeriesEntry {
-                name: &series.name,
-                unit: series.unit.as_deref(),
-                kind: kind_name(series.kind),
-                period_us: series.period_us,
-            })
-            .collect(),
+        series: catalog.series.iter().map(|series| SeriesEntry { name: &series.name, unit: series.unit.as_deref(), kind: kind_name(series.kind), period_us: series.period_us }).collect(),
     };
     // Plain strings and numbers always serialize.
     serde_json::to_string(&frame).unwrap_or_else(|_| String::from("{\"type\":\"catalog\",\"series\":[]}"))
@@ -221,10 +212,7 @@ mod tests {
         let catalog = StreamCatalog {
             stream: stream("board.hardware"),
             epoch: 3,
-            series: vec![
-                SeriesDecl::new("imu.acceleration.x", SeriesKind::F32, 10_000).with_unit("m/s²"),
-                SeriesDecl::new("light.led.0", SeriesKind::U32, 50_000),
-            ],
+            series: vec![SeriesDecl::new("imu.acceleration.x", SeriesKind::F32, 10_000).with_unit("m/s²"), SeriesDecl::new("light.led.0", SeriesKind::U32, 50_000)],
             live: false,
         };
         let text = catalog_text(&catalog);

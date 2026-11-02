@@ -49,13 +49,11 @@ fn main() -> Result<()> {
     let args = Args::parse();
     ensure_positive("tag-size", args.tag_size)?;
     let layout_text = std::fs::read_to_string(&args.layout).with_context(|| format!("reading {}", args.layout.display()))?;
-    let (layout, _format): (FieldLayout, _) =
-        FieldLayout::parse(&layout_text, args.tag_size).with_context(|| format!("reading the layout {}", args.layout.display()))?;
+    let (layout, _format): (FieldLayout, _) = FieldLayout::parse(&layout_text, args.tag_size).with_context(|| format!("reading the layout {}", args.layout.display()))?;
     ensure_positive("time-scale", args.time_scale)?;
     let camera = scene::CameraPlan::read(&args.camera)?.slowed(args.time_scale);
     let calibration_text = std::fs::read_to_string(&args.calibration).with_context(|| format!("reading {}", args.calibration.display()))?;
-    let calibration: scene::Calibration =
-        serde_json::from_str(&calibration_text).with_context(|| format!("reading the calibration {}", args.calibration.display()))?;
+    let calibration: scene::Calibration = serde_json::from_str(&calibration_text).with_context(|| format!("reading the calibration {}", args.calibration.display()))?;
 
     let scenery = match &args.scenery {
         Some(path) => scenery::Scenery::read(path)?,

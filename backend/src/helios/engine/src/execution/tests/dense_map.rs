@@ -86,8 +86,9 @@ fn dense_map_maps_the_live_map_pose_in_one_pipeline() {
 fn start_pipeline(plugins: &TestPlugins, bus: &PipelineBus, workload: ExecutionWorkload, frame_input: &str) -> (WorkloadDriver, TestCamera) {
     let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[frame_input.to_string()], GraphSettings::default()).expect("compile graph");
     let (sender, receiver) = test_camera();
-    let driver = WorkloadDriver::start(workload, graph, vec![(frame_spec(frame_input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), bus.clone())
-        .expect("start driver");
+    let driver =
+        WorkloadDriver::start(workload, graph, vec![(frame_spec(frame_input), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), bus.clone())
+            .expect("start driver");
     (driver, sender)
 }
 

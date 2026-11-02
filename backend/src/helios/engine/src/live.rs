@@ -198,7 +198,12 @@ mod tests {
         }
         assert!(sink.active());
         for n in 0..5 {
-            sink.offer(LiveTick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", format!("{{\"n\":{n}}}")))], serializers: ValueSerializerMap::default(), frame_ts_ns: Some(n) });
+            sink.offer(LiveTick {
+                pipeline: "front".into(),
+                outputs: vec![("count".into(), Payload::owned("test:count", format!("{{\"n\":{n}}}")))],
+                serializers: ValueSerializerMap::default(),
+                frame_ts_ns: Some(n),
+            });
         }
         let first = tokio::time::timeout(Duration::from_secs(2), reader.next_line()).await.expect("in time").expect("read").expect("a line");
         let json: serde_json::Value = serde_json::from_str(&first).expect("json");
