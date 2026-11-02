@@ -1,8 +1,8 @@
-//! The Raze device package's slots writer (`/usr/lib/board/slots`, Atlas `docs/slots.md`).
+//! The Raze device package's slots writer (`/usr/lib/board/slots`, Atlas's `devices/raze` package).
 //!
-//! HeliOS has no updater of its own: the writer installs a slot bundle (a tar of `slot.json`, the
-//! slot's root image and its boot files) into an inactive slot, trial-boots it once with the
-//! firmware's tryboot, and keeps it when `/etc/board/update-health` passes. This module reads the
+//! HeliOS has no updater of its own: the writer installs the build's `.img.xz` (`stage-image`) into
+//! an inactive slot, trial-boots it once with the firmware's tryboot, and keeps it when
+//! `/etc/board/update-health` passes. This module reads the
 //! state it publishes in `/run/board/update.json`; helios-api drives the CLI itself
 //! (`/v1/update/*`, `/v1/ota/*`).
 

@@ -138,7 +138,7 @@ async fn update_status_works_without_the_writer() {
 async fn raw_upload_then_apply_needs_the_device_package_writer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());
-    let request = Request::builder().method("POST").uri("/v1/update/uploads?filename=helios-raze-v9.slot.tar").body(Body::from(vec![7u8; 1024])).expect("request");
+    let request = Request::builder().method("POST").uri("/v1/update/uploads?filename=helios-raze-v9.img.xz").body(Body::from(vec![7u8; 1024])).expect("request");
     let response = router(state.clone()).oneshot(request).await.expect("response");
     assert_eq!(response.status(), StatusCode::CREATED);
     let upload: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.expect("body")).expect("json");

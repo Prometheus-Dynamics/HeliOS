@@ -1,44 +1,46 @@
 ---
 title: Updating HeliOS
-description: Use the Web UI updater to apply a new OS image.
+description: Install a new HeliOS image on a Raze into the spare slot.
 ---
 
-HeliOS images for HVS - Raze are updated by applying a new OS image. The built-in updater stages the image and applies it to the device.
-
-## Where The Updater Lives
-
-In the Web UI: **Settings** > **Updater**.
+A Raze runs HeliOS from one of two boot slots. An update is the build's `.img.xz` (the one image
+each HeliOS build produces). It is installed into the slot the device is not running, boots once
+on trial, and becomes the default once it comes up healthy.
 
 ## What You Need
 
-- A new OS image file from this repo’s Releases:
+- The build's `.img.xz` from this repo's Releases:
 
   ```txt
   https://github.com/Prometheus-Dynamics/HeliOS/releases
   ```
 
-## Apply an Update (Web UI)
+  Do not use a `.tar` or a slot bundle. Those are no longer built, and the device refuses them.
 
-1. Open **Settings** > **Updater**.
-2. Under **Select update image**, choose exactly one source:
-   - **Upload**: pick the image file from your computer, then click **Upload image**
-   - **Media**: pick a previously uploaded image stored on the device
-   - **URL**: provide an `https://…` or `file:///…` path
-3. Under **Apply update**, click **Apply update** and confirm.
+## Install an Update (Web UI)
 
-Notes (this is on purpose):
+1. Open the device's **Software** pane.
+2. In **Boot slots**, click **Install image** and choose the `.img.xz`.
+3. The image uploads, then is written into the spare slot. The pane shows the progress.
+4. The device reboots into the new slot on trial. The Web UI disconnects during the reboot, then
+   reconnects.
 
-- Applying an update will stop all streams and reboot the device.
-- The Web UI will disconnect during the reboot, then reload when the device comes back.
-- The current updater flow applies directly from the selected image source; you do not need to manage a separate user-facing staging step.
+Notes:
 
-## Canceling
+- Installing an update stops all streams and reboots the device.
+- The running slot is never overwritten. If the device is already on the image's slot, the install is refused and nothing changes.
 
-If an update is staged but not currently applying/rebooting, the updater UI exposes **Cancel**.
+## After It Boots
+
+- A trial that passes the device's health check is kept as the default. This happens by itself at
+  every boot.
+- A trial that fails its health check goes back to the previous slot by itself.
+- To go back to the previous slot by hand, use `POST /v1/update/rollback` (see the
+  [HTTP API](/api/http)). The device reboots into it.
 
 ## Troubleshooting
 
-- If you can’t reach the UI after an update:
+- If you can't reach the UI after an update:
   - Wait for the device to finish rebooting, then refresh the page.
   - If networking is misconfigured, hold the boot button for `5` seconds while the device is running to reset network settings to defaults.
     - When the reset completes, the LED ring flashes `3` times.

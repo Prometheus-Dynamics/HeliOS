@@ -2,65 +2,44 @@
 title: Updater
 ---
 
-Updater uploads or selects an OS image, then applies it on the device.
+Updates are installed from the device's **Software** pane, in **Boot slots**. The updater takes the
+build's `.img.xz`, writes it into the spare slot, and boots that slot on trial.
 
-Applying an update will reboot the device.
+Installing an update reboots the device.
 
-## Select An Update Image
+## Install Image
 
-You must choose exactly one source at apply time:
-
-### Upload
-
-1. Choose an image file from your computer (`.img`, `.tar.gz`, `.zip`, `.bin`, `.xz`).
-2. Click **Upload image**.
-3. The UI shows the detected filename, size, and SHA256 after upload.
+1. Click **Install image** and choose the `.img.xz` (the file picker shows only `.img.xz` and `.xz`
+   files).
+2. The image uploads to the device, then is installed into the slot the device is not running.
+3. The device reboots into the new slot on trial.
 
 Notes:
 
-- Upload stores the file on the device (it becomes available as a Media file source too).
-- The stored upload can be removed from the Updater UI.
+- The `.img.xz` is the only update image. A `.tar` (a slot bundle) is refused: the upload is
+  rejected with the reason.
+- A staged image is removed from the device once it is installed. A failed upload is kept until it
+  is deleted or it is an hour old.
+- An image for the slot the device is running is refused, and nothing changes.
 
-### Media
+## States
 
-Select an image file that already exists on the device under **OS > Media**.
+The update line shows the writer's state:
 
-- The list is filtered to common image extensions (`.img`, `.tar.gz`, `.zip`, `.bin`, `.xz`).
-- **Refresh** reloads the device media list.
-- **Remove** deletes the selected file from the device media store.
+- `staging`: the image is being installed into the spare slot
+- `staged`: installed, not booted yet
+- `trying`: booted on trial, the health check is running
+- `confirmed`: the new slot is the default
+- `rolled_back`: the trial failed and the device went back to the previous slot
+- `failed`: the install or the trial stopped, with the reason shown
 
-### URL
+## Boot Slots
 
-Paste a URL for the device to use as the update image source.
+The **Boot slots** list shows every installed slot, the one running, and the default. To boot
+another slot once on trial, use `POST /v1/update/slots/switch` (with `{"slot": "<id>"}` when there
+are more than two slots). It reboots the device.
 
-## Apply Update
+## Rollback
 
-1. Click **Apply update**.
-2. Read the warning and check the confirmation box.
-3. Click **Continue & apply**.
-
-What to expect:
-
-- Applying an update stops all streams.
-- The device reboots.
-- The Web UI disconnects during the reboot, then reloads when the device comes back.
-- The updater now applies directly from the selected `image_url`; there is no separate long-lived staging step in the user workflow.
-
-## Stages (What They Mean)
-
-The UI maps updater stages to labels:
-
-- `idle`: Idle
-- `downloading`: Downloading update
-- `verifying`: Verifying update
-- `awaiting_window`: Pending apply
-- `applying`: Applying
-- `rebooting`: Rebooting
-- `complete`: Complete
-- `rolled_back`: Canceled / Rolled back
-
-Notes:
-
-- **Cancel** is only enabled while an update is active and not currently applying/rebooting.
-- The **Current state** panel is driven by live updater state and shows progress, timestamps, cache usage, and artifact URL/checksum when available.
-- The page can optionally delete the selected image after apply completes.
+A confirmed update can be undone with `POST /v1/update/rollback`, which makes the previous slot the
+default and reboots into it. The API reference is at [HTTP API](/api/http).

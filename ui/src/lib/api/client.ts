@@ -9,6 +9,7 @@ import type {
   ApiErrorCode,
   ApiEvent,
   ApiToken,
+  ActionResponse,
   ApplyResponse,
   AuthStatus,
   Binding,
@@ -340,7 +341,8 @@ function methods(at: (path: string) => string) {
   deleteUpload: (id: string) => call<void>("DELETE", `/v1/update/uploads/${enc(id)}`),
   applyUpdate: (body: { upload_id?: string; image_url?: string; version?: string; sha256?: string; reboot?: boolean }) => call<ApplyResponse>("POST", "/v1/update/apply", { body }),
   updateStatus: () => call<UpdateStatus>("GET", "/v1/update/status"),
-  switchSlot: () => call<never>("POST", "/v1/update/slots/switch"),
+  /** Boots another installed slot on trial (`slots boot-once`); the only other slot when `slot` is omitted. */
+  switchSlot: (slot?: string) => call<ActionResponse>("POST", "/v1/update/slots/switch", slot ? { body: { slot } } : {}),
   };
 }
 

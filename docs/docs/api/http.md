@@ -623,42 +623,37 @@ addresses.
 
 ### Updates (OTA)
 
-OS updates go through the Raze board package's slots writer (`/usr/lib/board/slots`, Atlas
-`docs/slots.md`); HeliOS has no updater of its own. The Raze boots from dynamic slots: root slots
-are EROFS image files on the data partition, and the firmware boots the default slot. The writer
-takes a **slot bundle**, a tar of `slot.json`, the slot's root image (`rootfs.erofs`, or `layers/`)
-and its `boot/` files. It does not take the `.img.xz` that is flashed over USB, so an upload is a
-bundle, not an image. `slots stage` checks the bundle against `--sha256` and against its own
-contents, then installs the slot next to the running one. `slots apply` boots that slot once on
-trial (the next boot only). `slots confirm` keeps a healthy trial as the default, and runs at
-every boot from `board-update-confirm.service`: a trial whose `/etc/board/update-health` check
-fails (orion-node, helios-engine and helios-api active, the API answering) goes back to the default
-slot. `slots rollback` makes the previous slot the default again and reboots into it.
+OS updates go through the Raze board package's slots writer (`/usr/lib/board/slots`, Atlas's
+`devices/raze` package); HeliOS has no updater of its own. The Raze boots from dynamic slots: root
+slots are EROFS image files on the data partition, and the firmware boots the default slot. The
+upload is the build's **`.img.xz`** (the only update image: a whole-disk image that carries one slot,
+xz, zst, gz or raw, read by its magic). The writer's `slots stage-image` installs that slot next to
+the running one, the same checks as a slot bundle. A tar (a slot bundle) is refused at upload.
 
 | Method | Path | Writer command | Notes |
 |---|---|---|---|
-| `POST` | `/v1/update/uploads` | none | Raw bundle body (`application/octet-stream`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/data/updates` on a board (or HeliOS's state directory on a guest), and hashed. Uploads older than an hour are removed; returns 201 with an upload |
+| `POST` | `/v1/update/uploads` | none | Raw image body (`application/octet-stream`, the `.img.xz`). Optional `filename`, `sha256` and `version` as query parameters, or as `X-Helios-Filename`, `X-Helios-Sha256` and `X-Helios-Version` headers. Streamed to `/data/updates` on a board (or HeliOS's state directory on a guest), and hashed. A tar is 422. Uploads older than an hour are removed; returns 201 with an upload |
 | `GET` | `/v1/update/uploads` | none | Uploads, newest first |
 | `DELETE` | `/v1/update/uploads/{id}` | none | Delete an upload |
-| `POST` | `/v1/update/apply` | `slots stage <bundle> --sha256 <hex>`, then `slots apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Stages the upload and boots its slot on trial; answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot: false` stops after staging. With no body (`{}`) it boots the already staged slot on trial; 409 when no slot is staged |
+| `POST` | `/v1/update/apply` | `slots stage-image <file.img.xz> --sha256 <hex>`, then `slots apply` | `{upload_id \| image_url, sha256?, version?, reboot?}`. Stages the upload and boots its slot on trial; answers 202 `{update_id, version, sha256, image_url, reboot, message}`. `reboot: false` stops after staging. With no body (`{}`) it boots the already staged slot on trial; 409 when no slot is staged. A refusal the writer gives within 15 s (the sha256, room, the device lock) is 409 with the writer's message, and a failure is 422; nothing changed in either case. Later, the task's `failed` step carries the reason |
 | `POST` | `/v1/update/confirm` | `slots confirm` | Keeps the trial slot the board is running, once `update-health` passes. The check runs in the background (up to two minutes); the outcome is in `/v1/update/status`. 202 `{update_id, action, message}`. 409 when no slot is on trial, or the trial has not booted yet |
 | `POST` | `/v1/update/rollback` | `slots rollback` | Makes the previous slot the default and reboots into it. 202 `{update_id, action, message}`. 409 when there is no previous slot, or a trial is pending |
+| `POST` | `/v1/update/slots/switch` | `slots boot-once <id>` | Boots another installed slot on trial, and reboots into it. Body (optional): `{"slot": "<id>"}`; without one, the only other installed slot (422 when there are several). 202 `{update_id, action: "switch", message}`. 404 for a slot that is not installed, 409 for the running slot or while a trial is pending |
 | `GET` | `/v1/update/status` | `slots status` (only when none has run this boot) | Update status (below) |
 | `GET` | `/v1/update/events` | none | SSE `update` events, starting with the current status |
-| `POST` | `/v1/update/slots/switch` | none | **501** |
 
 An upload: `{id, filename, size_bytes, sha256, image_url, uploaded_at_ms, version}`. The `id` is
 the first 16 hex digits of the sha256, and `image_url` is a `file://` URL inside the upload
-directory. Apply accepts only bundles that were uploaded here, checks `sha256` against the upload
+directory. Apply accepts only images that were uploaded here, checks `sha256` against the upload
 when given (422), and refuses with 409 while an update is staging or on trial, with 422 off the
 slots layout, and with 501 when the device package's writer is not installed.
 
-Stage, apply, confirm and rollback run through `systemd-run`, so each lives in its own unit: a
-reboot that `slots apply` or `slots rollback` asks for does not depend on helios-api. Only one of
-them runs at a time (409 otherwise). A staged upload is deleted (the slot holds the bundle now); a
+Stage, apply, switch, confirm and rollback run through `systemd-run`, so each lives in its own unit: a
+reboot that `slots apply`, `slots boot-once` or `slots rollback` asks for does not depend on
+helios-api. Only one of them runs at a time (409 otherwise). A staged upload is deleted (the slot holds the image now); a
 failed one is kept. The version shown is the first of these that is set: the requested `version`,
 the upload's `version`, the `v…` part of the file name, or `upload-<sha256 prefix>`; the writer
-itself takes the version from the bundle's `slot.json`.
+itself takes the version from the image's `slot.json`.
 
 Update status (from the writer's `/run/board/update.json`):
 

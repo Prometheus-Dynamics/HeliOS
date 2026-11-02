@@ -654,6 +654,13 @@ export interface ApplyResponse {
   message: string;
 }
 
+/** A confirm, rollback or slot switch: the writer's command has started in the background. */
+export interface ActionResponse {
+  update_id: string;
+  action: "confirm" | "rollback" | "switch";
+  message: string;
+}
+
 /** What helios-api last asked the board's slots writer to do. */
 export interface UpdateTask {
   update_id: string;

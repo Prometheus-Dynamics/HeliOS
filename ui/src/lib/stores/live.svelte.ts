@@ -1307,7 +1307,7 @@ export class LiveCluster {
 
   /** Pick an OS image, upload it and hand it to the updater. */
   async installImage() {
-    const file = await pickFile(".img,.xz,.img.xz,application/octet-stream");
+    const file = await pickFile(".img.xz,.xz");
     if (!file) return;
     toasts.info(`Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(0)} MiB)`);
     const upload = await this.act("Upload", () => api.uploadImage(file));
