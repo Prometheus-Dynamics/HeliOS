@@ -80,8 +80,9 @@ For build `helios-<profile>-raze` (for example `helios-full-raze`):
 - Rust artifacts: `gaia/output/helios-full-raze/artifacts/`
 - Images: `gaia/output/helios-full-raze/images/` (`rootfs.erofs` and the other
   Buildroot outputs)
-- Flashable image: `gaia/output/helios-full-raze/helios-<version>-styx-<commit>.img.xz`,
-  the slots first-flash disk, with the `<id>.slot.tar` bundle next to it
+- Flashable image: `gaia/output/helios-full-raze/images/helios-<version>-styx-<commit>.img.xz`
+  (plus its `.minisig` when signed), the slots first-flash disk and the only build output: the
+  same file flashes a board and updates one (`slots stage-image`)
 - Reports: `gaia/output/helios-full-raze/.gaia/reports/`
 
 All of these except the build state follow `outputs.dir`, so one override moves

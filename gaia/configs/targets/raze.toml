@@ -139,4 +139,4 @@ deterministic = true
 
 # No disk here: the Raze image is the dynamic slots (devices/raze/gaia/slots.toml, Atlas), which
 # builds its own boot FAT and data partition from the boot tree above and rootfs.erofs, and
-# publishes the first-flash .img.xz and the <id>.slot.tar bundle into outputs.dir.
+# publishes the first-flash .img.xz into outputs.dir (the only output; it also updates boards).

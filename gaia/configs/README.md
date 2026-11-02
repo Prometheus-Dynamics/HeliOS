@@ -75,8 +75,8 @@ The image is Atlas's dynamic slots layout (`devices/raze/gaia/slots.toml`,
 with `initramfs.toml`, both imported by `builds/raze.toml` for the full
 profile). Raze boards use the slots layout only: there is no A/B disk and no
 fixed root partition. The build's deliverable is the first-flash image
-`helios-<version>-styx-<commit>.img.xz` in `outputs.dir`, next to the
-`<id>.slot.tar` bundle.
+`helios-<version>-styx-<commit>.img.xz` in `outputs.dir/images`. It is the only
+output: the same file flashes a board and updates one (`slots stage-image`).
 
 The first-flash disk is an MBR with two partitions:
 

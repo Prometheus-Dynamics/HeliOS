@@ -43,8 +43,8 @@ imports = [
   { path = "../layers/expect-full.toml", when = { profile = "full" } },
   # Dynamic slots, the only Raze layout: the device package's slot initramfs (slot-init) and
   # slots fragment. The image is the first-flash <id>.img.xz (helios-<ver>-styx-<commit>.img.xz)
-  # (signed by the signing layer), in outputs.dir; the root is a verity'd slot. Atlas makes the
-  # slot bundle from the .img.xz when it installs.
+  # (signed by the signing layer), in outputs.dir; the root is a verity'd slot. The same .img.xz
+  # updates a board (`slots stage-image`).
   { source = "atlas", path = "devices/raze/gaia/initramfs.toml", when = { profile = "full", target = "raze" } },
   { source = "atlas", path = "devices/raze/gaia/slots.toml", when = { profile = "full", target = "raze" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
