@@ -59,7 +59,7 @@ use super::{
     bindings::{FrameSourceSpec, ResourceInput},
     camera_context,
     frame_source::{FrameReceive, FrameSource, FrameSourceStatus},
-    graph::{CompiledWorkloadGraph, ResidentHostGraph},
+    graph::{CompiledWorkloadGraph, RefreshedGraph, ResidentHostGraph},
     map_io::{self, MAP_PORT, SAVE_PORT, SAVED_MAP_PORT, SavePulse},
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
     pipeline_bus::{PipelineBus, next_run_id},
@@ -344,6 +344,29 @@ impl WorkloadDriver {
     /// Write the full plan to `dir/<workload>.json` and publish only its summary (counts, host
     /// ports) and the file's path: the plan's text is tens of KB that never changes, and every
     /// publication would carry it.
+    /// Write a stored graph the plugins refreshed to `dir/<workload>.refreshed.json`, and name it in
+    /// the plan as `refreshed` (the digest of the stored graph it was read from, and the file). The
+    /// plan's summary carries that to helios-api, which stores the document as the pipeline's next
+    /// revision (`routes::pipelines::store_refreshed_graphs`). Call before `externalize_plan`.
+    pub fn record_refreshed(&mut self, dir: &std::path::Path, refreshed: &RefreshedGraph) {
+        let path = dir.join(format!("{}.refreshed.json", crate::execution::outputs::sanitize_id_component(&self.workload.workload_id)));
+        let written = std::fs::create_dir_all(dir).and_then(|()| {
+            let partial = path.with_extension("json.partial");
+            std::fs::write(&partial, &refreshed.document)?;
+            std::fs::rename(&partial, &path)
+        });
+        if let Err(error) = written {
+            tracing::warn!(path = %path.display(), %error, "could not write the refreshed graph; the stored graph keeps its retired settings");
+            return;
+        }
+        if let Ok(mut plan) = serde_json::from_str::<serde_json::Value>(&self.plan_message)
+            && let Some(fields) = plan.as_object_mut()
+        {
+            fields.insert("refreshed".into(), serde_json::json!({ "from": refreshed.from_digest, "file": path.display().to_string() }));
+            self.plan_message = plan.to_string();
+        }
+    }
+
     pub fn externalize_plan(&mut self, dir: &std::path::Path) {
         let Ok(mut plan) = serde_json::from_str::<serde_json::Value>(&self.plan_message) else { return };
         let path = dir.join(format!("{}.json", crate::execution::outputs::sanitize_id_component(&self.workload.workload_id)));

@@ -195,7 +195,9 @@ fn artifact_resources<'a>(executor_id: &'a str, provider_id: &'a str, artifacts:
 }
 
 /// FNV-1a 64 of an inline graph: which graph a session runs, without the graph.
-fn graph_digest(graph: &str) -> String {
+/// The digest of a stored graph's text: the session names it (`graph.digest`), and helios-api
+/// compares it with the graph it holds (a graph edited since names another one).
+pub(crate) fn graph_digest(graph: &str) -> String {
     let hash = graph.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3));
     format!("fnv1a64:{hash:016x}")
 }

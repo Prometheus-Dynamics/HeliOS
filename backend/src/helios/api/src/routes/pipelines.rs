@@ -1024,14 +1024,19 @@ pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiRes
     let id = id.to_string();
     let task = tokio::spawn(async move {
         let _deploying = state.deploys.lock().await;
-        let view = state.orion.view().await?;
-        let revision = next_revision(&state.store.history(&id).await?, deployed_revision(&view, &id));
-        apply_spec(&state, &view, &id, &spec, revision).await?;
-        let spec_json = serde_json::to_value(&spec).map_err(|error| ApiError::internal(error.to_string()))?;
-        state.store.push_revision(&id, revision, spec_json, now_ms()).await?;
-        fetch(&state, &id).await
+        deploy_locked(&state, &id, &spec).await
     });
     task.await.map_err(|error| ApiError::internal(format!("the deploy did not finish: {error}")))?
+}
+
+/// The body of `deploy`: the caller holds `deploys`.
+async fn deploy_locked(state: &SharedState, id: &str, spec: &PipelineSpec) -> ApiResult<Pipeline> {
+    let view = state.orion.view().await?;
+    let revision = next_revision(&state.store.history(id).await?, deployed_revision(&view, id));
+    apply_spec(state, &view, id, spec, revision).await?;
+    let spec_json = serde_json::to_value(spec).map_err(|error| ApiError::internal(error.to_string()))?;
+    state.store.push_revision(id, revision, spec_json, now_ms()).await?;
+    fetch(state, id).await
 }
 
 /// Redeploy, at their current revision, the managed pipelines whose multi-tag pose uses a layout
@@ -1062,6 +1067,84 @@ pub async fn refresh_field_layouts(state: &SharedState, changed: Option<&str>, s
         }
     }
     Ok(updated)
+}
+
+/// The graph helios-engine refreshed from the plugins on its last compile (`refreshed` in its plan
+/// summary): the digest of the stored graph it read, and the file that holds the refreshed document.
+#[derive(Debug, PartialEq, Eq)]
+struct RefreshedPlan {
+    from: String,
+    file: PathBuf,
+}
+
+fn refreshed_plan_of(view: &StateView, workload_id: &str) -> Option<RefreshedPlan> {
+    let summary = workload_resources(view, workload_id, ARTIFACT_TYPE)
+        .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some("execution.plan"))
+        .map(|record| parse_message(state_field(record, "message")))?;
+    let refreshed = summary.get("refreshed")?;
+    Some(RefreshedPlan { from: refreshed.get("from")?.as_str()?.to_string(), file: PathBuf::from(refreshed.get("file")?.as_str()?) })
+}
+
+/// Whether an observed-state snapshot names a stored graph helios-engine refreshed (its plan's
+/// `refreshed`): the trigger for `store_refreshed_graphs`, checked on every snapshot the watcher
+/// gets anyway, so nothing polls.
+pub fn has_refreshed_plans(view: &StateView) -> bool {
+    engine_workloads(view).any(|workload| refreshed_plan_of(view, workload.workload_id.as_str()).is_some())
+}
+
+/// Stores the stored graphs helios-engine refreshed from the plugins as their pipelines' next
+/// revisions. The engine drops a retired setting when it compiles a stored graph, and says so in
+/// its plan; the refreshed document is written back through `deploy`'s own path, so the revision
+/// bumps and the API and UI see it. Only while the graph is still the one the engine read: a graph
+/// edited since (or already stored) names another digest, so each refresh is stored once. The
+/// digest is checked under `deploys`, so two snapshots that name the same refresh store it once.
+/// Returns the pipelines stored.
+pub async fn store_refreshed_graphs(state: &SharedState) -> ApiResult<Vec<String>> {
+    let _deploying = state.deploys.lock().await;
+    let view = state.orion.view().await?;
+    let mut stored = Vec::new();
+    for workload in engine_workloads(&view) {
+        let workload_id = workload.workload_id.as_str();
+        let Some(refreshed) = refreshed_plan_of(&view, workload_id) else { continue };
+        let Some(graph) = config_string(workload, "graph.inline") else { continue };
+        if refreshed.from != graph_digest(&graph) {
+            continue;
+        }
+        let id = pipeline_id(workload_id);
+        match store_refreshed(state, &id, &refreshed).await {
+            Ok(true) => {
+                tracing::info!(pipeline = %id, "stored graph refreshed from the plugins");
+                stored.push(id);
+            }
+            Ok(false) => {}
+            Err(error) => tracing::warn!(pipeline = %id, error = %error.message, "the refreshed graph is not stored; the next snapshot tries again"),
+        }
+    }
+    Ok(stored)
+}
+
+/// Deploys `refreshed`'s document as pipeline `id`'s next revision, with the spec it has now. `false`
+/// when the pipeline has no spec here (it was not deployed through the API). The caller holds `deploys`.
+async fn store_refreshed(state: &SharedState, id: &str, refreshed: &RefreshedPlan) -> ApiResult<bool> {
+    // Only ever a plan file of the plans directory (the engine writes it there), as `pipeline_plan` reads them.
+    let file = refreshed.file.to_string_lossy();
+    if !refreshed.file.starts_with(state.config.layout.plans_dir()) || refreshed.file.extension().is_none_or(|ext| ext != "json") || file.contains("..") {
+        return Err(ApiError::internal(format!("unexpected refreshed graph file {file}")));
+    }
+    let history = state.store.history(id).await?;
+    let Some(latest) = history.latest() else { return Ok(false) };
+    let mut spec: PipelineSpec = serde_json::from_value(latest.spec.clone()).map_err(|error| ApiError::internal(format!("pipeline {id} has an unreadable spec: {error}")))?;
+    let bytes = tokio::fs::read(&refreshed.file).await?;
+    spec.graph = serde_json::from_slice(&bytes).map_err(|error| ApiError::internal(format!("refreshed graph of {id} is not JSON: {error}")))?;
+    deploy_locked(state, id, &spec).await?;
+    Ok(true)
+}
+
+/// The digest of a stored graph's text, as helios-engine names it in its plan (`refreshed.from`):
+/// FNV-1a 64, the same as `helios_engine::provider::publish::graph_digest`.
+fn graph_digest(graph: &str) -> String {
+    let hash = graph.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3));
+    format!("fnv1a64:{hash:016x}")
 }
 
 async fn fetch(state: &SharedState, id: &str) -> ApiResult<Pipeline> {

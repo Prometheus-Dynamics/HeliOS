@@ -171,7 +171,8 @@ impl ResidentExecutionSet {
         }
         if !self.drivers.contains_key(id) {
             let frame_inputs = resolved.frames.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
-            let graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload, &frame_inputs, self.settings)?;
+            let mut graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload, &frame_inputs, self.settings)?;
+            let refreshed = graph.refreshed.take();
             // Non-blocking: a camera service that is not up yet does not hold up this call.
             let frames = resolved
                 .frames
@@ -180,6 +181,9 @@ impl ResidentExecutionSet {
                 .collect::<Result<Vec<_>, _>>()?;
             let mut driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone(), self.sinks.clone(), self.bus.clone())?;
             if let Some(dir) = &self.plan_dir {
+                if let Some(refreshed) = &refreshed {
+                    driver.record_refreshed(dir, refreshed);
+                }
                 driver.externalize_plan(dir);
             }
             self.drivers.insert(id.to_string(), driver);

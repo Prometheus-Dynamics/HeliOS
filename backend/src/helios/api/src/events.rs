@@ -218,10 +218,21 @@ impl Watch {
                     return;
                 }
                 self.desired_revision = Some(revision);
+                let view = StateView::from_snapshot(*snapshot);
+                // A stored graph helios-engine refreshed from the plugins is stored as its next
+                // revision, once, from the snapshot that names it (`routes::pipelines`). Not
+                // polled: this runs on the observed-state changes the watch delivers anyway.
+                if routes::pipelines::has_refreshed_plans(&view) {
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) = routes::pipelines::store_refreshed_graphs(&state).await {
+                            tracing::warn!(error = %error.message, "refreshed graphs not stored yet");
+                        }
+                    });
+                }
                 if !active {
                     return;
                 }
-                let view = StateView::from_snapshot(*snapshot);
                 if self.seen.orion_up != Some(true) {
                     state.events.publish("orion", serde_json::json!({ "reachable": true, "desired_revision": view.desired_revision }));
                     self.seen.orion_up = Some(true);

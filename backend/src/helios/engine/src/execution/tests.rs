@@ -42,6 +42,7 @@ use super::{
 use crate::{
     model::{ContextValue, ExecutionBinding, FrameRequestOptions, GraphRef, PluginRequirement},
     plugins::{PluginLoadResult, load_plugins},
+    provider::publish::graph_digest,
 };
 
 /// Calibration uncertainty reaches the pose nodes: solved versus estimated covariances.
@@ -507,6 +508,37 @@ fn document_requires_must_name_the_plugins_of_its_nodes() {
 
     assert_eq!(snapshot.sessions[0].status, ExecutionSessionStatus::Failed);
     assert!(snapshot.sessions[0].message.as_deref().is_some_and(|message| message.contains("`requires` does not list plugin(s) eidos")), "{:?}", snapshot.sessions[0].message);
+}
+
+/// A stored graph with a setting on a port its plugin no longer has is refreshed once: the
+/// refreshed document is written to the plan directory and named in the plan (helios-api stores it
+/// as the pipeline's next revision), and loading that document again finds nothing to refresh.
+#[test]
+fn a_stored_graph_with_a_retired_setting_is_refreshed_once() {
+    let plugins = TestPlugins::load();
+    let mut value: serde_json::Value = serde_json::from_str(&passthrough_document(&plugins)).expect("document json");
+    let node = value["graph"]["nodes"].as_array_mut().expect("nodes").iter_mut().find(|node| node["id"].as_str().is_some_and(|id| id.contains("pass"))).expect("the pass node");
+    node["const_inputs"].as_array_mut().expect("const inputs").push(serde_json::json!(["retired_tuning", {"type": "Int", "value": 7}]));
+    let stored = value.to_string();
+
+    // Loaded from the store: the setting is dropped and the refreshed document is written.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut resident = ResidentExecutionSet::default().with_plan_dir(dir.path().to_path_buf());
+    let snapshot = resident.sync_workloads(&plugins.execution(), &[workload("workload.retired", stored.clone(), Vec::new())], None, 42);
+    assert!(artifact(&snapshot, "execution.plan").is_some(), "{:?}", snapshot.sessions);
+    let plan = artifact_json(&snapshot.artifacts, "execution.plan");
+    assert_eq!(plan["refreshed"]["from"], graph_digest(&stored), "{plan}");
+    let file = PathBuf::from(plan["refreshed"]["file"].as_str().expect("refreshed file"));
+    let persisted = std::fs::read_to_string(&file).expect("the refreshed graph is written");
+    assert!(!persisted.contains("retired_tuning"), "the retired setting is gone from the refreshed graph");
+
+    // Loaded again from what was written: nothing to refresh, so nothing is written again.
+    let mut again = ResidentExecutionSet::default().with_plan_dir(dir.path().join("again"));
+    let snapshot = again.sync_workloads(&plugins.execution(), &[workload("workload.retired", persisted, Vec::new())], None, 43);
+    let plan = artifact_json(&snapshot.artifacts, "execution.plan");
+    assert!(plan.get("refreshed").is_none(), "{plan}");
+    let written = std::fs::read_dir(dir.path().join("again")).map(|entries| entries.flatten().any(|entry| entry.file_name().to_string_lossy().ends_with(".refreshed.json")));
+    assert!(!written.unwrap_or(false), "no refreshed graph is written the second time");
 }
 
 #[test]

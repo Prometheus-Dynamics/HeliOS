@@ -11,6 +11,7 @@ use daedalus::{
 
 use super::ExecutionError;
 use crate::model::{ExecutionWorkload, GraphRef, LoadedPlugin};
+use crate::provider::publish::graph_digest;
 
 pub(crate) type ResidentHostGraph = HostGraph<HandlerRegistry>;
 
@@ -42,6 +43,8 @@ pub(crate) struct CompiledWorkloadGraph {
     /// interface.
     pub plan: serde_json::Value,
     pub metrics_level: MetricsLevel,
+    /// Set when the stored graph was refreshed from the plugins on this compile.
+    pub refreshed: Option<RefreshedGraph>,
 }
 
 /// Validate plugin requirements, parse the workload's `GraphDocument` and compile it against
@@ -65,12 +68,22 @@ pub(crate) fn compile_workload_graph(
     // its port lists follow the installed plugins on every compile. A setting on a port the plugin
     // no longer has (Eidos folds tuning ports into fixed values) is dropped, and logged with its
     // value; a wire to such a port still fails to plan.
-    for node in registry.refresh_graph_ports_with(&mut document.graph, RefreshPolicy { drop_stale_consts: true }).nodes {
+    let report = registry.refresh_graph_ports_with(&mut document.graph, RefreshPolicy { drop_stale_consts: true });
+    for node in &report.nodes {
         tracing::info!(workload = %workload.workload_id, node = %node.id, added_inputs = ?node.added_inputs, added_outputs = ?node.added_outputs, removed_inputs = ?node.removed_inputs, removed_outputs = ?node.removed_outputs, kept_inputs = ?node.kept_inputs, kept_outputs = ?node.kept_outputs, "stored graph ports refreshed from the plugins");
         if !node.dropped_consts.is_empty() {
             tracing::warn!(workload = %workload.workload_id, node = %node.id, dropped = ?node.dropped_consts, "stored settings dropped: the plugin no longer has these ports");
         }
     }
+    // The refreshed document is what the stored graph should be: helios-api stores it as the
+    // pipeline's next revision (`RefreshedGraph`), so the next load finds nothing to refresh.
+    let refreshed = match &workload.graph_ref {
+        GraphRef::InlineSpec(source) if report.changed() => {
+            let document_json = document.to_json().map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
+            Some(RefreshedGraph { from_digest: graph_digest(source), document: document_json })
+        }
+        _ => None,
+    };
     let host_alias = host_alias(&document);
     if !frame_inputs.is_empty() {
         declare_context_held(&mut document, &host_alias, frame_inputs)?;
@@ -86,7 +99,15 @@ pub(crate) fn compile_workload_graph(
     let input_ports = host_graph.host_inputs().iter().map(|port| port.name().to_string()).collect();
     let output_ports = host_graph.host_outputs().iter().map(|port| port.name().to_string()).collect();
     let plan = plan_introspection(&host_graph, requires, settings.metrics_level);
-    Ok(CompiledWorkloadGraph { host_graph, input_ports, output_ports, planning_ms, plan, metrics_level: settings.metrics_level })
+    Ok(CompiledWorkloadGraph { host_graph, input_ports, output_ports, planning_ms, plan, metrics_level: settings.metrics_level, refreshed })
+}
+
+/// A stored graph the plugins refreshed on compile (`compile_workload_graph`): the digest of the
+/// stored text it was read from, and the refreshed `GraphDocument` (JSON) to store in its place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RefreshedGraph {
+    pub from_digest: String,
+    pub document: String,
 }
 
 /// What the UI and API need to show a compiled graph: its host ports with their types, the
