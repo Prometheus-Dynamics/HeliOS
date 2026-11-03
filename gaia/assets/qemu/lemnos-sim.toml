@@ -1,4 +1,4 @@
-# Copied unchanged from Lemnos 2610455 packaging/sim/sim.toml (the pin in raze.toml): the simulated board's script,
+# Copied unchanged from Lemnos 01939e9 packaging/sim/sim.toml (the pin in raze.toml): the simulated board's script,
 # staged at /etc/lemnos/sim.toml for lemnosd --sim. Refresh it with the Lemnos pin.
 # The simulation script of a sim image (lemnosd --sim-script /etc/lemnos/sim.toml).
 # A still board, then a sequence of motions that repeats: a settle, a slow

@@ -31,7 +31,7 @@ stage_files = [
 ]
 
 # lemnosd --sim: Lemnos's own drop-in (ExecStart with --sim --sim-script) and its simulated board script,
-# copies of Lemnos 2610455's files (assets/qemu). The board definition stays the device package's /etc/lemnos/board.toml.
+# copies of Lemnos 01939e9's files (assets/qemu). The board definition stays the device package's /etc/lemnos/board.toml.
 [[stage.files]]
 id = "qemu-sim-lemnosd-dropin"
 src = "${assets}/qemu/lemnosd-sim.conf"
