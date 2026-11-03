@@ -58,9 +58,8 @@ config_overrides = [
   ["BR2_TARGET_ROOTFS_EXT2", "n"],
   ["BR2_TARGET_ROOTFS_SQUASHFS", "n"],
   ["BR2_TARGET_ROOTFS_EROFS", "y"],
-  # LZMA with 256 KiB physical clusters ("big pclusters"), tail packing,
-  # fragments and deduplication: the smallest image (the update download and
-  # the slot), decompressed by the kernel on demand.
+  # LZMA with big physical clusters, tail packing and fragments: a small image
+  # (the update download and the slot), decompressed by the kernel on demand.
   # LZMA level 6 as "custom compression": the same `mkfs.erofs -zlzma,6`, without
   # Buildroot's generic image compression, which BR2_TARGET_ROOTFS_EROFS_LZMA also turns on
   # (an unused `lzma -9` copy of the image, about 36 s per build).
@@ -73,7 +72,9 @@ config_overrides = [
   ["BR2_TARGET_ROOTFS_EROFS_ALL_FRAGMENTS", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_ZTAILPACKING", "y"],
   ["BR2_TARGET_ROOTFS_EROFS_FRAGMENTS", "y"],
-  ["BR2_TARGET_ROOTFS_EROFS_DEDUPE", "y"],
+  # No -Ededupe: mkfs.erofs runs dedupe on one thread only. On the Raze root it costs 69 s
+  # per build (79.6 s -> 10.5 s without) and saves 188 KiB (0.4%) (Gaia, 2026-11-03).
+  ["BR2_TARGET_ROOTFS_EROFS_DEDUPE", "n"],
   # Read-only root: no remount, and /var a tmpfs populated from a factory copy
   # by systemd-tmpfiles (helios-data-setup binds the persistent parts into it).
   ["BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW", "n"],
