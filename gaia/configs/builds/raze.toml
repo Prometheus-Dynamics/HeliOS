@@ -95,14 +95,14 @@ imports = [
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
 # read-only-root-safe device services, no udev hwdb, optional Vulkan layer.
-# Atlas d2e8ad6 (2026-11-03): the Raze package ships Lemnos's system looks as
+# Atlas 034663e (2026-11-03): the Raze package ships Lemnos's system looks as
 # /etc/lemnos/looks.d/system.toml and the ring's default_look, for Lemnos 50533a8
 # (only status.* built in). It must move together with the Lemnos source below.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "d2e8ad61dbfbf46d22886ee9bee1f2a06ca3d1eb"
+rev = "034663e54b82855f409c92b24afb14f9b7863390"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -119,7 +119,7 @@ rev = "d2e8ad61dbfbf46d22886ee9bee1f2a06ca3d1eb"
 # client helios-peripherals uses. Lemnos dev 01939e9: also Daedalus's lock and
 # Atlas ff07b83's manifest gaia_import. Lemnos 50533a8 (2026-11-03): built-in looks
 # are status.* only, the named looks are look files (the Atlas pin above stages
-# the system set), removed light keys are refused; Atlas d2e8ad6's gaia_import.
+# the system set), removed light keys are refused; Atlas 034663e's gaia_import.
 # backend/Cargo.lock keeps lemnos-ipc at 01939e9 until the next library pin
 # round (lemnos-ipc's wire is unchanged between the two).
 [[sources]]
