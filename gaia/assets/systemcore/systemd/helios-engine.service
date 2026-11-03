@@ -21,7 +21,7 @@ Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
 ExecStart=/usr/local/bin/helios-engine
 Restart=always
 RestartSec=2
-TimeoutStopSec=45
+TimeoutStopSec=10
 ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios /usr/local/var/log/helios
 WorkingDirectory=-/usr/local/var/lib/helios
 LimitNOFILE=65536

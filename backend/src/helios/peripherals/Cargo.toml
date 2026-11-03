@@ -28,6 +28,7 @@ workspace = true
 thiserror = { workspace = true }
 # Where every path lives (the image or a guest prefix): `config.rs`.
 helios-layout = { path = "../layout" }
+helios-shutdown = { path = "../shutdown" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

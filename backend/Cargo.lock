@@ -1684,6 +1684,7 @@ dependencies = [
  "helios-maps",
  "helios-recorder",
  "helios-robot",
+ "helios-shutdown",
  "hex",
  "hyper",
  "hyper-util",
@@ -1749,6 +1750,7 @@ dependencies = [
  "helios-layout",
  "helios-maps",
  "helios-robot",
+ "helios-shutdown",
  "libc",
  "nix",
  "notify",
@@ -1797,6 +1799,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "helios-layout",
+ "helios-shutdown",
  "lemnos-ipc",
  "lemnosd",
  "orion",
@@ -1836,6 +1839,15 @@ name = "helios-robot"
 version = "1.0.1-dev"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "helios-shutdown"
+version = "1.0.1-dev"
+dependencies = [
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

@@ -1,10 +1,18 @@
 use helios_peripherals::{config::PeripheralConfig, runtime::PeripheralRuntime};
+use helios_shutdown::BLOCKING_GRACE;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     fmt().with_ansi(ansi_for_terminal()).finish().with(log_filter()).init();
 
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(run());
+    // Blocking work still in flight (a read, a join) must not hold the stop: its threads end with the process.
+    runtime.shutdown_timeout(BLOCKING_GRACE);
+    result
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = PeripheralRuntime::from_config(PeripheralConfig::from_env()?)?;
     runtime.run_until_stopped().await?;
     Ok(())

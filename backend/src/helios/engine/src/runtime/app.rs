@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use helios_shutdown::{STAGE_TIMEOUT, Shutdown};
 use orion::{
     client::{ClientError, ControlPlaneEventStream, LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalServiceRetryPolicy},
     control_plane::{ClientEventKind, StateSnapshot, WorkloadRecord},
 };
 use tokio::{
-    signal,
     sync::mpsc,
     time::{Duration, Instant, interval, sleep, sleep_until},
 };
@@ -59,7 +59,27 @@ impl EngineApp {
         Ok(Self { config, publisher, node_runtime, nt4_status: std::sync::Mutex::default() })
     }
 
+    /// Runs until SIGINT or SIGTERM (or a failure), then stops the graphs: their threads are asked
+    /// to stop and waited for at most `STAGE_TIMEOUT` (see `helios_shutdown`).
     pub async fn run_until_stopped(&self) -> Result<(), EngineRuntimeError> {
+        let shutdown = Shutdown::new("helios-engine");
+        shutdown.listen();
+        let stop = shutdown.token();
+        // Owned here, not by `run`, so the graphs are stopped below whether `run` ends or is cut short.
+        let mut sessions: Option<ResidentExecutionSet> = None;
+        let result = tokio::select! {
+            result = self.run(&mut sessions) => result,
+            _ = stop.cancelled() => Ok(()),
+        };
+        if let Some(sessions) = sessions.take() {
+            // Dropping the set stops each graph and joins its thread.
+            shutdown.stage("graph threads", STAGE_TIMEOUT, move || drop(sessions));
+        }
+        shutdown.finish();
+        result
+    }
+
+    async fn run(&self, sessions: &mut Option<ResidentExecutionSet>) -> Result<(), EngineRuntimeError> {
         let plugins = self.bootstrap().await?;
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<RuntimeEvent>();
         loop {
@@ -134,10 +154,12 @@ impl EngineApp {
         let mut current_state_snapshot = self.node_runtime.control_plane(format!("{}-control", self.publisher.executor_client_name()))?.fetch_state_snapshot().await.ok();
         let (nt4, nt4_status) = crate::nt4::spawn(self.config.nt4_settings_path.clone(), self.config.controller_facts_path.clone(), format!("helios-{}", self.config.node_id));
         *self.nt4_status.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(nt4_status);
-        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level })
-            .with_nt4(nt4)
-            .with_live(crate::live::spawn(self.config.live_socket_path.clone()))
-            .with_plan_dir(self.config.plan_dir.clone());
+        let execution_sessions = sessions.insert(
+            ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level })
+                .with_nt4(nt4)
+                .with_live(crate::live::spawn(self.config.live_socket_path.clone()))
+                .with_plan_dir(self.config.plan_dir.clone()),
+        );
         // Graphs run on their own threads when their input arrives; they signal here when they
         // produced something, and what they produced is published at most once per interval.
         let outputs_ready = execution_sessions.outputs_ready();
@@ -145,7 +167,7 @@ impl EngineApp {
         let mut publish_due: Option<Instant> = None;
         let mut last_publish = Instant::now();
         let mut reconcile_tick = interval(ENGINE_RECONCILE_INTERVAL);
-        self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+        self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
         info!(
             node_id = %self.config.node_id,
             plugin_count = plugins.builtins.len() + plugins.libraries.len(),
@@ -156,9 +178,6 @@ impl EngineApp {
 
         loop {
             tokio::select! {
-                _ = shutdown_requested() => {
-                    return Ok(());
-                }
                 _ = reconcile_tick.tick() => {
                     if let Ok(snapshot) = self
                         .node_runtime
@@ -184,7 +203,7 @@ impl EngineApp {
                         current_workloads = snapshot_workloads;
                         current_state_snapshot = Some(snapshot);
                         if should_publish {
-                            self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                            self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                         }
                     }
                 }
@@ -195,7 +214,7 @@ impl EngineApp {
                     if Instant::now() >= last_publish + publish_interval {
                         publish_due = None;
                         last_publish = Instant::now();
-                        self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                        self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                     } else if publish_due.is_none() {
                         publish_due = Some(last_publish + publish_interval + PUBLISH_FALLBACK_DELAY);
                     }
@@ -204,13 +223,13 @@ impl EngineApp {
                 _ = sleep_until(publish_due.unwrap_or_else(Instant::now)), if publish_due.is_some() => {
                     publish_due = None;
                     last_publish = Instant::now();
-                    self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                    self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                 }
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::WorkloadsChanged(workloads)) => {
                             current_workloads = workloads;
-                            self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                            self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                         }
                         Some(RuntimeEvent::StateSnapshotUpdated(snapshot)) => {
                             let snapshot_workloads = snapshot
@@ -229,7 +248,7 @@ impl EngineApp {
                             current_workloads = snapshot_workloads;
                             current_state_snapshot = Some(*snapshot);
                             if should_publish {
-                                self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
+                                self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                             }
                         }
                         Some(RuntimeEvent::WorkloadWatchStopped(error)) => {
@@ -430,21 +449,4 @@ fn now_ms() -> u64 {
 
 fn is_retryable_no_message(error: &EngineRuntimeError) -> bool {
     matches!(error, EngineRuntimeError::Client(ClientError::NoMessageAvailable)) || matches!(error, EngineRuntimeError::Publish(EnginePublishError::Client(ClientError::NoMessageAvailable)))
-}
-
-/// Resolves on SIGINT or SIGTERM (what `systemctl stop` sends), so shutdown runs the same
-/// cleanup either way.
-async fn shutdown_requested() {
-    let mut terminate = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
-        Ok(stream) => stream,
-        Err(error) => {
-            tracing::warn!(error = %error, "cannot listen for SIGTERM; only SIGINT stops the service");
-            let _ = signal::ctrl_c().await;
-            return;
-        }
-    };
-    tokio::select! {
-        _ = signal::ctrl_c() => {}
-        _ = terminate.recv() => {}
-    }
 }

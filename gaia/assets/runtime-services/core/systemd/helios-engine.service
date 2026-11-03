@@ -32,7 +32,7 @@ EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-engine
 Restart=always
 RestartSec=2
-TimeoutStopSec=45
+TimeoutStopSec=10
 User=root
 # Primary group orion: orion-node admits the orion group (ORION_NODE_LOCAL_AUTH in orion-node.env).
 Group=orion

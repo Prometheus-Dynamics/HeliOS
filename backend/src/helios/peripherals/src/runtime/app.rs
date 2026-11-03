@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
 
+use helios_shutdown::{STAGE_TIMEOUT, Shutdown};
 use orion::{
     client::{ActionReporter, ClientError, LocalNodeRuntime, LocalProviderEvent, LocalProviderService, LocalServiceRetryPolicy},
     control_plane::{ActionRequest, ActionTarget, LeaseRecord, config_json_value},
@@ -8,7 +9,6 @@ use orion::{
 use serde::Deserialize;
 use styx::watch::{CompositeWatcher, LinuxVideoFsWatcher, WatchRuntime};
 use tokio::{
-    signal,
     sync::{Notify, mpsc},
     task::JoinHandle,
     time::{Duration, sleep},
@@ -215,20 +215,34 @@ impl PeripheralRuntime {
         }
     }
 
+    /// Runs until SIGINT or SIGTERM (or a failure), then stops: the runtime's loops end, and the
+    /// lemnosd connection (its fan override and raw claims) and the camera services are torn down,
+    /// each within `STAGE_TIMEOUT` (see `helios_shutdown`).
     pub async fn run_until_stopped(&self) -> Result<(), PeripheralRuntimeError> {
-        let result = self.run().await;
+        let shutdown = Shutdown::new("helios-peripherals");
+        shutdown.listen();
+        let stop = shutdown.token();
+        // Owned here, not by `run`, so the teardown below runs whether `run` ends or is cut short.
+        let mut state = RuntimeState::default();
+        let result = tokio::select! {
+            result = self.run(&mut state) => result,
+            _ = stop.cancelled() => Ok(()),
+        };
         if let Err(error) = &result {
             warn!(node_id = %self.config.node_id, error = %error, "peripherals runtime failed");
             self.set_health(ProviderHealth::Failed);
         }
         if let Some(bridge) = self.lemnosd.clone() {
             // Hands a running fan override back to the governor before the process exits.
-            let _ = tokio::task::spawn_blocking(move || bridge.stop()).await;
+            shutdown.stage("lemnosd connection", STAGE_TIMEOUT, move || bridge.stop());
         }
+        // Dropping a handle stops its camera service, which joins its capture threads.
+        shutdown.stage("camera services", STAGE_TIMEOUT, move || drop(state));
+        shutdown.finish();
         result
     }
 
-    async fn run(&self) -> Result<(), PeripheralRuntimeError> {
+    async fn run(&self, state: &mut RuntimeState) -> Result<(), PeripheralRuntimeError> {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<RuntimeEvent>();
         let refresh_notify = self.refresh_handle.notify.clone();
         let refresh_event_tx = event_tx.clone();
@@ -277,13 +291,12 @@ impl PeripheralRuntime {
             LocalProviderEvent::LeasesChanged { leases, .. } => leases,
             LocalProviderEvent::BootstrapStateSnapshot(_) | LocalProviderEvent::StateSnapshot { .. } => Vec::new(),
         };
-        let mut state = RuntimeState::default();
-        let mut current_snapshot = self.refresh_inventory_with_state(&current_leases, &state).await?;
+        let mut current_snapshot = self.refresh_inventory_with_state(&current_leases, state).await?;
         state.camera_services.sync(&self.config, &current_snapshot.resources);
         // The state snapshot that follows the leases is the readiness point; actions no longer
         // come from the desired state (they arrive as Orion action requests below).
         let _ = next_provider_event_retrying(&mut provider_subscription).await?;
-        self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
+        self.publish_snapshot(&current_snapshot, &current_leases, state).await?;
         self.set_health(ProviderHealth::Ready);
 
         // Action requests: one watch on the provider, each request handed to the event loop, which
@@ -320,24 +333,23 @@ impl PeripheralRuntime {
 
         loop {
             tokio::select! {
-                _ = shutdown_requested() => return Ok(()),
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::RefreshRequested) => {
                             current_snapshot = self.probe_inventory();
                             state.camera_services.sync(&self.config, &current_snapshot.resources);
-                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
+                            self.publish_or_retry(&current_snapshot, &current_leases, state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::LemnosdChanged) => {
                             current_snapshot = self.with_lemnosd_resources(current_snapshot);
-                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
+                            self.publish_or_retry(&current_snapshot, &current_leases, state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::LeaseUpdate(leases)) => {
                             current_leases = leases;
-                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
+                            self.publish_or_retry(&current_snapshot, &current_leases, state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::Republish) => {
-                            if self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await {
+                            if self.publish_or_retry(&current_snapshot, &current_leases, state, &retry_tx).await {
                                 self.set_health(ProviderHealth::Ready);
                             }
                         }
@@ -346,7 +358,7 @@ impl PeripheralRuntime {
                         }
                         Some(RuntimeEvent::ActionFinished { resource_id, feedback }) => {
                             state.resource_action_feedback.insert(resource_id, feedback);
-                            self.publish_or_retry(&current_snapshot, &current_leases, &state, &retry_tx).await;
+                            self.publish_or_retry(&current_snapshot, &current_leases, state, &retry_tx).await;
                         }
                         Some(RuntimeEvent::ProviderWatchStopped(error)) => {
                             warn!(node_id = %self.config.node_id, error = %error, "provider watch stopped");
@@ -553,23 +565,6 @@ fn resource_action_spec(kind: &str, arg: serde_json::Value) -> Result<ResourceAc
         FAN_OVERRIDE_ACTION => FanOverrideRequest::from_args(arg.pwm, arg.duty, arg.duration_ms).map(ResourceActionSpec::FanOverride),
         FAN_RELEASE_ACTION => Ok(ResourceActionSpec::FanRelease),
         other => Err(format!("unknown action kind {other:?}")),
-    }
-}
-
-/// Resolves on SIGINT or SIGTERM (what `systemctl stop` sends), so shutdown runs the same
-/// cleanup either way.
-async fn shutdown_requested() {
-    let mut terminate = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
-        Ok(stream) => stream,
-        Err(error) => {
-            tracing::warn!(error = %error, "cannot listen for SIGTERM; only SIGINT stops the service");
-            let _ = signal::ctrl_c().await;
-            return;
-        }
-    };
-    tokio::select! {
-        _ = signal::ctrl_c() => {}
-        _ = terminate.recv() => {}
     }
 }
 

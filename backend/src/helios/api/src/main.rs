@@ -88,7 +88,9 @@ async fn run() -> anyhow::Result<()> {
     let config = ApiConfig::from_env().context("invalid helios-api configuration")?;
     let bind = config.bind;
     let state = AppState::new(config);
-    let _stop = server::stop_on_signal(state.shutdown.clone());
+    // SIGTERM or SIGINT cancels `state.shutdown`, which the server watches (`server::serve`).
+    let stop = helios_shutdown::Shutdown::with_token("helios-api", state.shutdown.clone());
+    stop.listen();
     let _watcher = events::spawn_state_watcher(state.clone());
     // The board's node id changed from `node-local`: its state and pipelines follow it, once (`migration.rs`).
     let _node_id_migration = helios_api::migration::spawn(state.clone());
@@ -127,7 +129,9 @@ async fn run() -> anyhow::Result<()> {
     info!(%bind, "helios-api listening");
     info!(mode = state.auth.mode().as_str(), "device security");
     // Peer addresses feed the per-client sign-in rate limit. A stop (SIGTERM from systemd) ends it.
-    server::serve(listener, state).await.context("helios-api server failed")?;
+    let served = server::serve(listener, state).await;
+    stop.finish();
+    served.context("helios-api server failed")?;
     info!("helios-api stopped");
     Ok(())
 }

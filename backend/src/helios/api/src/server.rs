@@ -1,12 +1,12 @@
-//! The HTTP server's lifetime. A stop (SIGTERM or SIGINT, what `systemctl stop` sends) cancels
-//! `AppState::shutdown`, which ends the long-lived streams (events, logs, updates, previews and
-//! the live sockets) at once. The server then finishes what is left within `GRACE`, so a client
-//! that never lets go cannot hold a stop (an upgrade waits on it, and systemd would SIGKILL it).
+//! The HTTP server's lifetime. A stop (SIGTERM or SIGINT, what `systemctl stop` sends; see
+//! `helios_shutdown`) cancels `AppState::shutdown`, which ends the long-lived streams (events,
+//! logs, updates, previews and the live sockets) at once. The server then finishes what is left
+//! within `GRACE`, so a client that never lets go cannot hold a stop (an upgrade waits on it, and
+//! systemd would SIGKILL it).
 
 use std::{net::SocketAddr, time::Duration};
 
-use tokio::{net::TcpListener, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
+use tokio::net::TcpListener;
 
 use crate::{SharedState, router};
 
@@ -15,25 +15,6 @@ pub const GRACE: Duration = Duration::from_secs(2);
 /// How long blocking work (a camera read, a recording's write) may run on after the runtime is
 /// asked to stop. Its threads end with the process.
 pub const BLOCKING_GRACE: Duration = Duration::from_secs(2);
-
-/// Cancels `shutdown` on SIGINT or SIGTERM.
-pub fn stop_on_signal(shutdown: CancellationToken) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let terminate = async {
-            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                Ok(mut stream) => {
-                    stream.recv().await;
-                }
-                Err(_) => std::future::pending::<()>().await,
-            }
-        };
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate => {}
-        }
-        shutdown.cancel();
-    })
-}
 
 /// Serves `state`'s router on `listener` until `state.shutdown` is cancelled, then returns once
 /// the connections have finished or `GRACE` has passed.

@@ -1,0 +1,19 @@
+[package]
+name = "helios-shutdown"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# How a HeliOS service stops within a bounded time (see src/lib.rs). Shared by the service binaries.
+[lib]
+name = "helios_shutdown"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }

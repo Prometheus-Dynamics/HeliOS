@@ -1,9 +1,16 @@
 use helios_engine::{config::EngineConfig, runtime::EngineApp};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_target(true).compact().with_ansi(ansi_for_terminal()).finish().with(log_filter()).init();
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(run());
+    // Blocking work still in flight (a read, a join) must not hold the stop: its threads end with the process.
+    runtime.shutdown_timeout(helios_shutdown::BLOCKING_GRACE);
+    result
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = EngineConfig::from_env()?;
     let app = EngineApp::from_config(config)?;
     app.run_until_stopped().await?;

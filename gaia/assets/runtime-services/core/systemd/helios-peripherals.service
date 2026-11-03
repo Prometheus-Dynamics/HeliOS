@@ -19,7 +19,7 @@ ExecStart=/usr/bin/helios-peripherals
 # and lemnosd's own ExecStopPost hands every fan back when lemnosd stops.
 Restart=always
 RestartSec=2
-TimeoutStopSec=30
+TimeoutStopSec=10
 User=root
 # Primary group orion: orion-node admits the orion group (ORION_NODE_LOCAL_AUTH in orion-node.env).
 Group=orion
