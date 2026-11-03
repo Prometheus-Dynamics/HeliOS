@@ -73,6 +73,8 @@ pub struct AppState {
     pub recorder: helios_recorder::Recorder,
     /// Live journal tails, one `journalctl -f` per filter shared by its viewers.
     pub log_followers: routes::logs::LogFollowers,
+    /// The per-minute budget of the UI's error reports (`POST /v1/logs/client`).
+    pub client_reports: routes::logs::ClientReportBudget,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
     /// Held while a peripheral action runs: helios-api runs one at a time, so its callers queue
@@ -123,6 +125,7 @@ impl AppState {
             calibrations: calibration_capture::CalibrationSessions::default(),
             recorder: helios_recorder::Recorder::default(),
             log_followers: routes::logs::LogFollowers::default(),
+            client_reports: routes::logs::ClientReportBudget::default(),
             store,
             events,
             auth: auth::Auth::new(config.auth_file.clone()),

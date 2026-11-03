@@ -4,6 +4,7 @@
 
 import { API_BASE, MOCK } from "./mode";
 import { mockDevice } from "./mock-device";
+import { excerpt, reportFailure, setReportCsrf } from "./client-log";
 import type {
   ApiErrorBody,
   ApiErrorCode,
@@ -60,7 +61,10 @@ import type { LedSettings, LedState, LedsResponse } from "./leds";
 import type { EidosExport, PartSummary, RecorderSettings, RecordingListing, RecordingStatus } from "./recording-types";
 
 export function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.needs ? `${error.message} (needs: ${error.needs})` : error.message;
+  if (error instanceof ApiError) {
+    const text = error.needs ? `${error.message} (needs: ${error.needs})` : error.message;
+    return error.ref ? `${text} (ref ${error.ref})` : text;
+  }
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return "Something went wrong";
@@ -72,6 +76,8 @@ export class ApiError extends Error {
     readonly code: ApiErrorCode | "network",
     message: string,
     readonly needs?: string,
+    /** The id the device has this failure under (`client-log.ts`), to quote to a support person. */
+    readonly ref?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -131,6 +137,7 @@ export function mapDownloadUrl(id: string, nodeId?: string): string {
 // the sign-in screen.
 let csrfToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+setReportCsrf(() => csrfToken);
 
 export const session = {
   setCsrf(token: string | null | undefined) {
@@ -161,15 +168,20 @@ async function request<T>(method: string, path: string, options: { query?: Query
   try {
     response = await fetch(url(path, options.query), { method, headers, body, credentials: "same-origin" });
   } catch (error) {
-    throw new ApiError(0, "network", `Cannot reach the device: ${(error as Error).message}`);
+    const message = `Cannot reach the device: ${(error as Error).message}`;
+    const ref = reportFailure({ kind: "api", message, method, path, status: 0 });
+    throw new ApiError(0, "network", message, undefined, ref);
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   const json = text ? safeJson(text) : undefined;
   if (!response.ok) {
     const err = (json as ApiErrorBody | undefined)?.error;
+    const message = err?.message ?? `${method} ${path} failed with HTTP ${response.status}`;
+    // Every failed call is reported (the device keeps the status, route and the actions before it).
+    const ref = reportFailure({ kind: "api", message, method, path, status: response.status, body: excerpt(text) });
     if (response.status === 401 && !path.startsWith("/v1/auth/")) onUnauthorized?.();
-    throw new ApiError(response.status, err?.code ?? "internal", err?.message ?? `${method} ${path} failed with HTTP ${response.status}`, err?.needs);
+    throw new ApiError(response.status, err?.code ?? "internal", message, err?.needs, ref);
   }
   return json as T;
 }

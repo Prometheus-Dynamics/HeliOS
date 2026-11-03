@@ -3,6 +3,8 @@
   import "../app.css";
   import "@xyflow/svelte/dist/style.css";
   import Toasts from "#lib/components/shell/Toasts.svelte";
+  import { startClientLog } from "#lib/api/client-log.js";
+  import { toasts } from "#lib/stores/toasts.svelte.js";
   import UpdateBanner from "#lib/shell/UpdateBanner.svelte";
   import { commands } from "#lib/core/commands.svelte.js";
   import { identity } from "#lib/core/identity.svelte.js";
@@ -42,6 +44,9 @@
     prefs.apply();
     shell.fromHash();
   });
+
+  // The UI's own failures (errors, rejections, failed API calls) go to the device's journal.
+  $effect(() => startClientLog((message) => toasts.error(message)));
 
   $effect(() => {
     // Start with something to show in panes that follow the selection.

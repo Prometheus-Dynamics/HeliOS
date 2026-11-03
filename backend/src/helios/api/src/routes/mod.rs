@@ -20,7 +20,7 @@ pub mod update;
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{DefaultBodyLimit, MatchedPath, Request, State},
     http::{HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -72,6 +72,8 @@ pub fn router(state: SharedState) -> Router {
         // Logs and events
         .route("/v1/logs", get(logs::query))
         .route("/v1/logs/stream", get(logs::stream))
+        // The UI's own failures (errors, rejected promises, failed API calls), for the journal (`logs::client_report`)
+        .route("/v1/logs/client", post(logs::client_report).layer(DefaultBodyLimit::max(logs::CLIENT_BODY_LIMIT)))
         .route("/v1/events", get(events::events))
         // Every pipeline output of every tick (helios-engine's live socket)
         .route("/v1/live/ws", get(crate::live_outputs::live_ws))
@@ -150,7 +152,33 @@ pub fn router(state: SharedState) -> Router {
         // CORS is outermost so preflights are answered before auth.
         .layer(middleware::from_fn_with_state(state.clone(), auth::middleware))
         .layer(middleware::from_fn_with_state(state.clone(), cors))
+        // Outermost: every 5xx answer, whichever layer or route produced it, is written to the journal.
+        .layer(middleware::from_fn(log_server_errors))
         .with_state(state)
+}
+
+/// Writes every 5xx answer to the journal: the method, the route (its pattern when one matched),
+/// the status and the error the answer carries (`ApiError`), so a failure can be read from the log.
+async fn log_server_errors(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
+    let response = next.run(request).await;
+    if response.status().is_server_error() {
+        let detail = failure_detail(response.extensions().get::<ApiError>());
+        tracing::error!(target: "helios_api::http", %method, %route, status = response.status().as_u16(), error = %detail, "request failed with a server error");
+    }
+    response
+}
+
+/// The error an answer carries, as one line: its code, message and what it needs.
+fn failure_detail(error: Option<&ApiError>) -> String {
+    match error {
+        Some(error) => match &error.needs {
+            Some(needs) => format!("{:?}: {} (needs: {needs})", error.code, error.message),
+            None => format!("{:?}: {}", error.code, error.message),
+        },
+        None => "no error body (the handler returned the status alone)".to_string(),
+    }
 }
 
 /// Optional CORS for a UI served from another origin (`HELIOS_API_CORS_ORIGIN`).

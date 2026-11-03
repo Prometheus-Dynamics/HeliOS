@@ -123,6 +123,8 @@ impl IntoResponse for ApiError {
         if self.code == ErrorCode::Unauthorized {
             response.headers_mut().insert(axum::http::header::WWW_AUTHENTICATE, axum::http::HeaderValue::from_static("Bearer realm=\"helios\""));
         }
+        // The error stays on the response for the server's failure log (`routes::log_server_errors`).
+        response.extensions_mut().insert(self);
         response
     }
 }

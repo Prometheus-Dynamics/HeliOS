@@ -1,6 +1,7 @@
 // Which workspace is on screen. Kept in the URL hash too, so a link or a
 // reload lands on the same screen.
 
+import { breadcrumbRoute } from "../api/client-log";
 import { loadRaw, save } from "./persist";
 import { pane, workspaces } from "./workspace.svelte";
 
@@ -19,6 +20,7 @@ class ShellStore {
     workspaces.maximized = null;
     workspaces.focusedStack = null;
     save("active-workspace", id);
+    breadcrumbRoute(id);
     if (typeof location !== "undefined" && location.hash !== `#${id}`) history.replaceState(null, "", `#${id}`);
   }
 

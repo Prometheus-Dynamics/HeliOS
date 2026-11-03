@@ -63,6 +63,8 @@ Every error has the same body:
 | 503 | `backend_unavailable` | The backend exists but is unreachable right now (Orion down, systemctl or journalctl missing, camera service silent) |
 | 500 | `internal` | A bug |
 
+Every answer of 500 or more is also written to the journal (target `helios_api::http`) with its method, route, status and error, so a server failure can be read from `GET /v1/logs` without the client's report.
+
 A 501 means the backend is missing, not that a request failed. Clients should show the feature
 as unavailable and not retry.
 
@@ -101,6 +103,36 @@ as unavailable and not retry.
 | `GET` | `/v1/logs?unit=&lines=200&since_ms=&level=info` | `{"lines": [{at_ms, level, unit, message, pid}]}`. This is also the shape Atlas's log reader accepts. `level` is the lowest level included: `error`, `warn`, `info` or `debug` |
 | `GET` | `/v1/logs/stream?unit=&level=` | SSE. One `log` event per journal line, starting with the last 50 lines |
 | `GET` | `/v1/events?types=pipeline,update` | SSE. See [Event stream](./websockets.md) |
+| `POST` | `/v1/logs/client` | The UI's own failures, for the journal (see below). `204` on success |
+
+#### `POST /v1/logs/client`: the UI's failures
+
+The HeliOS UI reports what fails in it: uncaught errors, unhandled promise rejections, and every API call that fails or answers 400 or more. Each report goes to the journal as target `helios_ui` (WARN for a failed API call, ERROR otherwise), so `GET /v1/logs` and the support bundle show what failed, where, and after which actions. The UI shows the report's `ui-` id with the error, so a user can quote it.
+
+```json
+{
+  "reports": [
+    {
+      "id": "ui-3f9a1c2e",
+      "kind": "api",
+      "at_ms": 1793673558000,
+      "message": "Cannot reach the device: ...",
+      "route": "#tune",
+      "method": "PUT",
+      "path": "/v1/pipelines/p1/bindings/dictionary",
+      "status": 500,
+      "body": "{\"error\":{\"code\":\"internal\",...}}",
+      "after": ["11:02:07 route #tune", "11:02:09 click button \"Deploy\""]
+    }
+  ],
+  "dropped": 0
+}
+```
+
+- `kind` is `error`, `rejection` or `api`. `status` is `0` when no answer came. `body` is an excerpt of up to 512 bytes; `stack` and `source` appear for thrown errors.
+- `after` holds the last 20 user actions: screen changes and the names of clicked controls. Field values, typed text and request bodies are never sent.
+- At most 20 reports per request, a 96 KiB body, and 120 reports a minute from all UI clients together. Past the minute's budget the request is `429` and the UI drops the reports. `dropped` counts the reports the UI dropped before sending.
+- Protected like the other `/v1/logs` routes: on a secured device it needs a session (and the CSRF header) or an API token.
 
 ### Cameras
 

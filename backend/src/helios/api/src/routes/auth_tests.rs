@@ -112,6 +112,7 @@ async fn secured_mode_rejects_unauthenticated_requests() {
         ("GET", "/v1/auth/tokens"),
         ("GET", "/v1/logs"),
         ("GET", "/v1/logs/stream"),
+        ("POST", "/v1/logs/client"),
         ("GET", "/v1/events"),
         ("GET", "/v1/metrics"),
         ("GET", "/v1/device"),
