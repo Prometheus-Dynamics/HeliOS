@@ -102,11 +102,13 @@ imports = [
 # FAT auto + 64M free, data 8M free; /data grows on first boot).
 # Atlas 4c448ec: r8152's rtl_nic firmware ships from the device package (needs Gaia cf62b48+).
 # Atlas 48aba15: in-tree modules shadowed by Styx's updates/ modules are dropped (Gaia f90bed4+).
+# Atlas b4de2e1: slots stage-url installs an uploaded .img.xz (the only update image); the
+# management-link rollback watch no longer holds up boot completion.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "48aba1563cb070b09a0df89cfe2da85401a3a897"
+rev = "b4de2e1c519d38bc4e3326cc4144e29eed3f47df"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
