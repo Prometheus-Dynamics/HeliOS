@@ -16,7 +16,8 @@ export default defineConfig({
   retries: 0,
   forbidOnly: !!env.CI,
   timeout: 120_000,
-  expect: { timeout: 10_000 },
+  // 30 s: four parallel workers cold-start the dev server together, and the first page can take longer than 10 s.
+  expect: { timeout: 30_000 },
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   outputDir: "test-results",
   use: {
