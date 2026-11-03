@@ -95,11 +95,14 @@ imports = [
 # libcamera 0.7.2, the A/B update writer (/usr/lib/board/update,
 # board-image-slots) for the same .img.xz that is flashed,
 # read-only-root-safe device services, no udev hwdb, optional Vulkan layer.
+# Atlas d2e8ad6 (2026-11-03): the Raze package ships Lemnos's system looks as
+# /etc/lemnos/looks.d/system.toml and the ring's default_look, for Lemnos 50533a8
+# (only status.* built in). It must move together with the Lemnos source below.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "ff07b836271d12515fa9beaf75913a394e77adf0"
+rev = "d2e8ad61dbfbf46d22886ee9bee1f2a06ca3d1eb"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -114,12 +117,16 @@ rev = "ff07b836271d12515fa9beaf75913a394e77adf0"
 # build group for lemnosd and lemnos-ctl, the host-build layer imported
 # above). backend/Cargo.lock pins the same commit for lemnos-ipc, the lemnosd
 # client helios-peripherals uses. Lemnos dev 01939e9: also Daedalus's lock and
-# Atlas ff07b83's manifest gaia_import.
+# Atlas ff07b83's manifest gaia_import. Lemnos 50533a8 (2026-11-03): built-in looks
+# are status.* only, the named looks are look files (the Atlas pin above stages
+# the system set), removed light keys are refused; Atlas d2e8ad6's gaia_import.
+# backend/Cargo.lock keeps lemnos-ipc at 01939e9 until the next library pin
+# round (lemnos-ipc's wire is unchanged between the two).
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "01939e9d32fa1522bda04ed3fdb718aa9edf9179"
+rev = "50533a8d79cbac8dbc8986b6d3042f5ff6c18b16"
 
 # Orion dev 0703507 (Gaia config v3 packaging layers; code as 6a70758, the backend/Cargo.toml pin: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).

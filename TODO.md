@@ -18,11 +18,8 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       protocol 1 pin (was "v7"; the user, 2026-11-03: unreleased, so 1) together with Atlas's
       Orion merge (robot-env `ORION_NODE_PEER_AUTO_TRUST` becomes `private-link`), and the
       SystemCore package with 1c062333 (peer nets cover 172.31.0.0/16).
-      **Lemnos past c87819a moves the named looks out of lemnosd** (built-ins are `status.*` only):
-      the same pin must ship, in the Raze device package (Atlas `devices/raze`) and the flasher,
-      Lemnos's `examples/looks/looks.d/system.toml` (the `system.*` update/boot/locate looks its
-      intents name) in `/etc/lemnos/looks.d/`, and `default_look = "status.ok"` in the ring's board
-      config. HeliOS uses only its own `helios.*` look file and `status.off`, so no presets are needed.
+      Lemnos look change-over: done in Atlas d2e8ad6 (system looks file, ring default_look) with
+      gaia/configs/builds/raze.toml on Atlas d2e8ad6 + Lemnos 50533a8; not built yet.
       Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
 - [ ] **Role UI.** Why: the frozen PIT/ROBOT role split. Done when: role switching works with real
       clicks on a Raze through the SystemCore, and the UI is reviewed visually. Blocked by: nothing.
