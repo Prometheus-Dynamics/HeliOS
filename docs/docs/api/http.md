@@ -83,6 +83,9 @@ as unavailable and not retry.
 | `GET` `PUT` | `/v1/device/leds` | API, lemnosd | The status ring's settings (enabled, brightness, ambient, forward LED and direction, FOV, tally, boost) and its live state; see [Status ring](../leds.md). `PUT` takes the settings object |
 | `POST` | `/v1/device/leds/locate` | API, lemnosd | Shows the locate state for `{"seconds": 1..60}` (default 10) |
 | `POST` | `/v1/device/leds/preview` | API, lemnosd | Shows a state for `{"state": "<state>" \| null, "seconds": 1..30}` (default 4); `null` ends it |
+| `GET` | `/v1/device/identities` | API store | Every stored identity, by object id: `{name?, icon?, color}`. An object with none stored takes the defaults |
+| `PUT` `DELETE` | `/v1/device/identities/{id}` | API store | `PUT` keeps the identity of an object and answers every identity; `DELETE` forgets it (its defaults apply again) |
+| `GET` `PUT` | `/v1/device/setup` | API store | `{onboarded}`: whether first-time setup is done. `PUT` takes the same object |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
 | `GET` | `/v1/metrics` | Orion, kernel | CPU (total and per core), load, memory, temperature (the hottest sensor), throttling, disk, plus `metrics: [{id,label,value,unit,warn_above}]` for Atlas |
 | `GET` | `/v1/system/health` | helios-diagnostics | The full `helios-diagnostics doctor` report |
@@ -133,6 +136,22 @@ The HeliOS UI reports what fails in it: uncaught errors, unhandled promise rejec
 - `after` holds the last 20 user actions: screen changes and the names of clicked controls. Field values, typed text and request bodies are never sent.
 - At most 20 reports per request, a 96 KiB body, and 120 reports a minute from all UI clients together. Past the minute's budget the request is `429` and the UI drops the reports. `dropped` counts the reports the UI dropped before sending.
 - Protected like the other `/v1/logs` routes: on a secured device it needs a session (and the CSRF header) or an API token.
+
+### Peers
+
+The gateway: a robot's other HeliOS nodes (Orion cluster `robot-<team>`) and the HeliOS APIs they serve.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/peers` | The robot this device belongs to: its `security` state and its peers, each with whether this device's gateway reaches it |
+| `ANY` | `/v1/peers/{node}/{*rest}` | Proxies the request to peer `{node}`'s HeliOS API at `/v1/{rest}`. Two paths are not HeliOS API paths: `board/identity` (the board agent's identity document) and `orion` (the Orion tunnel, an HTTP upgrade). The gateway passes HeliOS's own `/v1` paths and nothing else |
+
+### Live data
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/live/ws` | Every pipeline output of every tick (`?pipelines=a,b&ports=detections,tracks` filters), as text messages of newline-delimited JSON (`{pipeline, port, observed_at_ms, frame_ts_ns, value}` per line), relayed unchanged from helios-engine's live socket. A slow reader skips to the newest data |
+| `GET` | `/v1/streams/ws` | The node's live streams (the Orion stream, shared by every client) over a WebSocket. Text frames are JSON (`catalog`, `status`, `lagged`); binary frames are samples. Nothing is sent back; a client that stops reading is told it lagged |
 
 ### Cameras
 
@@ -390,6 +409,9 @@ artifact `artifact.pipeline.<id>` that carries the name and revision as labels.
 | `GET` | `/v1/outputs` | Host outputs of every pipeline |
 | `GET` | `/v1/plugins` | `{engine_running, plugins}`: the plugins helios-engine reports as loaded |
 | `GET` | `/v1/catalog` | `{format: "helios.node-catalog", schema_version, plugins, nodes}`: every node the loaded plugins declare (Daedalus `NodeDecl`s with ports, `type_key`, schema, const defaults, and their `plugin`); **501** until helios-engine has written it |
+| `GET` | `/v1/pipelines/templates` | The graphs helios-engine ships, ready to deploy with a camera binding on `camera_input` |
+| `POST` | `/v1/pipelines/{id}/map/save` | Saves the pipeline's live map now and keeps it as a [saved map](#maps) (`{name?}`): `201` with the entry. `409` when the pipeline has no live mapper or is not running; `503` when the mapper did not give its map in time |
+| `GET` | `/v1/pipelines/{id}/dense?after=&epoch=` | The dense mapper's chunk changes since the cursor: `after` is the last `seq` the reader holds (0 for everything), `epoch` the run it holds (a different run's reader gets the run from the start) |
 
 Pipeline spec (the body of `PUT`, and of `POST` together with an optional `id`):
 
@@ -544,6 +566,45 @@ To have it created again, delete `default-pipeline.json` while the board has no 
 is read when helios-api starts; to change it, change the image's copy (`gaia/assets/runtime-services`)
 or replace the pipeline through the API. A missing, unreadable or invalid file creates nothing and
 the API starts anyway (logged). Helios-diagnostics reports whether the file enables a default.
+
+### Maps
+
+The map files a live mapper saves (`POST /v1/pipelines/{id}/map/save`, or the `map/save` NetworkTables trigger) and a pipeline starts from. Eidos's map format; HeliOS keeps one file per map, under the layout's data directory. A map is at most 16 MiB and all maps together 128 MiB (`507` past that, until one is deleted).
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/maps` | The stored maps, newest first, with the store's size and limits |
+| `POST` | `/v1/maps?name=` | The map file as the body, kept as a new map when it is a version 1 map file. `201` with the entry; `name` defaults to the id |
+| `GET` | `/v1/maps/{id}` | The map file, to keep |
+| `DELETE` | `/v1/maps/{id}` | Forgets a map. `409` while a pipeline starts from it |
+
+### Recordings
+
+Session recordings of one camera's frames (helios-recorder): one at a time, stored as parts that are MCAP files, plus the capture-last rings that keep the newest seconds of every camera the settings ask for. See [recording design](../recording-design.md).
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/recordings` | `{active, stored, storage, storage_error, rings}`: the running recording, the stored parts, the free space, and the capture-last rings |
+| `POST` | `/v1/recordings` | Starts one: `{camera, max_fps?, compression?}`, where `camera` is its resource id. `201` with its status; `409` while another runs, `507` below the free-space reserve, `503` when the camera's service is not there |
+| `GET` `PUT` | `/v1/recordings/settings` | The recorder's settings. `PUT` takes the whole object (defaults for the missing fields) and answers the stored one |
+| `POST` | `/v1/recordings/{id}/stop` | Asks the recording to end. `202` at once with the state `finishing`; the last part is completed in the background (poll `GET /v1/recordings`) |
+| `GET` | `/v1/recordings/{id}` | A stored part, streamed (`application/octet-stream`, an MCAP) |
+| `DELETE` | `/v1/recordings/{id}` | Deletes a stored part and its summary. `409` while it is being written |
+| `POST` | `/v1/recordings/capture-last` | Saves the last seconds of a camera's ring as a part: `{seconds?, camera?}` (both optional). `201` with its summary |
+| `POST` | `/v1/recordings/{id}/export/eidos` | Writes the recording's Eidos replay input into `<id>.eidos/` beside it. `201` with what was written; `409` while it is being written; `422` when the file is not a readable recording |
+
+### Playback
+
+Recordings and image folders served as cameras. A player's camera resource is bound to a pipeline like a live camera.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/playback` | The open players, with their replay state |
+| `POST` | `/v1/playback` | Opens a player from `{source: {recording: id} \| {path}, loop?, speed?, start_paused?, fps?}`; `201` with its view. Its camera resource is `resource_id` |
+| `GET` | `/v1/playback/{id}` | One player |
+| `DELETE` | `/v1/playback/{id}` | Closes the player. `204` |
+| `POST` | `/v1/playback/{id}/seek` | `{"ms": 1500}` or `{"frame": 42}`: the frame at that time is the next one delivered, also while paused. Returns the replay state |
+| `POST` | `/v1/playback/{id}/runs` | "Run on this recording": `{"pipeline": "<id>"}`, a copy of the pipeline with its camera bindings moved to the player. `201`. The live pipeline is not changed |
 
 ### Resources and peripherals
 
