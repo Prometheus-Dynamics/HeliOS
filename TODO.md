@@ -1,17 +1,12 @@
 # HeliOS TODO
 
-## Next release (2027.0.0)
+## Alpha (Raze)
 
-The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
-added on 2026-10-30 (the last addition). Version targets agreed with the user on 2026-10-30:
-HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 4.0.0, Lemnos 1.0.0, Gaia 3.0.0, Orion 1.0.0.
-Only the user decides when anything is released or tagged, and what blocks it; until then every
-repo stays on its dev version. Every backend gets full support wherever the hardware allows
-(scalar, x86 SIMD, aarch64 and armv7 NEON, RVV, GPU); no partial implementations. Anything not
-here waits for a later release. Every item: what, why, done when, blocked by. Board code is written
-now and marked untested on board; only its test waits for the board.
-
-### 0. Next up
+The user, 2026-11-03: the next release is an alpha that covers the Raze (CM5 + OV9782) hardware
+only. These items come first; the other boards' items below are still needed, after it. Only the
+user decides when the alpha is cut. The board checks under "Next: a HeliOS image on hardware"
+(live metrics, camera preview, the plugin graph and poll loop on the CM5, raw I/O, peripherals,
+camera controls, two cameras, `orionctl`) are alpha items too.
 
 - [ ] **Pin round and Raze deploy.** Why: Raze #1 runs older dependencies than dev, so the fixes
       below are unproven on the board. Partly done: pin round 1174c673 (Styx bcd29a7 with the PiSP
@@ -21,13 +16,12 @@ now and marked untested on board; only its test waits for the board.
       new image from its `.img.xz` through Atlas, the camera starting, the real capture
       allocations, the stale-graph refresh, the dense map pane by real clicks. Then the Orion v7
       pin together with Atlas's orion-v7 merge (robot-env `ORION_NODE_PEER_AUTO_TRUST` becomes
-      `private-link`). Blocked by: the SystemCore is stuck in its USB boot ROM since 2026-11-02
-      and needs a power cycle (user).
-
-### 1. Freeze items still open
-
+      `private-link`). Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
 - [ ] **Role UI.** Why: the frozen PIT/ROBOT role split. Done when: role switching works with real
       clicks on a Raze through the SystemCore, and the UI is reviewed visually. Blocked by: nothing.
+- [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
+      end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
+      real-click check on a Raze. Blocked by: nothing.
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.
@@ -43,12 +37,46 @@ now and marked untested on board; only its test waits for the board.
       the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
       services, with no port or USB conflicts. The package exists (one .ipk with the whole stack,
       4f3333c1). Blocked by: nothing.
-- [ ] **Gaia profiles.** Why: per-device builds. Done when: every board profile builds its image
-      from the shared base. The layered slot is dropped (user, 2026-11-02): the slots `.img.xz` is
-      the only build output, and Atlas makes the slot bundle from it. Blocked by: nothing.
+- [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
+      without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
+      (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
+      agent under Orion). Blocked by: e5226d57 moved to a 3-1.x SystemCore port (user, hardware) for
+      the flash; Orion's four Atlas features (Orion TODO, the coordinator's) for step 2.
+- [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
+      Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
+      node asks (7630c661). Left: dense on the GPU by default on the Raze, by `wants_gpu` also firing
+      on `auto`, with the pipeline cache in /var/lib/helios/gpu-cache. The gate judges keyframes
+      processed and mesh delivered. Eidos's v3d17 run on the full recording (CM5, CPU vs GPU):
+      keyframes 6 vs 7, mesh 5–6 vs 6, tick p99 2.88–2.96 vs 2.92–3.01 ms, max 3.51–3.75 vs
+      4.45–6.36 ms, ticks over 4 ms 0 vs 3, over 8.33 ms 0 vs 0, vision core per keyframe about 705
+      vs 180 ms. On the 700-frame clip the GPU still fails the gate: mesh delivered 1 vs the CPU's 2.
+      The `auto` probe chose the GPU every time but costs 27.5 s per start. Blocked by: Eidos passing
+      the gate and landing `auto` on dev with that setup cached (local 651e1071, v3d18 not yet run on
+      the board).
+- [ ] **Memory slimming.** Why: lean on the Raze now, and the K230D has 128 MB for everything later.
+      Done when: tags-only at 1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5
+      (2026-10-30: about 67 MiB plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
+      remaining targets. Blocked by: nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
       or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches.
       Blocked by: nothing.
+
+## Next release (2027.0.0)
+
+The release list. The 2026-10-27 feature freeze plus the hardware-support and GPU work the user
+added on 2026-10-30 (the last addition). Version targets agreed with the user on 2026-10-30:
+HeliOS 2027.0.0, Styx 3.0.0, Eidos 1.0.0, Daedalus 4.0.0, Lemnos 1.0.0, Gaia 3.0.0, Orion 1.0.0.
+Only the user decides when anything is released or tagged, and what blocks it; until then every
+repo stays on its dev version. Every backend gets full support wherever the hardware allows
+(scalar, x86 SIMD, aarch64 and armv7 NEON, RVV, GPU); no partial implementations. Anything not
+here waits for a later release. Every item: what, why, done when, blocked by. Board code is written
+now and marked untested on board; only its test waits for the board.
+
+### 1. Freeze items still open
+
+- [ ] **Gaia profiles.** Why: per-device builds. Done when: every board profile builds its image
+      from the shared base. The layered slot is dropped (user, 2026-11-02): the slots `.img.xz` is
+      the only build output, and Atlas makes the slot bundle from it. Blocked by: nothing.
 
 ### 2. Hardware support, memory and GPU (added 2026-10-30)
 
@@ -75,21 +103,6 @@ now and marked untested on board; only its test waits for the board.
       snapshot names it and the stored digest matches; a test covers the write and the clean reload.
       9ac1a79f. Blocked by: nothing.
 - [x] **Per-device camera knobs.** Done (f1a5b109): `HELIOS_CAMERA_QUEUE_DEPTH`, `_RAW_BUFFERS`, `_OUTPUT_BUFFERS`, `_ACCEL_ISP|SCALER|ENCODER|PYRAMID` set Styx's knobs per device (unset = Styx default; K230D entry 3/2/1 untested on board, `docs/device-profiles.md`).
-- [ ] **GPU per operation.** Why: the user chooses which operations run on the GPU, like NEON/SIMD.
-      Partly done: graphs select `backend: cpu|gpu` per node and the engine opens the GPU only when a
-      node asks (7630c661). Left: dense on the GPU by default on the Raze, by `wants_gpu` also firing
-      on `auto`, with the pipeline cache in /var/lib/helios/gpu-cache. The gate judges keyframes
-      processed and mesh delivered. Eidos's v3d17 run on the full recording (CM5, CPU vs GPU):
-      keyframes 6 vs 7, mesh 5–6 vs 6, tick p99 2.88–2.96 vs 2.92–3.01 ms, max 3.51–3.75 vs
-      4.45–6.36 ms, ticks over 4 ms 0 vs 3, over 8.33 ms 0 vs 0, vision core per keyframe about 705
-      vs 180 ms. On the 700-frame clip the GPU still fails the gate: mesh delivered 1 vs the CPU's 2.
-      The `auto` probe chose the GPU every time but costs 27.5 s per start. Blocked by: Eidos passing
-      the gate and landing `auto` on dev with that setup cached (local 651e1071, v3d18 not yet run on
-      the board).
-- [ ] **Memory slimming.** Why: the K230D has 128 MB for everything. Done when: tags-only at
-      1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5 (2026-10-30: about 67 MiB
-      plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
-      remaining targets. Blocked by: nothing.
 - [ ] **K230D device support.** Why: the cheap single-camera tier. Done when: an image for the
       K230D (two slots plus data on SPI-NAND), vision pinned to CPU1 (the only RVV core),
       services on CPU0, and HeliOS running tags + pose on the OV9782 inside 128 MB. The picture
@@ -103,14 +116,6 @@ now and marked untested on board; only its test waits for the board.
       PCB session from the CI dev board. Blocked by: the Gaia BSPs and Styx's rkisp/RGA/MPP for the
       code; boards only for the test (off-the-shelf dev boards can stand in: ROCK 5C, ROCK 4D,
       ZERO 3W, Firefly AIO-3562JQ, Luckfox Pico).
-- [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
-      without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
-      (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
-      agent under Orion). Blocked by: e5226d57 moved to a 3-1.x SystemCore port (user, hardware) for
-      the flash; Orion's four Atlas features (Orion TODO, the coordinator's) for step 2.
-- [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
-      end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
-      real-click check on a Raze. Blocked by: nothing.
 - [x] **CM5 tag speed model.** Eidos's sweep on the Raze (2026-10-30): a frame costs a fixed
       number of cycles (NEON full search 1.83 Mcycles p50, tracked 1.02), so ms ≈ C / (GHz × k).
       Tags alone fit 120 fps on every target (A7 tightest at 60–70%). In Eidos
