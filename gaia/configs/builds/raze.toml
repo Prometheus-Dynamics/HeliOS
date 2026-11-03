@@ -98,11 +98,13 @@ imports = [
 # Atlas 034663e (2026-11-03): the Raze package ships Lemnos's system looks as
 # /etc/lemnos/looks.d/system.toml and the ring's default_look, for Lemnos 50533a8
 # (only status.* built in). It must move together with the Lemnos source below.
+# Atlas 6a727fe (2026-11-03): the slots image is sized to its content (boot
+# FAT auto + 64M free, data 8M free; /data grows on first boot).
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "ee090b8c1540847b75c46091ba93849e4f6587be"
+rev = "6a727fe0d300555ccbd23bd7e9f2cbd9904f2aef"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
