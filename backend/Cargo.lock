@@ -631,12 +631,12 @@ dependencies = [
 [[package]]
 name = "daedalus-accel"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 
 [[package]]
 name = "daedalus-core"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "crossbeam-queue",
  "portable-atomic",
@@ -649,7 +649,7 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-kernels",
  "hashbrown 0.17.1",
@@ -665,7 +665,7 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -686,7 +686,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-core"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-data",
  "daedalus-kernels",
@@ -699,7 +699,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-host"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-data",
  "daedalus-ffi-core",
@@ -716,7 +716,7 @@ dependencies = [
 [[package]]
 name = "daedalus-gpu"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "ash",
  "bitflags",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "daedalus-kernels"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-accel",
 ]
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-wgsl-infer",
  "proc-macro-crate",
@@ -756,7 +756,7 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -793,7 +793,7 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -807,7 +807,7 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -828,7 +828,7 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "crossbeam-queue",
  "daedalus-core",
@@ -853,7 +853,7 @@ dependencies = [
 [[package]]
 name = "daedalus-transport"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 dependencies = [
  "daedalus-core",
  "hashbrown 0.17.1",
@@ -867,7 +867,7 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#37091629b10a26524cb3374e5f92a5a1cf02a69f"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#059439c57700b8f337ae87c46303ece66a7af0b0"
 
 [[package]]
 name = "darling"
