@@ -2304,7 +2304,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 [[package]]
 name = "lemnos-board"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "lemnos-core",
@@ -2326,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "lemnos-bus"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "lemnos-core",
@@ -2337,7 +2337,7 @@ dependencies = [
 [[package]]
 name = "lemnos-core"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-device",
  "lemnos-hal",
@@ -2349,7 +2349,7 @@ dependencies = [
 [[package]]
 name = "lemnos-device"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2359,7 +2359,7 @@ dependencies = [
 [[package]]
 name = "lemnos-discovery"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-core",
  "thiserror 2.0.21",
@@ -2368,7 +2368,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-bmi088"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2380,7 +2380,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-bmm150"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2392,7 +2392,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-ina2xx"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2403,7 +2403,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-linux"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "lemnos-device",
@@ -2414,7 +2414,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-vcm"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2426,7 +2426,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-ws2812"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-device",
 ]
@@ -2434,12 +2434,12 @@ dependencies = [
 [[package]]
 name = "lemnos-fusion"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 
 [[package]]
 name = "lemnos-hal"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2448,7 +2448,7 @@ dependencies = [
 [[package]]
 name = "lemnos-ipc"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-device",
  "lemnos-hal",
@@ -2458,7 +2458,7 @@ dependencies = [
 [[package]]
 name = "lemnos-light"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-device",
 ]
@@ -2466,7 +2466,7 @@ dependencies = [
 [[package]]
 name = "lemnos-linux"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2481,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "lemnos-linux-sys"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "libc",
 ]
@@ -2489,7 +2489,7 @@ dependencies = [
 [[package]]
 name = "lemnos-uevent"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "lemnos-linux-sys",
 ]
@@ -2497,7 +2497,7 @@ dependencies = [
 [[package]]
 name = "lemnosd"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#61af7038ff271fac23532279745120a330639eb6"
 dependencies = [
  "embedded-hal",
  "lemnos-board",
