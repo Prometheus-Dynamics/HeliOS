@@ -335,8 +335,10 @@ impl EngineApp {
 async fn watch_assigned_workloads(mut subscription: orion::client::LocalExecutorSubscription, event_tx: mpsc::UnboundedSender<RuntimeEvent>) -> Result<(), ClientError> {
     loop {
         match subscription.next_event().await {
-            Ok(LocalExecutorEvent::Bootstrap(_)) => {}
-            Ok(LocalExecutorEvent::WorkloadsChanged { workloads, .. }) => {
+            // Every bootstrap, the first one included, is republished: after an orion-node restart
+            // the watch reconnects with a bootstrap, and the node keeps no observed state, so this
+            // executor's provider, executor and session records are gone until they are published.
+            Ok(LocalExecutorEvent::Bootstrap(workloads)) | Ok(LocalExecutorEvent::WorkloadsChanged { workloads, .. }) => {
                 if event_tx.send(RuntimeEvent::WorkloadsChanged(workloads)).is_err() {
                     return Ok(());
                 }

@@ -299,13 +299,15 @@ pub async fn perform_action<C: ActionCall>(caller: &C, action: OrionActionReques
 }
 
 /// An Orion result as the API reports an action: `applied` (succeeded), `failed` (failed,
-/// rejected or timed out, with the reason), or `running`. `data` is the `value` output, or the
+/// rejected or timed out, with the reason), `cancelled` (stopped by its `<name>.cancel` action),
+/// or `running`. `data` is the `value` output, or the
 /// whole output when there are other entries.
 fn action_result_dto(result: &OrionActionResult) -> ActionResult {
     let (status, error) = match &result.state {
         ActionState::Succeeded => ("applied", None),
         ActionState::Failed { reason } | ActionState::Rejected { reason } => ("failed", Some(reason.clone())),
         ActionState::TimedOut => ("failed", Some("timed out".to_string())),
+        ActionState::Cancelled => ("cancelled", None),
         ActionState::Accepted | ActionState::Running { .. } => ("running", None),
     };
     let data = match result.output.get("value") {
@@ -522,6 +524,14 @@ mod tests {
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(!body.done);
         assert_eq!(body.result.as_ref().map(|result| result.status.as_str()), Some("running"));
+    }
+
+    #[test]
+    fn a_cancelled_action_is_reported_as_cancelled() {
+        let result = OrionActionResult::new("action-1", ActionTarget::Resource(ResourceId::new("lemnos_raw_node1_io")), "gpio.get", orion::core::NodeId::new("node-local"), ActionState::Cancelled);
+        let dto = action_result_dto(&result);
+        assert_eq!(dto.status, "cancelled");
+        assert_eq!(dto.error, None);
     }
 
     #[tokio::test]

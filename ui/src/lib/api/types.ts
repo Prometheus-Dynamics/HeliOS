@@ -53,6 +53,9 @@ export interface Health {
   version: string;
 }
 
+/** An action outcome as the API reports it: `applied`, `failed` (`error` says why), `cancelled` (stopped by its cancel action), or `running`. */
+export type ActionStatus = "applied" | "failed" | "running" | "cancelled";
+
 export interface DeviceOs {
   name: string | null;
   version: string | null;
@@ -618,7 +621,7 @@ export interface Resource {
   capabilities: string[];
   labels: Record<string, string>;
   endpoints: string[];
-  action_result: { action_kind: string; status: string; data: unknown; error: string | null; observed_at_ms: number } | null;
+  action_result: { action_kind: string; status: ActionStatus; data: unknown; error: string | null; observed_at_ms: number } | null;
   state: Record<string, unknown> | null;
 }
 

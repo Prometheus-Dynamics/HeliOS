@@ -121,7 +121,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
 rev = "2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
 
-# Orion dev 0703507 (Gaia config v3 packaging layers; code as 6a70758, the backend/Cargo.toml pin: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
+# Orion dev c8a173f (the backend/Cargo.toml pin; control protocol 7: the blob push over local IPC, `ActionState::Cancelled`, observed state no longer persisted (empty after an orion-node restart until the owner republishes), foreign-node executor and provider records refused, unsupported workloads skipped and logged once, the robot-link trust path named private link (`ORION_NODE_PEER_AUTO_TRUST=private-link`); fe6a995 changed packaging only in a unit comment). Earlier 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
 # Earlier, v4 (main f3efb26: adds the orion-nt4 crate, which HeliOS does not depend on yet; earlier
 # 4fadba9: request/response resource actions (`ActionRequest.wait_ms`,
@@ -148,7 +148,7 @@ rev = "bcd29a700102fad4ff9f6a24c34c7ab99f1eca6e"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "0703507a4b192abaca4ca501f2b4a22a7bc77db3"
+rev = "c8a173f1df8462d74a4b72d174552a78d2f206bc"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]
