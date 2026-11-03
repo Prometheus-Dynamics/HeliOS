@@ -101,7 +101,7 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "4b4c72a0c0db092f378f1c5a296dd1e9931f8584"
 
-# Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
+# Lemnos orion-v7 61af703: Orion control protocol 7 (Orion c8a173f); Lemnos dev 01939e9 (M2M VIDIOC_S_CTRL and G_CTRL on the session and on any descriptor) and c546b44 (USB positional descriptor read, pooled packet tables) are in it. Earlier Lemnos dev 2610455 (f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
 # replies return the granted period, boot-clock timestamps and the deadline scheduler; earlier b2634fc: fault reasons and lemnosd's Orion bridge, `lemnos-orion`).
 # The Raze layer imports Lemnos's lemnosd layer from a
@@ -113,13 +113,13 @@ rev = "4b4c72a0c0db092f378f1c5a296dd1e9931f8584"
 # users table for the `lemnos` user (packaging fixes: Gaia >=2.0.0, one cargo
 # build group for lemnosd and lemnos-ctl, the host-build layer imported
 # above). backend/Cargo.lock pins the same commit for lemnos-ipc, the lemnosd
-# client helios-peripherals uses. Lemnos dev 2610455: also Daedalus's lock and
+# client helios-peripherals uses. Lemnos dev 2610455 (backend/Cargo.lock still pins it for lemnos-ipc, which HeliOS builds against): also Daedalus's lock and
 # Atlas 61c3639's manifest gaia_import.
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "2610455519f44e2d2ecfe8230ca9dd4ae49b8780"
+rev = "61af7038ff271fac23532279745120a330639eb6"
 
 # Orion dev c8a173f (the backend/Cargo.toml pin; control protocol 7: the blob push over local IPC, `ActionState::Cancelled`, observed state no longer persisted (empty after an orion-node restart until the owner republishes), foreign-node executor and provider records refused, unsupported workloads skipped and logged once, the robot-link trust path named private link (`ORION_NODE_PEER_AUTO_TRUST=private-link`); fe6a995 changed packaging only in a unit comment). Earlier 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
