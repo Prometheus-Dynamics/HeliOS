@@ -14,10 +14,10 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       in progress; dev.841 on Raze #1 confirmed `queue_safe` Y and no "not safe" lines, but its
       camera failed ("pispbe-input gave 32 of 40 buffers", fixed in Styx bcd29a7). Left: deploy the
       new image from its `.img.xz` through Atlas, the camera starting, the real capture
-      allocations, the stale-graph refresh, the dense map pane by real clicks. Then the Orion
-      protocol 1 pin (was "v7"; the user, 2026-11-03: unreleased, so 1) together with Atlas's
-      Orion merge (robot-env `ORION_NODE_PEER_AUTO_TRUST` becomes `private-link`), and the
-      SystemCore package with 1c062333 (peer nets cover 172.31.0.0/16).
+      allocations, the stale-graph refresh, the dense map pane by real clicks, and the SystemCore
+      package with 1c062333 (peer nets cover 172.31.0.0/16). The Orion protocol 1 pin is in
+      (6d99a70, Atlas f351316 speaks it; robot-env `ORION_NODE_PEER_AUTO_TRUST` is `private-link`),
+      not yet proven on a board.
       Lemnos look change-over: done in Atlas 034663e (system looks file, ring default_look) with
       gaia/configs/builds/raze.toml on Atlas 034663e + Lemnos 50533a8; not built yet.
       Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).

@@ -574,7 +574,7 @@ mod tests {
             public_key_hex: PublicKeyHex::new("00"),
             key_fingerprint: "sha256:00".into(),
             peer_urls: vec![PeerBaseUrl::new(url)],
-            control_protocol_version: 3,
+            control_protocol_version: 1,
             state,
             first_seen_at_ms: 0,
             last_seen_at_ms: 0,

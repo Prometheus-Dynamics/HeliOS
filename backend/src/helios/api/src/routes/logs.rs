@@ -368,7 +368,20 @@ mod tests {
     #[test]
     fn a_client_report_is_clipped_and_its_id_sanitised() {
         let long = "é".repeat(2000);
-        let report = ClientReport { id: "ui-<script>\n".into(), kind: "error".into(), at_ms: None, message: Some(long.clone()), stack: None, source: None, route: None, method: None, path: None, status: None, body: None, after: vec![] };
+        let report = ClientReport {
+            id: "ui-<script>\n".into(),
+            kind: "error".into(),
+            at_ms: None,
+            message: Some(long.clone()),
+            stack: None,
+            source: None,
+            route: None,
+            method: None,
+            path: None,
+            status: None,
+            body: None,
+            after: vec![],
+        };
         let text = client_report_text(&report);
         assert!(text.starts_with("[ui-script] UI error"), "{text}");
         assert!(text.len() < 1200, "clipped to the message cap: {}", text.len());
@@ -395,9 +408,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let state = crate::AppState::new(crate::ApiConfig { state_dir: dir.path().join("state"), ui_dir: None, ..crate::ApiConfig::default() });
-        let post = |body: serde_json::Value| {
-            Request::builder().method("POST").uri("/v1/logs/client").header("content-type", "application/json").body(Body::from(body.to_string())).expect("request")
-        };
+        let post = |body: serde_json::Value| Request::builder().method("POST").uri("/v1/logs/client").header("content-type", "application/json").body(Body::from(body.to_string())).expect("request");
         let report = |id: &str| json!({ "id": id, "kind": "error", "message": "boom", "route": "#run", "after": ["route #run"] });
 
         let captured = Captured::default();

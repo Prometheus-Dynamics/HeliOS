@@ -68,7 +68,7 @@ class RobotEnvTest(unittest.TestCase):
     def test_an_open_robot_trusts_peers_on_its_own_links(self):
         settings = run("systemcore", team=6390, key=False)
         self.assertEqual(settings["ORION_NODE_PEER_AUTH"], "disabled")
-        self.assertEqual(settings["ORION_NODE_PEER_AUTO_TRUST"], "robot-link")
+        self.assertEqual(settings["ORION_NODE_PEER_AUTO_TRUST"], "private-link")
         self.assertEqual(settings["ORION_NODE_ROBOT_LINKS"], "172.31.0.0/16,172.31.12.80/29,10.63.90.0/24")
 
     def test_a_secured_helios_keeps_orions_own_rules(self):

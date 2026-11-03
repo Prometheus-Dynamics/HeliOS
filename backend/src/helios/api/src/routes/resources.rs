@@ -299,13 +299,14 @@ pub async fn perform_action<C: ActionCall>(caller: &C, action: OrionActionReques
 }
 
 /// An Orion result as the API reports an action: `applied` (succeeded), `failed` (failed,
-/// rejected or timed out, with the reason), or `running`. `data` is the `value` output, or the
+/// rejected, timed out or cancelled, with the reason), or `running`. `data` is the `value` output, or the
 /// whole output when there are other entries.
 fn action_result_dto(result: &OrionActionResult) -> ActionResult {
     let (status, error) = match &result.state {
         ActionState::Succeeded => ("applied", None),
         ActionState::Failed { reason } | ActionState::Rejected { reason } => ("failed", Some(reason.clone())),
         ActionState::TimedOut => ("failed", Some("timed out".to_string())),
+        ActionState::Cancelled => ("failed", Some("cancelled".to_string())),
         ActionState::Accepted | ActionState::Running { .. } => ("running", None),
     };
     let data = match result.output.get("value") {
