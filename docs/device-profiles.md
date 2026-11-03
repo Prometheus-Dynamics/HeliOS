@@ -76,7 +76,8 @@ are one robot to the user: any one HeliOS UI shows and controls all of them.
   automatically; without it, an operator approves each peer.
 - **Per-board settings.** `robot-env` writes `/run/helios/robot.env` before Orion starts: a node id
   unique to the board (`systemcore-<serial>`, `raze-<serial>`), the cluster, discovery, the peer
-  networks (the USB link and `10.TE.AM.0/24`) and the enrollment key. Every HeliOS unit reads it
+  networks (the USB gadget network `172.31.0.0/16`, where each board has its own address, the
+  SystemCore's robot link and `10.TE.AM.0/24`) and the enrollment key. Every HeliOS unit reads it
   last.
 - **Robot-link trust (open robots).** With a team, no enrollment key and HeliOS's security off (no
   `auth.json`), `robot-env` also sets Orion's `ORION_NODE_PEER_AUTH=disabled`,

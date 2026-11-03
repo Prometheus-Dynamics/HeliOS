@@ -63,7 +63,7 @@ class RobotEnvTest(unittest.TestCase):
         settings = run("systemcore", team=6390, key=False)
         self.assertEqual(settings["ORION_NODE_DISCOVERY"], "off")
         self.assertNotIn("ORION_NODE_ENROLLMENT_KEY_FILE", settings)
-        self.assertEqual(settings["HELIOS_API_PEER_NETS"], "172.31.12.80/29,10.63.90.0/24")
+        self.assertEqual(settings["HELIOS_API_PEER_NETS"], "172.31.0.0/16,172.31.12.80/29,10.63.90.0/24")
 
     def test_an_open_robot_trusts_peers_on_its_own_links(self):
         settings = run("systemcore", team=6390, key=False)

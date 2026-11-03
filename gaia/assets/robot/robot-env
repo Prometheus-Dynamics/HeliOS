@@ -99,7 +99,9 @@ write() {
         if [ -n "$team" ]; then
             team_net="10.$((team / 100)).$((team % 100)).0/24"
             echo "ORION_NODE_CLUSTER=robot-$team"
-            echo "HELIOS_API_PEER_NETS=$link_net,$team_net"
+            # Every board has its own USB address (serial-hash-v1, anywhere in usb_net), so the
+            # whole USB network is searched, not one board's /29.
+            echo "HELIOS_API_PEER_NETS=$usb_net,$link_net,$team_net"
         else
             echo "HELIOS_API_PEER_NETS="
         fi
