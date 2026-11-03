@@ -36,7 +36,7 @@ use std::{
     os::fd::AsFd,
     sync::{Arc, Mutex, MutexGuard},
     thread::JoinHandle,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use daedalus::{
@@ -67,7 +67,7 @@ use super::{
     stats::{DriverStats, FpsWindow, GraphMetrics},
 };
 use crate::{
-    model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload},
+    model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, now_ms},
     nt4::{Nt4Sink, Nt4Tick},
     stream_io,
 };
@@ -157,7 +157,7 @@ pub(crate) struct WorkloadDriver {
 impl WorkloadDriver {
     /// Start driving `graph`: from `frames` (one source per frame binding, the first paces the
     /// graph) when there are any, otherwise from the bound resources.
-    pub fn start(
+    pub(super) fn start(
         workload: ExecutionWorkload,
         graph: CompiledWorkloadGraph,
         frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>,
@@ -254,7 +254,7 @@ impl WorkloadDriver {
     /// Hand the bound resources to the graph when one of them changed: a frame-driven graph's
     /// held inputs take the changed values (and its next frame sees them); a resource-driven
     /// graph gets the full set in one batch and ticks once.
-    pub fn update_context(&mut self, inputs: Vec<ResourceInput>) {
+    pub(super) fn update_context(&mut self, inputs: Vec<ResourceInput>) {
         let changed = self.revisions.len() != inputs.len() || inputs.iter().any(|input| self.revisions.get(&input.input) != Some(&input.revision));
         if !changed {
             return;
@@ -279,7 +279,7 @@ impl WorkloadDriver {
     /// never ticks the graph. Values the graph has no host input for are ignored.
     /// Raise the graph's `save` input for a new save request (`map.save` changed): the graph saves
     /// its map on the next tick and gives `saved_map`. The request never restarts the graph.
-    pub fn update_map(&mut self, workload: &ExecutionWorkload) {
+    pub(super) fn update_map(&mut self, workload: &ExecutionWorkload) {
         // Pushed under the state lock: `TickRecorder::record` lowers `save` under the same lock, so
         // a lowering cannot overtake this raise.
         let mut state = lock(&self.shared.state);
@@ -291,7 +291,7 @@ impl WorkloadDriver {
         }
     }
 
-    pub fn update_camera_context(&mut self, workload: &ExecutionWorkload) {
+    pub(super) fn update_camera_context(&mut self, workload: &ExecutionWorkload) {
         let primary = self.sources.first().map(|source| source.input.clone());
         for binding in workload.bindings.iter().filter(|binding| self.sources.iter().any(|source| source.input == binding.input)) {
             let pushes = match camera_context::context_pushes(binding, primary.as_deref() == Some(binding.input.as_str())) {
@@ -330,12 +330,12 @@ impl WorkloadDriver {
     }
 
     #[cfg(test)]
-    pub fn stats(&self) -> DriverStats {
+    pub(super) fn stats(&self) -> DriverStats {
         lock(&self.shared.state).stats.clone()
     }
 
     #[cfg(test)]
-    pub fn host(&self) -> &HostBridgeHandle {
+    pub(super) fn host(&self) -> &HostBridgeHandle {
         &self.host
     }
 
@@ -348,7 +348,7 @@ impl WorkloadDriver {
     /// the plan as `refreshed` (the digest of the stored graph it was read from, and the file). The
     /// plan's summary carries that to helios-api, which stores the document as the pipeline's next
     /// revision (`routes::pipelines::store_refreshed_graphs`). Call before `externalize_plan`.
-    pub fn record_refreshed(&mut self, dir: &std::path::Path, refreshed: &RefreshedGraph) {
+    pub(super) fn record_refreshed(&mut self, dir: &std::path::Path, refreshed: &RefreshedGraph) {
         let path = dir.join(format!("{}.refreshed.json", crate::execution::outputs::sanitize_id_component(&self.workload.workload_id)));
         let written = std::fs::create_dir_all(dir).and_then(|()| {
             let partial = path.with_extension("json.partial");
@@ -367,7 +367,7 @@ impl WorkloadDriver {
         }
     }
 
-    pub fn externalize_plan(&mut self, dir: &std::path::Path) {
+    pub(super) fn externalize_plan(&mut self, dir: &std::path::Path) {
         let Ok(mut plan) = serde_json::from_str::<serde_json::Value>(&self.plan_message) else { return };
         let path = dir.join(format!("{}.json", crate::execution::outputs::sanitize_id_component(&self.workload.workload_id)));
         let written = std::fs::create_dir_all(dir).and_then(|()| {
@@ -387,7 +387,7 @@ impl WorkloadDriver {
         }
     }
 
-    pub fn snapshot(&mut self) -> (ExecutionSessionState, Vec<ExecutionArtifactRecord>) {
+    pub(super) fn snapshot(&mut self) -> (ExecutionSessionState, Vec<ExecutionArtifactRecord>) {
         let (stats, outputs, metrics) = {
             let mut state = lock(&self.shared.state);
             // The rate decays to zero when frames stop, with no timer on the graph thread.
@@ -586,7 +586,7 @@ impl Publisher {
 /// Where a workload's ticks go besides Orion: NetworkTables (`crate::nt4`) and the live socket
 /// (`crate::live`).
 #[derive(Clone, Default)]
-pub struct OutputSinks {
+pub(super) struct OutputSinks {
     pub nt4: Nt4Sink,
     pub live: crate::live::LiveSink,
 }
@@ -881,8 +881,4 @@ fn record_source_status(shared: &DriverShared, status: FrameSourceStatus, reason
     if changed {
         shared.outputs_ready.notify_one();
     }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }

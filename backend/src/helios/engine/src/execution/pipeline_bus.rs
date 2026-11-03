@@ -56,7 +56,7 @@ struct Slot {
 
 /// The pipelines' latest outputs, by pipeline id. Cloning shares the bus.
 #[derive(Clone, Default)]
-pub struct PipelineBus {
+pub(super) struct PipelineBus {
     slots: Arc<Mutex<BTreeMap<String, Slot>>>,
 }
 

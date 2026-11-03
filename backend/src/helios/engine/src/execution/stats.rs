@@ -51,7 +51,7 @@ pub(crate) struct DriverStats {
 }
 
 impl DriverStats {
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(super) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "frames_received": self.frames_received,
             "ticks_processed": self.ticks_processed,
@@ -99,7 +99,7 @@ impl Default for FpsWindow {
 }
 
 impl FpsWindow {
-    pub fn record_frame(&mut self, now: Instant) {
+    pub(super) fn record_frame(&mut self, now: Instant) {
         if self.last_frame_at.is_none_or(|last| now.duration_since(last) >= FPS_STALE_AFTER) {
             self.window_start = now;
             self.frames_in_window = 0;
@@ -115,7 +115,7 @@ impl FpsWindow {
     }
 
     /// The current rate, dropping to zero once frames are stale.
-    pub fn fps(&self) -> f64 {
+    pub(super) fn fps(&self) -> f64 {
         if self.last_frame_at.is_none_or(|last| last.elapsed() >= FPS_STALE_AFTER) { 0.0 } else { self.fps }
     }
 }
@@ -197,7 +197,7 @@ pub(crate) struct GraphMetrics {
 }
 
 impl GraphMetrics {
-    pub fn new(level: MetricsLevel, plan: &RuntimePlanExplanation) -> Self {
+    pub(super) fn new(level: MetricsLevel, plan: &RuntimePlanExplanation) -> Self {
         let label = |index: usize| plan.nodes.get(index).map(|node| node.label.clone().unwrap_or_else(|| node.id.clone())).unwrap_or_else(|| index.to_string());
         let node_names = plan.nodes.iter().map(|node| (node.index, (label(node.index), node.id.clone()))).collect();
         let edge_names = plan
@@ -210,11 +210,11 @@ impl GraphMetrics {
         Self { level, node_names, edge_names, window: MetricsTotals::default(), window_started: Instant::now(), last_window: None, total: MetricsTotals::default(), frame_overhead: None }
     }
 
-    pub fn enabled(&self) -> bool {
+    pub(super) fn enabled(&self) -> bool {
         self.level != MetricsLevel::Off
     }
 
-    pub fn record(&mut self, telemetry: &ExecutionTelemetry, now: Instant) {
+    pub(super) fn record(&mut self, telemetry: &ExecutionTelemetry, now: Instant) {
         if !self.enabled() {
             return;
         }
@@ -228,13 +228,13 @@ impl GraphMetrics {
     }
 
     /// Keep Daedalus's frame-path overhead report (`HostGraph::frame_overhead`) for the artifact.
-    pub fn set_frame_overhead(&mut self, report: &FrameOverheadReport) {
+    pub(super) fn set_frame_overhead(&mut self, report: &FrameOverheadReport) {
         self.frame_overhead = serde_json::to_value(report).ok();
     }
 
     /// The `metrics` artifact: the last complete window (or the current one before the first
     /// completes) and the totals since the graph started.
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(super) fn to_json(&self) -> serde_json::Value {
         let window = match &self.last_window {
             Some((totals, length)) => self.totals_json(totals, Some(*length)),
             None => self.totals_json(&self.window, Some(self.window_started.elapsed())),

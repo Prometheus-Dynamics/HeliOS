@@ -64,7 +64,7 @@ pub(crate) struct PipelineInputStats {
 }
 
 impl PipelineInputStats {
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(super) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "input": self.input,
             "pipeline": self.pipeline,
@@ -98,7 +98,7 @@ pub(crate) struct PipelineFeeds {
 
 impl PipelineFeeds {
     /// The feeds of `bindings` (the pipeline bindings among them, in input order).
-    pub fn new(bus: PipelineBus, bindings: &[ExecutionBinding]) -> Self {
+    pub(super) fn new(bus: PipelineBus, bindings: &[ExecutionBinding]) -> Self {
         let mut max_wait_ms = 0;
         let feeds = bindings
             .iter()
@@ -127,18 +127,18 @@ impl PipelineFeeds {
         Self { bus, feeds, max_wait: Duration::from_millis(u64::from(max_wait_ms)) }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.feeds.is_empty()
     }
 
     /// How long a frame may wait for the producers (the longest of the inputs' `max_wait_ms`).
-    pub fn max_wait(&self) -> Duration {
+    pub(super) fn max_wait(&self) -> Duration {
         self.max_wait
     }
 
     /// Whether a frame stamped `frame_ts_ns` may tick now: no producer is still on an older frame,
     /// or the frame has waited `max_wait` (`waited_out`).
-    pub fn ready(&self, frame_ts_ns: u64, waited_out: bool) -> bool {
+    pub(super) fn ready(&self, frame_ts_ns: u64, waited_out: bool) -> bool {
         waited_out || !self.feeds.iter().any(|feed| self.producer_behind(&feed.pipeline, frame_ts_ns))
     }
 
@@ -150,7 +150,7 @@ impl PipelineFeeds {
 
     /// Push each input's value that changed, and record the state of every input for the tick of
     /// the frame `frame_ts_ns`. Returns what the host rejected, one message per input.
-    pub fn sync(&mut self, host: &HostBridgeHandle, frame_ts_ns: u64) -> Vec<String> {
+    pub(super) fn sync(&mut self, host: &HostBridgeHandle, frame_ts_ns: u64) -> Vec<String> {
         let mut rejected = Vec::new();
         for feed in &mut self.feeds {
             let Some((run, published)) = self.bus.latest(&feed.pipeline, &feed.port) else {
@@ -179,7 +179,7 @@ impl PipelineFeeds {
         rejected
     }
 
-    pub fn stats(&self) -> Vec<PipelineInputStats> {
+    pub(super) fn stats(&self) -> Vec<PipelineInputStats> {
         self.feeds.iter().map(|feed| feed.stats.clone()).collect()
     }
 }

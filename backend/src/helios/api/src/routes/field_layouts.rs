@@ -17,7 +17,7 @@ use crate::{
     host::now_ms,
 };
 
-use super::{check_id, pipelines};
+use super::{check_id, pipelines, slug};
 
 /// `GET /v1/field-layouts`: `{selected, layouts: [summary]}`.
 pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<serde_json::Value>> {
@@ -56,7 +56,7 @@ pub async fn upload(State(state): State<SharedState>, Query(query): Query<Upload
     if name.is_empty() || name.len() > 120 {
         return Err(ApiError::unprocessable("name must be 1 to 120 characters"));
     }
-    let id = query.id.clone().unwrap_or_else(|| slug(name));
+    let id = query.id.clone().unwrap_or_else(|| slug(name, "field", 60));
     check_id(&id)?;
     if field_layouts::is_builtin(&id) {
         return Err(ApiError::conflict(format!("{id} is a built-in layout")));
@@ -124,14 +124,4 @@ async fn refresh(state: &SharedState, changed: Option<&str>, selection: bool) {
         Ok(_) => {}
         Err(error) => tracing::warn!(layout = ?changed, error = %error.message, "field layout not handed to its pipelines"),
     }
-}
-
-fn slug(name: &str) -> String {
-    let mut out: String = name.to_ascii_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    while out.contains("--") {
-        out = out.replace("--", "-");
-    }
-    let out = out.trim_matches('-');
-    let out = if out.is_empty() { "field" } else { out };
-    out.chars().take(60).collect()
 }

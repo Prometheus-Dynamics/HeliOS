@@ -50,25 +50,25 @@ use orion_nt4::Value;
 use serde_json::Value as Json;
 
 /// The output port whose JSON these topics come from.
-pub const MULTI_TAG_POSE_PORT: &str = "multi_tag_pose";
+pub(crate) const MULTI_TAG_POSE_PORT: &str = "multi_tag_pose";
 /// The output port of the live mapper's pose (`eidos:map_pose`): `map_pose` in the graphs built
 /// by Eidos's templates, `pose` in older stored graphs. Only its shape tells `pose` apart from the
 /// AprilTag graphs' `pose` outputs: see [`is_map_pose`].
-pub const MAP_POSE_PORT: &str = "map_pose";
+pub(crate) const MAP_POSE_PORT: &str = "map_pose";
 /// The live mapper's pose port in graphs stored before Eidos's templates named it.
-pub const LEGACY_MAP_POSE_PORT: &str = "pose";
+pub(crate) const LEGACY_MAP_POSE_PORT: &str = "pose";
 
 /// `port` carries the live mapper's pose (either name).
-pub fn is_map_pose_port(port: &str) -> bool {
+pub(crate) fn is_map_pose_port(port: &str) -> bool {
     port == MAP_POSE_PORT || port == LEGACY_MAP_POSE_PORT
 }
 /// The NT4 type of `robot_pose_struct` (WPILib's `Pose3d`).
-pub const POSE3D_STRUCT_TYPE: &str = "struct:Pose3d";
+pub(crate) const POSE3D_STRUCT_TYPE: &str = "struct:Pose3d";
 /// The NT4 type of a struct schema topic.
-pub const STRUCT_SCHEMA_TYPE: &str = "structschema";
+pub(crate) const STRUCT_SCHEMA_TYPE: &str = "structschema";
 /// WPILib's schemas for `Pose3d` and the structs it nests, by schema topic (as WPILib's
 /// `Pose3dStruct`, `Translation3dStruct`, `Rotation3dStruct` and `QuaternionStruct` give them).
-pub const POSE3D_SCHEMAS: &[(&str, &str)] = &[
+pub(crate) const POSE3D_SCHEMAS: &[(&str, &str)] = &[
     ("/.schema/struct:Pose3d", "Translation3d translation;Rotation3d rotation"),
     ("/.schema/struct:Translation3d", "double x;double y;double z"),
     ("/.schema/struct:Rotation3d", "Quaternion q"),
@@ -78,7 +78,7 @@ pub const POSE3D_SCHEMAS: &[(&str, &str)] = &[
 /// The robot pose in the field: translation in metres, rotation as a unit quaternion and as
 /// WPILib's roll, pitch and yaw in radians.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RobotPose {
+pub(crate) struct RobotPose {
     pub translation: [f64; 3],
     /// `w, x, y, z`.
     pub quaternion: [f64; 4],
@@ -88,7 +88,7 @@ pub struct RobotPose {
 
 /// The values one tick publishes for a pipeline's robot pose topics.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RobotPoseTopics {
+pub(crate) struct RobotPoseTopics {
     /// `inlier_tags`, 0 when missing.
     pub tag_count: i64,
     /// `Some` when there is a robot pose this tick (`valid && has_rig`, fields present).
@@ -99,19 +99,19 @@ pub struct RobotPoseTopics {
 
 impl RobotPoseTopics {
     /// `robot_pose_valid`.
-    pub fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.pose.is_some()
     }
 
     /// `robot_pose` as the `double[]` value.
-    pub fn robot_pose_value(pose: &RobotPose) -> Value {
+    pub(crate) fn robot_pose_value(pose: &RobotPose) -> Value {
         Value::DoubleArray(pose.translation.iter().chain(pose.rpy.iter()).copied().collect())
     }
 }
 
 /// A map pose's topics (`eidos:map_pose`, see [`read_map_pose`]).
 #[derive(Debug, Clone, PartialEq)]
-pub struct MapPoseTopics {
+pub(crate) struct MapPoseTopics {
     /// `state`: `bootstrapping`, `tracking`, `coasting`, `lost` or `relocalized`.
     pub state: String,
     /// The main track's robot pose; `tag_count` is `alignment.matched_tags`.
@@ -122,7 +122,7 @@ pub struct MapPoseTopics {
 
 /// The weak candidate's topics: a lone small or ambiguous tag the map does not map yet.
 #[derive(Debug, Clone, PartialEq)]
-pub struct WeakPoseTopics {
+pub(crate) struct WeakPoseTopics {
     /// `Some` when the map is aligned and the candidate has a rig (see the module docs).
     pub pose: Option<RobotPose>,
     /// `Some` with `pose`, when its covariance is usable.
@@ -133,14 +133,14 @@ pub struct WeakPoseTopics {
 
 impl WeakPoseTopics {
     /// `weak_robot_pose_valid`.
-    pub fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.pose.is_some()
     }
 }
 
 /// Whether `json` is an `eidos:map_pose`. The port name is not enough (the AprilTag graphs have
 /// `pose` outputs too), so this checks the shape: a `state` string and an `alignment` object.
-pub fn is_map_pose(json: &Json) -> bool {
+pub(crate) fn is_map_pose(json: &Json) -> bool {
     json.get("state").is_some_and(Json::is_string) && json.get("alignment").is_some_and(Json::is_object)
 }
 
@@ -151,7 +151,7 @@ pub fn is_map_pose(json: &Json) -> bool {
 /// aligned to the field layout and there is a rig. Eidos leaves `rig` out when the camera has no
 /// mount: it reads as the identity with an empty covariance, which is not a pose. Without the
 /// rig there is no robot pose (`valid` false), as for `multi_tag_pose`.
-pub fn read_map_pose(json: &Json) -> Option<MapPoseTopics> {
+pub(crate) fn read_map_pose(json: &Json) -> Option<MapPoseTopics> {
     if !is_map_pose(json) {
         return None;
     }
@@ -185,7 +185,7 @@ fn has_covariance(object: &Json) -> bool {
 
 /// Read a `multi_tag_pose` JSON (the output as `GET /v1/outputs` shows it). Missing or
 /// malformed fields give no robot pose (`valid` false), never a guessed one.
-pub fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
+pub(crate) fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
     let has_rig = multi_tag_pose.get("has_rig").and_then(Json::as_bool).unwrap_or(false);
     let valid = multi_tag_pose.get("valid").and_then(Json::as_bool).unwrap_or(false);
     let pose = if valid && has_rig { multi_tag_pose.get("reference_from_rig").and_then(robot_pose_from_transform) } else { None };
@@ -205,7 +205,7 @@ pub fn read(multi_tag_pose: &Json) -> RobotPoseTopics {
 /// robot's position error is `v - [t]× w` (rotation error turns about the field origin):
 /// `Σt = V - Cᵀ[t]×ᵀ - [t]× C + [t]× W [t]×ᵀ` with `W`, `C`, `V` the rotation, rotation-translation
 /// and translation blocks. `σθ` is the error about the field's `z` (`w_z`).
-pub fn robot_pose_std_devs(estimate: &Json, translation: [f64; 3]) -> Option<[f64; 3]> {
+pub(crate) fn robot_pose_std_devs(estimate: &Json, translation: [f64; 3]) -> Option<[f64; 3]> {
     let values = estimate.get("covariance")?.as_array()?;
     if values.len() != 36 {
         return None;
@@ -245,8 +245,8 @@ pub fn robot_pose_std_devs(estimate: &Json, translation: [f64; 3]) -> Option<[f6
 /// The smallest std devs robot code is given. Each frame's covariance comes from that one solve's
 /// residuals, so it is right on average but now and then far too small (Eidos's Monte Carlo); a
 /// pose estimator would then snap to that frame. The floors are the field's own placement error.
-pub const MIN_POSITION_STD_DEV_M: f64 = 0.01;
-pub const MIN_HEADING_STD_DEV_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
+pub(crate) const MIN_POSITION_STD_DEV_M: f64 = 0.01;
+pub(crate) const MIN_HEADING_STD_DEV_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
 
 /// A `reference_from_rig` transform (`{translation, rotation}`) as a robot pose; `None` unless
 /// every field is there and finite and the quaternion is not zero.
@@ -269,7 +269,7 @@ fn number(object: &Json, key: &str) -> Option<f64> {
 
 /// Roll, pitch and yaw of a unit quaternion `[w, x, y, z]`, as WPILib's `Rotation3d` reads them:
 /// `R = Rz(yaw) Ry(pitch) Rx(roll)`. Pitch is clamped to `±π/2` at the gimbal lock.
-pub fn rpy_from_quaternion([w, x, y, z]: [f64; 4]) -> [f64; 3] {
+pub(crate) fn rpy_from_quaternion([w, x, y, z]: [f64; 4]) -> [f64; 3] {
     let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
     let sin_pitch = 2.0 * (w * y - z * x);
     let pitch = if sin_pitch.abs() >= 1.0 { std::f64::consts::FRAC_PI_2.copysign(sin_pitch) } else { sin_pitch.asin() };
@@ -279,7 +279,7 @@ pub fn rpy_from_quaternion([w, x, y, z]: [f64; 4]) -> [f64; 3] {
 
 /// WPILib's `Pose3d` struct bytes: translation `x, y, z`, then quaternion `w, x, y, z`, as
 /// little-endian `f64`s.
-pub fn pose3d_struct_bytes(pose: &RobotPose) -> Vec<u8> {
+pub(crate) fn pose3d_struct_bytes(pose: &RobotPose) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(56);
     for component in pose.translation.iter().chain(pose.quaternion.iter()) {
         bytes.extend_from_slice(&component.to_le_bytes());

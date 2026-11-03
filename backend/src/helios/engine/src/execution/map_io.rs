@@ -35,7 +35,7 @@ pub(crate) struct SavePulse {
 impl SavePulse {
     /// The workload's save counter is `count`. A new request raises `save`: `Some(true)` is the
     /// value to push. A request while one is pending, or no new request, pushes nothing.
-    pub fn request(&mut self, count: u64) -> Option<bool> {
+    pub(super) fn request(&mut self, count: u64) -> Option<bool> {
         if count <= self.seen {
             return None;
         }
@@ -49,13 +49,13 @@ impl SavePulse {
 
     /// The graph gave `saved_map` on a tick (the edge was taken): `Some(false)` is the value to
     /// push to lower `save`, once.
-    pub fn saved(&mut self) -> Option<bool> {
+    pub(super) fn saved(&mut self) -> Option<bool> {
         std::mem::take(&mut self.raised).then_some(false)
     }
 
     /// Whether `save` is raised now.
     #[cfg(test)]
-    pub fn raised(&self) -> bool {
+    pub(super) fn raised(&self) -> bool {
         self.raised
     }
 }

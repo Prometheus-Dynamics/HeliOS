@@ -202,6 +202,18 @@ pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':'))
 }
 
+/// An id readable from a name: its ASCII letters and digits in lower case, every other run of
+/// characters as one `-`, at most `max` characters; `fallback` when nothing is left.
+fn slug(name: &str, fallback: &str, max: usize) -> String {
+    let mut out: String = name.to_ascii_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    let out = out.trim_matches('-');
+    let out = if out.is_empty() { fallback } else { out };
+    out.chars().take(max).collect()
+}
+
 pub fn check_id(id: &str) -> Result<(), ApiError> {
     if valid_id(id) { Ok(()) } else { Err(ApiError::bad_request(format!("invalid id {id:?}"))) }
 }

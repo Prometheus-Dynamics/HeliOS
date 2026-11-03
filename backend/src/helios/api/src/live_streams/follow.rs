@@ -15,7 +15,7 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 /// What one Orion event means for the clients.
 #[derive(Debug, PartialEq)]
-pub enum Step {
+pub(super) enum Step {
     Nothing,
     /// The stream's series, as a catalog text frame, and whether its publisher is there.
     Catalog {
@@ -31,23 +31,23 @@ pub enum Step {
 
 /// The state of one subscription: the kinds to decode with and the position reached.
 #[derive(Debug, Default)]
-pub struct Feed {
+pub(super) struct Feed {
     kinds: Vec<SeriesKind>,
     /// The last batch taken, which the next one must follow.
     cursor: Option<StreamCursor>,
 }
 
 impl Feed {
-    pub fn new(cursor: Option<StreamCursor>) -> Self {
+    pub(super) fn new(cursor: Option<StreamCursor>) -> Self {
         Self { kinds: Vec::new(), cursor }
     }
 
-    pub fn cursor(&self) -> Option<StreamCursor> {
+    pub(super) fn cursor(&self) -> Option<StreamCursor> {
         self.cursor
     }
 
     /// Folds in one event of the subscription.
-    pub fn on_event(&mut self, event: ClientEventKind) -> Step {
+    pub(super) fn on_event(&mut self, event: ClientEventKind) -> Step {
         match event {
             ClientEventKind::StreamCatalog(catalog) => {
                 self.kinds = catalog.series.iter().map(|series| series.kind).collect();
@@ -84,7 +84,7 @@ impl Feed {
 /// Follows the node's stream until `stop` fires (or its sender is dropped), then unsubscribes.
 /// `generation` is the one [`LiveStreams`] started this follower with: anything it reports after
 /// a newer generation began is dropped there.
-pub async fn run(live: Arc<LiveStreams>, generation: u64, mut stop: oneshot::Receiver<()>) {
+pub(super) async fn run(live: Arc<LiveStreams>, generation: u64, mut stop: oneshot::Receiver<()>) {
     let mut cursor: Option<StreamCursor> = None;
     loop {
         live.report(generation, "connecting", "");

@@ -34,9 +34,9 @@ use helios_field::{CameraMount, Pose};
 use crate::model::{ContextValue, ExecutionBinding};
 
 /// Host input of the primary camera's calibration (Eidos templates' `ports::CAMERA`).
-pub const CAMERA_PORT: &str = "camera";
+pub(super) const CAMERA_PORT: &str = "camera";
 /// Host input of the primary camera's extrinsics (Eidos templates' `ports::EXTRINSICS`).
-pub const EXTRINSICS_PORT: &str = "extrinsics";
+pub(super) const EXTRINSICS_PORT: &str = "extrinsics";
 
 const CAMERA_PREFIX: &str = "camera.";
 const MOUNT_PREFIX: &str = "mount.";
@@ -105,7 +105,7 @@ impl ContextPush {
     /// Rust-typed payloads: a `Value` (or JSON) for a structured `TypeKey` is refused as
     /// unkeyed instead of going through the type's registered const coercer, so the engine
     /// builds Eidos's own types (TODO.md, Upstream: Daedalus).
-    pub fn feed(&self, host: &HostBridgeHandle) -> Result<FeedOutcome, String> {
+    pub(super) fn feed(&self, host: &HostBridgeHandle) -> Result<FeedOutcome, String> {
         let error = |error: serde_json::Error| format!("{error} in {}", self.value);
         Ok(match self.kind {
             ContextKind::Camera => host.push(self.port.clone(), serde_json::from_value::<eidos_daedalus::types::CameraCalibration>(self.value.clone()).map_err(error)?),

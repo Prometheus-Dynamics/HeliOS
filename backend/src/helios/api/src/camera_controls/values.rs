@@ -35,7 +35,7 @@ pub fn standard_key(control: StandardControl) -> &'static str {
 /// A standard control's value in its type: exposure and colour temperature as whole numbers,
 /// gains, EV, fps and lens position as numbers, AE and AWB as booleans, AF mode
 /// (`manual`/`auto`/`continuous` or 0-2) and AF trigger (`start`/`cancel` or 0/1).
-pub fn standard_value(control: StandardControl, value: &serde_json::Value) -> ApiResult<ControlValue> {
+pub(super) fn standard_value(control: StandardControl, value: &serde_json::Value) -> ApiResult<ControlValue> {
     let key = standard_key(control);
     let choice = |names: &[&str]| -> ApiResult<ControlValue> {
         if let Some(name) = value.as_str() {
@@ -67,7 +67,7 @@ pub fn standard_value(control: StandardControl, value: &serde_json::Value) -> Ap
 
 /// A backend control's value: booleans as booleans, whole numbers as integers, others as floats
 /// (the camera service takes numbers of any type for the control's type and clamps them).
-pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlValue> {
+pub(super) fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlValue> {
     if let Some(rect) = rect_of(value) {
         return Ok(ControlValue::Rect(rect));
     }
@@ -94,7 +94,7 @@ pub fn backend_value(key: &str, value: &serde_json::Value) -> ApiResult<ControlV
 /// number of an integer menu, ignoring ASCII case, see `ControlMeta::menu_entry_named`) or its
 /// value (the index, a raw number). A stored label from before entries were typed loads the same
 /// way; other controls take `backend_value`.
-pub fn control_value(key: &str, meta: &ControlMeta, value: &serde_json::Value) -> ApiResult<ControlValue> {
+pub(super) fn control_value(key: &str, meta: &ControlMeta, value: &serde_json::Value) -> ApiResult<ControlValue> {
     if meta.menu.is_some()
         && let Some(label) = value.as_str()
     {
@@ -111,7 +111,7 @@ fn menu_labels(meta: &ControlMeta) -> String {
 
 /// A control's default as the control takes it. The camera reports a menu's default as an unsigned
 /// number, but a menu takes its index as an integer and refuses the other (a reset would fail on it).
-pub fn default_value(meta: &ControlMeta) -> ControlValue {
+pub(super) fn default_value(meta: &ControlMeta) -> ControlValue {
     match (&meta.kind, &meta.default) {
         (ControlKind::Menu | ControlKind::IntMenu, ControlValue::Uint(index)) => ControlValue::Int(*index as i32),
         (_, default) => default.clone(),

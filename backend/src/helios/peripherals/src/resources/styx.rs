@@ -1,5 +1,5 @@
 use crate::model::ResourceKind;
-use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder};
+use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder, sanitize_local_component};
 use styx::{BackendHandle, ProbedDevice, probe_all_with_errors};
 
 #[derive(Default)]
@@ -49,22 +49,9 @@ fn local_name_for_device(device: &ProbedDevice) -> String {
     if let Some(path) = device.backends.first().and_then(device_path)
         && let Some(name) = std::path::Path::new(path).file_name().and_then(|value| value.to_str())
     {
-        return sanitize_local_component(name);
+        return sanitize_local_component(name, "camera");
     }
     format!("camera-{}", short_fingerprint(&device.identity.display))
-}
-
-fn sanitize_local_component(value: &str) -> String {
-    let mut cleaned = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' {
-            cleaned.push(ch.to_ascii_lowercase());
-        } else if matches!(ch, '/' | '.' | '_' | ':' | ' ') && !cleaned.ends_with('-') {
-            cleaned.push('-');
-        }
-    }
-    let cleaned = cleaned.trim_matches('-');
-    if cleaned.is_empty() { "camera".into() } else { cleaned.into() }
 }
 
 fn short_fingerprint(value: &str) -> String {
@@ -87,8 +74,8 @@ mod tests {
 
     #[test]
     fn sanitize_local_component_normalizes_id_values() {
-        assert_eq!(sanitize_local_component("/dev/video0"), "dev-video0");
-        assert_eq!(sanitize_local_component("CSI Camera: Front"), "csi-camera-front");
-        assert_eq!(sanitize_local_component(""), "camera");
+        assert_eq!(sanitize_local_component("/dev/video0", "camera"), "dev-video0");
+        assert_eq!(sanitize_local_component("CSI Camera: Front", "camera"), "csi-camera-front");
+        assert_eq!(sanitize_local_component("", "camera"), "camera");
     }
 }

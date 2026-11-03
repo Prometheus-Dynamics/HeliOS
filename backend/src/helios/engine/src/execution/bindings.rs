@@ -35,7 +35,7 @@ impl FrameSourceSpec {
     /// binding asks for a size, pyramid levels or a frame rate. A stored rate is an exact one,
     /// requested with every frame so it applies from the first frame of every (re)connection,
     /// without waiting for the camera controls to be restored.
-    pub fn request(&self) -> FrameRequest {
+    pub(super) fn request(&self) -> FrameRequest {
         let mut request = Frames::gray().latest();
         if let Some((width, height)) = self.request.output_resolution {
             request = request.size(width, height);

@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use helios_shutdown::{STAGE_TIMEOUT, Shutdown};
 use orion::{
     client::{ClientError, ControlPlaneEventStream, LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalServiceRetryPolicy},
@@ -14,7 +12,7 @@ use tracing::{info, warn};
 use crate::{
     config::EngineConfig,
     execution::{ExecutionPlugins, GraphSettings, ResidentExecutionSet},
-    model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef},
+    model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, now_ms},
     plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins},
     provider::{EnginePublishError, OrionEnginePublisher},
     workloads::{WorkloadDecodeError, decode_assigned_workload},
@@ -441,10 +439,6 @@ fn log_loaded_plugins(plugins: &PluginLoadResult) {
             "loaded external Daedalus plugin"
         );
     }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 fn is_retryable_no_message(error: &EngineRuntimeError) -> bool {

@@ -14,7 +14,7 @@ use lemnos_ipc::{DeviceClass, DeviceDesc, DeviceStatus};
 use crate::lemnosd::fan::{FAN_DUTY_CONTROL, FAN_OVERRIDE_ACTION, FAN_RELEASE_ACTION};
 use crate::lemnosd::raw::RAW_ACTIONS;
 use crate::model::{NodeId, ObservedValue, ResourceDescriptor, ResourceKind, ResourceObservation, ResourceStatus};
-use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder};
+use crate::resources::{DiscoveryContext, DiscoveryError, DiscoveryProbe, DiscoverySnapshot, ResourceBuilder, sanitize_local_component};
 
 pub const PROBE_NAME: &str = "lemnosd";
 pub const DEVICE_ID_LABEL: &str = "lemnos.device_id";
@@ -75,7 +75,7 @@ pub fn lemnosd_resources(node: &NodeId, state: &LemnosdState) -> Result<Vec<Reso
 /// a fan's override is its own resource (`fan_resource`).
 fn device_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> Result<ResourceDescriptor, DiscoveryError> {
     let display_name = if device.label.is_empty() { device.id.clone() } else { device.label.clone() };
-    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::LemnosDevice, sanitize_local_component(&device.id), display_name)
+    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::LemnosDevice, sanitize_local_component(&device.id, "device"), display_name)
         .map_err(|error| DiscoveryError::ProbeFailed { probe: PROBE_NAME.into(), message: format!("device {}: {error}", device.id) })?
         .status(if state.connected { resource_status(device.status) } else { ResourceStatus::Missing })
         .label(DEVICE_ID_LABEL, device.id.clone())
@@ -126,7 +126,7 @@ fn raw_resource(node: &NodeId, state: &LemnosdState) -> Result<ResourceDescripto
 /// its state lists the running override (`fan.override.active|duty|until_ms`).
 fn fan_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> Result<ResourceDescriptor, DiscoveryError> {
     let display_name = if device.label.is_empty() { device.id.clone() } else { device.label.clone() };
-    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::Fan, sanitize_local_component(&device.id), display_name)
+    let mut builder = ResourceBuilder::new(node.clone(), ResourceKind::Fan, sanitize_local_component(&device.id, "device"), display_name)
         .map_err(|error| DiscoveryError::ProbeFailed { probe: PROBE_NAME.into(), message: format!("fan {}: {error}", device.id) })?
         .status(if state.connected { resource_status(device.status) } else { ResourceStatus::Missing })
         .label(DEVICE_ID_LABEL, device.id.clone())
@@ -161,19 +161,6 @@ fn resource_status(status: DeviceStatus) -> ResourceStatus {
         DeviceStatus::Degraded => ResourceStatus::Degraded,
         DeviceStatus::Faulted | DeviceStatus::Missing => ResourceStatus::Missing,
     }
-}
-
-fn sanitize_local_component(value: &str) -> String {
-    let mut cleaned = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' {
-            cleaned.push(ch.to_ascii_lowercase());
-        } else if matches!(ch, '/' | '.' | '_' | ':' | ' ') && !cleaned.ends_with('-') {
-            cleaned.push('-');
-        }
-    }
-    let cleaned = cleaned.trim_matches('-');
-    if cleaned.is_empty() { "device".into() } else { cleaned.into() }
 }
 
 /// lemnosd's devices for the inventory: reads the bridge's state, never the socket.

@@ -61,7 +61,7 @@ pub(crate) struct StyxFrameSource {
 
 impl StyxFrameSource {
     /// Fails only when the client's descriptors cannot be made.
-    pub fn open(spec: FrameSourceSpec) -> Result<Self, String> {
+    pub(super) fn open(spec: FrameSourceSpec) -> Result<Self, String> {
         let client = Self::client(&spec)?;
         Ok(Self { spec, client })
     }

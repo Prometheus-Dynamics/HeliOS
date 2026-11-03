@@ -229,3 +229,8 @@ pub struct EngineSnapshot {
     pub sessions: Vec<ExecutionSessionState>,
     pub artifacts: Vec<ExecutionArtifactRecord>,
 }
+
+/// Unix time in milliseconds (0 before the epoch): the timestamps the engine records and publishes.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}

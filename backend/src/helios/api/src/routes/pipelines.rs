@@ -37,6 +37,7 @@ use styx::ipc::StandardControl;
 use super::{
     check_id,
     pipeline_bindings::{self, BindingSource, PipelineInputHint},
+    slug,
 };
 
 pub const ENGINE_RUNTIME: &str = "helios.engine.execution.v1";
@@ -1162,20 +1163,10 @@ pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -
     fetch(&state, &id).await.map(Json)
 }
 
-fn slug(name: &str) -> String {
-    let mut out: String = name.to_ascii_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    while out.contains("--") {
-        out = out.replace("--", "-");
-    }
-    let out = out.trim_matches('-');
-    let out = if out.is_empty() { "pipeline" } else { out };
-    out.chars().take(40).collect()
-}
-
 pub async fn create(State(state): State<SharedState>, Json(request): Json<CreatePipeline>) -> ApiResult<(StatusCode, Json<Pipeline>)> {
     let id = match request.id {
         Some(id) => id,
-        None => format!("{}-{:x}", slug(&request.spec.name), now_ms() & 0xfffff),
+        None => format!("{}-{:x}", slug(&request.spec.name, "pipeline", 40), now_ms() & 0xfffff),
     };
     check_id(&id)?;
     let view = state.orion.view().await?;
@@ -1454,7 +1445,7 @@ mod tests {
         assert!(graph.to_string().contains("\"eidos:detectors.apriltag\"") && !graph.to_string().contains("full_search_every"));
     }
 
-    pub fn sample_document() -> serde_json::Value {
+    pub(super) fn sample_document() -> serde_json::Value {
         serde_json::json!({
             "format": "daedalus.graph",
             "schema_version": 1,
@@ -1993,8 +1984,8 @@ mod tests {
 
     #[test]
     fn slugs_are_ids() {
-        assert_eq!(slug("AprilTags · front!"), "apriltags-front");
-        assert!(super::super::valid_id(&slug("")));
+        assert_eq!(slug("AprilTags · front!", "pipeline", 40), "apriltags-front");
+        assert!(super::super::valid_id(&slug("", "pipeline", 40)));
     }
 }
 
