@@ -21,8 +21,6 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       Lemnos look change-over: done in Atlas 034663e (system looks file, ring default_look) with
       gaia/configs/builds/raze.toml on Atlas 034663e + Lemnos 50533a8; not built yet.
       Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
-- [ ] **Role UI.** Why: the frozen PIT/ROBOT role split. Done when: role switching works with real
-      clicks on a Raze through the SystemCore, and the UI is reviewed visually. Blocked by: nothing.
 - [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
       end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
       real-click check on a Raze. Blocked by: nothing.

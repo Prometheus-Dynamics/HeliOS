@@ -55,13 +55,11 @@ pub struct PipelineRevision {
     pub spec: StoredSpec,
 }
 
-/// The first-boot decision about the startup file's default pipeline. Kept once made, so that a
-/// pipeline the user deletes is not created again.
+/// The user deleted the board's last pipeline, so the startup file's default is not created again.
+/// Only this choice is kept: an Orion state that comes back empty gets the default back.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct DefaultPipelineRecord {
-    /// Whether the default pipeline was created (false: the board already had pipelines).
-    pub created: bool,
-    pub decided_at_ms: u64,
+struct DefaultPipelineDeclined {
+    declined_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -210,18 +208,18 @@ impl Store {
         self.dir.join("camera-mounts.json")
     }
 
-    fn default_pipeline_path(&self) -> PathBuf {
-        self.dir.join("default-pipeline.json")
+    fn default_pipeline_declined_path(&self) -> PathBuf {
+        self.dir.join("default-pipeline-declined.json")
     }
 
-    pub async fn default_pipeline_record(&self) -> ApiResult<Option<DefaultPipelineRecord>> {
+    pub async fn default_pipeline_declined(&self) -> ApiResult<bool> {
         let _guard = self.lock.lock().await;
-        read_json(&self.default_pipeline_path()).await
+        Ok(read_json::<DefaultPipelineDeclined>(&self.default_pipeline_declined_path()).await?.is_some())
     }
 
-    pub async fn record_default_pipeline(&self, created: bool, decided_at_ms: u64) -> ApiResult<()> {
+    pub async fn decline_default_pipeline(&self, declined_at_ms: u64) -> ApiResult<()> {
         let _guard = self.lock.lock().await;
-        self.save("default_pipeline", "record", &self.default_pipeline_path(), &DefaultPipelineRecord { created, decided_at_ms }).await
+        self.save("default_pipeline", "declined", &self.default_pipeline_declined_path(), &DefaultPipelineDeclined { declined_at_ms }).await
     }
 
     pub async fn history(&self, id: &str) -> ApiResult<PipelineHistory> {
@@ -541,13 +539,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_pipeline_decision_is_kept_across_a_new_store() {
+    async fn declining_the_default_pipeline_is_kept_across_a_new_store() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::new(dir.path());
-        assert_eq!(store.default_pipeline_record().await.expect("read"), None);
-        store.record_default_pipeline(true, 7).await.expect("record");
+        assert!(!store.default_pipeline_declined().await.expect("read"));
+        store.decline_default_pipeline(7).await.expect("record");
         let store = Store::new(dir.path());
-        assert_eq!(store.default_pipeline_record().await.expect("read"), Some(DefaultPipelineRecord { created: true, decided_at_ms: 7 }));
+        assert!(store.default_pipeline_declined().await.expect("read"));
     }
 
     #[tokio::test]

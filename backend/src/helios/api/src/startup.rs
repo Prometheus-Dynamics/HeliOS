@@ -1,7 +1,8 @@
 //! The first-boot startup file (`/etc/helios/startup.toml`, staged by gaia). Its
 //! `[default_pipeline]` is the pipeline helios-api creates on the first camera when the board has
-//! no pipelines yet, with the embedded golden graph it names. It is created once: the decision is
-//! kept in the API's state (`store.rs`), so a pipeline the user deletes stays deleted.
+//! no pipelines yet, with the embedded golden graph it names. Deleting the board's last pipeline
+//! is kept in the API's state (`store.rs`), so that choice stays; a board whose Orion state came
+//! back empty gets the default again.
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
@@ -12,7 +13,6 @@ use tracing::{info, warn};
 use crate::{
     SharedState,
     error::{ApiError, ApiResult},
-    host::now_ms,
     routes::{
         cameras,
         pipelines::{self, Binding, PipelineSpec},
@@ -126,10 +126,10 @@ pub fn parse(text: &str) -> anyhow::Result<Option<DefaultPipeline>> {
     Ok(Some(default))
 }
 
-/// Whether the default pipeline is created now: only once, and only while Orion has no managed
-/// pipeline and a camera is there to bind.
-pub fn should_create_default_pipeline(has_managed_pipelines: bool, has_camera: bool, created_before: bool) -> bool {
-    !created_before && !has_managed_pipelines && has_camera
+/// Whether the default pipeline is created now: only while Orion has no managed pipeline, a camera
+/// is there to bind, and the user has not deleted the board's last pipeline.
+pub fn should_create_default_pipeline(has_managed_pipelines: bool, has_camera: bool, declined: bool) -> bool {
+    !declined && !has_managed_pipelines && has_camera
 }
 
 /// The default pipeline of the startup file at `path`. A missing, unreadable or invalid file gives
@@ -182,30 +182,22 @@ pub fn spawn_default_pipeline(state: SharedState, default: DefaultPipeline) -> t
     })
 }
 
-/// One check: `Ok(true)` once decided (created, or settled because the board has pipelines of its
-/// own), `Ok(false)` while waiting for a camera.
+/// One check: `Ok(true)` once there is nothing left to do this boot (created, the board has
+/// pipelines, or the user declined), `Ok(false)` while waiting for a camera.
 async fn settle(state: &SharedState, default: &DefaultPipeline) -> ApiResult<bool> {
-    let record = state.store.default_pipeline_record().await?;
+    let declined = state.store.default_pipeline_declined().await?;
     let view = state.orion.view().await?;
     let managed = pipelines::managed_pipeline_count(&view) > 0;
     // A playback player is not a camera to start a default on.
     let camera = cameras::camera_records(&view).filter(|record| !crate::playback::is_player(record.resource_id.as_str())).map(|record| record.resource_id.to_string()).min();
-    match (should_create_default_pipeline(managed, camera.is_some(), record.is_some()), camera) {
+    match (should_create_default_pipeline(managed, camera.is_some(), declined), camera) {
         (true, Some(camera)) => {
             let spec = default.spec(&camera).map_err(|error| ApiError::internal(format!("{error:#}")))?;
             pipelines::deploy(state, DEFAULT_PIPELINE_ID, spec).await?;
-            state.store.record_default_pipeline(true, now_ms()).await?;
             info!(camera = %camera, "created the default pipeline");
             Ok(true)
         }
-        // A board that already has pipelines never gets the default, not even after the user has
-        // deleted them all and rebooted.
-        _ if record.is_none() && managed => {
-            state.store.record_default_pipeline(false, now_ms()).await?;
-            info!("the board already has pipelines; no default pipeline");
-            Ok(true)
-        }
-        _ => Ok(record.is_some()),
+        _ => Ok(managed || declined),
     }
 }
 
@@ -257,14 +249,15 @@ mod tests {
     }
 
     #[test]
-    fn default_pipeline_is_created_once_on_the_first_camera() {
-        // No managed pipeline, a camera present, not created before: create.
+    fn default_pipeline_is_created_on_the_first_camera_unless_declined() {
+        // No managed pipeline, a camera present, not declined: create. This is also a board whose
+        // Orion state came back empty after the default had been created.
         assert!(should_create_default_pipeline(false, true, false));
         // Nothing to bind yet.
         assert!(!should_create_default_pipeline(false, false, false));
         // The board already has a pipeline (its own or the default).
         assert!(!should_create_default_pipeline(true, true, false));
-        // Created before: a deleted default stays deleted.
+        // The user deleted the last pipeline: it stays deleted.
         assert!(!should_create_default_pipeline(false, true, true));
     }
 }

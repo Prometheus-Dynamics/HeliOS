@@ -1194,6 +1194,9 @@ pub async fn remove(State(state): State<SharedState>, Path(id): Path<String>) ->
         mutations.push(DesiredStateMutation::RemoveArtifact(workload.artifact_id.clone()));
     }
     state.orion.apply(mutations).await?;
+    if managed_pipeline_count(&view) <= 1 {
+        state.store.decline_default_pipeline(now_ms()).await?;
+    }
     state.store.forget(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

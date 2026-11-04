@@ -557,12 +557,13 @@ dictionary = "apriltag_36h11"
 pyramid = 1
 ```
 
-It is created through the same path as `PUT /v1/pipelines/default`, and only once. The API checks
-every few seconds until it can decide: when Orion has no pipeline of the API's own and a camera is
-there, it creates the default and records that in `default-pipeline.json` under the state
-directory. A board that already has pipelines records that instead, so the default is never created
-there later. Deleting the default is final: it is not created again after a reboot or an update.
-To have it created again, delete `default-pipeline.json` while the board has no pipelines. The file
+It is created through the same path as `PUT /v1/pipelines/default`. The API checks every few seconds
+after it starts, until it can decide: when Orion has no pipeline of the API's own and a camera is
+there, it creates the default. A board that has pipelines is left alone. Deleting the board's last
+pipeline is final: the API records that in `default-pipeline-declined.json` under the state
+directory, and the default is not created again after a reboot or an update. Orion state that comes
+back empty for any other reason, such as a protocol change, gets the default back. To have it created
+again after deleting it, delete `default-pipeline-declined.json` and restart helios-api. The file
 is read when helios-api starts; to change it, change the image's copy (`gaia/assets/runtime-services`)
 or replace the pipeline through the API. A missing, unreadable or invalid file creates nothing and
 the API starts anyway (logged). Helios-diagnostics reports whether the file enables a default.

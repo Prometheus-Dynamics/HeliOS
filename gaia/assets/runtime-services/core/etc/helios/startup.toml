@@ -1,10 +1,10 @@
 # HeliOS first-boot startup file, read by helios-api when it starts (backend/src/helios/api/src/startup.rs).
 #
 # [default_pipeline] is the pipeline helios-api creates on the first camera when the board has no
-# pipelines yet, with the pipeline id "default". It is created once. If the user deletes it, it stays
-# deleted, through reboots and updates, because helios-api keeps the decision in its state directory
-# (/var/lib/helios/api/default-pipeline.json). Remove that file to have it created again (only while
-# the board has no pipelines).
+# pipelines yet, with the pipeline id "default". If the user deletes the board's last pipeline, the
+# default stays deleted, through reboots and updates, because helios-api keeps that choice in its state
+# directory (/var/lib/helios/api/default-pipeline-declined.json). Remove that file to have it created
+# again. Orion state that comes back empty for any other reason gets the default back.
 #
 # No [default_pipeline] (or enabled = false, or a file helios-api cannot parse) means no pipeline is
 # created; the API still starts. See docs/docs/api/http.md, "First-boot default pipeline".
