@@ -25,13 +25,13 @@ timeout_seconds = 7200
 [providers.archive]
 timeout_seconds = 3600                      # the SDK is 1.75 GB
 
-# Limelight SystemCore ALPHA 18 SDK (limelightosr-2027.0.0-alpha18-410), pinned by GitHub's
+# Limelight SystemCore ALPHA 18 SDK (limelightosr-2027.0.0-alpha18-422), pinned by GitHub's
 # published asset digest: glibc 2.42, aarch64-buildroot-linux-gnu.
 [[sources]]
 id = "systemcore-sdk"
 kind = "archive"
-url = "https://github.com/LimelightVision/systemcore-os-public/releases/download/limelightosr-2027.0.0-alpha18-410/systemcore-aarch64-toolchain.tar.gz"
-sha256 = "5d0fb541ed1873cda4aba7f449d96c46c5e1ea074f752619cfe735f5333aa653"
+url = "https://github.com/LimelightVision/systemcore-os-public/releases/download/limelightosr-2027.0.0-alpha18-422/systemcore-aarch64-toolchain.tar.gz"
+sha256 = "7a5c5e0df85a00dc1493bc8d6588f950c7066b92d0cb59f0800a434389cb4d89"
 strip_components = 1
 allow_absolute_symlinks = true
 refresh = "never"
