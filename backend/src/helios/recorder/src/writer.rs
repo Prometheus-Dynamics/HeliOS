@@ -33,7 +33,7 @@ const CLOCK_PERIOD: Duration = Duration::from_secs(1);
 pub fn header_for(camera: &str, format: FourCc, size: (u32, u32), fps: Option<f32>) -> Result<RecordingHeader, RecorderError> {
     let resolution = Resolution::new(size.0, size.1).ok_or_else(|| RecorderError::Camera(format!("frame size {}x{} is not valid", size.0, size.1)))?;
     Ok(RecordingHeader {
-        device: DeviceIdentity { display: camera.to_string(), keys: vec![camera.to_string()] },
+        device: DeviceIdentity { display: camera.to_string(), product: None, keys: vec![camera.to_string()] },
         backend: "styx-camera-service".into(),
         format: MediaFormat::new(format, resolution, ColorSpace::Srgb),
         interval: fps.and_then(|fps| Interval::from_fps(fps.round().max(1.0) as u32)),

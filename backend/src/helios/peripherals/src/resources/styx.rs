@@ -24,6 +24,9 @@ impl DiscoveryProbe for CaptureProbe {
                 .capability("capture.configurable", Some("styx"))
                 .label("capture_role", "camera_stream")
                 .label("styx.backend", primary_backend.kind.to_string());
+            if let Some(product) = &device.identity.product {
+                builder = builder.label("styx.product", product.clone());
+            }
             if let Some(path) = device_path(primary_backend) {
                 builder = builder.endpoint("dev", path.to_string());
                 if path.starts_with("/dev/video") {

@@ -152,10 +152,15 @@ pub fn streaming_cameras(view: &StateView) -> Vec<(String, String)> {
         .filter(|record| frames_socket(&record.endpoints).is_some())
         .map(|record| {
             let id = record.resource_id.to_string();
-            let name = label_map(&record.labels).get("helios.display_name").cloned().unwrap_or_else(|| id.clone());
+            let name = camera_name(&label_map(&record.labels), &id);
             (id, name)
         })
         .collect()
+}
+
+/// A camera's name for people: its product when Styx knows it, else the name it is listed under.
+fn camera_name(labels: &BTreeMap<String, String>, id: &str) -> String {
+    labels.get("helios.label.styx.product").or_else(|| labels.get("helios.display_name")).cloned().unwrap_or_else(|| id.to_string())
 }
 
 fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, node_id: &str, mounts: &BTreeMap<String, CameraMount>) -> Camera {
@@ -163,7 +168,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
     let id = record.resource_id.to_string();
     let frames_endpoint = record.endpoints.iter().find(|e| e.starts_with(STYX_ENDPOINT_PREFIX)).cloned();
     Camera {
-        name: labels.get("helios.display_name").cloned().unwrap_or_else(|| id.clone()),
+        name: camera_name(&labels, &id),
         node_id: node_id.to_string(),
         provider: record.provider_id.to_string(),
         health: enum_name(record.health),
@@ -631,6 +636,15 @@ pub async fn reset_calibration_views(State(state): State<SharedState>, Path(id):
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_camera_goes_by_its_product_and_falls_back_to_its_listed_name() {
+        let labels = |pairs: &[(&str, &str)]| pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect::<BTreeMap<_, _>>();
+        let listed = ("helios.display_name", "UVC Camera (046d:0825)");
+        assert_eq!(camera_name(&labels(&[listed, ("helios.label.styx.product", "Logitech C270")]), "cam0"), "Logitech C270");
+        assert_eq!(camera_name(&labels(&[listed]), "cam0"), "UVC Camera (046d:0825)");
+        assert_eq!(camera_name(&labels(&[]), "cam0"), "cam0");
+    }
 
     #[test]
     fn drops_split_by_cause_next_to_the_total() {

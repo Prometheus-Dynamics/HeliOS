@@ -241,7 +241,7 @@ mod tests {
         let config = PeripheralConfig { stream_dir: dir.path().join("streams"), ..PeripheralConfig::default() };
         let resource = ResourceBuilder::new(NodeId::new("node1"), ResourceKind::CaptureDevice, "video0", "Camera 0").expect("camera").endpoint("dev", "/dev/video0").build();
         let device = ProbedDevice {
-            identity: styx::DeviceIdentity { display: "Camera 0".into(), keys: vec!["/dev/video0".into()] },
+            identity: styx::DeviceIdentity { display: "Camera 0".into(), product: None, keys: vec!["/dev/video0".into()] },
             backends: vec![ProbedBackend {
                 kind: styx::BackendKind::V4l2,
                 handle: BackendHandle::V4l2 { path: "/dev/video0".into() },
