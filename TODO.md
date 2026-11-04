@@ -23,7 +23,10 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
-      and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.
+      and it reconnects after a SystemCore and a Raze restart. Done on Raze #1 against Orion's
+      `nt4-server` through a tunnel: every topic arrives at 30 Hz, and it reconnects after a
+      server restart (2 s) and an engine restart (4 s). Left: a real WPILib client, a SystemCore
+      and a Raze reboot. Blocked by: nothing listens on 5810 on the SystemCore without a robot program running.
 - [ ] **Robot time.** Why: poses must line up with the robot's clock. Partly done: every NT
       output carries `capture_time_us` in the NT server's clock (deff96c9). Left: measure the bound
       between published capture times and the SystemCore's time, and write it in docs. Blocked by:
