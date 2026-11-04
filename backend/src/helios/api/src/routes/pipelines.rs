@@ -1035,8 +1035,7 @@ async fn deploy_locked(state: &SharedState, id: &str, spec: &PipelineSpec) -> Ap
     let view = state.orion.view().await?;
     let revision = next_revision(&state.store.history(id).await?, deployed_revision(&view, id));
     apply_spec(state, &view, id, spec, revision).await?;
-    let spec_json = serde_json::to_value(spec).map_err(|error| ApiError::internal(error.to_string()))?;
-    state.store.push_revision(id, revision, spec_json, now_ms()).await?;
+    state.store.push_revision(id, revision, spec, now_ms()).await?;
     fetch(state, id).await
 }
 
@@ -1054,7 +1053,7 @@ pub async fn refresh_field_layouts(state: &SharedState, changed: Option<&str>, s
         let id = pipeline_id(workload.workload_id.as_str());
         let history = state.store.history(&id).await?;
         let Some(latest) = history.latest() else { continue };
-        let Ok(spec) = serde_json::from_value::<PipelineSpec>(latest.spec.clone()) else { continue };
+        let Ok(spec) = latest.spec.parse::<PipelineSpec>() else { continue };
         if !field_layouts::has_multi_tag_pose(&spec.graph) {
             continue;
         }
@@ -1134,7 +1133,7 @@ async fn store_refreshed(state: &SharedState, id: &str, refreshed: &RefreshedPla
     }
     let history = state.store.history(id).await?;
     let Some(latest) = history.latest() else { return Ok(false) };
-    let mut spec: PipelineSpec = serde_json::from_value(latest.spec.clone()).map_err(|error| ApiError::internal(format!("pipeline {id} has an unreadable spec: {error}")))?;
+    let mut spec: PipelineSpec = latest.spec.parse().map_err(|error| ApiError::internal(format!("pipeline {id} has an unreadable spec: {error}")))?;
     let bytes = tokio::fs::read(&refreshed.file).await?;
     spec.graph = serde_json::from_slice(&bytes).map_err(|error| ApiError::internal(format!("refreshed graph of {id} is not JSON: {error}")))?;
     deploy_locked(state, id, &spec).await?;
@@ -1230,7 +1229,7 @@ pub async fn rollback(State(state): State<SharedState>, Path(id): Path<String>) 
     let task = tokio::spawn(async move {
         let _deploying = state.deploys.lock().await;
         let previous = state.store.previous_revision(&id).await?;
-        let spec: PipelineSpec = serde_json::from_value(previous.spec).map_err(|error| ApiError::internal(format!("stored revision {} is unreadable: {error}", previous.revision)))?;
+        let spec: PipelineSpec = previous.spec.parse().map_err(|error| ApiError::internal(format!("stored revision {} is unreadable: {error}", previous.revision)))?;
         let view = state.orion.view().await?;
         apply_spec(&state, &view, &id, &spec, previous.revision).await?;
         state.store.pop_revision(&id).await?;
@@ -1246,12 +1245,16 @@ pub struct RevisionSummary {
     pub name: Option<String>,
 }
 
+/// What a revision's summary reads of its spec.
+#[derive(Deserialize)]
+struct SpecName {
+    name: Option<String>,
+}
+
 pub async fn revisions(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Vec<RevisionSummary>>> {
     check_id(&id)?;
     let history = state.store.history(&id).await?;
-    Ok(Json(
-        history.revisions.iter().rev().map(|r| RevisionSummary { revision: r.revision, saved_at_ms: r.saved_at_ms, name: r.spec.get("name").and_then(|n| n.as_str()).map(str::to_string) }).collect(),
-    ))
+    Ok(Json(history.revisions.iter().rev().map(|r| RevisionSummary { revision: r.revision, saved_at_ms: r.saved_at_ms, name: r.spec.parse::<SpecName>().ok().and_then(|spec| spec.name) }).collect()))
 }
 
 /// Rebind one input (a new revision with the same graph).
@@ -1259,7 +1262,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
     check_id(&id)?;
     let history = state.store.history(&id).await?;
     let mut spec: PipelineSpec = match history.latest() {
-        Some(latest) => serde_json::from_value(latest.spec.clone()).map_err(|error| ApiError::internal(error.to_string()))?,
+        Some(latest) => latest.spec.parse().map_err(|error| ApiError::internal(error.to_string()))?,
         None => {
             // A pipeline written by another tool: start from what Orion has.
             let pipeline = fetch(&state, &id).await?;
@@ -1471,7 +1474,9 @@ mod tests {
     #[test]
     fn the_next_revision_is_past_the_history_and_past_the_label_orion_holds() {
         use crate::store::{PipelineHistory, PipelineRevision};
-        let history = |revisions: &[u64]| PipelineHistory { revisions: revisions.iter().map(|&revision| PipelineRevision { revision, saved_at_ms: 0, spec: serde_json::json!({}) }).collect() };
+        let history = |revisions: &[u64]| PipelineHistory {
+            revisions: revisions.iter().map(|&revision| PipelineRevision { revision, saved_at_ms: 0, spec: crate::store::StoredSpec::new(&serde_json::json!({})).expect("spec") }).collect(),
+        };
         // A pipeline never deployed, and one Orion has that the history does not know.
         assert_eq!(next_revision(&history(&[]), None), 1);
         assert_eq!(next_revision(&history(&[]), Some(4)), 5);

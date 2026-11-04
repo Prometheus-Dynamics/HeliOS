@@ -115,7 +115,7 @@ pub async fn save_pipeline(state: &SharedState, id: &str, name: Option<String>) 
         return Err(ApiError::conflict(format!("pipeline {id} is not running: start it to save its map")));
     }
     let history = state.store.history(id).await?;
-    let spec = history.latest().and_then(|revision| serde_json::from_value::<PipelineSpec>(revision.spec.clone()).ok());
+    let spec = history.latest().and_then(|revision| revision.spec.parse::<PipelineSpec>().ok());
     let Some(spec) = spec.filter(|spec| helios_maps::has_live_map(&spec.graph)) else {
         return Err(ApiError::conflict(format!("pipeline {id} has no live map to save")));
     };

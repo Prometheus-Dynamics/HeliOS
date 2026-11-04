@@ -33,7 +33,7 @@ pub struct RunReport {
 pub async fn run(state: &SharedState, player: &PlayerView, source: &str) -> ApiResult<RunReport> {
     let history = state.store.history(source).await?;
     let revision = history.latest().ok_or_else(|| ApiError::not_found(format!("no pipeline {source}")))?;
-    let mut spec: PipelineSpec = serde_json::from_value(revision.spec.clone()).map_err(|error| ApiError::internal(format!("pipeline {source}: {error}")))?;
+    let mut spec: PipelineSpec = revision.spec.parse().map_err(|error| ApiError::internal(format!("pipeline {source}: {error}")))?;
 
     let view = state.orion.view().await?;
     let cameras: BTreeSet<String> = cameras::camera_records(&view).map(|record| record.resource_id.to_string()).collect();

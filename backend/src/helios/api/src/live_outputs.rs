@@ -8,10 +8,9 @@
 //! waits on a slow client (it skips to the newest data).
 //!
 //! What waits for slow clients is bounded in bytes, not chunks (`HELIOS_API_LIVE_BUFFER_BYTES`,
-//! [`DEFAULT_BUFFER_BYTES`]): the engine writes as fast as it is read, so chunks are up to a whole
-//! read each, and one stalled reader (a slow link, or a self-calibration store waiting on Orion
-//! while the engine restarts) used to pin a thousand of them, ~64 MiB of the brk heap that glibc
-//! never gave back. The buffer is let go once nobody is left.
+//! [`DEFAULT_BUFFER_BYTES`]): the engine writes as fast as it is read, so a chunk can be a whole
+//! read, and a count of chunks would let one stalled reader hold up to ~64 MiB. The buffer is let
+//! go once nobody is left.
 
 use std::{
     collections::VecDeque,

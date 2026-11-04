@@ -11,6 +11,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::value::RawValue;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -24,11 +25,34 @@ use std::sync::Arc;
 /// Revisions kept per pipeline.
 pub const MAX_REVISIONS: usize = 20;
 
+/// A pipeline spec as stored: its JSON text, parsed only when one revision is used. A history is
+/// megabytes of graphs, and as a `serde_json::Value` tree it took 70 MiB of small allocations on
+/// every deploy, which glibc kept in the brk heap for good (81 MiB PSS on the CM5, from 9).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StoredSpec(Box<RawValue>);
+
+impl StoredSpec {
+    pub fn new<T: Serialize>(spec: &T) -> serde_json::Result<Self> {
+        serde_json::value::to_raw_value(spec).map(Self)
+    }
+
+    pub fn parse<T: DeserializeOwned>(&self) -> serde_json::Result<T> {
+        serde_json::from_str(self.0.get())
+    }
+}
+
+impl PartialEq for StoredSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PipelineRevision {
     pub revision: u64,
     pub saved_at_ms: u64,
-    pub spec: serde_json::Value,
+    pub spec: StoredSpec,
 }
 
 /// The first-boot decision about the startup file's default pipeline. Kept once made, so that a
@@ -208,7 +232,8 @@ impl Store {
     /// Append revision `revision` (trimming old ones) and return its number. The number is the one
     /// the caller wrote to Orion, so the history and the device agree; it is never below the
     /// history's own next number, so the history stays strictly increasing.
-    pub async fn push_revision(&self, id: &str, revision: u64, spec: serde_json::Value, saved_at_ms: u64) -> ApiResult<u64> {
+    pub async fn push_revision<T: Serialize>(&self, id: &str, revision: u64, spec: &T, saved_at_ms: u64) -> ApiResult<u64> {
+        let spec = StoredSpec::new(spec).map_err(|error| ApiError::internal(error.to_string()))?;
         let _guard = self.lock.lock().await;
         let path = self.pipeline_path(id);
         let mut history: PipelineHistory = read_json(&path).await?.unwrap_or_default();
@@ -480,11 +505,23 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn a_history_written_as_a_tree_reads_and_keeps_its_specs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path().to_path_buf());
+        let old = serde_json::json!({ "revisions": [{ "revision": 1, "saved_at_ms": 5, "spec": { "name": "a", "graph": { "nodes": [1, 2] } } }] });
+        write_json(&store.pipeline_path("old"), &old).await.expect("write");
+        assert_eq!(store.push_revision("old", 2, &serde_json::json!({ "name": "b" }), 6).await.expect("push"), 2);
+        let history = store.history("old").await.expect("history");
+        assert_eq!(history.revisions[0].spec.parse::<serde_json::Value>().expect("spec"), old["revisions"][0]["spec"]);
+        assert_eq!(history.revisions[1].spec.parse::<serde_json::Value>().expect("spec"), serde_json::json!({ "name": "b" }));
+    }
+
+    #[tokio::test]
     async fn revisions_push_pop_and_trim() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::new(dir.path());
-        assert_eq!(store.push_revision("tags/front", 1, serde_json::json!({"n": 1}), 1).await.expect("push"), 1);
-        assert_eq!(store.push_revision("tags/front", 2, serde_json::json!({"n": 2}), 2).await.expect("push"), 2);
+        assert_eq!(store.push_revision("tags/front", 1, &serde_json::json!({"n": 1}), 1).await.expect("push"), 1);
+        assert_eq!(store.push_revision("tags/front", 2, &serde_json::json!({"n": 2}), 2).await.expect("push"), 2);
         assert_eq!(store.previous_revision("tags/front").await.expect("previous").revision, 1);
         let previous = store.pop_revision("tags/front").await.expect("pop");
         assert_eq!(previous.revision, 1);
@@ -492,11 +529,11 @@ mod tests {
         assert!(store.previous_revision("tags/front").await.is_err(), "nothing before revision 1");
         // The number Orion was given wins when it is ahead of the history (a deploy whose record was
         // cut short); a stale number never takes the history backwards.
-        assert_eq!(store.push_revision("tags/front", 5, serde_json::json!({"n": 5}), 3).await.expect("push"), 5);
-        assert_eq!(store.push_revision("tags/front", 2, serde_json::json!({"n": 6}), 4).await.expect("push"), 6);
+        assert_eq!(store.push_revision("tags/front", 5, &serde_json::json!({"n": 5}), 3).await.expect("push"), 5);
+        assert_eq!(store.push_revision("tags/front", 2, &serde_json::json!({"n": 6}), 4).await.expect("push"), 6);
         for n in 0..(MAX_REVISIONS + 5) {
             let next = store.history("x").await.expect("history").next_revision();
-            store.push_revision("x", next, serde_json::json!(n), 0).await.expect("push");
+            store.push_revision("x", next, &serde_json::json!(n), 0).await.expect("push");
         }
         let history = store.history("x").await.expect("history");
         assert_eq!(history.revisions.len(), MAX_REVISIONS);
