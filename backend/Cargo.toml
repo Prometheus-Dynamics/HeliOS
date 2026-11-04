@@ -143,7 +143,7 @@ tempfile = "3.27.0"
 # Updating another library tends to move Daedalus to its dev head: re-pin it with
 # `cargo update -p daedalus-rs --precise 3709162` (the pinned Daedalus dev commit; updating Styx
 # or Eidos moves it too), and check `cargo tree -d`. The lock holds one rev each for Daedalus
-# (3709162), Lemnos (01939e9, which Daedalus also tracks as branch dev), Styx (4efa7fe) and Eidos (8831d4f4): Styx's own lock is irrelevant here.
+# (3709162), Lemnos (01939e9, which Daedalus also tracks as branch dev), Styx (7bd2970) and Eidos (8831d4f4): Styx's own lock is irrelevant here.
 daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-macros = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
