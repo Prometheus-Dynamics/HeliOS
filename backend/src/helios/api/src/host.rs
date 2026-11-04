@@ -22,6 +22,17 @@ pub fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
     std::fs::read_to_string(path).ok().map(|text| text.trim_matches(|c: char| c.is_whitespace() || c == '\0').to_string()).filter(|text| !text.is_empty())
 }
 
+/// Gives the heap's free pages back to the system, after work that made many small allocations:
+/// glibc otherwise only returns what is free at the top of the heap.
+pub fn release_heap() {
+    // SAFETY: takes no pointers, and glibc's allocator locks itself.
+    #[cfg(target_env = "gnu")]
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
 /// `KEY=value` lines (os-release, env files).
 pub fn parse_env(text: &str) -> BTreeMap<String, String> {
     text.lines()

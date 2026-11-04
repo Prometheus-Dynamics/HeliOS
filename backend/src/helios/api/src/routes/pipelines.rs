@@ -1027,7 +1027,10 @@ pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiRes
         let _deploying = state.deploys.lock().await;
         deploy_locked(&state, &id, &spec).await
     });
-    task.await.map_err(|error| ApiError::internal(format!("the deploy did not finish: {error}")))?
+    let deployed = task.await.map_err(|error| ApiError::internal(format!("the deploy did not finish: {error}")));
+    // The graph's tree is gone by now; its small allocations are what glibc would keep.
+    crate::host::release_heap();
+    deployed?
 }
 
 /// The body of `deploy`: the caller holds `deploys`.
