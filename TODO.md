@@ -25,16 +25,22 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Done on Raze #1 against Orion's
       `nt4-server` through a tunnel: every topic arrives at 30 Hz, and it reconnects after a
-      server restart (2 s) and an engine restart (4 s). Left: a real WPILib client, a SystemCore
-      and a Raze reboot. Blocked by: nothing listens on 5810 on the SystemCore without a robot program running.
+      server restart (2 s) and an engine restart (4 s). A real WPILib robot program
+      (`tools/wpilib-nt-check`) now runs on the SystemCore as the NT server and reads Raze #1, Raze
+      #2 and the SystemCore itself. Left: a pose with a tag in view, and both reboots. Boards on
+      the default prefix collide on `/helios/<pipeline>/...`, so each board needs its own prefix
+      until the default changes. Blocked by: the SystemCore stuck in its USB boot ROM after a soft
+      reboot on 2026-11-03; it needs a power-cycle.
 - [ ] **Robot time.** Why: poses must line up with the robot's clock. Partly done: every NT
-      output carries `capture_time_us` in the NT server's clock (deff96c9). Left: measure the bound
-      between published capture times and the SystemCore's time, and write it in docs. Blocked by:
-      nothing.
+      output carries `capture_time_us` in the NT server's clock (deff96c9). Measured over 40 s on the
+      SystemCore's clock, no tags in view: arrival less stamp and latency was 458/656/4072 µs
+      (min/median/max) from Raze #1 and 304/573/2897 µs from the SystemCore itself, never negative.
+      Left: a longer run across reconnects, the time from sensor to graph (the stamp starts when
+      the frame reaches the graph), then the bound in docs. Blocked by: the SystemCore, as above.
 - [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
       Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
       self-calibration (fd343ffc). Left: show self-calibration converging from it on the Raze.
-      Blocked by: nothing.
+      Blocked by: Raze #1 is behind the SystemCore, as above.
 - [ ] **SystemCore coexistence.** Why: HeliOS runs next to the SystemCore's own services. Done when:
       the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
       services, with no port or USB conflicts. The package exists (one .ipk with the whole stack,

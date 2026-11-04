@@ -17,7 +17,8 @@ processed, for robot code. It does not wait for the 250 ms Orion publish interva
 - `team` is the FRC team number. The server is that team's roboRIO, `10.TE.AM.2`.
 - `server` is a host to use instead of the roboRIO (a simulator, or Atlas's local NT server).
 - `port` defaults to `5810`.
-- `prefix` defaults to `/helios`.
+- `prefix` defaults to `/helios`. Boards on one robot need different prefixes: with the same
+  prefix and pipeline id, they publish to the same topics.
 
 Publishing is off until a team number or a server is set. `server` in the response is the
 host helios-engine connects to (`null` while off). `connected` comes from the engine's

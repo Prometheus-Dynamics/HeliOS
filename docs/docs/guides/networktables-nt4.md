@@ -25,7 +25,10 @@ You are done when:
 
 ## What robot code reads
 
-Each pipeline publishes under `/helios/<pipeline>/` (the prefix can be changed under **Topics**):
+Each pipeline publishes under `/helios/<pipeline>/` (the prefix can be changed under **Topics**).
+Give each board on a robot its own prefix, such as `/helios/front` and `/helios/rear`. Boards that
+share a prefix and a pipeline id write to the same topics, and robot code can't tell them apart.
+
 
 - one `string` topic per output, holding JSON (for example `detections`, `multi_tag_pose`);
 - `latency_ms`, `fps` and `capture_time_us`. `capture_time_us` is on the NT server's clock, so
