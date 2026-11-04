@@ -88,6 +88,7 @@ const GROUP_BY_NAME: Record<string, ControlGroup> = {
   ae_flicker_mode: "flicker",
   ae_deflicker_mode: "flicker",
   ae_flicker_detected: "flicker",
+  "Power Line Frequency": "flicker",
   output_crop: "crop",
   ae_exposure_max_us: "exposure",
   ae_gain_max: "exposure",

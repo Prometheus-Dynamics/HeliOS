@@ -21,9 +21,6 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       Lemnos look change-over: done in Atlas 034663e (system looks file, ring default_look) with
       gaia/configs/builds/raze.toml on Atlas 034663e + Lemnos 50533a8; not built yet.
       Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
-- [ ] **Typed camera menus in the UI.** Why: menu controls show names, not raw values. Done in code
-      end to end (Styx 45cb3a3, HeliOS aa44c4d3: API `MenuEntryJson`, UI `MenuChoice`). Left: the
-      real-click check on a Raze. Blocked by: nothing.
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Blocked by: nothing.

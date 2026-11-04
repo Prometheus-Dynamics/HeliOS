@@ -90,6 +90,10 @@ describe("groups", () => {
     expect(group("frame_duration_us")).toBe("advanced");
   });
 
+  test("a UVC camera's mains frequency menu is its flicker control", () => {
+    expect(groupOf({ name: "Power Line Frequency" })).toBe("flicker");
+  });
+
   test("a device's max-exposure limit is an exposure control, crops never are", () => {
     expect(groupOf({ name: "ae_max_exposure_us" })).toBe("exposure");
     expect(groupOf({ name: "region_crop_2" })).toBe("crop");

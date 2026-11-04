@@ -352,6 +352,9 @@ export class LiveCluster {
   /** The cameras the cluster lists: this device's and each routed peer's. */
   private publishCameras() {
     this.data.cameras = [...this.localCameras, ...[...this.peerState.values()].flatMap((s) => s.cameras)];
+    // The published objects from here on: what is read into them (their controls) stays in them,
+    // not in the plain objects they were made from, so the next publish must not start over.
+    this.localCameras = this.data.cameras.slice(0, this.localCameras.length);
   }
 
   /** The pipelines the cluster lists, each with its node: the workloads, and the streams they publish. */
