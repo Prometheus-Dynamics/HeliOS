@@ -575,7 +575,7 @@ export interface Pipeline {
   session: { status: string; message: string | null; observed_at_ms: number } | null;
   telemetry: { fps?: number; last_tick_ms?: number; frames_processed?: number; frames_failed?: number; source_connected?: boolean; last_error?: string | null; cpu?: number | null; cpu_error?: string | null; [key: string]: unknown } | null;
   /** Daedalus per-node timings over the last window and since start (null while metrics are off). */
-  metrics?: { window?: PipelineMetricsWindow; total?: PipelineMetricsWindow; [key: string]: unknown } | null;
+  metrics?: { window?: PipelineMetricsWindow; total?: PipelineMetricsWindow; frame_overhead?: FrameOverhead | null; [key: string]: unknown } | null;
   outputs: PipelineOutput[];
   search_mode: SearchMode | null;
   full_search_every: number | null;
@@ -725,6 +725,11 @@ export interface PipelineMetricsNode {
   handler_us_per_tick: number;
   /** Wall time per tick (recorded at every metrics level; handler time needs `detailed`). */
   total_us_per_tick?: number;
+}
+
+/** Daedalus's frame-path report over its rolling window: each stage's percentiles, in ns. */
+export interface FrameOverhead {
+  stages?: { name: string; p50: number; p99: number; max: number; mean: number }[];
 }
 
 export interface PipelineMetricsWindow {

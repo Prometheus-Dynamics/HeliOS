@@ -47,3 +47,13 @@ test("a pipeline stored without a core is placed by the scheduler", () => {
   expect(w.cpuApplied).toBeNull();
   expect(w.cpuError).toBeNull();
 });
+
+test("the tick percentiles are the engine's window, not the last tick the UI happened to read", () => {
+  const stages = [{ name: "tick", p50: 3_750_000, p99: 5_730_000, max: 8_140_000, mean: 3_870_000 }];
+  const slow = { telemetry: { fps: 30, last_tick_ms: 12.2 } };
+  const perf = toWorkload(pipeline({ ...slow, metrics: { frame_overhead: { stages } } }), "raze-front").perf;
+  expect(perf.tickP50Ms).toBeCloseTo(3.75);
+  expect(perf.tickP99Ms).toBeCloseTo(5.73);
+  // Metrics off: what the UI read is all there is.
+  expect(toWorkload(pipeline(slow), "raze-front").perf.tickP50Ms).toBe(12.2);
+});

@@ -388,6 +388,8 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload, k
   const tick = Number(p.telemetry?.last_tick_ms ?? 0);
   const graph = fromDaedalus(p.graph);
   const history = [...(previous?.perf.tickHistory ?? []), tick].slice(-60);
+  // The engine's own rolling window, in ns; `tick` above is one tick, read every few seconds.
+  const ticks = p.metrics?.frame_overhead?.stages?.find((stage) => stage.name === "tick");
   return {
     id: keyOf(p.id),
     name: p.name,
@@ -406,7 +408,7 @@ export function toWorkload(p: W.Pipeline, nodeId: string, previous?: Workload, k
     cpuApplied: typeof p.telemetry?.cpu === "number" ? p.telemetry.cpu : null,
     cpuError: p.telemetry?.cpu_error ?? null,
     map: p.map ?? null,
-    perf: { tickP50Ms: quantile(history, 0.5), tickP99Ms: quantile(history, 0.99), fps, memMiB: 0, nodeMs: nodeTimes(p, graph.nodes.map((n) => n.id)), tickHistory: history },
+    perf: { tickP50Ms: ticks ? ticks.p50 / 1e6 : quantile(history, 0.5), tickP99Ms: ticks ? ticks.p99 / 1e6 : quantile(history, 0.99), fps, memMiB: 0, nodeMs: nodeTimes(p, graph.nodes.map((n) => n.id)), tickHistory: history },
   };
 }
 
