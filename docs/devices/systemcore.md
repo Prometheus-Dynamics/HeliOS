@@ -71,3 +71,19 @@ Limelight's vision servers run in `vision.slice` with `CPUWeight=idle` (SCHED_ID
 only when no control or safety service wants it. HeliOS is vision too, so its units take
 `Slice=vision.slice` and stay below the robot's control paths. The robot program
 (`robot.service`) runs as `systemcore` with `LimitRTPRIO=50`.
+
+## Reboots
+
+A soft `reboot` can leave the board in its USB boot ROM. On 2026-11-03 (PC-side kernel log, PC clock):
+it went down at 23:20:53 and showed as `0a5c:2712 BCM2712D0 Boot` on the USB port one second later,
+so the ROM took USB boot straight after the reset. It stayed there for 9 minutes, until the user cut
+the power at 23:29:49, and booted normally by 23:30:07. The shutdown log is clean, and the board's
+logs can't show what the ROM saw: the reset comes before anything that logs. Nothing was loaded over
+USB boot. The cause is not known.
+
+- Bootloader: September 2024, `BOOT_ORDER=0xf2461`, `reboot=w`, hardware watchdog armed through
+  shutdown. `rsts` reads `0x1000` after the power-cycle.
+- Only a power-cycle was seen to get it out. Anything on its USB ports loses power then: a Raze on
+  them reboots too (Raze #1's uptime matched the power cut, not the reboot).
+- The SystemCore is the only route to the Razes behind it, so while it sits in the ROM they can't be
+  reached at all, even if they are running.

@@ -331,6 +331,10 @@ impl EngineApp {
                 warn!(node_id = %self.config.node_id, error = %error, "engine publish hit transient no-message condition; will retry on next event");
                 Ok(())
             }
+            Err(error) if publish_lost_orion(&error) => {
+                warn!(node_id = %self.config.node_id, error = %error, "orion-node is not answering; skipping this publish");
+                Ok(())
+            }
             Err(error) => Err(error),
         }
     }
@@ -457,7 +461,19 @@ fn orion_unavailable(error: &ClientError) -> bool {
 }
 
 fn is_retryable_no_message(error: &EngineRuntimeError) -> bool {
-    matches!(error, EngineRuntimeError::Client(ClientError::NoMessageAvailable)) || matches!(error, EngineRuntimeError::Publish(EnginePublishError::Client(ClientError::NoMessageAvailable)))
+    publish_client_error(error).is_some_and(|error| matches!(error, ClientError::NoMessageAvailable))
+}
+
+/// A publish that found no orion-node: the next one tries again, as it does after a restart of it.
+fn publish_lost_orion(error: &EngineRuntimeError) -> bool {
+    publish_client_error(error).is_some_and(orion_unavailable)
+}
+
+fn publish_client_error(error: &EngineRuntimeError) -> Option<&ClientError> {
+    match error {
+        EngineRuntimeError::Client(error) | EngineRuntimeError::Publish(EnginePublishError::Client(error)) => Some(error),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -472,5 +488,14 @@ mod tests {
         assert!(!orion_unavailable(&ClientError::Rejected("no".into())));
         assert!(!orion_unavailable(&ClientError::ProtocolMismatch { local: 1, remote: 2 }));
         assert!(!orion_unavailable(&ClientError::Ipc(IpcTransportError::MissingPreamble)));
+    }
+
+    #[test]
+    fn a_publish_that_finds_no_orion_node_does_not_stop_the_engine() {
+        let gone = ClientError::Ipc(IpcTransportError::ConnectFailed("no socket".into()));
+        assert!(publish_lost_orion(&EngineRuntimeError::Publish(EnginePublishError::Client(gone))));
+        let refused = ClientError::Rejected("no".into());
+        assert!(!publish_lost_orion(&EngineRuntimeError::Publish(EnginePublishError::Client(refused))));
+        assert!(is_retryable_no_message(&EngineRuntimeError::Client(ClientError::NoMessageAvailable)));
     }
 }
