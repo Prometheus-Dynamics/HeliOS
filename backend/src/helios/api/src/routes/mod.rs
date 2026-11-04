@@ -144,6 +144,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/update/status", get(update::status))
         .route("/v1/update/events", get(update::events))
         .route("/v1/update/slots/switch", post(update::switch_slot))
+        .route("/v1/update/slots/{command}", post(update::slot_command))
         // Atlas's HTTP OTA path (legacy Atlas client contract)
         .route("/v1/ota/apply", post(update::atlas_apply))
         .route("/v1/ota/state", get(update::atlas_state))

@@ -363,6 +363,13 @@ const REFUSED_EXIT: i32 = 3;
 /// image is the long part). Past it the request is accepted, and the stage runs on in the task.
 const STAGE_ANSWER_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// How long a command that reboots waits after its request is answered: the 202 reaches the client
+/// before the network goes down with the board.
+const REBOOT_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The writer's commands `POST /v1/update/slots/{command}` runs.
+const SLOT_COMMANDS: [&str; 4] = ["set-default", "remove", "pin", "unpin"];
+
 /// A writer command that did not succeed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WriterError {
@@ -468,6 +475,9 @@ fn spawn_writer(state: &SharedState, mut task: UpdateTask, args: Vec<String>, wa
     let state = state.clone();
     tokio::spawn(async move {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if matches!(args.first(), Some(&("apply" | "boot-once" | "rollback"))) {
+            tokio::time::sleep(REBOOT_GRACE).await;
+        }
         let result = run_writer(&state.config, &args, wait).await;
         let change = match result {
             Ok(()) => {
@@ -526,6 +536,7 @@ async fn stage_and_apply(state: SharedState, upload: Upload, mut task: UpdateTas
     }
     // `slots apply` boots the staged slot once (on trial) and reboots: started in its own unit and not
     // awaited.
+    tokio::time::sleep(REBOOT_GRACE).await;
     match run_writer(&state.config, &["apply"], false).await {
         Ok(()) => tracing::info!(version = ?task.version, "update applied; rebooting into the staged slot on trial"),
         Err(error) => {
@@ -690,6 +701,26 @@ pub async fn switch_slot(State(state): State<SharedState>, body: Bytes) -> ApiRe
     let request =
         if body.iter().all(u8::is_ascii_whitespace) { SwitchRequest::default() } else { serde_json::from_slice(&body).map_err(|error| ApiError::bad_request(format!("switch body: {error}")))? };
     Ok((StatusCode::ACCEPTED, Json(start_switch(&state, request.slot).await?)))
+}
+
+/// `POST /v1/update/slots/{command}`: `set-default`, `remove`, `pin` or `unpin` on an installed slot
+/// (`{"slot": "<id>"}`). The writer's refusal is a 409 with its reason.
+pub async fn slot_command(State(state): State<SharedState>, Path(command): Path<String>, Json(request): Json<SwitchRequest>) -> ApiResult<StatusCode> {
+    capabilities::require(&state, feature::SLOTS).await?;
+    if !SLOT_COMMANDS.contains(&command.as_str()) {
+        return Err(ApiError::not_found(format!("no slot command {command}; there are {}", SLOT_COMMANDS.join(", "))));
+    }
+    let slot = request.slot.ok_or_else(|| ApiError::bad_request("name the slot as {\"slot\": \"<id>\"}"))?;
+    super::check_id(&slot)?;
+    ensure_board_status(&state.config).await;
+    let current = ensure_writer_ready(&state.config, false)?.ok_or_else(|| ApiError::unprocessable("the device package writer has published no state yet"))?;
+    if !current.slots.iter().any(|entry| entry.get("id").and_then(|id| id.as_str()) == Some(slot.as_str())) {
+        return Err(ApiError::not_found(format!("no installed slot {slot}")));
+    }
+    let _guard = take_update_lock(&state)?;
+    run_writer(&state.config, &[&command, &slot], true).await.map_err(WriterError::into_api)?;
+    publish_status(&state, "slots");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // --- status --------------------------------------------------------------------
@@ -1030,6 +1061,9 @@ stage | stage-image)
 	fi
 	cp "$dir/after-stage-image.json" "$dir/update.json" ;;
 apply | boot-once | confirm | rollback) cp "$dir/after-$1.json" "$dir/update.json" ;;
+set-default | remove | pin | unpin)
+	STAGE_FAILURE
+	;;
 *) echo "slots: unknown command $1" >&2; exit 2 ;;
 esac
 echo "$*" >> "$dir/calls.log"
@@ -1252,6 +1286,68 @@ echo "$*" >> "$dir/calls.log"
             "slots": [{ "id": "helios-a", "version": "v1" }, { "id": "helios-b", "version": "v2" }],
         })
         .to_string()
+    }
+
+    /// A board running `helios-a` with `helios-b` installed too, and the fake writer.
+    fn board_with_two_slots(dir: &std::path::Path, failure: Option<(i32, &str)>) -> SharedState {
+        let mut config = config(dir);
+        config.board.as_mut().expect("board").update_tool = fake_writer(dir, failure);
+        let mut status: serde_json::Value = serde_json::from_str(&idle()).expect("status");
+        status["slots"] = serde_json::json!([{ "id": "helios-a", "version": "v1" }, { "id": "helios-b", "version": "v2" }]);
+        set_writer_state(dir, "update.json", &status.to_string());
+        set_writer_state(dir, "after-boot-once.json", &status.to_string());
+        crate::AppState::new(config)
+    }
+
+    fn slot_request(slot: &str) -> Json<SwitchRequest> {
+        Json(SwitchRequest { slot: Some(slot.into()) })
+    }
+
+    #[tokio::test]
+    async fn slot_commands_run_on_an_installed_slot_and_publish_the_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = board_with_two_slots(dir.path(), None);
+        let mut events = state.events.subscribe();
+        for command in SLOT_COMMANDS {
+            let status = slot_command(State(state.clone()), Path(command.to_string()), slot_request("helios-b")).await.expect("command");
+            assert_eq!(status, StatusCode::NO_CONTENT);
+            let event = events.recv().await.expect("event");
+            assert_eq!((event.kind.as_str(), event.data["change"].as_str()), ("update", Some("slots")));
+        }
+        assert_eq!(calls(dir.path()), SLOT_COMMANDS.map(|command| format!("{command} helios-b")));
+    }
+
+    #[tokio::test]
+    async fn slot_commands_refuse_what_the_writer_must_not_see() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = board_with_two_slots(dir.path(), None);
+        let run = |command: &str, request: Json<SwitchRequest>| slot_command(State(state.clone()), Path(command.to_string()), request);
+        assert_eq!(run("apply", slot_request("helios-b")).await.expect_err("not a slot command").code, crate::error::ErrorCode::NotFound);
+        assert_eq!(run("pin", slot_request("helios-c")).await.expect_err("not installed").code, crate::error::ErrorCode::NotFound);
+        assert_eq!(run("pin", slot_request("--all")).await.expect_err("not installed").code, crate::error::ErrorCode::NotFound);
+        assert_eq!(run("pin", slot_request("a b")).await.expect_err("bad id").code, crate::error::ErrorCode::BadRequest);
+        assert_eq!(run("pin", Json(SwitchRequest::default())).await.expect_err("no slot").code, crate::error::ErrorCode::BadRequest);
+        assert!(calls(dir.path()).is_empty(), "the writer ran nothing");
+    }
+
+    #[tokio::test]
+    async fn a_refused_slot_command_is_a_conflict_with_the_writers_reason() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = board_with_two_slots(dir.path(), Some((3, "helios-b is the default slot")));
+        let error = slot_command(State(state), Path("remove".into()), slot_request("helios-b")).await.expect_err("refused");
+        assert_eq!(error.code, crate::error::ErrorCode::Conflict);
+        assert_eq!(error.message, "helios-b is the default slot");
+    }
+
+    /// The writer reboots the board: it must not start before the request has its answer.
+    #[tokio::test]
+    async fn a_reboot_starts_only_after_the_request_is_answered() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = board_with_two_slots(dir.path(), None);
+        let response = start_switch(&state, Some("helios-b".into())).await.expect("switch");
+        assert_eq!(response.action, "switch");
+        assert!(calls(dir.path()).is_empty(), "nothing ran before the answer");
+        assert_eq!(wait_for_calls(dir.path(), 1).await, vec!["boot-once helios-b".to_string()]);
     }
 
     #[tokio::test]

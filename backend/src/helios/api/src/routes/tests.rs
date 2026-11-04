@@ -64,6 +64,14 @@ async fn orion_backed_routes_answer_503_without_orion() {
 }
 
 #[tokio::test]
+async fn a_slot_command_without_the_writer_answers_501() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = test_state(dir.path());
+    let (status, _) = call(&state, "POST", "/v1/update/slots/pin", Some(serde_json::json!({ "slot": "helios-b" }))).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+}
+
+#[tokio::test]
 async fn missing_backends_answer_501_with_what_they_need() {
     let dir = tempfile::tempdir().expect("tempdir");
     let state = test_state(dir.path());

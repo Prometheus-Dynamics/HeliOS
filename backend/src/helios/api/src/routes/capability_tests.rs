@@ -105,6 +105,7 @@ async fn a_guest_refuses_updates_slots_reboot_safe_mode_and_security() {
     for (method, uri, body, name) in [
         ("POST", "/v1/update/apply", Some(json!({ "upload_id": "x" })), "updates"),
         ("POST", "/v1/update/slots/switch", None, "slots"),
+        ("POST", "/v1/update/slots/pin", Some(json!({ "slot": "x" })), "slots"),
         ("POST", "/v1/system/reboot", None, "reboot"),
         ("POST", "/v1/system/safe-mode", None, "safe_mode"),
         ("POST", "/v1/auth/enable", Some(json!({ "password": "a-long-password" })), "security"),

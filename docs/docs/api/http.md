@@ -734,6 +734,7 @@ the running one, the same checks as a slot bundle. A tar (a slot bundle) is refu
 | `POST` | `/v1/update/confirm` | `slots confirm` | Keeps the trial slot the board is running, once `update-health` passes. The check runs in the background (up to two minutes); the outcome is in `/v1/update/status`. 202 `{update_id, action, message}`. 409 when no slot is on trial, or the trial has not booted yet |
 | `POST` | `/v1/update/rollback` | `slots rollback` | Makes the previous slot the default and reboots into it. 202 `{update_id, action, message}`. 409 when there is no previous slot, or a trial is pending |
 | `POST` | `/v1/update/slots/switch` | `slots boot-once <id>` | Boots another installed slot on trial, and reboots into it. Body (optional): `{"slot": "<id>"}`; without one, the only other installed slot (422 when there are several). 202 `{update_id, action: "switch", message}`. 404 for a slot that is not installed, 409 for the running slot or while a trial is pending |
+| `POST` | `/v1/update/slots/{command}` | `slots <command> <id>` | `set-default`, `remove`, `pin` or `unpin` an installed slot. Body: `{"slot": "<id>"}`. 204, then an `update` event with `change: "slots"`. 409 with the writer's reason when it refuses (the running or default slot, a pinned slot), or while a trial is pending; 404 for another command or a slot not installed |
 | `GET` | `/v1/update/status` | `slots status` (only when none has run this boot) | Update status (below) |
 | `GET` | `/v1/update/events` | none | SSE `update` events, starting with the current status |
 
