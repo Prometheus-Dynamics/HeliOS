@@ -111,6 +111,9 @@ pub struct Camera {
     pub node_id: String,
     pub provider: String,
     pub health: String,
+    /// Whether frames are arriving now (`flowing`, `stalled`, `idle`). `stalled` makes `health`
+    /// `degraded`, whatever the service reports about itself.
+    pub frame_flow: crate::camera_status::FrameFlow,
     pub availability: String,
     pub backend: Option<String>,
     pub labels: BTreeMap<String, String>,
@@ -164,6 +167,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         node_id: node_id.to_string(),
         provider: record.provider_id.to_string(),
         health: enum_name(record.health),
+        frame_flow: Default::default(),
         availability: enum_name(record.availability),
         backend: labels.get("helios.label.styx.backend").cloned(),
         labels: labels.iter().filter_map(|(k, v)| k.strip_prefix("helios.label.").map(|k| (k.to_string(), v.clone()))).collect(),
@@ -233,7 +237,15 @@ async fn with_live(state: &SharedState, mut camera: Camera, record: &orion::cont
     camera.service_online = state.cameras.online(&camera.id).await;
     match frames_socket(&record.endpoints) {
         Some(socket) => match live_facts(socket).await {
-            Ok(live) => camera.live = Some(live),
+            Ok(live) => {
+                if let Some(capture) = live.captures.first() {
+                    camera.frame_flow = state.frame_progress.observe(&camera.id, capture.frames_delivered, live.clients, std::time::Instant::now());
+                }
+                if camera.frame_flow == crate::camera_status::FrameFlow::Stalled && camera.health == "healthy" {
+                    camera.health = "degraded".into();
+                }
+                camera.live = Some(live);
+            }
             Err(error) => camera.live_error = Some(error),
         },
         None => camera.live_error = Some("the camera has no Styx frames endpoint".into()),
@@ -248,7 +260,7 @@ async fn chain_of(state: &SharedState, view: &StateView, camera: &Camera, record
     let pipelines = pipelines::pipelines_using_dto(view, &camera.id);
     let pipeline_facts: Vec<PipelineFacts> = pipelines.iter().map(PipelineFacts::of).collect();
     let capture = camera.live.as_ref().and_then(|live| live.captures.first().cloned());
-    let flowing = capture.as_ref().is_some_and(|c| c.fps_measured.is_some_and(|fps| fps > 0.0) || c.frames_delivered > 0);
+    let flowing = camera.frame_flow == crate::camera_status::FrameFlow::Flowing && capture.as_ref().is_some_and(|c| c.fps_measured.is_some_and(|fps| fps > 0.0) || c.frames_delivered > 0);
     let device = device_node(record);
     let holders = match &device {
         Some(node) if !flowing && camera.frames_endpoint.is_some() => {
@@ -265,6 +277,7 @@ async fn chain_of(state: &SharedState, view: &StateView, camera: &Camera, record
         }
     };
     let camera_facts = CameraFacts {
+        flow: camera.frame_flow,
         service: camera.frames_endpoint.is_some(),
         service_online: camera.service_online,
         live_error: camera.live_error.clone(),

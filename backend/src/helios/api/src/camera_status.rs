@@ -9,9 +9,11 @@
 //! capture's last error) and from `/proc` (another process holding the camera's device node).
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -105,6 +107,8 @@ pub struct CameraStatus {
 /// What the camera service and the device say about one camera.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CameraFacts {
+    /// Whether the capture's delivered count is moving ([`FrameProgress`]).
+    pub flow: FrameFlow,
     /// The camera has a Styx camera service (a frames endpoint).
     pub service: bool,
     /// Whether the API's control client is connected to the service (`None`: it keeps none).
@@ -125,6 +129,51 @@ pub struct CameraFacts {
     pub calibration: Option<CalibrationFact>,
     /// Why the last self-calibration fit was not stored, when one was refused.
     pub calibration_note: Option<String>,
+}
+
+/// Whether frames are arriving now. A capture's `frames_delivered` is a lifetime count and its
+/// measured rate comes from the last intervals seen, so neither changes when frames stop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameFlow {
+    /// The count moved within [`STALL_AFTER`], or there is nothing to compare it with yet.
+    #[default]
+    Flowing,
+    /// The count stands still while clients wait for frames.
+    Stalled,
+    /// The count stands still and nobody is reading: the capture has no reason to run.
+    Idle,
+}
+
+/// How long the delivered count may stand still before frames count as stopped.
+pub const STALL_AFTER: Duration = Duration::from_secs(3);
+
+/// The last delivered count seen of each camera, and when it last moved. Read when a client asks
+/// about a camera, so the first look after a long gap can only compare from then on.
+#[derive(Default)]
+pub struct FrameProgress(Mutex<HashMap<String, (u64, Instant)>>);
+
+impl FrameProgress {
+    pub fn observe(&self, camera: &str, delivered: u64, clients: usize, now: Instant) -> FrameFlow {
+        let mut seen = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match seen.get_mut(camera) {
+            Some((count, _)) if *count == delivered => {}
+            Some(entry) => {
+                *entry = (delivered, now);
+                return FrameFlow::Flowing;
+            }
+            None => {
+                seen.insert(camera.to_string(), (delivered, now));
+                return FrameFlow::Flowing;
+            }
+        }
+        let moved = seen[camera].1;
+        match (now.duration_since(moved) >= STALL_AFTER, clients) {
+            (false, _) => FrameFlow::Flowing,
+            (true, 0) => FrameFlow::Idle,
+            (true, _) => FrameFlow::Stalled,
+        }
+    }
 }
 
 /// A calibration the camera uses: the user's, or one the live mapper fitted.
@@ -389,6 +438,14 @@ fn frames_stage(camera: &CameraFacts) -> Stage {
         }
         return stage(StageState::Waiting, "No capture yet".into()).hint("The capture starts when the camera view or a pipeline uses the camera.");
     };
+    match camera.flow {
+        FrameFlow::Stalled => {
+            let cause = capture.last_error.as_deref().map_or_else(String::new, |error| format!(": {error}"));
+            return stage(StageState::Blocked, format!("Frames stopped{cause}")).hint("Clients are waiting and none have arrived for a few seconds. Check the camera's USB connection.");
+        }
+        FrameFlow::Idle => return stage(StageState::Waiting, "Capture idle".into()).hint("The capture runs when the camera view or a pipeline uses the camera."),
+        FrameFlow::Flowing => {}
+    }
     let fps = capture.fps_measured.filter(|fps| *fps > 0.0);
     if fps.is_some() || capture.frames_delivered > 0 {
         let reason = fps.map_or_else(|| "Frames flowing".into(), |fps| format!("{fps:.1} fps"));
@@ -628,6 +685,32 @@ mod tests {
             ae_state: None,
             last_error: last_error.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn frames_stopped_are_not_flowing_whatever_the_counters_say() {
+        let frames = |flow| {
+            let camera = CameraFacts { flow, ..served(Some(capture(Some(30.0), 900, None))) };
+            stage(&derive(&camera, &[]), "frames").clone()
+        };
+        assert_eq!(frames(FrameFlow::Flowing).state, StageState::Ok);
+        assert_eq!(frames(FrameFlow::Stalled).state, StageState::Blocked);
+        assert_eq!(frames(FrameFlow::Stalled).reason, "Frames stopped");
+        assert_eq!(frames(FrameFlow::Idle).state, StageState::Waiting);
+    }
+
+    #[test]
+    fn progress_follows_the_delivered_count() {
+        let progress = FrameProgress::default();
+        let start = Instant::now();
+        let later = |by: Duration| start + by;
+        assert_eq!(progress.observe("cam", 10, 1, start), FrameFlow::Flowing, "nothing to compare with yet");
+        assert_eq!(progress.observe("cam", 10, 1, later(STALL_AFTER / 2)), FrameFlow::Flowing, "within the window");
+        assert_eq!(progress.observe("cam", 10, 1, later(STALL_AFTER)), FrameFlow::Stalled);
+        assert_eq!(progress.observe("cam", 10, 0, later(STALL_AFTER)), FrameFlow::Idle, "nobody is reading");
+        assert_eq!(progress.observe("cam", 11, 1, later(STALL_AFTER * 2)), FrameFlow::Flowing, "frames came back");
+        assert_eq!(progress.observe("cam", 11, 1, later(STALL_AFTER * 2 + STALL_AFTER / 2)), FrameFlow::Flowing, "the window restarts");
+        assert_eq!(progress.observe("other", 11, 1, later(STALL_AFTER * 9)), FrameFlow::Flowing, "cameras are apart");
     }
 
     #[test]

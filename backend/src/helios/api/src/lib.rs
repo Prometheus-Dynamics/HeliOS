@@ -67,6 +67,8 @@ pub struct AppState {
     pub cameras: camera_controls::CameraControls,
     /// One Styx preview per camera, made on its first viewer.
     pub previews: camera_preview::CameraPreviews,
+    /// Whether each camera's frames are still arriving (`camera_status`).
+    pub frame_progress: camera_status::FrameProgress,
     /// Calibration views captured per camera, until solved.
     pub calibrations: calibration_capture::CalibrationSessions,
     /// The session recorder: one recording at a time, from a camera's frames.
@@ -122,6 +124,7 @@ impl AppState {
             tunnels: peers::TunnelLimits::default(),
             cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
             previews: camera_preview::CameraPreviews::new(config.preview),
+            frame_progress: camera_status::FrameProgress::default(),
             calibrations: calibration_capture::CalibrationSessions::default(),
             recorder: helios_recorder::Recorder::default(),
             log_followers: routes::logs::LogFollowers::default(),

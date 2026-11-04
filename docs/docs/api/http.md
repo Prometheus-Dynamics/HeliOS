@@ -157,7 +157,7 @@ The gateway: a robot's other HeliOS nodes (Orion cluster `robot-<team>`) and the
 
 | Method | Path | Backend | Notes |
 |---|---|---|---|
-| `GET` | `/v1/cameras` | Orion + Styx | Camera resources with `live` facts, or `live_error` when the camera service did not answer |
+| `GET` | `/v1/cameras` | Orion + Styx | Camera resources with `live` facts, or `live_error` when the camera service did not answer. `frame_flow` says whether frames are arriving now: `flowing`, `idle` (nobody reading) or `stalled` (clients waiting, the delivered count still for 3 s, which also makes `health` `degraded`) |
 | `GET` | `/v1/cameras/{id}` | Orion + Styx | One camera |
 | `GET` | `/v1/cameras/{id}/status` | Orion + Styx + device | The camera's status chain: `stages` (camera, service, frames, pipeline, tags, calibration, map, depth, features), each `{stage, label, state: ok\|waiting\|blocked\|off, reason, hint, progress?}`, the `blocking` stage and a `summary`. Each camera in `GET /v1/cameras` has it as `status`; a pipeline has its own line as `status` |
 | `GET` | `/v1/cameras/{id}/settings` | Styx + API store | The camera's controls (range, default, value now, standard control, `writable`, `persisted`) plus the capture's mode, fps and measured exposure and gains, and the values kept across reboots (`persisted`) |
