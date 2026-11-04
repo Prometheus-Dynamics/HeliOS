@@ -2,6 +2,7 @@ use helios_shutdown::{STAGE_TIMEOUT, Shutdown};
 use orion::{
     client::{ClientError, ControlPlaneEventStream, LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalServiceRetryPolicy},
     control_plane::{ClientEventKind, StateSnapshot, WorkloadRecord},
+    transport::ipc::IpcTransportError,
 };
 use tokio::{
     sync::mpsc,
@@ -100,20 +101,14 @@ impl EngineApp {
         let mut subscription = loop {
             match service.subscribe_workloads().await {
                 Ok(subscription) => break subscription,
-                Err(ClientError::NoMessageAvailable) => {
-                    sleep(ORION_EMPTY_WATCH_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(error.into()),
+                Err(error) => self.wait_for_orion(error).await?,
             }
         };
         let mut current_workloads = loop {
             match subscription.next_event().await {
                 Ok(LocalExecutorEvent::Bootstrap(workloads)) => break workloads,
                 Ok(LocalExecutorEvent::WorkloadsChanged { workloads, .. }) => break workloads,
-                Err(ClientError::NoMessageAvailable) => {
-                    sleep(ORION_EMPTY_WATCH_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(error.into()),
+                Err(error) => self.wait_for_orion(error).await?,
             }
         };
         let watch_error_tx = event_tx.clone();
@@ -127,18 +122,14 @@ impl EngineApp {
         let state_watch = loop {
             let mut stream = match ControlPlaneEventStream::connect_at(&self.config.orion_ipc_stream_socket_path, format!("{}-state-watch", self.publisher.executor_client_name())).await {
                 Ok(stream) => stream,
-                Err(ClientError::NoMessageAvailable) => {
-                    sleep(ORION_EMPTY_WATCH_RETRY_DELAY).await;
+                Err(error) => {
+                    self.wait_for_orion(error).await?;
                     continue;
                 }
-                Err(error) => return Err(error.into()),
             };
             match stream.subscribe_state(orion::core::Revision::ZERO).await {
                 Ok(()) => break stream,
-                Err(ClientError::NoMessageAvailable) => {
-                    sleep(ORION_EMPTY_WATCH_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(error.into()),
+                Err(error) => self.wait_for_orion(error).await?,
             }
         };
         let state_watch_error_tx = event_tx.clone();
@@ -312,6 +303,21 @@ impl EngineApp {
         Ok(())
     }
 
+    /// Waits out a startup call Orion could not answer yet, or returns the error when retrying
+    /// cannot help.
+    async fn wait_for_orion(&self, error: ClientError) -> Result<(), ClientError> {
+        if matches!(error, ClientError::NoMessageAvailable) {
+            sleep(ORION_EMPTY_WATCH_RETRY_DELAY).await;
+            return Ok(());
+        }
+        if !orion_unavailable(&error) {
+            return Err(error);
+        }
+        warn!(node_id = %self.config.node_id, error = %error, retry_delay_secs = ORION_IPC_RETRY_DELAY.as_secs(), "orion-node is not answering yet; retrying");
+        sleep(ORION_IPC_RETRY_DELAY).await;
+        Ok(())
+    }
+
     async fn publish_snapshot_resilient(
         &self,
         plugins: &PluginLoadResult,
@@ -441,6 +447,30 @@ fn log_loaded_plugins(plugins: &PluginLoadResult) {
     }
 }
 
+/// Whether this is orion-node not being there (still starting, or restarting), not a refusal.
+fn orion_unavailable(error: &ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::SendFailed
+            | ClientError::Ipc(IpcTransportError::ConnectFailed(_) | IpcTransportError::ConnectionRefused(_) | IpcTransportError::ReadFailed(_) | IpcTransportError::WriteFailed(_))
+    )
+}
+
 fn is_retryable_no_message(error: &EngineRuntimeError) -> bool {
     matches!(error, EngineRuntimeError::Client(ClientError::NoMessageAvailable)) || matches!(error, EngineRuntimeError::Publish(EnginePublishError::Client(ClientError::NoMessageAvailable)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_orion_node_is_waited_for_and_a_refusal_is_not() {
+        assert!(orion_unavailable(&ClientError::SendFailed));
+        assert!(orion_unavailable(&ClientError::Ipc(IpcTransportError::ConnectFailed("no socket".into()))));
+        assert!(orion_unavailable(&ClientError::Ipc(IpcTransportError::ConnectionRefused("refused".into()))));
+        assert!(!orion_unavailable(&ClientError::Rejected("no".into())));
+        assert!(!orion_unavailable(&ClientError::ProtocolMismatch { local: 1, remote: 2 }));
+        assert!(!orion_unavailable(&ClientError::Ipc(IpcTransportError::MissingPreamble)));
+    }
 }
