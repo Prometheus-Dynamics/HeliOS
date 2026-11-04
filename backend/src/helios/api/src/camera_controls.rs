@@ -290,10 +290,22 @@ impl CameraClient {
             })
             .collect::<Vec<_>>();
         sort_modes_first(&mut changes);
-        let batch = self.set_all(changes).await;
-        match batch.refused {
-            Some(error) => Err(error),
-            None => Ok(batch.applied),
+        // A control the camera holds inactive (a manual white balance under auto) refuses the
+        // write; the others still go back to their defaults.
+        let mut applied = Vec::with_capacity(changes.len());
+        let mut refused = Vec::new();
+        for change in changes {
+            match self.client.set_control_async(change.target, change.value).await {
+                Ok(result) => applied.push(AppliedCameraControl::new(change.key, &result)),
+                Err(error) => refused.push(control_error(&change.key, &[], error)),
+            }
+        }
+        if !refused.is_empty() {
+            tracing::info!(camera = %self.camera_id, ?refused, "camera controls not reset");
+        }
+        match refused.into_iter().next() {
+            Some(error) if applied.is_empty() => Err(error),
+            _ => Ok(applied),
         }
     }
 
