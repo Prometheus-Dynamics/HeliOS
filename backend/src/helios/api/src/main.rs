@@ -118,7 +118,7 @@ async fn run() -> anyhow::Result<()> {
     let _default_pipeline = startup::load_default_pipeline(&state.config.startup_file).map(|default| startup::spawn_default_pipeline(state.clone(), default));
     // Capture-last rings for the cameras the recording settings ask for.
     let _rings = helios_api::recording_rings::spawn_supervisor(state.clone());
-    // Recording over NetworkTables (`/helios/record`, status) and auto-record (robot enabled).
+    // Recording over NetworkTables (`<prefix>/<board>/record`, status) and auto-record (robot enabled).
     let _recording_nt = helios_api::recording_nt::spawn(state.clone());
     // Uploads an update was installed from (Atlas leaves them in /data/updates) are removed.
     let _old_uploads = tokio::spawn({

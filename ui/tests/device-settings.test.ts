@@ -7,11 +7,14 @@ import { demoDocument, demoLayout, layoutFromDocument, layoutToWpilib, type Fiel
 
 // Bun has no localStorage: the simulated device keeps its document there.
 const memory = new Map<string, string>();
-(globalThis as { localStorage?: unknown }).localStorage = {
-  getItem: (key: string) => memory.get(key) ?? null,
-  setItem: (key: string, value: string) => void memory.set(key, value),
-  removeItem: (key: string) => void memory.delete(key),
-};
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => void memory.set(key, value),
+    removeItem: (key: string) => void memory.delete(key),
+  },
+});
 
 beforeEach(() => memory.clear());
 
@@ -48,7 +51,7 @@ test("the simulated device resolves the team and the server like the device does
   expect(nt.effective.nt4_server).toEqual({ value: null, source: "none" });
 
   // A team gives the roboRIO address, set by the user.
-  const team: Nt4Settings = { enabled: true, team: 6390, server: null, port: 5810, prefix: "/helios" };
+  const team: Nt4Settings = { enabled: true, team: 6390, server: null, port: 5810, prefix: "/helios", board: "" };
   nt = (await answer("PUT", "/v1/device/nt4", { body: team })) as Nt4State;
   expect(nt.effective.team).toEqual({ value: 6390, source: "user" });
   expect(nt.effective.nt4_server).toEqual({ value: "10.63.90.2", source: "user" });

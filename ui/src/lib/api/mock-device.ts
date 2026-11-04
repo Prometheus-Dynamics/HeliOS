@@ -88,6 +88,7 @@ function nt4State(settings: Nt4Settings) {
   const server = !settings.enabled ? null : (explicit ?? (team !== null ? roborioAddress(team) : null));
   return {
     settings,
+    topics: `${settings.prefix.replace(/\/$/, "")}/${settings.board || "helios-sim"}`,
     effective: {
       team: team !== null ? { value: team, source: "user" as const } : { value: null, source: "none" as const },
       nt4_server: !settings.enabled ? { value: null, source: "user" as const } : server !== null ? { value: server, source: "user" as const } : { value: null, source: "none" as const },

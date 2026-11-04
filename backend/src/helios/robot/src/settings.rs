@@ -27,13 +27,16 @@ pub struct Nt4Settings {
     /// A server host instead of the team's roboRIO.
     pub server: Option<String>,
     pub port: u16,
-    /// Topics are `<prefix>/<pipeline>/<output>`.
+    /// Topics are `<prefix>/<board>/<pipeline>/<output>`.
     pub prefix: String,
+    /// This board's name in its topics; empty is its hostname. Boards on one robot share a server,
+    /// and the board is what keeps their topics apart.
+    pub board: String,
 }
 
 impl Default for Nt4Settings {
     fn default() -> Self {
-        Self { enabled: true, team: None, server: None, port: DEFAULT_NT4_PORT, prefix: DEFAULT_NT4_PREFIX.into() }
+        Self { enabled: true, team: None, server: None, port: DEFAULT_NT4_PORT, prefix: DEFAULT_NT4_PREFIX.into(), board: String::new() }
     }
 }
 
@@ -49,6 +52,17 @@ impl Nt4Settings {
             format!("/{prefix}")
         }
     }
+
+    /// Where this board's topics start: `<prefix>/<board>`.
+    pub fn topic_base(&self) -> String {
+        let board = self.board.trim();
+        if board.is_empty() {
+            let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
+            format!("{}/{}", self.topic_prefix(), hostname.trim())
+        } else {
+            format!("{}/{board}", self.topic_prefix())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -62,6 +76,15 @@ mod tests {
         assert_eq!(roborio_address(25_599).as_deref(), Some("10.255.99.2"));
         assert_eq!(roborio_address(0), None);
         assert_eq!(roborio_address(25_600), None);
+    }
+
+    #[test]
+    fn boards_have_their_own_topics() {
+        let named = |board: &str| Nt4Settings { board: board.into(), ..Nt4Settings::default() };
+        assert_eq!(named("front").topic_base(), "/helios/front");
+        assert_ne!(named("front").topic_base(), named("rear").topic_base());
+        let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap();
+        assert_eq!(named(" ").topic_base(), format!("/helios/{}", hostname.trim()));
     }
 
     #[test]

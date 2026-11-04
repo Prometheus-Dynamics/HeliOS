@@ -10,30 +10,35 @@ processed, for robot code. It does not wait for the 250 ms Orion publish interva
 
 | Method | Path | Body | Description |
 |---|---|---|---|
-| `GET` | `/v1/device/nt4` | — | `{settings, server, connected, engine_reporting}` |
-| `PUT` | `/v1/device/nt4` | `{enabled, team, server, port, prefix}` | Store the settings. helios-engine picks them up within 2 s |
+| `GET` | `/v1/device/nt4` | — | `{settings, topics, server, connected, engine_reporting}` |
+| `PUT` | `/v1/device/nt4` | `{enabled, team, server, port, prefix, board}` | Store the settings. helios-engine picks them up within 2 s |
 
 - `enabled` defaults to `true`.
 - `team` is the FRC team number. The server is that team's roboRIO, `10.TE.AM.2`.
 - `server` is a host to use instead of the roboRIO (a simulator, or Atlas's local NT server).
 - `port` defaults to `5810`.
-- `prefix` defaults to `/helios`. Boards on one robot need different prefixes: with the same
-  prefix and pipeline id, they publish to the same topics.
+- `prefix` defaults to `/helios`.
+- `board` is this board's name in its topics, and defaults to its hostname. Boards on one robot
+  share a server, so the name keeps their topics apart. Set it (for example `front`) so robot code
+  keeps working when a board is swapped. Two boards given the same name write to the same topics.
 
 Publishing is off until a team number or a server is set. `server` in the response is the
-host helios-engine connects to (`null` while off). `connected` comes from the engine's
+host helios-engine connects to (`null` while off). `topics` is where this board's topics start,
+`<prefix>/<board>`. `connected` comes from the engine's
 `engine.runtime` resource. The UI edits these under **Settings › Robot**.
 
 ## Topics
 
-For each pipeline (by id, for example `default`), on every graph tick:
+`<base>` is `<prefix>/<board>`. For each pipeline (by id, for example `default`), on every graph tick:
 
 | Topic | Type | Value |
 |---|---|---|
-| `<prefix>/<pipeline>/<output>` | `string` | The output as JSON, exactly as `GET /v1/outputs` returns `value` (for example `detections`, `multi_tag_pose`) |
-| `<prefix>/<pipeline>/latency_ms` | `double` | Time from the frame reaching the graph to its outputs |
-| `<prefix>/<pipeline>/fps` | `double` | Frames per second the pipeline processes |
-| `<prefix>/<pipeline>/capture_time_us` | `int` | When the frame reached the graph, on the NT server's clock. Use it to compensate for latency |
+| `<base>/<pipeline>/<output>` | `string` | The output as JSON, exactly as `GET /v1/outputs` returns `value` (for example `detections`, `multi_tag_pose`) |
+| `<base>/<pipeline>/latency_ms` | `double` | Time from the frame reaching the graph to its outputs |
+| `<base>/<pipeline>/fps` | `double` | Frames per second the pipeline processes |
+| `<base>/<pipeline>/capture_time_us` | `int` | When the frame reached the graph, on the NT server's clock. Use it to compensate for latency |
+
+`capture_time_us` is not published until helios-engine has its first clock sample from the server.
 
 Every topic carries the properties `{"helios": 1, "kind": "<output port>"}`. For the three
 timing topics, `kind` is `latency_ms`, `fps` or `capture_time_us`. Frames themselves are
@@ -48,11 +53,11 @@ up) and is the robot's pose through the camera's mount, so it needs a mount on t
 
 | Topic | Type | Value |
 |---|---|---|
-| `<prefix>/<pipeline>/robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`: metres and radians, WPILib's `Rotation3d` (intrinsic `Z`-`Y`-`X`). Published only while there is a robot pose; it keeps its last value otherwise, so check `robot_pose_valid` |
-| `<prefix>/<pipeline>/robot_pose_valid` | `boolean` | There is a robot pose this tick: the solve is valid and the camera has a mount |
-| `<prefix>/<pipeline>/robot_pose_struct` | `raw` (`struct:Pose3d`) | The same pose as WPILib's `Pose3d` struct: translation `x, y, z` then rotation `w, x, y, z`, little-endian `f64`s (56 bytes). Published with `robot_pose`, after its schemas (`/.schema/struct:Pose3d`, `Translation3d`, `Rotation3d`, `Quaternion`; type `structschema`), so robot code and dashboards such as AdvantageScope decode it |
-| `<prefix>/<pipeline>/tag_count` | `int` | Tags the solve used (`inlier_tags`); 0 when there is no solve |
-| `<prefix>/<pipeline>/robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]` (metres, metres, radians), with `robot_pose`: the multi-tag pose's honest covariance (Eidos) carried to the robot's field position, including how a heading error moves a robot far from the field origin. Floored at 1 cm and 0.5° (a single frame's covariance is right on average but occasionally too small). Pass it to WPILib's `addVisionMeasurement` |
+| `<base>/<pipeline>/robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`: metres and radians, WPILib's `Rotation3d` (intrinsic `Z`-`Y`-`X`). Published only while there is a robot pose; it keeps its last value otherwise, so check `robot_pose_valid` |
+| `<base>/<pipeline>/robot_pose_valid` | `boolean` | There is a robot pose this tick: the solve is valid and the camera has a mount |
+| `<base>/<pipeline>/robot_pose_struct` | `raw` (`struct:Pose3d`) | The same pose as WPILib's `Pose3d` struct: translation `x, y, z` then rotation `w, x, y, z`, little-endian `f64`s (56 bytes). Published with `robot_pose`, after its schemas (`/.schema/struct:Pose3d`, `Translation3d`, `Rotation3d`, `Quaternion`; type `structschema`), so robot code and dashboards such as AdvantageScope decode it |
+| `<base>/<pipeline>/tag_count` | `int` | Tags the solve used (`inlier_tags`); 0 when there is no solve |
+| `<base>/<pipeline>/robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]` (metres, metres, radians), with `robot_pose`: the multi-tag pose's honest covariance (Eidos) carried to the robot's field position, including how a heading error moves a robot far from the field origin. Floored at 1 cm and 0.5° (a single frame's covariance is right on average but occasionally too small). Pass it to WPILib's `addVisionMeasurement` |
 
 Their `kind` properties are `robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `tag_count`
 and `robot_pose_std_devs`.
@@ -76,9 +81,9 @@ only a map pose uses the plain names.
 
 | Topic | Type | Value |
 |---|---|---|
-| `<prefix>/<pipeline>/robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `robot_pose_std_devs` | as above | The map's robot pose, the same as the AprilTag one. `robot_pose_std_devs` is the map's covariance carried to the robot's field position, with the same floors |
-| `<prefix>/<pipeline>/tag_count` | `int` | `alignment.matched_tags`: the placed tags that are in the layout |
-| `<prefix>/<pipeline>/map_state` | `string` | The tracker's state: `bootstrapping`, `tracking`, `coasting`, `lost` or `relocalized`. Use it to see whether the pose is current |
+| `<base>/<pipeline>/robot_pose`, `robot_pose_valid`, `robot_pose_struct`, `robot_pose_std_devs` | as above | The map's robot pose, the same as the AprilTag one. `robot_pose_std_devs` is the map's covariance carried to the robot's field position, with the same floors |
+| `<base>/<pipeline>/tag_count` | `int` | `alignment.matched_tags`: the placed tags that are in the layout |
+| `<base>/<pipeline>/map_state` | `string` | The tracker's state: `bootstrapping`, `tracking`, `coasting`, `lost` or `relocalized`. Use it to see whether the pose is current |
 
 With a `multi_tag_pose` beside it, the map's robot pose topics are `map_robot_pose`,
 `map_robot_pose_valid`, `map_robot_pose_struct`, `map_robot_pose_std_devs` and `map_tag_count`.
@@ -93,11 +98,11 @@ robot program opts in by reading them and weighting the pose by its std devs. It
 
 | Topic | Type | Value |
 |---|---|---|
-| `<prefix>/<pipeline>/weak_robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`, as `robot_pose`. Keeps its last value; check `weak_robot_pose_valid` |
-| `<prefix>/<pipeline>/weak_robot_pose_valid` | `boolean` | There is a weak robot pose this tick: the map is aligned, there is a candidate and it has a rig |
-| `<prefix>/<pipeline>/weak_robot_pose_struct` | `raw` (`struct:Pose3d`) | The weak pose as `robot_pose_struct` |
-| `<prefix>/<pipeline>/weak_robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]`, with `weak_robot_pose`: the candidate's covariance, carried to the robot's field position. Looser than the main track's: the tag's rotation is ambiguous (a small far tag can be 4 to 15 degrees off) |
-| `<prefix>/<pipeline>/weak_source` | `string` | Why the tag is weak (`lone small tag, not mapped`, `lone ambiguous tag, not mapped` or `small tags, not mapped`). Empty when there is no candidate |
+| `<base>/<pipeline>/weak_robot_pose` | `double[]` | `[x, y, z, roll, pitch, yaw]`, as `robot_pose`. Keeps its last value; check `weak_robot_pose_valid` |
+| `<base>/<pipeline>/weak_robot_pose_valid` | `boolean` | There is a weak robot pose this tick: the map is aligned, there is a candidate and it has a rig |
+| `<base>/<pipeline>/weak_robot_pose_struct` | `raw` (`struct:Pose3d`) | The weak pose as `robot_pose_struct` |
+| `<base>/<pipeline>/weak_robot_pose_std_devs` | `double[]` | `[σx, σy, σθ]`, with `weak_robot_pose`: the candidate's covariance, carried to the robot's field position. Looser than the main track's: the tag's rotation is ambiguous (a small far tag can be 4 to 15 degrees off) |
+| `<base>/<pipeline>/weak_source` | `string` | Why the tag is weak (`lone small tag, not mapped`, `lone ambiguous tag, not mapped` or `small tags, not mapped`). Empty when there is no candidate |
 
 The candidate's robot pose is read from its `rig`, the same as the map's. Eidos's weak candidate
 at the pinned revision (`676cbf20`) has no rig, so `weak_robot_pose_valid` is `false` until it

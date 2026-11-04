@@ -4,7 +4,7 @@
 import type { Nt4Settings } from "#lib/api/types.js";
 
 /** NetworkTables settings with nothing set (the device's own defaults). */
-export const DEFAULT_NT4: Nt4Settings = { enabled: true, team: null, server: null, port: 5810, prefix: "/helios" };
+export const DEFAULT_NT4: Nt4Settings = { enabled: true, team: null, server: null, port: 5810, prefix: "/helios", board: "" };
 
 /** `10.TE.AM.2`, the roboRIO address WPILib uses for a team; `null` outside 1..25599. */
 export function roborioAddress(team: number): string | null {

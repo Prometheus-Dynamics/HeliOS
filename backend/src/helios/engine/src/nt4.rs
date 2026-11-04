@@ -1,8 +1,8 @@
 //! Pipeline outputs on NetworkTables (NT4), for robot code.
 //!
 //! Every graph tick's host outputs go to the robot's NT4 server as they are produced, not at
-//! the Orion publish interval: `<prefix>/<pipeline>/<port>` (`string` holding the same JSON as
-//! `GET /v1/outputs`), plus `<prefix>/<pipeline>/latency_ms` (input to outputs, `double`),
+//! the Orion publish interval: `<prefix>/<board>/<pipeline>/<port>` (`string` holding the same JSON as
+//! `GET /v1/outputs`), plus `<prefix>/<board>/<pipeline>/latency_ms` (input to outputs, `double`),
 //! `fps` (`double`) and `capture_time_us` (`int`: when the frame came in, on the NT server's
 //! clock, for latency compensation). Every topic carries properties `{"helios": 1, "kind": ..}`
 //! (the output port, or `latency_ms`, `fps`, `capture_time_us`, or a robot pose topic).
@@ -105,7 +105,7 @@ pub fn spawn(settings_path: PathBuf, facts_path: PathBuf, client_name: String) -
 struct Connection {
     client: Client,
     handle: ClientHandle,
-    prefix: String,
+    base: String,
     publishers: HashMap<String, Publisher>,
 }
 
@@ -132,10 +132,14 @@ impl Connection {
     }
 
     fn publish(&mut self, tick: Nt4Tick) {
-        let base = format!("{}/{}", self.prefix, topic_segment(&tick.pipeline));
-        let now_server_us = self.handle.server_time_us();
-        let latency_us = (tick.latency_ms * 1000.0) as i64;
-        self.set(format!("{base}/capture_time_us"), "int", Value::Int(now_server_us - latency_us), "capture_time_us");
+        let base = format!("{}/{}", self.base, topic_segment(&tick.pipeline));
+        // Before the first clock sample, server_time_us is this process's own clock: no stamp at all
+        // is better than one that is minutes out.
+        if self.handle.time_offset_us().is_some() {
+            let latency_us = (tick.latency_ms * 1000.0) as i64;
+            let capture_time_us = self.handle.server_time_us() - latency_us;
+            self.set(format!("{base}/capture_time_us"), "int", Value::Int(capture_time_us), "capture_time_us");
+        }
         self.set(format!("{base}/latency_ms"), "double", Value::Double(tick.latency_ms), "latency_ms");
         self.set(format!("{base}/fps"), "double", Value::Double(tick.fps), "fps");
         for (port, payload) in &tick.outputs {
@@ -228,11 +232,11 @@ async fn run(path: PathBuf, facts_path: PathBuf, client_name: String, mut rx: mp
                 }
                 let server = resolve(&settings, facts.as_ref()).nt4_server.value;
                 connection = server.clone().map(|host| {
-                    info!(%host, port = settings.port, prefix = %settings.topic_prefix(), "NT4 publishing");
+                    info!(%host, port = settings.port, base = %settings.topic_base(), "NT4 publishing");
                     let mut config = ClientConfig::new(host, client_name.clone());
                     config.port = settings.port;
                     let client = Client::start(config);
-                    Connection { handle: client.handle(), client, prefix: settings.topic_prefix(), publishers: HashMap::new() }
+                    Connection { handle: client.handle(), client, base: settings.topic_base(), publishers: HashMap::new() }
                 });
                 if connection.is_none() {
                     info!("NT4 publishing off (disabled, or no team or server known)");
@@ -245,6 +249,10 @@ async fn run(path: PathBuf, facts_path: PathBuf, client_name: String, mut rx: mp
                 let connected = match event {
                     ClientEvent::Connected => true,
                     ClientEvent::Disconnected { .. } => false,
+                    ClientEvent::TimeSync { offset_us, rtt_us, .. } => {
+                        info!(offset_us, rtt_us, "NT4 clock estimate");
+                        continue;
+                    }
                     _ => continue,
                 };
                 status.lock().unwrap_or_else(|poison| poison.into_inner()).connected = connected;
@@ -329,7 +337,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("helios-nt4-e2e-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
-        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
+        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios", "board": "b"}}"#)).unwrap();
         let (sink, status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
@@ -340,12 +348,12 @@ mod tests {
         let serializers = ValueSerializerMap::default();
         sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", 3_i64))], serializers, latency_ms: 4.5, fps: 30.0, map_pose_prefix: false });
         let host = server.handle();
-        while host.value("/helios/front/count").is_none() {
+        while host.value("/helios/b/front/count").is_none() {
             assert!(tokio::time::Instant::now() < deadline, "no value");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
-        assert_eq!(host.value("/helios/front/fps"), Some(Value::Double(30.0)));
+        assert_eq!(host.value("/helios/b/front/latency_ms"), Some(Value::Double(4.5)));
+        assert_eq!(host.value("/helios/b/front/fps"), Some(Value::Double(30.0)));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -357,7 +365,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("helios-nt4-pose-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
-        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
+        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios", "board": "b"}}"#)).unwrap();
         let (sink, _status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
@@ -392,22 +400,22 @@ mod tests {
             "reference_from_rig": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 3.0, "y": 4.0, "z": 0.0}},
         });
         offer(with_rig);
-        wait_for("/helios/front/tag_count", Value::Int(3)).await;
-        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(true)));
-        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
-        assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
+        wait_for("/helios/b/front/tag_count", Value::Int(3)).await;
+        assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/b/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
+        assert!(matches!(host.value("/helios/b/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
         assert!(matches!(host.value("/.schema/struct:Pose3d"), Some(Value::Raw(bytes)) if bytes == b"Translation3d translation;Rotation3d rotation"));
-        assert_eq!(host.value("/helios/front/robot_pose_std_devs"), None, "no std devs without a covariance");
-        assert_eq!(host.value("/helios/front/latency_ms"), Some(Value::Double(4.5)));
+        assert_eq!(host.value("/helios/b/front/robot_pose_std_devs"), None, "no std devs without a covariance");
+        assert_eq!(host.value("/helios/b/front/latency_ms"), Some(Value::Double(4.5)));
 
         // Invalid, then valid without a rig: no robot pose. Waiting on `tag_count` (sent after
         // `robot_pose_valid` in a tick) means that tick's validity has landed too.
         offer(serde_json::json!({"status": "uncalibrated", "valid": false, "inlier_tags": 0, "has_rig": true}));
-        wait_for("/helios/front/tag_count", Value::Int(0)).await;
-        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        wait_for("/helios/b/front/tag_count", Value::Int(0)).await;
+        assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(false)));
         offer(serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 2, "has_rig": false}));
-        wait_for("/helios/front/tag_count", Value::Int(2)).await;
-        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        wait_for("/helios/b/front/tag_count", Value::Int(2)).await;
+        assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(false)));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -419,7 +427,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("helios-nt4-map-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nt4.json");
-        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios"}}"#)).unwrap();
+        std::fs::write(&path, format!(r#"{{"server": "127.0.0.1", "port": {port}, "prefix": "/helios", "board": "b"}}"#)).unwrap();
         let (sink, _status) = spawn(path.clone(), path.with_file_name("controller.json"), "helios-test".into());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !sink.active() {
@@ -467,37 +475,37 @@ mod tests {
         // A map pose alone, on a pipeline whose graph has no `multi_tag_pose`: the plain names.
         // `weak_source` is set last in a tick, so waiting on it means the rest of the tick is there.
         offer("front", false, vec![("pose", map_pose(true, [3.0, 4.0, 0.1]))]);
-        wait_for("/helios/front/weak_source", Value::String("lone small tag, not mapped".into())).await;
-        assert_eq!(host.value("/helios/front/map_state"), Some(Value::String("tracking".into())));
-        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
-        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(true)));
-        assert_eq!(host.value("/helios/front/tag_count"), Some(Value::Int(2)));
-        assert!(matches!(host.value("/helios/front/robot_pose_std_devs"), Some(Value::DoubleArray(v)) if v.len() == 3));
-        assert!(matches!(host.value("/helios/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
-        assert_eq!(host.value("/helios/front/weak_robot_pose_valid"), Some(Value::Boolean(false)), "the weak candidate has no rig");
-        assert_eq!(host.value("/helios/front/weak_robot_pose"), None);
-        assert_eq!(host.value("/helios/front/map_robot_pose_valid"), None, "no prefix without a multi_tag_pose");
+        wait_for("/helios/b/front/weak_source", Value::String("lone small tag, not mapped".into())).await;
+        assert_eq!(host.value("/helios/b/front/map_state"), Some(Value::String("tracking".into())));
+        assert_eq!(host.value("/helios/b/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/b/front/tag_count"), Some(Value::Int(2)));
+        assert!(matches!(host.value("/helios/b/front/robot_pose_std_devs"), Some(Value::DoubleArray(v)) if v.len() == 3));
+        assert!(matches!(host.value("/helios/b/front/robot_pose_struct"), Some(Value::Raw(bytes)) if bytes.len() == 56));
+        assert_eq!(host.value("/helios/b/front/weak_robot_pose_valid"), Some(Value::Boolean(false)), "the weak candidate has no rig");
+        assert_eq!(host.value("/helios/b/front/weak_robot_pose"), None);
+        assert_eq!(host.value("/helios/b/front/map_robot_pose_valid"), None, "no prefix without a multi_tag_pose");
 
         // Unaligned on the same pipeline: no robot pose this tick, the names do not change, and the
         // last robot pose stays.
         offer("front", false, vec![("pose", map_pose(false, [5.0, 5.0, 0.0]))]);
-        wait_for("/helios/front/tag_count", Value::Int(0)).await;
-        assert_eq!(host.value("/helios/front/robot_pose_valid"), Some(Value::Boolean(false)));
-        assert_eq!(host.value("/helios/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
+        wait_for("/helios/b/front/tag_count", Value::Int(0)).await;
+        assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(false)));
+        assert_eq!(host.value("/helios/b/front/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.1, 0.0, 0.0, 0.0])));
 
         // Beside a multi_tag_pose (pipeline `back`): the map's topics are `map_`-prefixed, and the
         // AprilTag ones keep their names.
         let multi = serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 3, "has_rig": true,
             "reference_from_rig": {"rotation": identity, "translation": {"x": 3.0, "y": 4.0, "z": 0.0}}});
         offer("back", true, vec![("multi_tag_pose", multi), ("pose", map_pose(true, [7.0, 1.0, 0.2]))]);
-        wait_for("/helios/back/map_tag_count", Value::Int(2)).await;
-        assert_eq!(host.value("/helios/back/map_robot_pose"), Some(Value::DoubleArray(vec![7.0, 1.0, 0.2, 0.0, 0.0, 0.0])));
-        assert_eq!(host.value("/helios/back/map_robot_pose_valid"), Some(Value::Boolean(true)));
-        assert_eq!(host.value("/helios/back/map_state"), Some(Value::String("tracking".into())));
-        assert_eq!(host.value("/helios/back/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
-        assert_eq!(host.value("/helios/back/robot_pose_valid"), Some(Value::Boolean(true)));
-        assert_eq!(host.value("/helios/back/tag_count"), Some(Value::Int(3)));
-        assert_eq!(host.value("/helios/back/robot_pose_std_devs"), None, "the multi-tag pose has no covariance here");
+        wait_for("/helios/b/back/map_tag_count", Value::Int(2)).await;
+        assert_eq!(host.value("/helios/b/back/map_robot_pose"), Some(Value::DoubleArray(vec![7.0, 1.0, 0.2, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/b/back/map_robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/b/back/map_state"), Some(Value::String("tracking".into())));
+        assert_eq!(host.value("/helios/b/back/robot_pose"), Some(Value::DoubleArray(vec![3.0, 4.0, 0.0, 0.0, 0.0, 0.0])));
+        assert_eq!(host.value("/helios/b/back/robot_pose_valid"), Some(Value::Boolean(true)));
+        assert_eq!(host.value("/helios/b/back/tag_count"), Some(Value::Int(3)));
+        assert_eq!(host.value("/helios/b/back/robot_pose_std_devs"), None, "the multi-tag pose has no covariance here");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

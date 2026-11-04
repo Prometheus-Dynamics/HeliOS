@@ -28,6 +28,10 @@ fn validate(settings: &Nt4Settings) -> ApiResult<()> {
     if prefix.len() > 120 || !prefix.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.')) {
         return Err(ApiError::unprocessable("prefix is a topic path such as /helios (letters, digits, / _ - .)"));
     }
+    let board = settings.board.trim();
+    if board.len() > 63 || !board.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+        return Err(ApiError::unprocessable("board is a name such as front (letters, digits, _ - .)"));
+    }
     Ok(())
 }
 
@@ -35,6 +39,8 @@ fn validate(settings: &Nt4Settings) -> ApiResult<()> {
 pub struct Nt4State {
     /// What the user set on this device.
     pub settings: Nt4Settings,
+    /// Where this board's topics start, `<prefix>/<board>`.
+    pub topics: String,
     /// The team and the server robot code is at, and where each came from.
     pub effective: Effective,
     /// The robot controller HeliOS found, when it found one.
@@ -56,7 +62,7 @@ async fn state_of(state: &SharedState, settings: Nt4Settings) -> ApiResult<Nt4St
     };
     let connected = runtime.as_ref().is_some_and(|runtime| label_values(&runtime.labels, "helios.nt4.connected").first() == Some(&"true"));
     let engine_reporting = runtime.as_ref().is_some_and(|runtime| !label_values(&runtime.labels, "helios.nt4.connected").is_empty());
-    Ok(Nt4State { server: effective.nt4_server.value.clone(), effective, controller, settings, connected, engine_reporting })
+    Ok(Nt4State { server: effective.nt4_server.value.clone(), topics: settings.topic_base(), effective, controller, settings, connected, engine_reporting })
 }
 
 pub async fn get_nt4(State(state): State<SharedState>) -> ApiResult<Json<Nt4State>> {
@@ -81,6 +87,7 @@ mod tests {
         assert!(validate(&Nt4Settings { team: Some(0), ..Nt4Settings::default() }).is_err());
         assert!(validate(&Nt4Settings { server: Some("bad host".into()), ..Nt4Settings::default() }).is_err());
         assert!(validate(&Nt4Settings { prefix: "/helios front".into(), ..Nt4Settings::default() }).is_err());
+        assert!(validate(&Nt4Settings { board: "front/left".into(), ..Nt4Settings::default() }).is_err());
         assert!(validate(&Nt4Settings { port: 0, ..Nt4Settings::default() }).is_err());
     }
 }

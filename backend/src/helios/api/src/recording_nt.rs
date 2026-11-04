@@ -1,12 +1,12 @@
 //! Recording over NetworkTables, and auto-record. helios-api keeps a second, low-rate NT4 client on
 //! the robot's server (the connection of `nt4.json`, as the engine's publisher uses it):
-//! - `<prefix>/record` (boolean): a change to true starts a recording from the default camera, to
+//! - `<prefix>/<board>/record` (boolean): a change to true starts a recording from the default camera, to
 //!   false stops the running one;
-//! - `<prefix>/capture_last` (boolean): a rising edge writes the capture-last clip (the first camera
+//! - `<prefix>/<board>/capture_last` (boolean): a rising edge writes the capture-last clip (the first camera
 //!   with a ring);
-//! - `<prefix>/map/save` (boolean): a rising edge saves the map of each running live-map pipeline,
+//! - `<prefix>/<board>/map/save` (boolean): a rising edge saves the map of each running live-map pipeline,
 //!   named after the match (`/FMSInfo`), as `POST /v1/pipelines/{id}/map/save` does;
-//! - `<prefix>/recording/{active,bytes,dropped,file}` (boolean, int, int, string): the status, about
+//! - `<prefix>/<board>/recording/{active,bytes,dropped,file}` (boolean, int, int, string): the status, about
 //!   once a second (`dropped`: frames and host messages not written);
 //! - auto-record (the `auto_record` setting) reads the FMS topics `/FMSInfo/FMSControlData` (bit 0:
 //!   enabled), `EventName`, `MatchType` and `MatchNumber`: one recording per enabled period, named
@@ -35,12 +35,12 @@ pub const FMS_EVENT_NAME: &str = "/FMSInfo/EventName";
 pub const FMS_MATCH_TYPE: &str = "/FMSInfo/MatchType";
 pub const FMS_MATCH_NUMBER: &str = "/FMSInfo/MatchNumber";
 
-/// How often the settings are checked for a new server, prefix or NT control switch.
+/// How often the settings are checked for a new server, topics or NT control switch.
 const CHECK_EVERY: Duration = Duration::from_secs(2);
 /// How often the status is published.
 const STATUS_EVERY: Duration = Duration::from_secs(1);
 
-/// The topics of recording control and status, under the NT prefix.
+/// The topics of recording control and status, under this board's NT topics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Topics {
     pub record: String,
@@ -52,12 +52,12 @@ pub struct Topics {
     pub file: String,
 }
 
-pub fn topics(prefix: &str) -> Topics {
-    let status = format!("{prefix}/recording");
+pub fn topics(base: &str) -> Topics {
+    let status = format!("{base}/recording");
     Topics {
-        record: format!("{prefix}/record"),
-        capture_last: format!("{prefix}/capture_last"),
-        map_save: format!("{prefix}/map/save"),
+        record: format!("{base}/record"),
+        capture_last: format!("{base}/capture_last"),
+        map_save: format!("{base}/map/save"),
         active: format!("{status}/active"),
         bytes: format!("{status}/bytes"),
         dropped: format!("{status}/dropped"),
@@ -195,7 +195,7 @@ pub fn status_values(status: Option<&RecordingStatus>) -> (bool, i64, i64, Strin
 struct Connection {
     host: String,
     port: u16,
-    prefix: String,
+    base: String,
 }
 
 /// Work for the worker, which runs one job at a time (a start opens a camera).
@@ -254,7 +254,7 @@ impl Link {
                 }
             }
         });
-        let topics = topics(&connection.prefix);
+        let topics = topics(&connection.base);
         let control = handle.subscribe(&[topics.record.as_str(), topics.capture_last.as_str(), topics.map_save.as_str()], SubscribeOptions::default()).ok();
         let fms = handle.subscribe(&[FMS_PREFIX], SubscribeOptions { prefix: true, ..SubscribeOptions::default() }).ok();
         let publish = |name: &str, type_name: &str| handle.publish(name, type_name).ok();
@@ -289,7 +289,7 @@ async fn wanted(state: &SharedState) -> Option<Connection> {
     let controller = state.store.controller_facts().await.unwrap_or_default();
     let recorder = state.store.recording_settings().await.unwrap_or_default();
     let host = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value?;
-    (recorder.nt_control).then(|| Connection { host, port: nt4.port, prefix: nt4.topic_prefix() })
+    (recorder.nt_control).then(|| Connection { host, port: nt4.port, base: nt4.topic_base() })
 }
 
 async fn run(state: SharedState, jobs: mpsc::UnboundedSender<Job>) {

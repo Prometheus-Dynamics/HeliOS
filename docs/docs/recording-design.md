@@ -13,8 +13,8 @@ built, and where:
   are 4 (`HELIOS_CAMERA_SPARE_CLIENTS`): preview, calibration, a recording and its ring.
 - Capture last: a ring per camera in `capture_last_cameras` (`capture_last_seconds`, 10 by default),
   compressed in RAM and sized from `MemAvailable` (a quarter at most). `POST /v1/recordings/capture-last`.
-- NetworkTables (helios-api, `recording_nt.rs`): `<prefix>/record`, `<prefix>/capture_last` and
-  the status topics `<prefix>/recording/{active,bytes,dropped,file}`. Chosen over an engine relay
+- NetworkTables (helios-api, `recording_nt.rs`): `<base>/record`, `<base>/capture_last` and
+  the status topics `<base>/recording/{active,bytes,dropped,file}`. Chosen over an engine relay
   because the recorder and its state are helios-api's; the engine's publisher stays the one-way
   path for outputs. The client is a second, low-rate connection to the same server (`nt4.json`).
 - Auto-record (`auto_record`): one recording per robot-enabled period, from `/FMSInfo`
@@ -100,7 +100,8 @@ so every sample maps exactly onto the frame clock offline.
   `DELETE /v1/recordings/{id}`, `POST /v1/recordings/capture-last`.
 - UI: a record control on the camera view and the status bar (state, size, drops, free space),
   a Recordings screen (list, download, delete), settings for mode/storage/rate.
-- NT: `/helios/record` (bool) and `/helios/capture_last` (trigger), plus status topics.
+- NT: `<base>/record` (bool) and `<base>/capture_last` (trigger), plus status topics. `<base>` is
+  `<prefix>/<board>`, so robot code triggers each board on its own.
 
 ## Offline use
 

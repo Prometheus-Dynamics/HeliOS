@@ -93,10 +93,10 @@ class GuideStore {
   /** Where this camera's results go for robot code. */
   table(c: Camera): string | null {
     const w = this.active(c);
-    // On a device the engine publishes every pipeline's outputs under <prefix>/<pipeline>.
+    // On a device the engine publishes every pipeline's outputs under <prefix>/<board>/<pipeline>.
     if (cluster.live) {
       const nt = liveState.nt4;
-      return w && nt?.server ? `${nt.settings.prefix.replace(/\/$/, "")}/${w.id}` : null;
+      return w && nt?.server ? `${nt.topics}/${w.id}` : null;
     }
     const nt = w?.graph.nodes.find((n) => n.type === "helios:nt4");
     return nt ? String(nt.params.table) : null;
@@ -164,7 +164,7 @@ class GuideStore {
         ? {
             id: "robot-code",
             title: "Connect to robot code",
-            detail: liveState.nt4?.connected ? `Publishing to ${liveState.nt4.server} under ${liveState.nt4.settings.prefix}.` : liveState.nt4?.server ? `Waiting for ${liveState.nt4.server}. Is the device on the robot network?` : "Set your team number in Device › Robot link.",
+            detail: liveState.nt4?.connected ? `Publishing to ${liveState.nt4.server} under ${liveState.nt4.topics}.` : liveState.nt4?.server ? `Waiting for ${liveState.nt4.server}. Is the device on the robot network?` : "Set your team number in Device › Robot link.",
             done: Boolean(liveState.nt4?.connected),
             icon: "plug",
           }

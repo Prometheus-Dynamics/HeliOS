@@ -30,6 +30,7 @@ public final class NtCheck extends TimedRobot {
   private static final class Base {
     final List<Long> transit = new ArrayList<>();
     long age;
+    boolean stamped;
     double latencyMs;
     double fps;
     long tags;
@@ -54,11 +55,17 @@ public final class NtCheck extends TimedRobot {
     synchronized (bases) {
       Base base = bases.computeIfAbsent(name.substring(0, slash), key -> new Base());
       switch (leaf) {
-        case "capture_time_us" -> base.age = nowUs - value.getInteger();
+        case "capture_time_us" -> {
+          base.age = nowUs - value.getInteger();
+          base.stamped = true;
+        }
         // The engine publishes latency_ms right after capture_time_us, from the same tick.
         case "latency_ms" -> {
           base.latencyMs = value.getDouble();
-          base.transit.add(base.age - (long) (base.latencyMs * 1000));
+          if (base.stamped) {
+            base.transit.add(base.age - (long) (base.latencyMs * 1000));
+            base.stamped = false;
+          }
         }
         case "fps" -> base.fps = value.getDouble();
         case "tag_count" -> base.tags = value.getInteger();

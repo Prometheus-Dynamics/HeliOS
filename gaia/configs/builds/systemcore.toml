@@ -62,12 +62,12 @@ kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
 branch = "dev"
 
-# Orion at the commit raze.toml pins (dev c8c0332: protocol 1; earlier 0703507: Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit, lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; a380034: safe mode, robot-link peer trust in open mode).
+# Orion at the commit raze.toml pins (dev f557669: protocol 1; earlier 0703507: Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit, lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; a380034: safe mode, robot-link peer trust in open mode).
 [[sources]]
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "c8c03326d1d7daab49e87510b7fc7b0754e78979"
+rev = "f5576691178228fbe0500de8c2ab383af5c84732"
 
 # Lemnos dev f803975 (was b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; it includes the SystemCore board and host-owned devices: lemnosd, and its
 # board definition at packaging/boards/systemcore.toml, read by ${source.lemnos} below).

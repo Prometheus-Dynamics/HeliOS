@@ -62,9 +62,8 @@ HeliOS can connect to an NT4 server (commonly the roboRIO) and publish/subscribe
 
 ### Publish Prefix + Topics
 
-- **Publish prefix** is derived from hostname:
-  - If hostname is set: `/<hostname>`
-  - Otherwise: `/helios`
+- **Topics** start at `<prefix>/<board>`. The prefix defaults to `/helios`, and the board to the
+  hostname.
 - The UI shows the topics it publishes under the prefix, including:
   - `<prefix>/info/hostname`
   - `<prefix>/info/api_url`

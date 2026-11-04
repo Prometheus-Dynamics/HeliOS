@@ -814,6 +814,8 @@ export interface Nt4Settings {
   server: string | null;
   port: number;
   prefix: string;
+  /** This board's name in its topics; empty is its hostname. */
+  board: string;
 }
 
 /** Where a robot fact came from: the user's setting on this device, the robot controller, or nothing. */
@@ -837,6 +839,8 @@ export interface ControllerFacts {
 
 export interface Nt4State {
   settings: Nt4Settings;
+  /** Where this board's topics start, `<prefix>/<board>`. */
+  topics: string;
   /** The team and the server robot code is at, each with where it came from. */
   effective: { team: Fact<number>; nt4_server: Fact<string> };
   controller: ControllerFacts | null;

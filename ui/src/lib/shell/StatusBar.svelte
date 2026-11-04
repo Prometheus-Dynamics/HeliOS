@@ -38,7 +38,7 @@
     if (!state.settings.enabled) return { tone: "", text: "NT off", tip: "Publishing to NetworkTables is off (Device › Robot link)" };
     if (!state.server) return { tone: "warn", text: "NT: no team", tip: "Set the team number in Device › Robot link so results reach robot code" };
     return state.connected
-      ? { tone: "ok", text: `NT ${state.server}`, tip: `Publishing every frame to ${state.server} under ${state.settings.prefix}` }
+      ? { tone: "ok", text: `NT ${state.server}`, tip: `Publishing every frame to ${state.server} under ${state.topics}` }
       : { tone: "warn", text: `NT waiting`, tip: `Not connected to ${state.server} yet: is the device on the robot network?` };
   });
 </script>

@@ -12,7 +12,7 @@ You are done when:
 
 - **Settings › Robot** shows NetworkTables as **Connected**;
 - robot code (or a dashboard such as AdvantageScope, or Atlas's NT viewer) sees
-  `/helios/<pipeline>/...` topics updating.
+  `/helios/<board>/<pipeline>/...` topics updating.
 
 ## Configure
 
@@ -25,9 +25,9 @@ You are done when:
 
 ## What robot code reads
 
-Each pipeline publishes under `/helios/<pipeline>/` (the prefix can be changed under **Topics**).
-Give each board on a robot its own prefix, such as `/helios/front` and `/helios/rear`. Boards that
-share a prefix and a pipeline id write to the same topics, and robot code can't tell them apart.
+Each pipeline publishes under `/helios/<board>/<pipeline>/`. `<board>` is the board's hostname
+unless you name it under **Board**, for example `front`, which keeps robot code working when a board
+is swapped. The prefix can be changed under **Topics**.
 
 
 - one `string` topic per output, holding JSON (for example `detections`, `multi_tag_pose`);

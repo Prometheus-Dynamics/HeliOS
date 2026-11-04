@@ -51,8 +51,11 @@
   <Prop label="Server" help="Set a host for a simulator or another server.">
     <input class="text mono" type="text" placeholder={roborioAddress(team.number ?? 0) ?? "roboRIO"} value={nt.settings.server ?? ""} onchange={(e) => team.save({ server: e.currentTarget.value.trim() || null })} aria-label="NetworkTables server" />
   </Prop>
-  <Prop label="Topics" help="Each pipeline publishes <prefix>/<pipeline>/<output> (JSON), plus latency_ms, fps and capture_time_us.">
+  <Prop label="Topics" help="Each pipeline publishes <prefix>/<board>/<pipeline>/<output> (JSON), plus latency_ms, fps and capture_time_us.">
     <input class="text mono" type="text" value={nt.settings.prefix} onchange={(e) => team.save({ prefix: e.currentTarget.value.trim() || "/helios" })} aria-label="NetworkTables topic prefix" />
+  </Prop>
+  <Prop label="Board" help="This board's name in its topics, so boards on one robot stay apart. Empty uses its hostname.">
+    <input class="text mono" type="text" placeholder={nt.topics.split("/").pop()} value={nt.settings.board} onchange={(e) => team.save({ board: e.currentTarget.value.trim() })} aria-label="NetworkTables board name" />
   </Prop>
 {:else}
   <Prop label="NetworkTables"><span class="small dim">Loading the robot's settings…</span></Prop>
