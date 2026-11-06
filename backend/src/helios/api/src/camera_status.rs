@@ -145,6 +145,13 @@ pub enum FrameFlow {
     Idle,
 }
 
+impl FrameFlow {
+    /// The flow of a camera service running no capture: clients waiting get nothing.
+    pub fn without_capture(clients: usize) -> Self {
+        if clients == 0 { Self::Idle } else { Self::Stalled }
+    }
+}
+
 /// How long the delivered count may stand still before frames count as stopped.
 pub const STALL_AFTER: Duration = Duration::from_secs(3);
 
@@ -696,6 +703,8 @@ mod tests {
         assert_eq!(frames(FrameFlow::Flowing).state, StageState::Ok);
         assert_eq!(frames(FrameFlow::Stalled).state, StageState::Blocked);
         assert_eq!(frames(FrameFlow::Stalled).reason, "Frames stopped");
+        assert_eq!(FrameFlow::without_capture(0), FrameFlow::Idle);
+        assert_eq!(FrameFlow::without_capture(2), FrameFlow::Stalled);
         assert_eq!(frames(FrameFlow::Idle).state, StageState::Waiting);
     }
 

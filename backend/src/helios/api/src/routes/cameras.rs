@@ -70,7 +70,7 @@ pub struct CaptureLive {
 }
 
 /// A capture's dropped frames by cause. `drops` (the total) is Styx's own sum; `raw_skipped`
-/// is not in it (raw consumers, which the other consumers do not see).
+/// (raw consumers, which the other consumers do not see) and `unread` are not in it.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct DropsByCause {
     /// Missing from the sensor's sequence numbers: lost before Styx got them.
@@ -83,11 +83,13 @@ pub struct DropsByCause {
     pub isp_skipped: u64,
     /// Raw frames a raw consumer did not get (not in `drops`).
     pub raw_skipped: u64,
+    /// Frames a capture made after its last client left: nobody missed them (not in `drops`).
+    pub unread: u64,
 }
 
 impl From<&styx::metrics::Drops> for DropsByCause {
     fn from(drops: &styx::metrics::Drops) -> Self {
-        Self { sensor_sequence_gaps: drops.sensor_sequence_gaps, queue_overflow: drops.queue_overflow, corrupted: drops.corrupted, isp_skipped: drops.isp_skipped, raw_skipped: drops.raw_skipped }
+        Self { sensor_sequence_gaps: drops.sensor_sequence_gaps, queue_overflow: drops.queue_overflow, corrupted: drops.corrupted, isp_skipped: drops.isp_skipped, raw_skipped: drops.raw_skipped, unread: drops.unread }
     }
 }
 
@@ -243,9 +245,11 @@ async fn with_live(state: &SharedState, mut camera: Camera, record: &orion::cont
     match frames_socket(&record.endpoints) {
         Some(socket) => match live_facts(socket).await {
             Ok(live) => {
-                if let Some(capture) = live.captures.first() {
-                    camera.frame_flow = state.frame_progress.observe(&camera.id, capture.frames_delivered, live.clients, std::time::Instant::now());
-                }
+                camera.frame_flow = match live.captures.first() {
+                    Some(capture) => state.frame_progress.observe(&camera.id, capture.frames_delivered, live.clients, std::time::Instant::now()),
+                    // No capture runs (another program may hold the device): nothing flows.
+                    None => crate::camera_status::FrameFlow::without_capture(live.clients),
+                };
                 if camera.frame_flow == crate::camera_status::FrameFlow::Stalled && camera.health == "healthy" {
                     camera.health = "degraded".into();
                 }
@@ -648,7 +652,7 @@ mod tests {
 
     #[test]
     fn drops_split_by_cause_next_to_the_total() {
-        let drops = styx::metrics::Drops { sensor_sequence_gaps: 1, queue_overflow: 2, corrupted: 3, isp_skipped: 4, raw_skipped: 5, total: 10 };
+        let drops = styx::metrics::Drops { sensor_sequence_gaps: 1, queue_overflow: 2, corrupted: 3, isp_skipped: 4, raw_skipped: 5, unread: 6, total: 10 };
         let split = DropsByCause::from(&drops);
         assert_eq!(split.sensor_sequence_gaps, 1);
         assert_eq!(split.queue_overflow, 2);
@@ -657,7 +661,7 @@ mod tests {
         assert_eq!(split.raw_skipped, 5);
         let json = serde_json::to_value(&split).expect("serializes");
         assert_eq!(json["queue_overflow"], 2);
-        assert_eq!(json.as_object().map(|o| o.len()), Some(5));
+        assert_eq!(json.as_object().map(|o| o.len()), Some(6));
     }
 
     #[test]
