@@ -2,9 +2,10 @@
 //!
 //! Every graph tick's host outputs go to the robot's NT4 server as they are produced, not at
 //! the Orion publish interval: `<prefix>/<board>/<pipeline>/<port>` (`string` holding the same JSON as
-//! `GET /v1/outputs`), plus `<prefix>/<board>/<pipeline>/latency_ms` (input to outputs, `double`),
-//! `fps` (`double`) and `capture_time_us` (`int`: when the frame came in, on the NT server's
-//! clock, for latency compensation). Every topic carries properties `{"helios": 1, "kind": ..}`
+//! `GET /v1/outputs`), plus `<prefix>/<board>/<pipeline>/latency_ms` (the sensor capturing the frame to its outputs, or
+//! the tick alone for a tick without a frame; `double`), `fps` (`double`) and `capture_time_us`
+//! (`int`: when the sensor captured the frame, on the NT server's clock, for latency
+//! compensation). Every topic carries properties `{"helios": 1, "kind": ..}`
 //! (the output port, or `latency_ms`, `fps`, `capture_time_us`, or a robot pose topic).
 //!
 //! A pipeline whose outputs include `multi_tag_pose` also gets typed robot pose topics on every

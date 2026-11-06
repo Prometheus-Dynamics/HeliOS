@@ -34,9 +34,9 @@ host helios-engine connects to (`null` while off). `topics` is where this board'
 | Topic | Type | Value |
 |---|---|---|
 | `<base>/<pipeline>/<output>` | `string` | The output as JSON, exactly as `GET /v1/outputs` returns `value` (for example `detections`, `multi_tag_pose`) |
-| `<base>/<pipeline>/latency_ms` | `double` | Time from the frame reaching the graph to its outputs |
+| `<base>/<pipeline>/latency_ms` | `double` | Time from the sensor capturing the frame (its Styx timestamp) to its outputs: capture, ISP, delivery and the graph |
 | `<base>/<pipeline>/fps` | `double` | Frames per second the pipeline processes |
-| `<base>/<pipeline>/capture_time_us` | `int` | When the frame reached the graph, on the NT server's clock. Use it to compensate for latency |
+| `<base>/<pipeline>/capture_time_us` | `int` | When the sensor captured the frame, on the NT server's clock. Use it to compensate for latency |
 
 `capture_time_us` is not published until helios-engine has its first clock sample from the server.
 
@@ -44,7 +44,9 @@ How close it is, measured on a Raze against a WPILib 2027 robot program on a Sys
 11,104 values, 2026-11-05): a value's arrival on the robot's clock, less `capture_time_us` and
 `latency_ms`, was 486 µs at the median and between -0.47 and +5.9 ms at the extremes. That figure
 is the time on the wire plus the clock error, so robot code can trust a capture time to about
-±0.5 ms plus network delay. The stamp starts when the frame reaches the graph, not at exposure.
+±0.5 ms plus network delay. That measurement predates the sensor stamp: since 2026-11-06 the stamp
+is the frame's sensor timestamp, not its arrival at the graph, so it moved about 10 ms earlier (the
+capture and ISP time a frame plan shows).
 
 Every topic carries the properties `{"helios": 1, "kind": "<output port>"}`. For the three
 timing topics, `kind` is `latency_ms`, `fps` or `capture_time_us`. Frames themselves are

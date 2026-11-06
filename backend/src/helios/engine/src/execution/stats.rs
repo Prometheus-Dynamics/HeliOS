@@ -27,6 +27,9 @@ pub(crate) struct DriverStats {
     pub ticks_processed: u64,
     pub ticks_failed: u64,
     pub last_tick_ms: f64,
+    /// From the sensor capturing the last frame to its tick's outputs (`None`: the tick had no
+    /// frame, or the frame's clock is not monotonic).
+    pub last_capture_latency_ms: Option<f64>,
     /// Ticks per second.
     pub fps: f64,
     pub last_frame_timestamp: Option<u64>,
@@ -57,6 +60,7 @@ impl DriverStats {
             "ticks_processed": self.ticks_processed,
             "ticks_failed": self.ticks_failed,
             "last_tick_ms": round2(self.last_tick_ms),
+            "capture_latency_ms": self.last_capture_latency_ms.map(round2),
             "fps": round2(self.fps),
             "last_frame_timestamp": self.last_frame_timestamp,
             "last_frame_width": self.last_frame_size.map(|(width, _)| width),

@@ -100,6 +100,9 @@ struct DriverState {
     sequence: u64,
     /// When the input that the next tick consumes was pushed (tick latency).
     last_input_at: Option<Instant>,
+    /// The sensor timestamp (`CLOCK_MONOTONIC` ns) of the frame the next tick consumes, for its
+    /// capture-to-outputs latency.
+    last_input_sensor_ns: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -191,6 +194,7 @@ impl WorkloadDriver {
                 metrics,
                 sequence: 0,
                 last_input_at: None,
+                last_input_sensor_ns: None,
                 save: SavePulse::default(),
             }),
             outputs_ready,
@@ -540,6 +544,7 @@ impl TickRecorder {
             state.fps.record_frame(now);
             state.stats.fps = state.fps.fps();
             state.stats.last_tick_ms = state.last_input_at.take().map_or(0.0, |pushed| now.duration_since(pushed).as_secs_f64() * 1000.0);
+            state.stats.last_capture_latency_ms = state.last_input_sensor_ns.take().and_then(capture_latency_ms);
             state.stats.updated_at_ms = updated_at_ms;
             match result {
                 Ok(telemetry) => {
@@ -563,7 +568,10 @@ impl TickRecorder {
                 state.metrics.set_frame_overhead(&report);
             }
             if let Some(outputs) = nt4_outputs {
-                self.nt4.offer(outputs, state.stats.last_tick_ms, state.stats.fps, state.stats.last_frame_timestamp);
+                // Robot code compensates for the whole delay since the sensor captured the frame,
+                // not only the graph's share of it.
+                let latency_ms = state.stats.last_capture_latency_ms.unwrap_or(state.stats.last_tick_ms);
+                self.nt4.offer(outputs, latency_ms, state.stats.fps, state.stats.last_frame_timestamp);
             }
         }
         self.shared.outputs_ready.notify_one();
@@ -805,6 +813,7 @@ impl GraphLoop {
         {
             let mut state = lock(&self.shared.state);
             state.last_input_at = Some(Instant::now());
+            state.last_input_sensor_ns = frame.meta().sensor_monotonic_ns();
             let stats = &mut state.stats;
             stats.frames_received += 1;
             stats.last_frame_timestamp = Some(timestamp);
@@ -881,4 +890,11 @@ fn record_source_status(shared: &DriverShared, status: FrameSourceStatus, reason
     if changed {
         shared.outputs_ready.notify_one();
     }
+}
+
+/// Milliseconds from a frame's sensor timestamp (`CLOCK_MONOTONIC` ns) to now; `None` for a
+/// timestamp in the future (a clock the frame did not report correctly).
+fn capture_latency_ms(sensor_ns: u64) -> Option<f64> {
+    let elapsed = styx::core::prelude::CaptureInstant::now().as_nanos().checked_sub(sensor_ns)?;
+    Some(elapsed as f64 / 1e6)
 }
