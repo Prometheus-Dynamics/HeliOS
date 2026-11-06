@@ -60,9 +60,13 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       the board).
 - [ ] **Memory slimming.** Why: lean on the Raze now, and the K230D has 128 MB for everything later.
       Done when: tags-only at 1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5
-      (2026-10-30: about 67 MiB plus about 20 MiB of camera buffers). helios-api is at 18 MiB PSS, 10
-      MiB heap on dev.926 with no deploy run yet (peak after a deploy 48 MiB). The engine's heap is
-      the remaining target; the tags-only figure has not been re-measured. Blocked by: nothing.
+      (2026-10-30: about 67 MiB plus about 20 MiB of camera buffers). helios-api: the 23-34 MB heap
+      swing per boot Gaia saw was the deploy reading the pipeline's whole revision history (12.6 MB
+      on Raze #1, pretty-printed) for its revision number. Fixed in 324371a6. On the CM5 (Raze #1,
+      2026-11-06), a refused 94 KB PUT now peaks at +4.7 MB RSS instead of +25.1, and the history
+      is 3.4 MB once written compact. An accepted deploy peaks at +7.8 MB, and helios-api settles
+      at 17-18 MiB PSS after it. The engine's heap is the remaining target; the tags-only figure
+      has not been re-measured. Blocked by: nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
       or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches. Partly
       done: `/v1/ota/*` is gone (Atlas dev calls none of it; the identity already named
