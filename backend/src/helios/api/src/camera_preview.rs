@@ -53,6 +53,20 @@ impl PreviewSettings {
     }
 }
 
+/// A camera preview's counters (`styx::preview::Preview::metrics`), in the camera record.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct PreviewFacts {
+    /// Viewers now (MJPEG and WebSocket).
+    pub viewers: u64,
+    /// Frames the camera service gave the preview.
+    pub frames_in: u64,
+    /// JPEG frames sent to viewers (encoded or passed through).
+    pub frames_published: u64,
+    /// Frames that failed, and requests to the camera service that were refused.
+    pub errors: u64,
+    pub last_error: Option<String>,
+}
+
 struct Entry {
     socket: PathBuf,
     preview: Arc<Preview>,
@@ -88,6 +102,21 @@ impl CameraPreviews {
         // A replaced preview stops once its last viewer is gone.
         previews.insert(id.to_string(), Entry { socket: socket.to_path_buf(), preview: preview.clone() });
         Ok(preview)
+    }
+
+    /// What camera `id`'s preview has done, when it has one: frames in and published, its
+    /// viewers, and its last error (a refused camera service request, a frame it could not
+    /// encode), so an empty preview says why.
+    pub async fn facts(&self, id: &str) -> Option<PreviewFacts> {
+        let previews = self.previews.lock().await;
+        let metrics = previews.get(id)?.preview.metrics();
+        Some(PreviewFacts {
+            viewers: metrics.subscribers,
+            frames_in: metrics.frames_in,
+            frames_published: metrics.encoded,
+            errors: metrics.errors,
+            last_error: metrics.last_error,
+        })
     }
 
     /// Forget previews of cameras that are gone (`keep`: the cameras there are now).

@@ -136,19 +136,30 @@ pub struct CameraFacts {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameFlow {
-    /// The count moved within [`STALL_AFTER`], or there is nothing to compare it with yet.
+    /// The camera service gave no live facts (it did not answer, or the camera has none): the
+    /// API cannot tell whether frames arrive.
     #[default]
+    Unknown,
+    /// The count moved within [`STALL_AFTER`], or there is nothing to compare it with yet.
     Flowing,
     /// The count stands still while clients wait for frames.
     Stalled,
     /// The count stands still and nobody is reading: the capture has no reason to run.
     Idle,
+    /// No capture runs because the camera could not be started (another program holds it, or
+    /// the bus refused the mode): nothing flows, whoever asks.
+    Blocked,
 }
 
 impl FrameFlow {
-    /// The flow of a camera service running no capture: clients waiting get nothing.
-    pub fn without_capture(clients: usize) -> Self {
-        if clients == 0 { Self::Idle } else { Self::Stalled }
+    /// The flow of a camera service running no capture: blocked when its last start failed
+    /// (`start_error`), else clients waiting get nothing.
+    pub fn without_capture(clients: usize, start_error: Option<&str>) -> Self {
+        match (start_error, clients) {
+            (Some(_), _) => Self::Blocked,
+            (None, 0) => Self::Idle,
+            (None, _) => Self::Stalled,
+        }
     }
 }
 
@@ -451,7 +462,7 @@ fn frames_stage(camera: &CameraFacts) -> Stage {
             return stage(StageState::Blocked, format!("Frames stopped{cause}")).hint("Clients are waiting and none have arrived for a few seconds. Check the camera's USB connection.");
         }
         FrameFlow::Idle => return stage(StageState::Waiting, "Capture idle".into()).hint("The capture runs when the camera view or a pipeline uses the camera."),
-        FrameFlow::Flowing => {}
+        FrameFlow::Flowing | FrameFlow::Unknown | FrameFlow::Blocked => {}
     }
     let fps = capture.fps_measured.filter(|fps| *fps > 0.0);
     if fps.is_some() || capture.frames_delivered > 0 {
@@ -703,8 +714,10 @@ mod tests {
         assert_eq!(frames(FrameFlow::Flowing).state, StageState::Ok);
         assert_eq!(frames(FrameFlow::Stalled).state, StageState::Blocked);
         assert_eq!(frames(FrameFlow::Stalled).reason, "Frames stopped");
-        assert_eq!(FrameFlow::without_capture(0), FrameFlow::Idle);
-        assert_eq!(FrameFlow::without_capture(2), FrameFlow::Stalled);
+        assert_eq!(FrameFlow::without_capture(0, None), FrameFlow::Idle);
+        assert_eq!(FrameFlow::without_capture(2, None), FrameFlow::Stalled);
+        assert_eq!(FrameFlow::without_capture(0, Some("VIDIOC_S_FMT failed: Device or resource busy")), FrameFlow::Blocked);
+        assert_eq!(FrameFlow::default(), FrameFlow::Unknown, "no live facts is not flowing");
         assert_eq!(frames(FrameFlow::Idle).state, StageState::Waiting);
     }
 

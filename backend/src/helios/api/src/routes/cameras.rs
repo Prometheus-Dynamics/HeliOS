@@ -113,8 +113,9 @@ pub struct Camera {
     pub node_id: String,
     pub provider: String,
     pub health: String,
-    /// Whether frames are arriving now (`flowing`, `stalled`, `idle`). `stalled` makes `health`
-    /// `degraded`, whatever the service reports about itself.
+    /// Whether frames are arriving now (`flowing`, `stalled`, `idle`, `blocked`: the camera could
+    /// not be started; `unknown`: the camera service gave no live facts). `stalled` makes
+    /// `health` `degraded`, whatever the service reports about itself.
     pub frame_flow: crate::camera_status::FrameFlow,
     pub availability: String,
     pub backend: Option<String>,
@@ -135,6 +136,8 @@ pub struct Camera {
     pub settings_writable: bool,
     /// Whether `GET /v1/cameras/{id}/preview` can serve it: the camera has a Styx camera service.
     pub preview_available: bool,
+    /// The preview's counters and last error, once someone has opened it (`null` before).
+    pub preview: Option<crate::camera_preview::PreviewFacts>,
     /// The camera's status chain (`camera_status`): each stage from the camera to its map, depth
     /// and features, and the stage it stops at. Set by the list and by `GET /v1/cameras/{id}`.
     pub status: Option<CameraStatus>,
@@ -179,6 +182,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         backend: labels.get("helios.label.styx.backend").cloned(),
         labels: labels.iter().filter_map(|(k, v)| k.strip_prefix("helios.label.").map(|k| (k.to_string(), v.clone()))).collect(),
         preview_available: frames_endpoint.is_some(),
+        preview: None,
         settings_writable: frames_endpoint.is_some(),
         used_by: pipelines::pipelines_using(view, &id),
         mount: mounts.get(&id).copied(),
@@ -242,13 +246,14 @@ pub async fn live_facts(socket: PathBuf) -> Result<CameraLive, String> {
 
 async fn with_live(state: &SharedState, mut camera: Camera, record: &orion::control_plane::ResourceRecord) -> Camera {
     camera.service_online = state.cameras.online(&camera.id).await;
+    camera.preview = state.previews.facts(&camera.id).await;
     match frames_socket(&record.endpoints) {
         Some(socket) => match live_facts(socket).await {
             Ok(live) => {
                 camera.frame_flow = match live.captures.first() {
                     Some(capture) => state.frame_progress.observe(&camera.id, capture.frames_delivered, live.clients, std::time::Instant::now()),
                     // No capture runs (another program may hold the device): nothing flows.
-                    None => crate::camera_status::FrameFlow::without_capture(live.clients),
+                    None => crate::camera_status::FrameFlow::without_capture(live.clients, live.last_error.as_deref()),
                 };
                 if camera.frame_flow == crate::camera_status::FrameFlow::Stalled && camera.health == "healthy" {
                     camera.health = "degraded".into();
