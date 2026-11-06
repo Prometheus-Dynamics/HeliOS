@@ -758,6 +758,10 @@ pub struct UpdateStatus {
     pub version_staged: Option<String>,
     /// What helios-api last asked the writer to do.
     pub task: Option<UpdateTask>,
+    /// A reboot the board is holding back, and why: the board's `reboot-locked` writes its
+    /// waiting line (for example the holder of `/run/lock/raze-gpu.lock`) to `reboot-wait` next to
+    /// the writer's status, and removes it once the reboot goes ahead.
+    pub reboot_waiting: Option<String>,
 }
 
 fn read_board_status(config: &ApiConfig) -> Option<BoardUpdateStatus> {
@@ -802,7 +806,16 @@ pub fn status_from(config: &ApiConfig, task: Option<UpdateTask>) -> UpdateStatus
         version_active: board.as_ref().and_then(|board| board.version_active.clone()),
         version_staged: board.as_ref().and_then(|board| board.version_staged.clone()),
         task,
+        reboot_waiting: read_reboot_wait(config),
     }
+}
+
+/// The board's `reboot-wait` line (next to the writer's status), when a reboot is waiting.
+fn read_reboot_wait(config: &ApiConfig) -> Option<String> {
+    let board = config.board.as_ref()?;
+    let text = std::fs::read_to_string(board.update_status.with_file_name("reboot-wait")).ok()?;
+    let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
+    Some(line.to_string())
 }
 
 /// Before the writer has run on this boot `/run/board/update.json` may be missing; `slots status`
@@ -931,6 +944,15 @@ mod tests {
         // Detected by content, not by name: an xz image is kept whatever it is called.
         let image = store_upload(&config, "helios-raze-v2.slot.tar", None, None, chunks(&[b"\xfd7zXZ\0"])).await.expect("an xz image");
         assert_eq!(image.filename, "helios-raze-v2.slot.tar");
+    }
+
+    #[test]
+    fn status_names_a_waiting_reboot() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = config(dir.path());
+        assert_eq!(status_from(&config, None).reboot_waiting, None);
+        std::fs::write(dir.path().join("reboot-wait"), "waiting for raze-gpu.lock held by pid 42 (flock)\n").expect("write");
+        assert_eq!(status_from(&config, None).reboot_waiting.as_deref(), Some("waiting for raze-gpu.lock held by pid 42 (flock)"));
     }
 
     #[test]
