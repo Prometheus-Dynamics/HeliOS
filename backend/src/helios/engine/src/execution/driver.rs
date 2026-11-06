@@ -699,7 +699,10 @@ impl GraphLoop {
         let host_graph = &mut self.graph.host_graph;
         let result = if self.graph.input_ports.is_empty() { host_graph.run_executor_once().map(|run| run.telemetry) } else { host_graph.tick() };
         match result {
-            Ok(telemetry) => self.recorder.record(host_graph, Ok(&telemetry)),
+            Ok(telemetry) => {
+                self.recorder.record(host_graph, Ok(&telemetry));
+                host_graph.recycle_telemetry(telemetry);
+            }
             Err(error) => self.recorder.record(host_graph, Err(error.to_string())),
         }
     }
@@ -787,7 +790,12 @@ impl GraphLoop {
                     }
                     if pushed || readable(inbound_index) {
                         match self.graph.host_graph.tick_ready() {
-                            Ok(Some(telemetry)) => self.recorder.record(&self.graph.host_graph, Ok(&telemetry)),
+                            Ok(Some(telemetry)) => {
+                                self.recorder.record(&self.graph.host_graph, Ok(&telemetry));
+                                // Its buffers go back to the executor: the next tick records
+                                // into them instead of allocating (~3 KB a tick otherwise).
+                                self.graph.host_graph.recycle_telemetry(telemetry);
+                            }
                             Ok(None) => {}
                             Err(error) => self.recorder.record(&self.graph.host_graph, Err(error.to_string())),
                         }
