@@ -404,6 +404,8 @@ impl Worker {
         let mut state = lock(&self.state);
         state.connected = false;
         state.readings.clear();
+        // lemnosd sends the current owners again after the next welcome.
+        state.led_owners.clear();
         self.changed = true;
     }
 
@@ -442,7 +444,15 @@ impl Worker {
                 }
             }
             Event::Dropped { count } => warn!(count, "lemnosd dropped events HeliOS did not read in time"),
-            Event::Control { .. } | Event::LedOwner { .. } => {}
+            Event::LedOwner { device, owner, layer } => {
+                let mut state = lock(&self.state);
+                let view = crate::lemnosd::resources::LedOwnerView { owner, layer };
+                if state.led_owners.get(&device) != Some(&view) {
+                    state.led_owners.insert(device, view);
+                    self.changed = true;
+                }
+            }
+            Event::Control { .. } => {}
         }
     }
 

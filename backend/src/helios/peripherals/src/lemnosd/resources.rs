@@ -57,6 +57,16 @@ pub struct LemnosdState {
     pub claims: usize,
     /// The claims' published values (`claim.<id>.<field>`).
     pub raw: BTreeMap<String, ObservedValue>,
+    /// Who shows on each light now, and in which layer (lemnosd's `LedOwner` events: the current
+    /// owners right after connecting, then each change). An empty owner: nobody holds the light.
+    pub led_owners: BTreeMap<String, LedOwnerView>,
+}
+
+/// A light's current owner (`lemnos.led_owner`, `lemnos.led_layer` on its device resource).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LedOwnerView {
+    pub owner: String,
+    pub layer: String,
 }
 
 /// The resources for lemnosd's devices, fans (the override) and raw access, once lemnosd has been
@@ -90,6 +100,9 @@ fn device_resource(node: &NodeId, state: &LemnosdState, device: &DeviceDesc) -> 
     }
     if !device.reason.is_empty() {
         builder = builder.label("lemnos.reason", device.reason.clone());
+    }
+    if let Some(owner) = state.led_owners.get(&device.id).filter(|owner| !owner.owner.is_empty()) {
+        builder = builder.label("lemnos.led_owner", owner.owner.clone()).label("lemnos.led_layer", owner.layer.clone());
     }
     let mut observed_at_ms = 0;
     let mut values = BTreeMap::new();

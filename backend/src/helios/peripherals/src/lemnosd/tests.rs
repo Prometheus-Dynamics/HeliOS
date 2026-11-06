@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use lemnos_ipc::raw::LineConfig;
-use lemnos_ipc::{ClientEvent, ClientOptions, Event, LedShow, LedStatus, LineTarget, Refusal};
+use lemnos_ipc::{ClientEvent, ClientOptions, Event, LedStatus, LineTarget, Refusal};
 use lemnosd::mock::{MockHardware, MockLemnosd};
 use serde_json::json;
 
@@ -166,14 +166,10 @@ fn raw_value(bridge: &LemnosdBridge, key: &str) -> Option<ObservedValue> {
     bridge.state().raw.get(key).cloned()
 }
 
-/// Waits until the status ring shows `owner`'s intent. A watching client covers the ring with a
-/// test look for a moment and drops it: the owner lemnosd then reports is whoever holds the
-/// layers below (owner changes are only reported when they happen).
+/// Waits until the status ring shows `owner`'s intent. lemnosd sends a watching client each
+/// light's current owner right after its welcome, then each change.
 fn wait_for_led_owner(socket: &Path, owner: &str) {
     let mut watcher = ClientOptions::new(socket, "watcher").events(true).leds().expect("watcher");
-    watcher.test(LedShow::Color(0x00ff_0000), None).expect("test look");
-    watcher.sync().expect("sync");
-    watcher.clear_test().expect("clear the test look");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         assert!(Instant::now() < deadline, "the ring never showed {owner}'s intent");
@@ -197,6 +193,7 @@ fn bridge_publishes_devices_holds_the_status_and_runs_a_timed_override() {
     assert_eq!(bridge.state().board, "raze");
     wait_until("a thermal reading", || bridge.state().readings.get("cpu-thermal").is_some_and(|reading| reading.values.iter().any(|(_, value)| value.is_some())));
     wait_for_led_owner(service.socket(), "helios");
+    wait_until("the ring's owner on the bridge", || bridge.state().led_owners.values().any(|owner| owner.owner == "helios"));
     assert!(notified.load(Ordering::SeqCst) > 0);
 
     // A timed override: lemnosd takes the fan from the governor, and the release at the end
