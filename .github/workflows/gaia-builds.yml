@@ -56,7 +56,7 @@ jobs:
         run: mkdir -p gaia/build/ui && echo '<!doctype html>' > gaia/build/ui/index.html
 
       - name: Validate raze.toml
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@7188154efee2805f1ae678cef130b3e27342cd42
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@8c229a16f4683f74c08f42ac1c9e19dc15b4ee50
         with:
           config: gaia/configs/builds/raze.toml
           command: validate
@@ -65,7 +65,7 @@ jobs:
 
       - name: Validate systemcore.toml
         if: hashFiles('gaia/configs/builds/systemcore.toml') != ''
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@7188154efee2805f1ae678cef130b3e27342cd42
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@8c229a16f4683f74c08f42ac1c9e19dc15b4ee50
         with:
           config: gaia/configs/builds/systemcore.toml
           command: validate
@@ -116,7 +116,7 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Build the SystemCore artifacts
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@7188154efee2805f1ae678cef130b3e27342cd42
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@8c229a16f4683f74c08f42ac1c9e19dc15b4ee50
         with:
           config: gaia/configs/builds/systemcore.toml
           # dev-image: thin LTO, the faster link; this job checks that it builds.
