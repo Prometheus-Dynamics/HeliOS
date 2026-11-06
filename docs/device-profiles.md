@@ -127,7 +127,7 @@ none captures as Styx does, and the Raze sets none today.
 | Variable | What it sets (Styx) | Values | Styx default |
 |---|---|---|---|
 | `HELIOS_CAMERA_QUEUE_DEPTH` | `capture_queue_depth`: frames the capture queues | 1 or more | 2 |
-| `HELIOS_CAMERA_RAW_BUFFERS` | `native_raw_buffers`: raw sensor buffers in flight (one raw frame each) | 2 or more | 4 |
+| `HELIOS_CAMERA_RAW_BUFFERS` | `native_raw_buffers`: the receiver's raw buffers on the software-ISP path (one raw frame each); no effect on the PiSP, whose front end keeps its own 6 (plus 4 for sensor raw) | 2 or more | 4 |
 | `HELIOS_CAMERA_OUTPUT_BUFFERS` | `native_output_buffers`: buffers per native ISP output | 2 or more | 6 |
 | `HELIOS_CAMERA_ACCEL_ISP` | `accelerators.isp`: the native ISP (PiSP, Rockchip ISP) against the software ISP | `auto`, `off`, `required` | `auto` |
 | `HELIOS_CAMERA_ACCEL_SCALER` | `accelerators.scaler`: scaling to the requested size in hardware against the CPU | `auto`, `off`, `required` | `auto` |
@@ -139,8 +139,14 @@ none captures as Styx does, and the Raze sets none today.
 - A value that does not parse, or is below its minimum, stops helios-peripherals at start (the
   unit's log names the variable), instead of running with Styx's default.
 - The knobs are read when a camera service starts. Change them, then restart helios-peripherals.
-- Buffers are memory: each raw buffer is one sensor frame (1 MB for RAW8 at 1280x800), each
-  output buffer one processed frame (1.5 MB for NV12 at 1280x800).
+- Buffers are memory: each raw buffer is one sensor frame (1 MB for RAW8 at 1280x800; the PiSP
+  front end writes 16-bit raw, 2 MB), each output buffer one processed frame (1.5 MB for NV12 at
+  1280x800).
+- Sensor raw (`HELIOS_CAMERA_SENSOR_RAW`, on by default) is the largest camera cost on the Raze.
+  Measured on Raze #2 (2026-11-06, one OV9782 at 1280x800): with it on, 20 front-end 2 MB buffers
+  and 69 MB helios-peripherals RSS; with it off, 6 buffers and 33 MB. Off, a raw recording is
+  refused (Styx does not restart a capture for a low-priority client), so it stays on while
+  recordings default to raw frames.
 
 Per device:
 

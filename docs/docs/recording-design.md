@@ -8,8 +8,8 @@ in Styx 2af5836 (writer queue, lz4, host channels, per-frame 3A, zero-copy `sens
 built, and where:
 
 - Raw by default: `RecordFrames::Raw` (`frames: "raw"`, or `"luma"`), at `max_fps` (30). The camera
-  services keep sensor raw on for every capture (`HELIOS_CAMERA_SENSOR_RAW`, default on: about
-  8 MB more per camera), so a recording joins without a capture restart. Spare low-priority clients
+  services keep sensor raw on for every capture (`HELIOS_CAMERA_SENSOR_RAW`, default on: 28 MB more
+  front-end buffers per camera measured on the Raze, against the 8 MB expected; Styx is looking), so a recording joins without a capture restart. Spare low-priority clients
   are 4 (`HELIOS_CAMERA_SPARE_CLIENTS`): preview, calibration, a recording and its ring.
 - Capture last: a ring per camera in `capture_last_cameras` (`capture_last_seconds`, 10 by default),
   compressed in RAM and sized from `MemAvailable` (a quarter at most). `POST /v1/recordings/capture-last`.
