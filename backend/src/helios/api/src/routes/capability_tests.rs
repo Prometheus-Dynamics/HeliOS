@@ -109,7 +109,7 @@ async fn a_guest_refuses_updates_slots_reboot_safe_mode_and_security() {
         ("POST", "/v1/system/reboot", None, "reboot"),
         ("POST", "/v1/system/safe-mode", None, "safe_mode"),
         ("POST", "/v1/auth/enable", Some(json!({ "password": "a-long-password" })), "security"),
-        ("POST", "/v1/ota/apply", Some(json!({ "image_url": "file:///x" })), "updates"),
+        ("POST", "/v1/update/apply", Some(json!({ "image_url": "file:///x" })), "updates"),
     ] {
         let (status, error) = call(&state, method, uri, body).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {error}");

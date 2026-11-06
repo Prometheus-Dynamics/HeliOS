@@ -24,20 +24,17 @@
 //! (it runs the OS's `/etc/board/update.d/pre-reboot` hook first, and stops services cleanly). HeliOS
 //! has no hook of its own: an upload is fsynced before it is acknowledged, and the writer keeps the
 //! update state in its own files, so nothing here has to flush before a restart.
-//!
-//! `/v1/ota/*` is the contract Atlas Hardware Manager's HTTP OTA client speaks (multipart upload,
-//! `image_url` apply, lenient state polling).
 
 use std::{convert::Infallible, path::PathBuf, sync::Arc};
 
 use axum::{
     Json,
     body::{Body, Bytes},
-    extract::{Multipart, Path, Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::sse::{Event, KeepAlive, Sse},
 };
-use futures_util::{Stream, StreamExt, TryStreamExt};
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -62,7 +59,7 @@ pub struct Upload {
     pub filename: String,
     pub size_bytes: u64,
     pub sha256: String,
-    /// Where the image is on the device; `POST /v1/update/apply` and `/v1/ota/apply` take it.
+    /// Where the image is on the device; `POST /v1/update/apply` takes it.
     pub image_url: String,
     pub uploaded_at_ms: u64,
     pub version: Option<String>,
@@ -836,81 +833,6 @@ pub async fn events(State(state): State<SharedState>) -> Sse<impl Stream<Item = 
     let receiver = state.events.subscribe();
     let first = ApiEvent { kind: "update".into(), at_ms: now_ms(), data: serde_json::to_value(current_status(&state).await).unwrap_or_default() };
     Sse::new(sse_stream(receiver, Some(["update".to_string()].into()), vec![first]).take_until(state.shutdown.clone().cancelled_owned())).keep_alive(KeepAlive::default())
-}
-
-// --- Atlas's HTTP OTA client -----------------------------------------------------
-
-#[derive(Debug, Serialize)]
-pub struct AtlasUploadResponse {
-    pub image_url: String,
-    pub filename: String,
-    pub size_bytes: u64,
-    pub sha256: String,
-}
-
-/// `POST /v1/ota/upload`: multipart/form-data with the slot bundle in a part named `file`.
-pub async fn atlas_upload(State(state): State<SharedState>, mut multipart: Multipart) -> ApiResult<Json<AtlasUploadResponse>> {
-    capabilities::require(&state, feature::UPDATES).await?;
-    while let Some(field) = multipart.next_field().await.map_err(|error| ApiError::bad_request(error.to_string()))? {
-        if field.name() != Some("file") {
-            continue;
-        }
-        let filename = field.file_name().map(str::to_string).unwrap_or_else(|| "helios-update.img.xz".into());
-        let stream = field.map_err(|error| error.to_string());
-        let upload = store_upload(&state.config, &filename, None, None, Box::pin(stream)).await?;
-        state.events.publish("update", serde_json::json!({ "change": "uploaded", "upload": upload }));
-        return Ok(Json(AtlasUploadResponse { image_url: upload.image_url, filename: upload.filename, size_bytes: upload.size_bytes, sha256: upload.sha256 }));
-    }
-    Err(ApiError::bad_request("multipart body has no part named \"file\""))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AtlasApplyRequest {
-    #[serde(default)]
-    pub requested_by: Option<String>,
-    pub image_url: String,
-    #[serde(default)]
-    pub size_bytes: Option<u64>,
-    #[serde(default)]
-    pub checksum: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AtlasApplyResponse {
-    pub update_id: String,
-    pub message: String,
-}
-
-pub async fn atlas_apply(State(state): State<SharedState>, Json(request): Json<AtlasApplyRequest>) -> ApiResult<Json<AtlasApplyResponse>> {
-    capabilities::require(&state, feature::UPDATES).await?;
-    let upload = upload_for_url(&state.config, &request.image_url).await?;
-    if let Some(size) = request.size_bytes
-        && size != upload.size_bytes
-    {
-        return Err(ApiError::unprocessable(format!("size mismatch: expected {size} bytes, upload has {}", upload.size_bytes)));
-    }
-    if let Some(by) = &request.requested_by {
-        tracing::info!(requested_by = %by, image = %request.image_url, "OTA apply requested");
-    }
-    let response = apply_upload(&state, upload, None, request.checksum, true).await?;
-    Ok(Json(AtlasApplyResponse { update_id: response.update_id, message: response.message }))
-}
-
-/// `GET /v1/ota/state`: `{"state": {"update_id", "stage", "progress_percent", "last_error"}, ...}`.
-pub async fn atlas_state(State(state): State<SharedState>) -> Json<serde_json::Value> {
-    let status = current_status(&state).await;
-    Json(serde_json::json!({
-        "state": {
-            "update_id": status.task.as_ref().map(|t| t.update_id.clone()),
-            "stage": status.stage,
-            "phase": status.phase,
-            "progress_percent": status.progress_percent,
-            "last_error": status.last_error,
-        },
-        "slots": status.slots,
-        "version_active": status.version_active,
-        "version_staged": status.version_staged,
-    }))
 }
 
 /// Shared by the API state: one update command at a time from helios-api (the writer has its own lock).

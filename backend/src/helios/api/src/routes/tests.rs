@@ -137,9 +137,6 @@ async fn update_status_works_without_the_writer() {
     let (status, body) = call(&state, "GET", "/v1/update/status", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["phase"], "unknown");
-    let (status, body) = call(&state, "GET", "/v1/ota/state", None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(body["state"].is_object());
 }
 
 #[tokio::test]

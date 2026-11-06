@@ -8,43 +8,44 @@ user decides when the alpha is cut. The board checks under "Next: a HeliOS image
 (live metrics, camera preview, the plugin graph and poll loop on the CM5, raw I/O, peripherals,
 camera controls, two cameras, `orionctl`) are alpha items too.
 
-- [ ] **Pin round and Raze deploy.** Why: Raze #1 runs older dependencies than dev, so the fixes
-      below are unproven on the board. Partly done: pin round 1174c673 (Styx bcd29a7 with the PiSP
-      buffer-count fix, Daedalus 6900b97, Eidos f8d0ef8, Lemnos f803975), Eidos re-pin to dev head
-      in progress; dev.841 on Raze #1 confirmed `queue_safe` Y and no "not safe" lines, but its
-      camera failed ("pispbe-input gave 32 of 40 buffers", fixed in Styx bcd29a7). Left: deploy the
-      new image from its `.img.xz` through Atlas, the camera starting, the real capture
-      allocations, the stale-graph refresh, the dense map pane by real clicks, and the SystemCore
-      package with 1c062333 (peer nets cover 172.31.0.0/16). The Orion protocol 1 pin is in
-      (6d99a70, Atlas f351316 speaks it; robot-env `ORION_NODE_PEER_AUTO_TRUST` is `private-link`),
-      not yet proven on a board.
-      Lemnos look change-over: done in Atlas 034663e (system looks file, ring default_look) with
-      gaia/configs/builds/raze.toml on Atlas 034663e + Lemnos 50533a8; not built yet.
-      Blocked by: nothing (the SystemCore is back since 2026-11-03; Gaia builds the image).
+- [ ] **Pin round and Raze deploy.** Why: Raze #1 must run current dependencies, so the fixes below
+      are proven on the board. Done on Raze #1 and the SystemCore (2026-11-03): trial slot dev.921
+      on the Raze and the .ipk dev.922 on the SystemCore, both on Orion protocol 1 with
+      `ORION_NODE_PEER_AUTO_TRUST` at `private-link`, cameras running, stale state set aside and the
+      default pipeline restored. Left: the real capture allocations, the stale-graph refresh, the
+      dense map pane by real clicks, and deploying the `.img.xz` through Atlas. Blocked by: nothing.
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
-      and it reconnects after a SystemCore and a Raze restart. Done on Raze #1 against Orion's
-      `nt4-server` through a tunnel: every topic arrives at 30 Hz, and it reconnects after a
-      server restart (2 s) and an engine restart (4 s). A real WPILib robot program
-      (`tools/wpilib-nt-check`) now runs on the SystemCore as the NT server and reads Raze #1, Raze
-      #2 and the SystemCore itself. Left: a pose with a tag in view, and both reboots. Boards on
-      the default prefix collide on `/helios/<pipeline>/...`, so each board needs its own prefix
-      until the default changes. Blocked by: the SystemCore stuck in its USB boot ROM after a soft
-      reboot on 2026-11-03; it needs a power-cycle.
+      and it reconnects after a SystemCore and a Raze restart. Done: a real WPILib robot program
+      (`tools/wpilib-nt-check`, started at boot by `robot.service` while
+      `/home/systemcore/robotCommand` exists; `run.sh stop` removes it) is the NT server on the
+      SystemCore and reads Raze #1, Raze #2 and the SystemCore itself. Each board publishes under
+      `<prefix>/<board>/<pipeline>` (ca13ec0e), so they no longer collide; Raze #2 keeps the old
+      paths until it is updated. It came back by itself after a SystemCore power-cycle, and after a
+      Raze-only reboot (updates back about 38 s later, slot update included). Left: a pose with a
+      tag in view. Blocked by: a tag in front of a camera (none on the bench).
 - [ ] **Robot time.** Why: poses must line up with the robot's clock. Partly done: every NT
-      output carries `capture_time_us` in the NT server's clock (deff96c9). Measured over 40 s on the
+      output carries `capture_time_us` in the NT server's clock (deff96c9), and it is not published
+      before the first clock sample (ca13ec0e; it was 112 s out after a boot). Measured on the
       SystemCore's clock, no tags in view: arrival less stamp and latency was 458/656/4072 µs
-      (min/median/max) from Raze #1 and 304/573/2897 µs from the SystemCore itself, never negative.
-      Left: a longer run across reconnects, the time from sensor to graph (the stamp starts when
-      the frame reaches the graph), then the bound in docs. Blocked by: the SystemCore, as above.
+      (min/median/max) from Raze #1 and 304/573/2897 µs from the SystemCore itself. With the WPILib
+      server, RTT is a 60 s sawtooth from 0.9 to 20.7 ms and the stamp error follows it, so Orion
+      f557669's 30 s window reaches -9.5 ms for about 30 s of every 60 s. Left: Orion's next rev,
+      the final bound over a long run, the time from sensor to graph (the stamp starts when the
+      frame reaches the graph), then the bound in docs. Blocked by: Orion ages samples instead of
+      dropping them (asked through the coordinator 2026-11-04).
 - [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
       Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
-      self-calibration (fd343ffc). Left: show self-calibration converging from it on the Raze.
-      Blocked by: Raze #1 is behind the SystemCore, as above.
-- [ ] **SystemCore coexistence.** Why: HeliOS runs next to the SystemCore's own services. Done when:
-      the SystemCore package installs, runs and uninstalls cleanly next to WPILib and Limelight's
-      services, with no port or USB conflicts. The package exists (one .ipk with the whole stack,
-      4f3333c1). Blocked by: nothing.
+      self-calibration (fd343ffc). On dev.926 Raze #1's map pipeline runs and sits in its window at
+      0 of 30 views. Left: show self-calibration converging from it on the Raze. Blocked by: someone
+      moving the camera around tags; the bench has no tag in view.
+- [x] **SystemCore coexistence.** Done on dev.926 next to the WPILib robot and Limelight's services:
+      installs, runs, uninstalls and reinstalls with no failed units, and the robot stays active.
+      HeliOS is on :5880, WPILib on :5810 and Limelight on 5800-5837. Removing the package leaves only
+      its data, `/usr/local/var/lib/helios` (16 MB) and the log directory, so a reinstall brought the
+      pipeline back. Limelight's `visionserver1` holds a USB camera it finds first (here the C922):
+      HeliOS's status says "In use by visionserver1", though `frame_flow` in `/v1/cameras` still
+      reads `flowing` (a small fix, open).
 - [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
       without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
       (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
@@ -63,11 +64,28 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       the board).
 - [ ] **Memory slimming.** Why: lean on the Raze now, and the K230D has 128 MB for everything later.
       Done when: tags-only at 1280x800 measures under 60 MiB of HeliOS-private PSS on the CM5
-      (2026-10-30: about 67 MiB plus about 20 MiB of camera buffers). helios-api's binary/UI and the engine's heap are the
-      remaining targets. Blocked by: nothing.
+      (2026-10-30: about 67 MiB plus about 20 MiB of camera buffers). helios-api is at 18 MiB PSS, 10
+      MiB heap on dev.926 with no deploy run yet (peak after a deploy 48 MiB). The engine's heap is
+      the remaining target; the tags-only figure has not been re-measured. Blocked by: nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
-      or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches.
-      Blocked by: nothing.
+      or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches. Partly
+      done: `/v1/ota/*` is gone (Atlas dev calls none of it; the identity already named
+      `/v1/update/*`), and with it axum's multipart. No route is registered twice. Left: types and
+      aliases, and the engine and peripherals. Blocked by: nothing.
+
+## Decided, starts when the user says
+
+The user decided these on 2026-11-03. Nothing here starts until the user starts it, step by step.
+
+- [ ] **Thin clients.** Each big library lives in one process, and the others reach it through a
+      thin client.
+- [ ] **Drop direct Eidos use from `helios-api`.** Follows from thin clients: helios-api asks the
+      process that holds Eidos.
+- [ ] **Static and shared build forms.** Every dependency becomes a core, a small versioned surface
+      and a client wrapper, and the stack builds in both forms. Gaia's LTO test only informs how the
+      shared form gets built.
+- [ ] **Move onto the Lemnos module path.** One kernel module in Lemnos, with the drivers in Rust in
+      userspace. HeliOS moves onto it once it exists; the stock V4L2 path stays as the fallback.
 
 ## Next release (2027.0.0)
 
@@ -155,7 +173,8 @@ For when the user calls the release; not work to start before that.
 
 ## After the release: dependency layers (planned 2026-11-02)
 
-Slated, not started. Each item may move into the release if the user says so. Why: as the
+Slated, not started, and each needs the user's go. The Lemnos kernel module and the static and
+shared forms under "Decided, starts when the user says" change how these land. Why: as the
 dependencies grow they reach into each other's areas (three USB stacks, two hotplug watchers, two
 DMA buffer allocators); every building block needs one owner so the stack stays modular and a new
 device or feature has one obvious home.
@@ -171,7 +190,7 @@ never copies; no product names below HeliOS.
 | L3 | Eidos | vision: detectors, pose, mapping, calibration, later models; ops as Daedalus nodes on every backend | capture, buffers, devices, FRC specifics |
 | L2 | Daedalus | the compute runtime: graphs, planner, types and adapters, residency, CPU SIMD/GPU/RGA (later NPU) | camera capture, algorithms, device discovery |
 | L2 | Styx | cameras and media: sensors, ISP (hardware, software, GPU), V4L2/UVC, codecs, frame pools and leases | its own USB, hotplug or GPU runtime |
-| L1 | Lemnos | user-space hardware access: buses, USB, later PCIe/MMIO, hotplug, board files, drivers, device ownership (lemnosd), DMA buffer basics, MCU drivers | a memory manager, a decider of data movement, camera or vision code |
+| L1 | Lemnos | hardware access: one small kernel module, Rust drivers in userspace, buses, USB, later PCIe/MMIO, hotplug, board files, drivers, device ownership (lemnosd), DMA buffer basics, MCU drivers | a memory manager, a decider of data movement, camera or vision code |
 | L1 | Orion | messaging between processes and nodes: state, status, actions/jobs, blobs, discovery, MCU links | a frame or tensor data path, hardware access |
 | L0 | Gaia | building images | anything at run time |
 
@@ -210,8 +229,7 @@ Items (each: owner, done when; each needs the user's go before it starts):
 - Atlas's release signing key.
 - Image publishing: GHCR is approved (2026-11-01, owner still to be named) and so are
   minisign/cosign (Gaia finishes the proof); the CI runner token and fork-PR policy are the user's.
-- The pispbe `queue_safe` patch stays carried in Styx's images; no upstream filing for now (user,
-  2026-11-01).
+- The pispbe and ov9282 kernel patches are dropped (user, 2026-11-03): the stock drivers stay.
 - On hold: OV9782 ColorChecker tuning (chart and lighting being ordered, 2026-10-31); Styx's bench tests (mains-lamp
   anti-flicker, C270 YUYV fallback).
 
@@ -290,7 +308,7 @@ The plan (written against Daedalus c927136 and Styx 4e8e19c; recheck the APIs ag
   (AprilTag, ArUco, later ML) become graphs of one domain instead of separate workloads with
   separate `FrameClient`s. Load them with `ExecutionDomain::load_shared_documents`, so nodes
   they compute identically (mask prep, pyramid, candidate quads)
-  move into one upstream `shared` graph (Eidos does not mark its nodes `shareable` yet: Upstream); route the camera's `frame` to every graph (one push,
+  move into one upstream `shared` graph; route the camera's `frame` to every graph (one push,
   `Arc` clones); per-camera context (calibration, mount) as held inputs routed to the graphs
   that need it. Enabling or disabling a pipeline is `add_graph`/`remove_graph` between ticks,
   with no recompile of the others. Engine: group the resident workloads by camera binding;

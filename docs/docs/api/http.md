@@ -778,16 +778,10 @@ what helios-api last asked the writer to do: its `step` is `staging`, `staged`, 
 (rebooting into the new slot on trial), `confirming`, `rolling-back`, `done` or `failed`, with the
 writer's reason in `error`.
 
-#### Atlas's HTTP OTA path
+#### `stage` in the status
 
-These routes speak the contract of Atlas Hardware Manager's HTTP OTA client:
-
-| Method | Path | Contract |
-|---|---|---|
-| `POST` | `/v1/ota/upload` | `multipart/form-data`, with the image in a part named `file`. Returns `{image_url, filename, size_bytes, sha256}` |
-| `POST` | `/v1/ota/apply` | `{requested_by, image_url, size_bytes, checksum}`. Returns `{update_id, message}`. Size and checksum are verified against the upload; the update is staged and applied |
-| `GET` | `/v1/ota/state` | `{"state": {update_id, stage, phase, progress_percent, last_error}, "slots": ..., "version_active", "version_staged"}` |
-| `GET` | `/v1/health`, `/v1/device/os` | Reconnect probes after the reboot |
+Atlas polls `/v1/update/status` and reads `stage`, and probes `/v1/health` and `/v1/device/os` to
+reconnect after the reboot.
 
 Stage mapping: `idle` stays `idle`; `staging` is `verifying` until the writer writes its first state
 (its SHA-256 check) and `installing` during the install; `staged` becomes `committing`; `rebooting`

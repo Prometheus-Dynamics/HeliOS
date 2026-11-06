@@ -4,7 +4,7 @@
 //! an inactive slot, trial-boots it once with the firmware's tryboot, and keeps it when
 //! `/etc/board/update-health` passes. This module reads the
 //! state it publishes in `/run/board/update.json`; helios-api drives the CLI itself
-//! (`/v1/update/*`, `/v1/ota/*`).
+//! (`/v1/update/*`).
 
 use std::{fs, path::Path};
 
@@ -90,7 +90,7 @@ impl BoardUpdateStatus {
         }
     }
 
-    /// The same state in Atlas's update-stage vocabulary (`/v1/ota/state`).
+    /// The same state in Atlas's update-stage vocabulary (`stage` in `/v1/update/status`).
     pub fn atlas_stage(&self) -> &'static str {
         match self.state.as_str() {
             "idle" => "idle",

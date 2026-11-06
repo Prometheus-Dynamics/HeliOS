@@ -30,7 +30,7 @@ use axum::{
 use crate::{SharedState, error::ApiError, events};
 
 pub fn router(state: SharedState) -> Router {
-    let uploads = Router::new().route("/v1/update/uploads", post(update::upload_raw).get(update::list_uploads)).route("/v1/ota/upload", post(update::atlas_upload)).layer(DefaultBodyLimit::disable());
+    let uploads = Router::new().route("/v1/update/uploads", post(update::upload_raw).get(update::list_uploads)).layer(DefaultBodyLimit::disable());
 
     Router::new()
         // Device, identity, system
@@ -145,9 +145,6 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/update/events", get(update::events))
         .route("/v1/update/slots/switch", post(update::switch_slot))
         .route("/v1/update/slots/{command}", post(update::slot_command))
-        // Atlas's HTTP OTA path (legacy Atlas client contract)
-        .route("/v1/ota/apply", post(update::atlas_apply))
-        .route("/v1/ota/state", get(update::atlas_state))
         .merge(uploads)
         .fallback(crate::ui::fallback)
         // CORS is outermost so preflights are answered before auth.

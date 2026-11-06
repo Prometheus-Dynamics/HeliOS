@@ -27,7 +27,7 @@ clap = { workspace = true, features = ["derive"] }
 argon2 = { workspace = true }
 getrandom = { workspace = true }
 subtle = { workspace = true }
-axum = { workspace = true, features = ["multipart", "ws"] }
+axum = { workspace = true, features = ["ws"] }
 # The Orion tunnel takes the request's HTTP upgrade (`peers.rs`).
 hyper = { workspace = true }
 hyper-util = { workspace = true }

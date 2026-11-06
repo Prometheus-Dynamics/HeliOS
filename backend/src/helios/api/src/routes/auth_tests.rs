@@ -103,8 +103,6 @@ async fn secured_mode_rejects_unauthenticated_requests() {
         ("POST", "/v1/update/confirm"),
         ("POST", "/v1/update/rollback"),
         ("POST", "/v1/update/slots/pin"),
-        ("POST", "/v1/ota/upload"),
-        ("POST", "/v1/ota/apply"),
         ("DELETE", "/v1/cameras/cam0/mount"),
         ("PUT", "/v1/pipelines/p"),
         ("POST", "/v1/auth/disable"),
