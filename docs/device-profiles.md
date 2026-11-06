@@ -156,6 +156,21 @@ Per device:
   to fit the 128 MB budget. **Written now, untested on board**; the K230D image does not exist yet,
   so this entry is not yet installed by any build.
 
+## Contiguous memory (CMA) per board
+
+The camera's front-end, back-end and pyramid buffers come from the kernel's contiguous pool
+(`linux,cma`) where the driver needs it, and from the system heap otherwise. The pool is
+reusable: free CMA backs movable pages and counts in `MemFree` and `MemAvailable`. So a pool
+larger than the cameras use costs no RAM, and one too small spills the back end's buffers to the
+system heap (Styx sizes its contiguous share from `CmaFree`).
+
+- **Raze** (CM5): 64 MB, the firmware's default, nothing set in `config.txt`. Measured
+  2026-11-06: Raze #2 (one camera, default pipeline) 23 MB used; Raze #1 (one camera plus the
+  NAPA benchmark clients) 56 MB used, with NV12 buffers already on the system heap. Keep 64 MB:
+  smaller frees no memory, and it is close to full on Raze #1.
+- **K230D**: the camera buffers come from the vendor's media memory zone (MMZ), not CMA; its
+  size is the K230D firmware's, set with the K230D image (`TODO.md`, K230D device support).
+
 ## The install layout
 
 Every path HeliOS uses comes from one layout, never a literal in the code:
