@@ -24,16 +24,12 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       paths until it is updated. It came back by itself after a SystemCore power-cycle, and after a
       Raze-only reboot (updates back about 38 s later, slot update included). Left: a pose with a
       tag in view. Blocked by: a tag in front of a camera (none on the bench).
-- [ ] **Robot time.** Why: poses must line up with the robot's clock. Partly done: every NT
-      output carries `capture_time_us` in the NT server's clock (deff96c9), and it is not published
-      before the first clock sample (ca13ec0e; it was 112 s out after a boot). Measured on the
-      SystemCore's clock, no tags in view: arrival less stamp and latency was 458/656/4072 µs
-      (min/median/max) from Raze #1 and 304/573/2897 µs from the SystemCore itself. With the WPILib
-      server, RTT is a 60 s sawtooth from 0.9 to 20.7 ms and the stamp error follows it, so Orion
-      f557669's 30 s window reaches -9.5 ms for about 30 s of every 60 s. Left: Orion's next rev,
-      the final bound over a long run, the time from sensor to graph (the stamp starts when the
-      frame reaches the graph), then the bound in docs. Blocked by: Orion ages samples instead of
-      dropping them (asked through the coordinator 2026-11-04).
+- [x] **Robot time.** Done (Orion 1996c47, d363bdb9, dev.928 on Raze #1): `capture_time_us` is on
+      the NT server's clock and is not published before the first clock sample. Over 370 s (six RTT
+      sawtooth cycles, 11,104 values) against the WPILib server on the SystemCore, arrival less
+      stamp and latency was 486 µs median, -0.47 to +5.9 ms at the extremes (it was -9.5 ms with
+      Orion f557669). In docs/docs/api/networktables.md. Not covered: the time from sensor exposure
+      to the graph.
 - [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
       Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
       self-calibration (fd343ffc). On dev.926 Raze #1's map pipeline runs and sits in its window at
