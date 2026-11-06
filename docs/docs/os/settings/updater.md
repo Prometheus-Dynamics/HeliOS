@@ -39,6 +39,12 @@ The **Boot slots** list shows every installed slot, the one running, and the def
 another slot once on trial, use `POST /v1/update/slots/switch` (with `{"slot": "<id>"}` when there
 are more than two slots). It reboots the device.
 
+A reboot on a Raze waits for the board's device lock (`/run/lock/raze-gpu.lock`, taken with
+`flock`), so a restart never cuts off work that holds it. A switch or an install that boots
+asked for while someone holds the lock stays in `trying` until the lock is released. Scripts
+that hold the lock for board work should take it after the board is back up, not across a
+reboot.
+
 ## Rollback
 
 A confirmed update can be undone with `POST /v1/update/rollback`, which makes the previous slot the
