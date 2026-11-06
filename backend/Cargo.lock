@@ -630,12 +630,12 @@ dependencies = [
 [[package]]
 name = "daedalus-accel"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 
 [[package]]
 name = "daedalus-core"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "crossbeam-queue",
  "portable-atomic",
@@ -648,7 +648,7 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-kernels",
  "hashbrown 0.17.1",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -685,7 +685,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-core"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-data",
  "daedalus-kernels",
@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-host"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-data",
  "daedalus-ffi-core",
@@ -716,7 +716,7 @@ dependencies = [
 [[package]]
 name = "daedalus-gpu"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "ash",
  "bitflags",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "daedalus-kernels"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-accel",
 ]
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-wgsl-infer",
  "proc-macro-crate",
@@ -756,7 +756,7 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -793,7 +793,7 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -807,7 +807,7 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -828,7 +828,7 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "crossbeam-queue",
  "daedalus-core",
@@ -853,7 +853,7 @@ dependencies = [
 [[package]]
 name = "daedalus-transport"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 dependencies = [
  "daedalus-core",
  "hashbrown 0.17.1",
@@ -867,7 +867,7 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "3.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#16af7b887e5333d610651b4086d04645c6c71c4b"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=dev#671715b3c545708eded06fe9a2d40302fbc5c640"
 
 [[package]]
 name = "darling"
@@ -2314,7 +2314,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 [[package]]
 name = "lemnos-board"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "lemnos-core",
@@ -2336,7 +2336,7 @@ dependencies = [
 [[package]]
 name = "lemnos-bus"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "lemnos-core",
@@ -2347,7 +2347,7 @@ dependencies = [
 [[package]]
 name = "lemnos-core"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-device",
  "lemnos-hal",
@@ -2359,7 +2359,7 @@ dependencies = [
 [[package]]
 name = "lemnos-device"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2369,7 +2369,7 @@ dependencies = [
 [[package]]
 name = "lemnos-discovery"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-core",
  "thiserror 2.0.21",
@@ -2378,7 +2378,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-bmi088"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2390,7 +2390,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-bmm150"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2402,7 +2402,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-ina2xx"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2413,7 +2413,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-linux"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "lemnos-device",
@@ -2425,7 +2425,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-vcm"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2437,7 +2437,7 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-ws2812"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-device",
 ]
@@ -2445,12 +2445,12 @@ dependencies = [
 [[package]]
 name = "lemnos-fusion"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 
 [[package]]
 name = "lemnos-hal"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2459,7 +2459,7 @@ dependencies = [
 [[package]]
 name = "lemnos-ipc"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-device",
  "lemnos-hal",
@@ -2469,7 +2469,7 @@ dependencies = [
 [[package]]
 name = "lemnos-light"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-device",
 ]
@@ -2477,7 +2477,7 @@ dependencies = [
 [[package]]
 name = "lemnos-linux"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -2492,7 +2492,7 @@ dependencies = [
 [[package]]
 name = "lemnos-linux-sys"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "libc",
 ]
@@ -2500,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "lemnos-uevent"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "lemnos-linux-sys",
 ]
@@ -2508,7 +2508,7 @@ dependencies = [
 [[package]]
 name = "lemnos-usb"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "futures-core",
  "lemnos-linux-sys",
@@ -2520,7 +2520,7 @@ dependencies = [
 [[package]]
 name = "lemnosd"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#69d7f3037d03f0380a66e888dd1757a943ee067f"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?branch=dev#afd5b0d50bfb347e7797727680db32fb04481079"
 dependencies = [
  "embedded-hal",
  "lemnos-board",
@@ -4017,7 +4017,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4055,7 +4055,7 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "serde",
  "serde_json",
@@ -4067,7 +4067,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "serde",
  "smallvec",
@@ -4077,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "parking_lot",
  "serde",
@@ -4093,7 +4093,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "crossbeam-queue",
  "daedalus-rs",
@@ -4112,7 +4112,7 @@ dependencies = [
 [[package]]
 name = "styx-dng"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "styx-math",
  "thiserror 2.0.21",
@@ -4121,7 +4121,7 @@ dependencies = [
 [[package]]
 name = "styx-gpuisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "ash",
  "daedalus-gpu",
@@ -4133,7 +4133,7 @@ dependencies = [
 [[package]]
 name = "styx-graph"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "futures-core",
  "libc",
@@ -4143,7 +4143,7 @@ dependencies = [
 [[package]]
 name = "styx-hal"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -4153,7 +4153,7 @@ dependencies = [
 [[package]]
 name = "styx-kernel"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "lemnos-linux",
  "lemnos-linux-sys",
@@ -4163,7 +4163,7 @@ dependencies = [
 [[package]]
 name = "styx-math"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "libm",
 ]
@@ -4171,7 +4171,7 @@ dependencies = [
 [[package]]
 name = "styx-native"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "futures-core",
  "lemnos-drivers-vcm",
@@ -4187,7 +4187,7 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "bytemuck",
  "serde",
@@ -4209,7 +4209,7 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "bytemuck",
  "styx-kernel",
@@ -4219,7 +4219,7 @@ dependencies = [
 [[package]]
 name = "styx-rkisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "bytemuck",
  "styx-algo",
@@ -4230,7 +4230,7 @@ dependencies = [
 [[package]]
 name = "styx-runtime"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "smallvec",
  "styx-core-rs",
@@ -4242,7 +4242,7 @@ dependencies = [
 [[package]]
 name = "styx-sensor"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
@@ -4260,7 +4260,7 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "libc",
  "serde",
@@ -4271,7 +4271,7 @@ dependencies = [
 [[package]]
 name = "styx-uvc"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "lemnos-linux",
  "lemnos-linux-sys",
@@ -4286,7 +4286,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.1-dev"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#13f3cc5e4d4039f86c80b0bd88db56976b413ef2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#9d5a3bf0ec069d553c3b77cdc263576424b58690"
 dependencies = [
  "libc",
  "smallvec",

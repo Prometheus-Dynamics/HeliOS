@@ -186,7 +186,7 @@ A camera:
     "clients": 1, "frames_sent": 36000, "frames_skipped": 0, "restarts": 0,
     "captures": [{ "name": "ov9782", "backend": "native", "mode": "1280x800 GREY @60", "fps_configured": 60,
                    "fps_measured": 59.9, "frames_delivered": 36000, "drops": 0,
-                   "drops_by_cause": { "sensor_sequence_gaps": 0, "queue_overflow": 0, "corrupted": 0, "isp_skipped": 0, "raw_skipped": 0 },
+                   "drops_by_cause": { "sensor_sequence_gaps": 0, "queue_overflow": 0, "corrupted": 0, "isp_skipped": 0, "raw_skipped": 0, "unread": 0 },
                    "latency_p50_ms": 9.6,
                    "latency_p95_ms": 10.4, "cpu_per_frame_us": 300, "exposure_us": 2200,
                    "analogue_gain": 4, "digital_gain": 1, "ae_state": "converged" }]

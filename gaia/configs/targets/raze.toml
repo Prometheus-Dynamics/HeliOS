@@ -12,15 +12,11 @@ kind = "buildroot"
 # Device tree first, so its @source: token resolves; Gaia takes one value and
 # the last import wins. Package overrides in HeliOS's packages/ would win over
 # the device's; HeliOS keeps none of the device's (libcamera, libpisp).
-external_tree = "${source.atlas}/devices/raze/gaia/buildroot-external:gaia/assets/buildroot:${source.styx}/kernel-modules/ov9282/buildroot"
+external_tree = "${source.atlas}/devices/raze/gaia/buildroot-external:gaia/assets/buildroot"
 external_tree_mode = "required"
 # defconfig, kernel tarball and hash, OV9782 extension, rpi-firmware overlays,
 # rpi-utils and host-dtc come from the device package.
 config_overrides = [
-  # Styx's kernel modules (the source is declared in builds/raze.toml).
-  ["BR2_PACKAGE_STYX_OV9282", "y"],
-  ["BR2_PACKAGE_STYX_RP1_CFE", "y"],
-  ["BR2_PACKAGE_STYX_PISPBE", "y"],
   # The device package's kernel trim (pass 2, -O2): smaller kernel and module set, board-tested.
   ["BR2_RAZE_KERNEL_TRIM", "y"],
   # The device package installs only the overlays it loads (bcm2712d0 plus its

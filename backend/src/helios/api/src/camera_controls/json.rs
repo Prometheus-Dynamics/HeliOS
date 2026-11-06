@@ -65,6 +65,9 @@ pub struct CameraControl {
     pub standard: Option<&'static str>,
     /// The camera service lets the API change it.
     pub writable: bool,
+    /// Another control holds it for now (a colour temperature under auto white balance), so a new
+    /// value is refused until that control lets go.
+    pub inactive: bool,
     /// A value set through the API is stored for it and re-applied after a reboot.
     pub persisted: bool,
 }
@@ -90,6 +93,7 @@ impl CameraControl {
             persisted: persisted.contains_key(meta.name.as_str()) || standard.is_some_and(|key| persisted.contains_key(key)),
             standard,
             writable: descriptor.writable,
+            inactive: descriptor.inactive,
         }
     }
 }

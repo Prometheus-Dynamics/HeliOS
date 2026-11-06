@@ -292,6 +292,7 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
         current: Some(ControlValue::Uint(2_200)),
         standard: Some(StandardControl::ExposureUs),
         writable: true,
+        inactive: false,
         effective_min: Some(ControlValue::Uint(9)),
         effective_max: Some(ControlValue::Uint(8_100)),
     };
@@ -308,7 +309,7 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
 
     let mut flicker = meta(0xF400_0011, "ae_flicker_mode", ControlKind::Int, Access::ReadWrite, ControlValue::Int(0), ControlValue::Int(3), ControlValue::Int(3));
     flicker.menu = Some(MenuEntry::names(["off", "50 Hz", "60 Hz", "auto"]));
-    let descriptor = ControlDescriptor { meta: flicker, current: Some(ControlValue::Int(3)), standard: None, writable: true, effective_min: None, effective_max: None };
+    let descriptor = ControlDescriptor { meta: flicker, current: Some(ControlValue::Int(3)), standard: None, writable: true, inactive: false, effective_min: None, effective_max: None };
     let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
     assert_eq!(
         json["menu"],
@@ -336,7 +337,7 @@ fn listing_carries_menu_and_effective_range_and_applied_changes_say_clamped() {
 fn menu_entries_are_listed_typed_with_the_current_one() {
     let mut exposure = meta(0xF400_0020, "exposure_auto", ControlKind::Int, Access::ReadWrite, ControlValue::Int(1), ControlValue::Int(3), ControlValue::Int(3));
     exposure.menu = Some(vec![MenuEntry::named(1, "manual"), MenuEntry::named(3, "aperture priority")]);
-    let descriptor = ControlDescriptor { meta: exposure, current: Some(ControlValue::Int(3)), standard: None, writable: true, effective_min: None, effective_max: None };
+    let descriptor = ControlDescriptor { meta: exposure, current: Some(ControlValue::Int(3)), standard: None, writable: true, inactive: false, effective_min: None, effective_max: None };
     let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
     assert_eq!(json["menu"], serde_json::json!([{ "value": 1, "label": "manual", "kind": "name" }, { "value": 3, "label": "aperture priority", "kind": "name" }]));
     assert_eq!(json["current_entry"]["label"], "aperture priority");
@@ -345,7 +346,7 @@ fn menu_entries_are_listed_typed_with_the_current_one() {
 
     let mut rates = meta(0xF400_0030, "link_frequency", ControlKind::IntMenu, Access::ReadWrite, ControlValue::Int(0), ControlValue::Int(1), ControlValue::Int(0));
     rates.menu = Some(vec![MenuEntry::int(0, 456_000_000), MenuEntry::int(1, 228_000_000)]);
-    let descriptor = ControlDescriptor { meta: rates, current: Some(ControlValue::Int(1)), standard: None, writable: true, effective_min: None, effective_max: None };
+    let descriptor = ControlDescriptor { meta: rates, current: Some(ControlValue::Int(1)), standard: None, writable: true, inactive: false, effective_min: None, effective_max: None };
     let json = serde_json::to_value(CameraControl::new(&descriptor, &BTreeMap::new())).expect("json");
     assert_eq!(json["menu"], serde_json::json!([{ "value": 0, "label": "456000000", "kind": "int" }, { "value": 1, "label": "228000000", "kind": "int" }]));
     assert_eq!(json["current_entry"], serde_json::json!({ "value": 1, "label": "228000000", "kind": "int" }));

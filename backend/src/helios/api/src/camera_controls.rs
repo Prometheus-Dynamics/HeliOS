@@ -392,6 +392,7 @@ fn control_error(key: &str, applied: &[AppliedCameraControl], error: IpcError) -
     match error {
         IpcError::ControlRefused(ControlRefusal::Unsupported(_) | ControlRefusal::ReadOnly(_) | ControlRefusal::Invalid(_)) => ApiError::unprocessable(message),
         IpcError::ControlRefused(ControlRefusal::NotPermitted(_)) => ApiError::forbidden(message),
+        IpcError::ControlRefused(ControlRefusal::Inactive(_)) => ApiError::conflict(message),
         _ => ApiError::backend(format!("camera service: {message}")),
     }
 }

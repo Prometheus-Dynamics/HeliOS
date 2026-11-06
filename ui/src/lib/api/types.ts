@@ -216,6 +216,8 @@ export interface DropsByCause {
   corrupted: number;
   isp_skipped: number;
   raw_skipped: number;
+  /** Frames made after the last client left; nobody missed them, not in `drops`. */
+  unread: number;
 }
 
 export interface CaptureLive {
@@ -353,6 +355,8 @@ export interface CameraControl {
   standard: CameraStandardControl | null;
   /** The camera service lets the API change it. */
   writable: boolean;
+  /** Another control holds it for now (white balance temperature under auto). */
+  inactive?: boolean;
   /** A value set through the API is stored for it and re-applied after a reboot. */
   persisted: boolean;
 }
