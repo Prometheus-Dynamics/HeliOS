@@ -11,8 +11,8 @@ input:
 
 - `base-os` imports `layers/base-os.toml`, the Raze device package and
   `targets/raze.toml`.
-- `full` additionally imports the package's GPU layers (`gpu.toml`,
-  `gpu-vulkan.toml`), Orion's `orion-node` layer, `layers/app-layer.toml` and
+- `full` additionally imports the package's Vulkan-only GPU layer
+  (`gpu-vulkan.toml`: v3dv, libdrm, the loader, no Mesa GL), Orion's `orion-node` layer, `layers/app-layer.toml` and
   `layers/release-layer.toml` (`when = { profile = "full" }`).
 
 ## Device support: the Raze device package
