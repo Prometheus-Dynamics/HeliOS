@@ -108,11 +108,15 @@ imports = [
 # Atlas f351316: the trial confirm is event-driven and outside the boot transaction.
 # Atlas c1f7803: gpu-vulkan.toml stands alone (Vulkan without Mesa's GL); also f07b56e
 # (no usb-boot in Orion's auto-enroll), 20366e4 (board-stream's hardware topic goes).
+# Atlas fa0cac3: device package on Lemnos cf3a4ac (lemnosd SCHED_FIFO IMU loop: 0 of 12000
+# samples lost at 200 Hz under load on Raze #1, against 80 on dev.931; 0660 lemnos socket),
+# trial-only --boot, every restart path through reboot-locked (holds raze-gpu.lock),
+# gaia_version >=2.0.2 on the layers that need it.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "c1f780308dcc56dc04bd2bfe73eafea974072e7c"
+rev = "fa0cac3933ddbc6841ad3c8e70eb288d13c6a7cb"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -132,11 +136,15 @@ rev = "c1f780308dcc56dc04bd2bfe73eafea974072e7c"
 # the system set), removed light keys are refused; Atlas 034663e's gaia_import.
 # backend/Cargo.lock keeps lemnos-ipc at 01939e9 until the next library pin
 # round (lemnos-ipc's wire is unchanged between the two).
+# Lemnos cf3a4ac (2026-11-06, Lemnos's settled set): the CMA heap capped by CmaTotal,
+# DmaHeap::allocate_importable, IPC gap fixes on protocol 1, the 0660 lemnos:lemnos socket.
+# Board-tested with Atlas fa0cac3 (all six lemnosd clients connect). backend/Cargo.lock's
+# lemnos-ipc moves in the joint Daedalus/Styx/Lemnos lock bump (protocol 1 unchanged).
 [[sources]]
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "afd5b0d50bfb347e7797727680db32fb04481079"
+rev = "cf3a4ac1b6e0043fde5bc80175a162a982b1239f"
 
 # Orion dev 1996c47 (protocol 1, the backend/Cargo.toml pin; PEER_AUTO_TRUST is off or private-link). Earlier, 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
