@@ -37,11 +37,6 @@ id = "helios-engine-service"
 name = "helios-engine.service"
 unit_path = "${assets}/runtime-services/core/systemd/helios-engine.service"
 
-[[stage.services]]
-id = "helios-engine-socket"
-name = "helios-engine.socket"
-unit_path = "${assets}/runtime-services/core/systemd/helios-engine.socket"
-
 [[stage.files]]
 id = "helios-robot-env"
 src = "${assets}/robot/robot-env"
@@ -84,5 +79,4 @@ stage_services = [
   "helios-robot-service",
   "helios-api-service",
   "helios-engine-service",
-  "helios-engine-socket",
 ]

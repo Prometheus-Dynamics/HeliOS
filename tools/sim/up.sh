@@ -264,7 +264,8 @@ start helios-engine \
   ORION_NODE_IPC_STREAM_SOCKET="$ORION_STREAM_SOCKET" \
   RUST_LOG="$SIM_RUST_LOG" \
   "$SIM_BIN_DIR/helios-engine"
-# The engine advertises ENGINE_SOCKET but does not bind it (the board's helios-engine.socket does).
+# The engine advertises ENGINE_SOCKET in its Orion record; nothing binds it (no socket unit since
+# 2026-11-06: the engine serves only its live socket).
 wait_for_file "$ENGINE_LIVE_SOCKET" helios-engine
 
 start helios-api \
