@@ -144,7 +144,7 @@ tempfile = "3.27.0"
 # `cargo update -p daedalus-rs --precise 6d651e1` (the pinned Daedalus dev commit; updating Styx
 # or Eidos moves it too), and check `cargo tree -d`. The lock holds one rev each for Daedalus
 # (6d651e1), Lemnos (cf3a4ac, Lemnos's settled set; Daedalus and Styx declare it branch dev too),
-# Styx (7cff38c: on the Lemnos drivers, NEON box2 row prefetch, no per-send Weak registry, 2x2 box PiSP L1) and Eidos (23dc6803: the NAPA-round exact speed-ups, on the same Daedalus/Styx/Lemnos): Styx's own lock is irrelevant here.
+# Styx (7cff38c: on the Lemnos drivers, NEON box2 row prefetch, no per-send Weak registry, 2x2 box PiSP L1) and Eidos (48303016: the NAPA-round exact speed-ups, on Styx 7cff38c with the same Daedalus/Lemnos): Styx's own lock is irrelevant here.
 daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-data = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-macros = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
