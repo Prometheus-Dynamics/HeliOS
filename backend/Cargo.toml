@@ -154,12 +154,12 @@ daedalus-planner = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git"
 # hardware.
 lemnos-ipc = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev" }
 lemnosd = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "dev", default-features = false }
-orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "f5576691178228fbe0500de8c2ab383af5c84732", default-features = false }
+orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "1996c47ef4f240efdc5c83165e9e273f159cbbd5", default-features = false }
 # The client SDK, for `ActionCaller` (request/response actions over one stream, and the client watches
 # that reconnect; the `orion` facade does not re-export it). The same Orion source and commit as `orion`.
-orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "f5576691178228fbe0500de8c2ab383af5c84732", default-features = false, features = ["ipc"] }
+orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "1996c47ef4f240efdc5c83165e9e273f159cbbd5", default-features = false, features = ["ipc"] }
 # NetworkTables 4 (robot code): pipeline outputs from helios-engine. Same Orion commit.
-orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "f5576691178228fbe0500de8c2ab383af5c84732" }
+orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "1996c47ef4f240efdc5c83165e9e273f159cbbd5" }
 styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false, features = ["std"] }
