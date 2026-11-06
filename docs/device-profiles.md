@@ -142,11 +142,11 @@ none captures as Styx does, and the Raze sets none today.
 - Buffers are memory: each raw buffer is one sensor frame (1 MB for RAW8 at 1280x800; the PiSP
   front end writes 16-bit raw, 2 MB), each output buffer one processed frame (1.5 MB for NV12 at
   1280x800).
-- Sensor raw (`HELIOS_CAMERA_SENSOR_RAW`, on by default) is the largest camera cost on the Raze.
-  Measured on Raze #2 (2026-11-06, one OV9782 at 1280x800): with it on, 20 front-end 2 MB buffers
-  and 69 MB helios-peripherals RSS; with it off, 6 buffers and 33 MB. Off, a raw recording is
-  refused (Styx does not restart a capture for a low-priority client), so it stays on while
-  recordings default to raw frames.
+- Sensor raw (`HELIOS_CAMERA_SENSOR_RAW`, on by default) costs four more 2 MB front-end
+  buffers (8 MB per camera at 1280x800). Off, a raw recording is refused (Styx does not restart a
+  capture for a low-priority client), so it stays on while recordings default to raw frames.
+  Counting dma-bufs: Styx before 1538cd0 exports the raw buffers twice with sensor raw on, so
+  `bufinfo` lists 20 objects over 10 buffers; RSS also counts the mapped buffers.
 
 Per device:
 
