@@ -71,10 +71,17 @@ async fn a_deploy_reads_and_writes_the_history_without_a_json_tree() {
 
     let (_, allocations, peak) = measured(store.push_revision("default", MAX_REVISIONS as u64 + 1, &spec, 0)).await;
     println!("tree: {tree_allocations} allocations, {tree_peak} bytes; deploy: {allocations} allocations, {peak} bytes; file {} bytes", text.len());
-    // One deploy serializes its own spec, so it pays for one tree-free spec and the file's text.
+    // One deploy holds the history's specs (the file's size) and its own; the file is streamed in
+    // and out, so its text is never held next to them.
     assert!(tree_allocations > 100_000, "the control is not a real tree: {tree_allocations} allocations");
     assert!(allocations < 1_000, "{allocations} allocations in a deploy's history write");
     assert!(allocations * 100 < tree_allocations, "{allocations} allocations against the tree's {tree_allocations}");
-    assert!(peak < text.len() * 4, "{peak} bytes held for a {} byte history", text.len());
+    assert!(peak < text.len() * 3 / 2, "{peak} bytes held for a {} byte history", text.len());
     assert!(peak * 2 < tree_peak, "{peak} bytes held against the tree's {tree_peak}");
+
+    // A deploy's revision number reads the history without holding it.
+    let (next, allocations, peak) = measured(store.next_revision("default")).await;
+    println!("next revision: {allocations} allocations, {peak} bytes");
+    assert_eq!(next.expect("next"), MAX_REVISIONS as u64 + 2);
+    assert!(peak < 256 * 1024, "{peak} bytes held to read a revision number from a {} byte history", text.len());
 }

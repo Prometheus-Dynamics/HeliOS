@@ -28,9 +28,52 @@ pub const MAX_REVISIONS: usize = 20;
 /// A pipeline spec as stored: its JSON text, parsed only when one revision is used. A history is
 /// megabytes of graphs, and as a `serde_json::Value` tree it took 70 MiB of small allocations on
 /// every deploy, which glibc kept in the brk heap for good (81 MiB PSS on the CM5, from 9).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The text is compact: a spec read with indentation (histories written pretty-printed, 12.6 MB
+/// for 20 revisions on a Raze) is minified as it is read, so the next write keeps it small.
+#[derive(Debug, Clone, Serialize)]
 #[serde(transparent)]
 pub struct StoredSpec(Box<RawValue>);
+
+impl<'de> Deserialize<'de> for StoredSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = Box::<RawValue>::deserialize(deserializer)?;
+        match minified(raw.get()) {
+            None => Ok(Self(raw)),
+            Some(text) => RawValue::from_string(text).map(Self).map_err(serde::de::Error::custom),
+        }
+    }
+}
+
+/// `json` without the whitespace between its tokens, or `None` when it has none.
+fn minified(json: &str) -> Option<String> {
+    let bytes = json.as_bytes();
+    let (mut in_string, mut escaped) = (false, false);
+    let is_space = |b: u8| matches!(b, b' ' | b'\n' | b'\r' | b'\t');
+    let first = bytes.iter().position(|&b| {
+        if in_string {
+            (in_string, escaped) = (escaped || b != b'"', !escaped && b == b'\\');
+            false
+        } else {
+            in_string = b == b'"';
+            is_space(b)
+        }
+    })?;
+    let mut out = Vec::with_capacity(bytes.len());
+    out.extend_from_slice(&bytes[..first]);
+    (in_string, escaped) = (false, false);
+    for &b in &bytes[first..] {
+        if in_string {
+            (in_string, escaped) = (escaped || b != b'"', !escaped && b == b'\\');
+        } else if is_space(b) {
+            continue;
+        } else {
+            in_string = b == b'"';
+        }
+        out.push(b);
+    }
+    // Only ASCII whitespace outside strings was dropped, so the text is still UTF-8.
+    String::from_utf8(out).ok()
+}
 
 impl StoredSpec {
     pub fn new<T: Serialize>(spec: &T) -> serde_json::Result<Self> {
@@ -140,6 +183,29 @@ impl Store {
         Ok(())
     }
 
+    /// `save` without indentation, for files nobody reads by hand (a history's specs are the
+    /// bulk of it, and pretty-printed they took 4.7 times the bytes).
+    /// Streamed to the file, so the text is never held whole next to `value`.
+    async fn save_compact<T: Serialize + Send + 'static>(&self, domain: &str, key: &str, path: &Path, value: T) -> ApiResult<()> {
+        let (path, tmp) = (path.to_path_buf(), path.with_extension("json.tmp"));
+        tokio::task::spawn_blocking(move || -> ApiResult<()> {
+            use std::io::Write;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+            serde_json::to_writer(&mut file, &value).map_err(|error| ApiError::internal(error.to_string()))?;
+            file.flush()?;
+            drop(file);
+            std::fs::rename(&tmp, &path)?;
+            Ok(())
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("writing a file did not finish: {error}")))??;
+        self.notify_changed(domain, key);
+        Ok(())
+    }
+
     /// Announce that `domain`'s `key` changed: one `settings` event, `{domain, key}`.
     pub(crate) fn notify_changed(&self, domain: &str, key: &str) {
         if let Some(events) = &self.events {
@@ -222,6 +288,22 @@ impl Store {
         self.save("default_pipeline", "declined", &self.default_pipeline_declined_path(), &DefaultPipelineDeclined { declined_at_ms }).await
     }
 
+    /// The number the next revision of `id` gets, read from its history without holding the specs:
+    /// a deploy needs the number only, and the history is megabytes.
+    pub async fn next_revision(&self, id: &str) -> ApiResult<u64> {
+        #[derive(Deserialize)]
+        struct Numbers {
+            revisions: Vec<Number>,
+        }
+        #[derive(Deserialize)]
+        struct Number {
+            revision: u64,
+        }
+        let _guard = self.lock.lock().await;
+        let numbers: Option<Numbers> = read_json(&self.pipeline_path(id)).await?;
+        Ok(numbers.and_then(|numbers| numbers.revisions.last().map(|latest| latest.revision + 1)).unwrap_or(1))
+    }
+
     pub async fn history(&self, id: &str) -> ApiResult<PipelineHistory> {
         let _guard = self.lock.lock().await;
         read_json(&self.pipeline_path(id)).await.map(Option::unwrap_or_default)
@@ -239,7 +321,7 @@ impl Store {
         history.revisions.push(PipelineRevision { revision, saved_at_ms, spec });
         let excess = history.revisions.len().saturating_sub(MAX_REVISIONS);
         history.revisions.drain(..excess);
-        self.save("pipeline", id, &path, &history).await?;
+        self.save_compact("pipeline", id, &path, history).await?;
         Ok(revision)
     }
 
@@ -264,7 +346,7 @@ impl Store {
         }
         history.revisions.pop();
         let previous = history.revisions.last().cloned().expect("at least one revision left");
-        self.save("pipeline", id, &path, &history).await?;
+        self.save_compact("pipeline", id, &path, history).await?;
         Ok(previous)
     }
 
@@ -479,12 +561,17 @@ fn file_stem(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect()
 }
 
-pub(crate) async fn read_json<T: DeserializeOwned>(path: &Path) -> ApiResult<Option<T>> {
-    match tokio::fs::read(path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| ApiError::internal(format!("{} is corrupt: {error}", path.display()))),
+/// `path` parsed as a `T`, streamed from the file: the file's text is never held whole next to
+/// what it parses into (`None` when there is no file).
+pub(crate) async fn read_json<T: DeserializeOwned + Send + 'static>(path: &Path) -> ApiResult<Option<T>> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || match std::fs::File::open(&path) {
+        Ok(file) => serde_json::from_reader(std::io::BufReader::new(file)).map(Some).map_err(|error| ApiError::internal(format!("{} is corrupt: {error}", path.display()))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
-    }
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("reading a file did not finish: {error}")))?
 }
 
 pub(crate) async fn write_json<T: Serialize>(path: &Path, value: &T) -> ApiResult<()> {
@@ -512,6 +599,30 @@ mod tests {
         let history = store.history("old").await.expect("history");
         assert_eq!(history.revisions[0].spec.parse::<serde_json::Value>().expect("spec"), old["revisions"][0]["spec"]);
         assert_eq!(history.revisions[1].spec.parse::<serde_json::Value>().expect("spec"), serde_json::json!({ "name": "b" }));
+    }
+
+    #[test]
+    fn specs_are_minified_outside_their_strings() {
+        assert_eq!(minified(r#"{"a":[1,2],"b":"x y"}"#), None);
+        assert_eq!(minified("{\n  \"a\": [1, 2],\n  \"b\": \"x \\\" y\"\n}").as_deref(), Some(r#"{"a":[1,2],"b":"x \" y"}"#));
+        assert_eq!(minified(r#"{"k\\": " a "}"#).as_deref(), Some(r#"{"k\\":" a "}"#));
+    }
+
+    #[tokio::test]
+    async fn a_pretty_history_is_written_back_compact_and_numbered_without_its_specs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path().to_path_buf());
+        let spec = serde_json::json!({ "name": "a b", "graph": { "nodes": [1, 2] } });
+        let old = serde_json::json!({ "revisions": [{ "revision": 7, "saved_at_ms": 5, "spec": spec }] });
+        write_json(&store.pipeline_path("p"), &old).await.expect("write");
+        assert_eq!(store.next_revision("p").await.expect("next"), 8);
+        assert_eq!(store.next_revision("none").await.expect("next"), 1);
+        store.push_revision("p", 8, &spec, 6).await.expect("push");
+        let text = std::fs::read_to_string(store.pipeline_path("p")).expect("history");
+        assert!(!text.contains('\n') && !text.contains(": "), "{text}");
+        let history = store.history("p").await.expect("history");
+        assert_eq!(history.revisions[0].spec.parse::<serde_json::Value>().expect("spec"), spec);
+        assert_eq!(store.next_revision("p").await.expect("next"), 9);
     }
 
     #[tokio::test]

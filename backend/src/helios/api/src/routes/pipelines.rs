@@ -1009,8 +1009,8 @@ fn deployed_revision(view: &StateView, id: &str) -> Option<u64> {
 /// The number the next deploy writes: past the history's latest and past the label Orion holds.
 /// The two can disagree by one when an earlier deploy wrote Orion and was cut short before its
 /// record (see `deploy`); taking the larger one means a deploy always shows as a new revision.
-fn next_revision(history: &crate::store::PipelineHistory, deployed: Option<u64>) -> u64 {
-    history.next_revision().max(deployed.map_or(1, |r| r + 1))
+fn next_revision(history_next: u64, deployed: Option<u64>) -> u64 {
+    history_next.max(deployed.map_or(1, |r| r + 1))
 }
 
 /// Write `spec` as pipeline `id` (a new revision, kept for rollback) and return the pipeline.
@@ -1036,7 +1036,7 @@ pub async fn deploy(state: &SharedState, id: &str, spec: PipelineSpec) -> ApiRes
 /// The body of `deploy`: the caller holds `deploys`.
 async fn deploy_locked(state: &SharedState, id: &str, spec: &PipelineSpec) -> ApiResult<Pipeline> {
     let view = state.orion.view().await?;
-    let revision = next_revision(&state.store.history(id).await?, deployed_revision(&view, id));
+    let revision = next_revision(state.store.next_revision(id).await?, deployed_revision(&view, id));
     apply_spec(state, &view, id, spec, revision).await?;
     state.store.push_revision(id, revision, spec, now_ms()).await?;
     fetch(state, id).await
@@ -1484,15 +1484,15 @@ mod tests {
             revisions: revisions.iter().map(|&revision| PipelineRevision { revision, saved_at_ms: 0, spec: crate::store::StoredSpec::new(&serde_json::json!({})).expect("spec") }).collect(),
         };
         // A pipeline never deployed, and one Orion has that the history does not know.
-        assert_eq!(next_revision(&history(&[]), None), 1);
-        assert_eq!(next_revision(&history(&[]), Some(4)), 5);
+        assert_eq!(next_revision(history(&[]).next_revision(), None), 1);
+        assert_eq!(next_revision(history(&[]).next_revision(), Some(4)), 5);
         // In step: the history's next.
-        assert_eq!(next_revision(&history(&[1, 2, 3]), Some(3)), 4);
+        assert_eq!(next_revision(history(&[1, 2, 3]).next_revision(), Some(3)), 4);
         // A deploy that wrote Orion (label 10) and was cut short before its record (history at 9):
         // the next deploy is 11, never 10 again.
-        assert_eq!(next_revision(&history(&[8, 9]), Some(10)), 11);
+        assert_eq!(next_revision(history(&[8, 9]).next_revision(), Some(10)), 11);
         // A history ahead of the label (a rollback's record, or an older device): the history wins.
-        assert_eq!(next_revision(&history(&[8, 9, 10]), Some(9)), 11);
+        assert_eq!(next_revision(history(&[8, 9, 10]).next_revision(), Some(9)), 11);
     }
 
     #[test]
