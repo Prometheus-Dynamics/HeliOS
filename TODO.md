@@ -254,7 +254,7 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 
 - [x] The device package's A/B layout and update writer (p1 autoboot, p2/p3 boot, p5/p6 root, p7 data), the same as the PhotonVision image; read-only EROFS root; `update-health` and `pre-reboot` hooks. The squashfs A/B storage, initramfs, helios-provision, helios-ota-confirm, helios-updater and `50-helios.preset` are gone.
 - [x] Stage the new `ui/` (served by helios-api on :5800, the port in `manage_url`); lighttpd and the old `frontend/` are no longer in the image.
-- [ ] Remove the old `frontend/` tree (tools/deploy-live.sh now deploys `ui/`). The device test tools `run-device-template*.sh` and `run-device-isolated-runtime.sh` still call the pre-v1 API (`/v1/templates`, `helios-node`): port them to `/v1/pipelines` or remove them.
+- [x] Remove the old `frontend/` tree and the pre-v1 device test tools (`run-device-template*.sh`, `run-device-isolated-runtime.sh`, which called `/v1/templates` and `helios-node`). The xtask frontend TypeScript codegen and its CI check went with them; `ui/` is the only UI.
 - [ ] Machine ID: systemd generates a transient one before /data mounts, so helios-data-setup binds the kept one and restarts journald each boot. If that proves noisy, ask Atlas for a package-level answer (e.g. an early generator).
 - [ ] Generate `/etc/helios/version` and `build-id` from the build version instead of the static copies in `gaia/assets/identity` (`os-release` already is, 78638b74).
 

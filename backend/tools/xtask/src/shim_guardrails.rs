@@ -8,7 +8,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 pub const DEFAULT_CONFIG_NAME: &str = "shim_guardrails.toml";
-pub const DEFAULT_SCAN_ROOTS: &[&str] = &["backend", "frontend", "tools", ".github"];
+pub const DEFAULT_SCAN_ROOTS: &[&str] = &["backend", "ui", "tools", ".github"];
 const MARKER_TOKEN: &str = "TEMP_SHIM:";
 const SKIP_DIR_NAMES: &[&str] = &[".git", ".svelte-kit", "build", "coverage", "dist", "node_modules", "target", "vendor"];
 

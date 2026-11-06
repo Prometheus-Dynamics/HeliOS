@@ -210,13 +210,13 @@ mod tests {
     #[test]
     fn evaluate_passes_when_repo_matches_rules() {
         let temp_dir = tempdir().expect("tempdir");
-        let guarded_file = temp_dir.path().join("frontend/src/example.ts");
+        let guarded_file = temp_dir.path().join("ui/src/example.ts");
         fs::create_dir_all(guarded_file.parent().expect("parent")).expect("mkdir");
         fs::write(&guarded_file, "const x = 1;\n").expect("write guarded file");
 
         let config = GuardrailConfig {
-            line_limits: vec![LineLimitRule { path: "frontend/src/example.ts".into(), max_lines: 5, owner: "HeliOS".into(), review_note: "small demo file".into() }],
-            forbidden_paths: vec![ForbiddenPathRule { path: "frontend/src/legacy.ts".into(), owner: "HeliOS".into(), reason: "legacy file must stay deleted".into() }],
+            line_limits: vec![LineLimitRule { path: "ui/src/example.ts".into(), max_lines: 5, owner: "HeliOS".into(), review_note: "small demo file".into() }],
+            forbidden_paths: vec![ForbiddenPathRule { path: "ui/src/legacy.ts".into(), owner: "HeliOS".into(), reason: "legacy file must stay deleted".into() }],
         };
 
         let violations = evaluate_guardrails(temp_dir.path(), &config);

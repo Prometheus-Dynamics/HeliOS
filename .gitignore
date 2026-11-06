@@ -1,5 +1,3 @@
-tools/api-client/node_modules/
-frontend/src/lib/ts-bindings/
 target/
 build/
 output/
@@ -19,11 +17,7 @@ __pycache__/
 configs/sdk/offline
 
 # Local-only Cargo overrides for sibling checkouts (see backend/README.md)
-backend/.cargo/local-overrides.toml
-# Frontend test runs
-frontend/test-results/
-frontend/playwright-report/
-# Python virtualenvs
+backend/.cargo/local-overrides.toml# Python virtualenvs
 .venv/
 venv/
 # Stray disk images outside gaia/output

@@ -10,7 +10,7 @@ Use this checklist after updating calibration behavior or OV9782 stream tuning.
 Run:
 
 ```bash
-cd frontend && bun run check && bun run lint
+cd ui && bun run check
 cd ../backend && cargo check -p helios-api
 ```
 

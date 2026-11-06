@@ -37,7 +37,7 @@ rustup toolchain install 1.99.0
 rustup default 1.99.0
 nvm install 22.20.0
 nvm use 22.20.0
-bun install --cwd frontend
+bun install --cwd ui
 bun install --cwd docs
 cargo run --manifest-path backend/Cargo.toml -p xtask -- validate all
 ```

@@ -10,14 +10,6 @@ HeliOS publishes API specs that can be used to generate SDKs for your language.
 - OpenAPI (HTTP): `GET /openapi.json` (or `GET /v1/openapi.json`)
 - AsyncAPI (WebSocket): `GET /asyncapi.json` (or `GET /v1/asyncapi.json`)
 
-## TypeScript (Example)
-
-This repo generates TypeScript bindings for the frontend:
-
-```bash
-./tools/api-codegen/run.sh
-```
-
 If you are building your own integration, you can use the same inputs (`openapi.json`, `asyncapi.json`) with generators for your target language.
 
 ## Related
