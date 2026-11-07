@@ -34,9 +34,9 @@ const CLIENT_NAME: &str = "helios-leds";
 /// The Raze's status ring, as the board definition names it.
 pub const RING_DEVICE: &str = "status-ring";
 /// The first wait after a failed connection; each further failure doubles it, up to the max. A
-/// device with no lemnosd (or no status ring) is then tried about once a minute.
-const RECONNECT_MS: u64 = 2000;
-const RECONNECT_MAX_MS: u64 = 60_000;
+/// device with no lemnosd (or no status ring) is then tried every 8 s, never given up on.
+const RECONNECT_MS: u64 = 1000;
+const RECONNECT_MAX_MS: u64 = 8_000;
 const FRAME_MS: u64 = 33;
 const TICK_MS: u64 = 100;
 const EVENT_MS: u64 = 100;
@@ -45,7 +45,7 @@ const PROGRESS_MS: u64 = 250;
 /// Brightness is written when it moves by at least this much.
 const BRIGHTNESS_STEP: f64 = 0.004;
 /// A lemnosd that refused the spots is left alone for this long before the look is tried again.
-const NATIVE_RETRY_MS: u64 = 30_000;
+const NATIVE_RETRY_MS: u64 = 8_000;
 /// lemnosd's spots block shows at most this many spots.
 const MAX_NATIVE_SPOTS: usize = 8;
 

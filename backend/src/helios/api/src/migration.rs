@@ -42,7 +42,7 @@ pub const MARKER_FILE: &str = "node-id-migration.json";
 pub const LEGACY_DIR: &str = "legacy-node-id";
 /// The first retry waits this long; each further one doubles it, up to `RETRY_MAX`.
 const RETRY_MIN: Duration = Duration::from_millis(500);
-const RETRY_MAX: Duration = Duration::from_secs(60);
+const RETRY_MAX: Duration = Duration::from_secs(8);
 /// The `graph.inline` config field of a pipeline (its graph document, as JSON text).
 const GRAPH_FIELD: &str = "graph.inline";
 
