@@ -643,8 +643,10 @@ export interface RawClaim {
 }
 
 export interface RawIo {
-  resource: string;
+  /** The board definition admits HeliOS (lemnosd's `raw_clients`). */
   available: boolean;
+  /** helios-api is connected to lemnosd (it connects on the first raw action). */
+  connected: boolean;
   claims: RawClaim[];
 }
 

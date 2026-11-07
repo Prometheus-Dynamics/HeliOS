@@ -33,16 +33,11 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-# The board definition's `raw_clients` (lemnosd's raw-access policy), read at each connection.
-toml = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 orion = { workspace = true, default-features = false, features = ["client"] }
-# lemnosd's client: sensors, the fan, the status light and raw GPIO/PWM/I2C/SPI. HeliOS opens no
-# hardware itself.
-lemnos-ipc = { workspace = true }
 styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "serde", "hotplug", "async", "codec-turbojpeg", "tracing"] }
 
 [features]
@@ -52,5 +47,3 @@ sim = ["styx/sim"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# The real lemnosd over mock hardware (claims, edges, transactions, restores on disconnect).
-lemnosd = { workspace = true, features = ["mock"] }

@@ -1,7 +1,6 @@
 #![deny(unsafe_code)]
 
 pub mod config;
-pub mod lemnosd;
 pub mod model;
 pub mod provider;
 pub mod resources;

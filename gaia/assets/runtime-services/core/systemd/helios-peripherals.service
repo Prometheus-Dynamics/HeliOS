@@ -1,9 +1,7 @@
 [Unit]
 Description=Helios Peripherals Service
-# lemnosd (the Raze device package's hardware service) owns the sensors, fan and
-# status light; helios-peripherals is its client and reconnects when it restarts.
-After=network.target orion-node.service lemnosd.service
-Wants=network.target orion-node.service lemnosd.service
+After=network.target orion-node.service
+Wants=network.target orion-node.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -14,17 +12,12 @@ Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0
 EnvironmentFile=-/etc/default/helios-peripherals.env
 EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-peripherals
-# No fan hand-back here: helios-peripherals ends its fan override through lemnosd
-# (release) when it stops, a crashed run's override is released on the next start,
-# and lemnosd's own ExecStopPost hands every fan back when lemnosd stops.
 Restart=always
 RestartSec=2
 TimeoutStopSec=10
 User=root
 # Primary group orion: orion-node admits the orion group (ORION_NODE_LOCAL_AUTH in orion-node.env).
 Group=orion
-# lemnos owns /run/lemnos/lemnosd.sock (mode 0660).
-SupplementaryGroups=lemnos
 WorkingDirectory=/var/lib/helios
 # No StateDirectory=helios: /var/lib/helios is helios-data-setup's bind of /data/helios,
 # and systemd re-owns a StateDirectory recursively to the unit's user and group,

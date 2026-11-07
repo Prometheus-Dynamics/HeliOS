@@ -90,8 +90,6 @@ pub struct Digest {
     pub resources: BTreeMap<String, serde_json::Value>,
     /// Pose summary per pipeline (`pose` events).
     pub poses: BTreeMap<String, serde_json::Value>,
-    /// Raw GPIO/PWM claims (`gpio` events: claimed, renewed, set, an edge, released).
-    pub claims: BTreeMap<String, serde_json::Value>,
     /// Pipeline host outputs by `<pipeline>/<port>` (`output` events).
     pub outputs: BTreeMap<String, serde_json::Value>,
 }
@@ -102,12 +100,12 @@ pub fn diff(before: &Digest, after: &Digest) -> Vec<(&'static str, serde_json::V
     diff_maps("pipeline", &before.pipelines, &after.pipelines, &mut out);
     diff_maps("resource", &before.resources, &after.resources, &mut out);
     diff_maps("pose", &before.poses, &after.poses, &mut out);
-    diff_maps("gpio", &before.claims, &after.claims, &mut out);
     diff_maps("output", &before.outputs, &after.outputs, &mut out);
     out
 }
 
-fn diff_maps(kind: &'static str, before: &BTreeMap<String, serde_json::Value>, after: &BTreeMap<String, serde_json::Value>, out: &mut Vec<(&'static str, serde_json::Value)>) {
+/// The `kind` events (`{id, change, value}`) that turn `before` into `after`.
+pub fn diff_maps(kind: &'static str, before: &BTreeMap<String, serde_json::Value>, after: &BTreeMap<String, serde_json::Value>, out: &mut Vec<(&'static str, serde_json::Value)>) {
     for (id, value) in after {
         if before.get(id) != Some(value) {
             out.push((kind, serde_json::json!({ "id": id, "change": if before.contains_key(id) { "updated" } else { "added" }, "value": value })));
@@ -241,7 +239,6 @@ impl Watch {
                     pipelines: routes::pipelines::digest(&view),
                     resources: routes::resources::digest(&view),
                     poses: routes::pipelines::pose_digest(&view),
-                    claims: routes::resources::claims_digest(&view),
                     outputs: routes::pipelines::outputs_digest(&view),
                 };
                 if let Some(before) = &self.seen.last {

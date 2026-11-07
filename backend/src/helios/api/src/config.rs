@@ -57,8 +57,10 @@ pub struct ApiConfig {
     pub preview: crate::camera_preview::PreviewSettings,
     /// The first-boot startup file (`[default_pipeline]`, see `startup.rs`).
     pub startup_file: PathBuf,
-    /// lemnosd's socket: the IMU, magnetometer and power samples a recording takes.
+    /// lemnosd's socket: the IMU, magnetometer and power samples a recording takes, and raw access.
     pub lemnos_socket: PathBuf,
+    /// The board definition lemnosd runs: its `raw_clients` says whether HeliOS gets raw access.
+    pub lemnos_board_file: PathBuf,
     /// Playback players (`playback/`): their concurrent limit, sockets and allowed folders.
     pub playback: crate::playback::PlaybackSettings,
     /// The node's live stream the UI shows, and the history a new client starts with.
@@ -111,6 +113,7 @@ impl ApiConfig {
             preview: crate::camera_preview::PreviewSettings::default(),
             startup_file: layout.startup_file(),
             lemnos_socket: layout.lemnos_socket(),
+            lemnos_board_file: layout.lemnos_board_file(),
             playback: crate::playback::PlaybackSettings { stream_dir: layout.streams_dir(), ..crate::playback::PlaybackSettings::default() },
             live_streams: crate::live_streams::LiveStreamSettings::default(),
             live_buffer_bytes: crate::live_outputs::DEFAULT_BUFFER_BYTES,
@@ -183,6 +186,9 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_LEMNOSD_SOCKET") {
             config.lemnos_socket = value.into();
+        }
+        if let Some(value) = env.get("HELIOS_LEMNOSD_BOARD") {
+            config.lemnos_board_file = value.into();
         }
         if let Some(value) = env.get("HELIOS_LIVE_STREAM_ID") {
             config.live_streams.stream_id = value.clone();

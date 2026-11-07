@@ -22,6 +22,7 @@ pub mod device_settings;
 pub mod error;
 pub mod events;
 pub mod fan_override;
+pub mod lemnos_raw;
 pub mod field_layouts;
 pub mod host;
 pub mod host_facts;
@@ -109,6 +110,8 @@ pub struct AppState {
     pub shutdown: tokio_util::sync::CancellationToken,
     /// The timed fan overrides on Lemnos's fan devices (`fan_override`).
     pub fan_overrides: Arc<fan_override::FanOverrides>,
+    /// Raw GPIO/PWM/I2C/SPI access, straight to lemnosd (`lemnos_raw`).
+    pub raw: lemnos_raw::RawAccess,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -123,6 +126,10 @@ impl AppState {
             self_calibration_notes: self_calibration::Notes::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
             fan_overrides: Arc::new(fan_override::FanOverrides::load(config.state_dir.join("fan-overrides.json"))),
+            raw: lemnos_raw::RawAccess::new(
+                lemnos_raw::RawOptions { socket: config.lemnos_socket.clone(), board_file: Some(config.lemnos_board_file.clone()), client: lemnos_raw::CLIENT_NAME.into() },
+                Some(events.clone()),
+            ),
             orion: orion_link,
             peer_client: peers::client(),
             tunnels: peers::TunnelLimits::default(),

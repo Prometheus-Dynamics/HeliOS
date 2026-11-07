@@ -118,7 +118,7 @@ If no paths are provided, both documents are printed to stdout.
 When developing locally, prefer `cargo run -p helios-api --profile dev-release` for faster rebuilds and linking. Use `--release` when validating production performance. The first run will create a `.env` file populated with default configuration values if none exists. On the target device the built API binary is started by systemd and listens on multiple ports for HTTP, JSON‑RPC, WebSocket and NetworkTables.
 
 Hardware specific kernel modules can be loaded automatically by setting the `OPTIONAL_KERNEL_MODULES` environment variable. Provide a comma separated list of module names and the server will attempt to `modprobe` each one without failing if a module is missing.
-The Raze's sensors, fan and status light belong to lemnosd, the hardware service the Raze device package ships (board definition `/etc/lemnos/board.toml`). `helios-peripherals` is its client (`/run/lemnos/lemnosd.sock`, `HELIOS_PERIPHERALS_LEMNOSD_SOCKET` to override) and publishes each lemnosd device as an Orion resource; HeliOS ships and reads no sensors file (see `src/helios/peripherals/ARCHITECTURE.md`).
+The Raze's sensors, fan and status light belong to lemnosd, the hardware service the Raze device package ships (board definition `/etc/lemnos/board.toml`). Its Orion bridge, `lemnos-orion`, publishes each lemnosd device as an Orion resource (`lemnos.<board>.<device>`). `helios-api` is the lemnosd client for the fan override, raw GPIO/PWM/I2C/SPI access, recordings' sensor samples and the LEDs (`/run/lemnos/lemnosd.sock`; `HELIOS_LEMNOSD_SOCKET` and `HELIOS_LEMNOSD_BOARD` to override). HeliOS ships and reads no sensors file.
 
 ### First-Boot Stream/Pipeline Startup Preset
 

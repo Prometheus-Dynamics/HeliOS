@@ -5,9 +5,6 @@ use helios_layout::Layout;
 
 pub const DEFAULT_NODE_ID: &str = "node-local";
 pub const DEFAULT_IPC_DIR_ENV: &str = "HELIOS_IPC_DIR";
-/// The client name HeliOS gives lemnosd. The fan's board `writers` must list it (Atlas's Raze
-/// board.toml does).
-pub const LEMNOSD_CLIENT_NAME: &str = "helios";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeripheralConfig {
@@ -18,16 +15,6 @@ pub struct PeripheralConfig {
     pub orion_ipc_stream_socket_path: PathBuf,
     /// Probe local cameras (Styx).
     pub enable_linux_probes: bool,
-    /// lemnosd's socket (sensors, fan, status light).
-    pub lemnosd_socket_path: PathBuf,
-    /// The board definition lemnosd runs (`/etc/lemnos/board.toml`): its `raw_clients` says whether
-    /// HeliOS may claim raw access, which decides whether the `lemnos.raw` resource is published.
-    pub lemnosd_board_file: PathBuf,
-    /// The lemnosd subscription period, and the most often readings are republished to Orion.
-    pub lemnosd_reading_interval_ms: u64,
-    /// How long the first lemnosd connection waits for the service before it keeps trying in the
-    /// background.
-    pub lemnosd_startup_wait_ms: u64,
     pub lease_ttl_ms: u64,
     pub camera_idle_pause_ms: u64,
     /// The camera services carry the sensor's raw frames (16-bit Bayer, zero copy) as a companion
@@ -114,10 +101,6 @@ impl PeripheralConfig {
             orion_ipc_socket_path: layout.orion_socket(),
             orion_ipc_stream_socket_path: layout.orion_stream_socket(),
             enable_linux_probes: true,
-            lemnosd_socket_path: layout.lemnos_socket(),
-            lemnosd_board_file: layout.lemnos_board_file(),
-            lemnosd_reading_interval_ms: 250,
-            lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,
             camera_idle_pause_ms: 2_000,
             camera_sensor_raw: false,
@@ -154,15 +137,6 @@ impl PeripheralConfig {
         }
         if let Some(value) = env.get("HELIOS_ENABLE_LINUX_PROBES") {
             config.enable_linux_probes = !matches!(value.as_str(), "0" | "false" | "False" | "FALSE" | "no" | "NO");
-        }
-        if let Some(path) = env.get("HELIOS_PERIPHERALS_LEMNOSD_SOCKET").filter(|path| !path.is_empty()) {
-            config.lemnosd_socket_path = PathBuf::from(path);
-        }
-        if let Some(value) = env.get("HELIOS_PERIPHERALS_LEMNOSD_READING_MS").and_then(|v| v.parse::<u64>().ok()).filter(|value| *value > 0) {
-            config.lemnosd_reading_interval_ms = value;
-        }
-        if let Some(value) = env.get("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS").and_then(|v| v.parse::<u64>().ok()) {
-            config.lemnosd_startup_wait_ms = value;
         }
         if let Some(value) = env.get("HELIOS_LEASE_TTL_MS").or_else(|| env.get("HELIOS_CLAIM_TTL_MS")).and_then(|v| v.parse::<u64>().ok()) {
             config.lease_ttl_ms = value;
@@ -231,9 +205,6 @@ mod tests {
             ("ORION_NODE_IPC_SOCKET", "/tmp/orion/control.sock"),
             ("ORION_NODE_IPC_STREAM_SOCKET", "/tmp/orion/control-stream.sock"),
             ("HELIOS_ENABLE_LINUX_PROBES", "false"),
-            ("HELIOS_PERIPHERALS_LEMNOSD_SOCKET", "/tmp/lemnos/lemnosd.sock"),
-            ("HELIOS_PERIPHERALS_LEMNOSD_READING_MS", "125"),
-            ("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS", "1500"),
             ("HELIOS_LEASE_TTL_MS", "7500"),
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
             ("HELIOS_CAMERA_SENSOR_RAW", "0"),
@@ -246,9 +217,6 @@ mod tests {
         assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/tmp/orion/control.sock"));
         assert_eq!(config.orion_ipc_stream_socket_path, PathBuf::from("/tmp/orion/control-stream.sock"));
         assert!(!config.enable_linux_probes);
-        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/tmp/lemnos/lemnosd.sock"));
-        assert_eq!(config.lemnosd_reading_interval_ms, 125);
-        assert_eq!(config.lemnosd_startup_wait_ms, 1_500);
         assert_eq!(config.lease_ttl_ms, 7_500);
         assert_eq!(config.camera_idle_pause_ms, 3_000);
         assert!(!config.camera_sensor_raw);
@@ -304,24 +272,15 @@ mod tests {
     }
 
     #[test]
-    fn config_defaults_stream_dir_from_ipc_dir_and_lemnosd_to_its_socket() {
+    fn config_defaults_stream_dir_from_ipc_dir() {
         let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
         assert_eq!(config.stream_dir, PathBuf::from("/tmp/helios-peripherals/streams"));
-        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/run/lemnos/lemnosd.sock"));
-        assert_eq!(config.lemnosd_reading_interval_ms, 250);
-    }
-
-    #[test]
-    fn the_image_lemnosd_socket_is_the_lemnos_client_default() {
-        // The layout pins the path (`helios-layout`); this keeps it equal to lemnos's own default.
-        assert_eq!(Layout::image().lemnos_socket(), PathBuf::from(lemnos_ipc::DEFAULT_SOCKET));
     }
 
     #[test]
     fn a_guest_layout_keeps_the_host_sockets_and_drops_nothing_else() {
         let config = PeripheralConfig::from_env_iter([("HELIOS_LAYOUT_PROFILE", "guest")]).expect("config");
         assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/run/orion/control.sock"));
-        assert_eq!(config.lemnosd_socket_path, PathBuf::from("/run/lemnos/lemnosd.sock"));
         assert_eq!(config.camera_spare_clients, 4);
     }
 }

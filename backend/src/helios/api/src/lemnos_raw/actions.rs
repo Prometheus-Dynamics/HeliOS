@@ -7,8 +7,8 @@
 //! **Claims are leases.** A GPIO line or PWM channel claimed through HeliOS belongs to a HeliOS
 //! claim (`gpio-<n>`, `pwm-<n>`) with a time to live (`ttl_ms`, default 30 s, 1 s to 10 min).
 //! Every action naming the claim renews it (`raw.renew` does nothing else); when it runs out,
-//! helios-peripherals releases it, so a client that disappears from the HTTP side never holds a
-//! line for longer than its lease. When helios-peripherals itself dies, its lemnosd connection
+//! helios-api releases it, so a client that disappears from the HTTP side never holds a
+//! line for longer than its lease. When helios-api itself dies, its lemnosd connection
 //! closes and lemnosd ends every claim: lines go to their safe state (the claim's `on_release`,
 //! else the board's `[[lines]] safe`, else high impedance) and PWM channels are disabled.
 //! Claims do not survive a lemnosd restart: after a reconnection HeliOS claims every live lease
@@ -26,7 +26,7 @@ use lemnos_ipc::{I2cOp, Line, LineTarget, Pwm, PwmTarget, SpiXfer};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-use crate::model::ObservedValue;
+use crate::routes::resources::{ClaimDto, EdgeDto};
 
 pub const GPIO_CLAIM_ACTION: &str = "gpio.claim";
 pub const GPIO_CONFIGURE_ACTION: &str = "gpio.configure";
@@ -623,34 +623,27 @@ impl Claim {
         }
     }
 
-    /// The published view: `claim.<id>.<field>` values.
-    pub fn observe(&self, values: &mut BTreeMap<String, ObservedValue>) {
-        let key = |field: &str| format!("claim.{}.{field}", self.id);
-        values.insert(key("kind"), ObservedValue::String(self.kind().into()));
-        values.insert(key("target"), ObservedValue::String(self.target()));
-        values.insert(key("expires_at_ms"), ObservedValue::UInt(self.expires_at_ms));
-        values.insert(key("held"), ObservedValue::Bool(self.held != Held::Pending));
+    /// The claim as the HTTP API shows it.
+    pub fn dto(&self) -> ClaimDto {
+        let mut dto = ClaimDto { id: self.id.clone(), kind: self.kind().into(), target: self.target(), expires_at_ms: self.expires_at_ms, held: self.held != Held::Pending, ..ClaimDto::default() };
         match &self.spec {
             ClaimSpec::Line(line) => {
                 let output = line.config.direction == Direction::Output;
-                values.insert(key("direction"), ObservedValue::String(if output { "output" } else { "input" }.into()));
+                dto.direction = Some(if output { "output" } else { "input" }.into());
                 if output {
-                    values.insert(key("value"), ObservedValue::Bool(line.config.initial));
+                    dto.value = Some(line.config.initial);
                 }
-                values.insert(key("edges"), ObservedValue::UInt(self.edges));
-                if let Some(edge) = self.last_edge {
-                    values.insert(key("edge.rising"), ObservedValue::Bool(edge.rising));
-                    values.insert(key("edge.timestamp_ns"), ObservedValue::UInt(edge.timestamp_ns));
-                    values.insert(key("edge.seq"), ObservedValue::UInt(u64::from(edge.seq)));
-                }
+                dto.edges = Some(self.edges);
+                dto.last_edge = self.last_edge.map(|edge| EdgeDto { rising: edge.rising, timestamp_ns: edge.timestamp_ns, seq: u64::from(edge.seq) });
             }
             ClaimSpec::Pwm { config: Some(config), .. } => {
-                values.insert(key("period_ns"), ObservedValue::UInt(config.period_ns));
-                values.insert(key("duty_ns"), ObservedValue::UInt(config.duty_ns));
-                values.insert(key("enabled"), ObservedValue::Bool(config.enabled));
+                dto.period_ns = Some(config.period_ns);
+                dto.duty_ns = Some(config.duty_ns);
+                dto.enabled = Some(config.enabled);
             }
             ClaimSpec::Pwm { config: None, .. } => {}
         }
+        dto
     }
 }
 
@@ -910,12 +903,12 @@ mod tests {
         let spec = ClaimSpec::Line(LineClaim { target: LineTarget::Chip { chip: "gpiochip0".into(), offset: 9 }, config: LineConfig::input().with_edge(EdgeDetect::Both), on_release: None });
         let id = claims.insert(spec, Held::Pending, Duration::from_secs(5), now, 0);
         assert!(!claims.edge(7, EdgeView { rising: true, timestamp_ns: 1, seq: 1 }), "a pending claim has no handle");
-        let mut values = BTreeMap::new();
-        claims.iter().for_each(|claim| claim.observe(&mut values));
-        assert_eq!(values.get(&format!("claim.{id}.target")), Some(&ObservedValue::String("gpiochip0:9".into())));
-        assert_eq!(values.get(&format!("claim.{id}.direction")), Some(&ObservedValue::String("input".into())));
-        assert_eq!(values.get(&format!("claim.{id}.edges")), Some(&ObservedValue::UInt(0)));
-        assert_eq!(values.get(&format!("claim.{id}.held")), Some(&ObservedValue::Bool(false)));
+        let dto = claims.iter().next().expect("claim").dto();
+        assert_eq!(dto.id, id);
+        assert_eq!(dto.target, "gpiochip0:9");
+        assert_eq!(dto.direction.as_deref(), Some("input"));
+        assert_eq!(dto.edges, Some(0));
+        assert!(!dto.held);
     }
 
     #[test]

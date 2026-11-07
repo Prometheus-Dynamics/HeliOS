@@ -610,21 +610,19 @@ Recordings and image folders served as cameras. A player's camera resource is bo
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `lemnos.raw`, `execution.session`, ...) |
+| `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `execution.session`, ...) |
 | `GET` | `/v1/resources/{id}` | One resource, including its latest `action_result` |
-| `GET` | `/v1/peripherals` | The board's `lemnos.device` resources with their state, and the raw-access and camera resources |
+| `GET` | `/v1/peripherals` | The board's `lemnos.device` resources with their state, and the camera resources |
 | `POST` | `/v1/peripherals/{id}/actions` | `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}` (below) |
-| `GET` | `/v1/peripherals/io` | Raw GPIO/PWM/I2C/SPI access: `{resource, available, claims: [...]}` (below) |
-| `POST` | `/v1/peripherals/io/actions` | A raw action on this node's `lemnos.raw` resource, e.g. `{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output"}}` |
+| `GET` | `/v1/peripherals/io` | Raw GPIO/PWM/I2C/SPI access: `{available, connected, claims: [...]}` (below) |
+| `POST` | `/v1/peripherals/io/actions` | A raw action, straight to lemnosd, e.g. `{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output"}}` |
 | `GET` `PUT` | `/v1/peripherals/fan` · `/leds` · `/imu` | **501** |
 
 The board's devices come from lemnosd's own Orion bridge (Lemnos `docs/orion.md`): one
 `lemnos.device` resource per device, `lemnos.<board>.<device>`, with its status and readings as
 status entries, which `GET /v1/peripherals` merges into the resource's `state` (`status`, `reason`,
 `read_us`, one `F64` per channel, `control.<name>`) and its labels as they are (`lemnos.class`,
-`lemnos.model`, `lemnos.board`, `lemnos.unit.*`, `lemnos.control.*`). helios-peripherals publishes
-one `lemnos.raw` resource for raw access (`lemnos_raw_<node>_io`) and the cameras. Action kinds, on
-the fan (the `lemnos.device` whose `lemnos.class` is `fan`, e.g. `lemnos.raze.fan`):
+`lemnos.model`, `lemnos.board`, `lemnos.unit.*`, `lemnos.control.*`). Action kinds, on the fan (the `lemnos.device` whose `lemnos.class` is `fan`, e.g. `lemnos.raze.fan`):
 
 - `fan.override` (`pwm` 0 to 255 or `duty` 0 to 1, `duration_ms` 1000 to 600000, default 60000):
   helios-api sets the bridge's `duty` control and releases it when the time is up, so the fan is
@@ -634,28 +632,24 @@ the fan (the `lemnos.device` whose `lemnos.class` is `fan`, e.g. `lemnos.raze.fa
   `fan.override.duty` and `fan.override.until_ms`, and each start and end is a `peripheral` event.
 - `fan.release`: end an override now.
 
-Other actions on a `lemnos.device` (`set`, `restore`, `release`, `read`, ...) go to the bridge as
-they are.
+The bridge's own actions on other devices (`set`, `restore`, `release`, `read`, ...) are Orion
+actions on `lemnos.<board>.<device>` (`orionctl action run`), not API actions.
 
-The API sends an action to the resource's provider (lemnos-orion, or helios-peripherals for raw access) as an Orion request/response
-action (`ActionCaller`, Orion `docs/actions.md`): one control-plane stream shared by all requests, so
-concurrent actions run at once and none waits for another's answer. The provider answers each
-action by its id, and the API waits up to 5 s for the final result. The answer is 200
+The API runs the fan's actions as Orion request/response actions on lemnos-orion
+(`ActionCaller`, Orion `docs/actions.md`) and waits up to 10 s for the result. The answer is 200
 `{action_id, resource, done: true, result: {action_kind, status, data, error, observed_at_ms}}`, or
-202 with `done: false` and the latest result (`status` `running`) when the wait runs out; the action
-itself keeps running until its own 10 s budget. `status` is `applied`, `failed` (the action failed,
-or the node refused it, with the reason in `error`) or `running`. `data` is the action's `value`.
-`arg` is any JSON object: nested objects and arrays are sent as dotted argument names and rebuilt
-for helios-peripherals, and arrays of byte values (0 to 255) travel as `Bytes`.
-Raw claims are unchanged: a claim is a HeliOS lease with an id, a time to live and renewal (see
-[Raw GPIO, PWM, I2C and SPI](#raw-gpio-pwm-i2c-and-spi)).
+202 with `done: false` and the latest result (`status` `running`) when the wait runs out. `status`
+is `applied`, `failed` (the action failed, or the node refused it, with the reason in `error`) or
+`running`. `data` is the action's output (`fan.override`: `{applied, control}`).
 
 #### Raw GPIO, PWM, I2C and SPI
 
 Raw access goes through lemnosd, the one owner of the board's hardware (Lemnos
-`docs/system-service.md`, "Raw bus and line access"); HeliOS opens no device node. Actions go to
-the `lemnos.raw` resource (`POST /v1/peripherals/io/actions`, or
-`/v1/peripherals/{id}/actions` with its id). `result.data` is what the action returns.
+`docs/system-service.md`, "Raw bus and line access"); HeliOS opens no device node. helios-api is
+the lemnosd client (`helios`): one connection, opened on the first raw action, owned by one thread
+(`lemnos_raw`). Actions are `POST /v1/peripherals/io/actions`; the answer is always 200 with
+`done: true`, and `result.status` `applied` or `failed` with lemnosd's reason in `error`.
+`result.data` is what the action returns.
 
 | Kind | `arg` | `data` |
 |---|---|---|
@@ -672,24 +666,23 @@ the `lemnos.raw` resource (`POST /v1/peripherals/io/actions`, or
 | `raw.renew` | `claim`, `ttl_ms` | when the lease now ends (`expires_at_ms`) |
 
 Bytes are arrays of numbers or hex strings (`"9f00"`, `"0x9f 0x00"`). Limits: lemnosd's 4 KiB per
-I2C transaction, 64 KiB per SPI transaction and 64 claims; Orion's, for an action's arguments, 64 KiB
-per `Bytes` value (one SPI transaction) and 256 KiB per request, so the I2C and SPI payloads fit.
+I2C transaction, 64 KiB per SPI transaction and 64 claims.
 
 ```json
 POST /v1/peripherals/io/actions
 {"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output", "value": false, "ttl_ms": 60000}}
-→ {"action_id": "helios-api.1760000000000.0", "resource": "lemnos_raw_raze_io", "done": true,
+→ {"action_id": "helios-api.1760000000000.0", "resource": "lemnos.raw", "done": true,
    "result": {"action_kind": "gpio.claim", "status": "applied", "data": "gpio-1", "error": null, "observed_at_ms": 1760000000000}}
 {"kind": "gpio.set", "arg": {"claim": "gpio-1", "value": true}}
 {"kind": "i2c.transfer", "arg": {"bus": "i2c-1", "address": 80, "ops": [{"write": [16]}, {"read": 2}]}}
 ```
 
-`GET /v1/peripherals/io` lists the live claims: `{id, kind, target, expires_at_ms, held,
-direction, value, edges, last_edge: {rising, timestamp_ns, seq}, period_ns, duty_ns, enabled}`.
-Edges on claimed inputs (`edge` set) are counted per claim and published at most every
-reading interval (`HELIOS_PERIPHERALS_LEMNOSD_READING_MS`, 250 ms): watch SSE `gpio` events
-([WebSocket and SSE](/api/websockets)); `seq` and `edges` show edges that fell between two
-events.
+`GET /v1/peripherals/io` says whether the board admits HeliOS (`available`), whether helios-api
+is connected to lemnosd (`connected`), and lists the live claims: `{id, kind, target,
+expires_at_ms, held, direction, value, edges, last_edge: {rising, timestamp_ns, seq}, period_ns,
+duty_ns, enabled}`. A claim made, changed or ended, and edges on claimed inputs (`edge` set,
+counted per claim), are SSE `gpio` events (`{id, change, value}`, at most every 50 ms;
+[WebSocket and SSE](/api/websockets)); `seq` and `edges` show edges that fell between two events.
 
 **Safety model.**
 
@@ -701,11 +694,11 @@ events.
   channel another client holds fails with "another client holds it".
 - **Claims are leases.** Every claim has a time to live (`ttl_ms`, default 30 s, 1 s to 10 min).
   Each action naming it renews it; `raw.renew` only renews. When it runs out,
-  helios-peripherals releases it, so a client that goes away never holds a line longer than its
+  helios-api releases it, so a client that goes away never holds a line longer than its
   lease.
-- **Claims end with the connection.** When helios-peripherals stops (or crashes), its lemnosd
+- **Claims end with the connection.** When helios-api stops (or crashes), its lemnosd
   connection closes and lemnosd ends every claim. Claims do not survive a lemnosd restart:
-  helios-peripherals claims each live lease again with its last settings when lemnosd is back
+  helios-api claims each live lease again with its last settings when lemnosd is back
   (`held` is `false` meanwhile); a claim lemnosd refuses then ends.
 - **Safe states.** A released line goes to the claim's `on_release`, else the board's
   `[[lines]] safe` (`input`, `low`, `high`), else input with the bias off (high impedance); a

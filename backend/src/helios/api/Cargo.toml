@@ -89,6 +89,8 @@ helios-calibration-wire = { path = "../calibration-wire" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The real lemnosd over mock hardware, for raw access (`lemnos_raw`).
+lemnosd = { workspace = true, features = ["mock"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # Paused time for timer tests (`fan_override`).
 tokio = { workspace = true, features = ["test-util"] }

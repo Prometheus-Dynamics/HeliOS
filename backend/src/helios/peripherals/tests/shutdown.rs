@@ -19,8 +19,6 @@ fn sigterm_stops_helios_peripherals_within_the_deadline() {
         .env("HELIOS_PERIPHERAL_STREAM_DIR", dir.path().join("streams"))
         .env("ORION_NODE_IPC_SOCKET", dir.path().join("orion.sock"))
         .env("ORION_NODE_IPC_STREAM_SOCKET", dir.path().join("orion-stream.sock"))
-        .env("HELIOS_PERIPHERALS_LEMNOSD_SOCKET", dir.path().join("lemnosd.sock"))
-        .env("HELIOS_PERIPHERALS_LEMNOSD_WAIT_MS", "50")
         .env("HELIOS_ENABLE_LINUX_PROBES", "false");
     let report = stop_on_sigterm(command, "failed to register provider/executor identities", Duration::from_secs(20)).expect("the service stops");
     assert!(report.status.success(), "exit status {:?}:\n{}", report.status, report.log);
