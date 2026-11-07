@@ -2,7 +2,8 @@
 //! facts (the tags, the field pose, the calibration's views) come from the event stream, which
 //! the collector subscribes to while the LEDs are on. Slow facts (Orion's engine workloads and
 //! the engine's runtime labels, the robot's NetworkTables connection, the calibration sessions,
-//! the recorder, the calibrations) are read once a second.
+//! the recorder, the calibrations) are read once a second. Robot code counts as not connected as
+//! soon as the link under the server's route is down (`link`), before the TCP session notices.
 //!
 //! Two inputs are not published yet and read as absent: the robot's enable state
 //! (`helios.robot.enabled=true` on `engine.runtime.<node>`) and the camera's lux
@@ -14,6 +15,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
+use super::link;
 use super::detections::{Detections, multi_tag_valid, parse_detections, pick_calibration, tag_observations};
 use super::settings::LedSettings;
 use super::states::{CALIBRATION_VIEWS, Calibration, Facts};
@@ -147,7 +149,11 @@ async fn sample_slow(state: &SharedState) -> Slow {
     let nt4 = state.store.nt4_settings().await.unwrap_or_default();
     let controller = state.store.controller_facts().await.unwrap_or_default();
     // Robot code's server is known: the user's, or the robot controller's.
-    let wanted = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value.is_some();
+    let server = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value;
+    let wanted = server.is_some();
+    // The link under the server's route is down (the USB gadget's host gone, no carrier): robot
+    // code is not connected, whatever the TCP session still says.
+    let link_down = server.as_deref().and_then(link::server_ip).is_some_and(|ip| link::route_down(ip, std::path::Path::new("/sys")));
     // Each camera's calibrations, turned into the orientation its frames are read out in now.
     for (camera, calibrations) in state.store.calibrations().await.unwrap_or_default() {
         let orientation = Orientation::from_settings(&state.store.camera_settings(&camera).await.unwrap_or_default());
@@ -160,7 +166,7 @@ async fn sample_slow(state: &SharedState) -> Slow {
     let Ok(view) = state.orion.view().await else { return slow };
     let runtime = view.resources.get(&format!("engine.runtime.{}", state.config.node_id));
     let labels: &[String] = runtime.map(|resource| resource.labels.as_slice()).unwrap_or(&[]);
-    slow.robot_missing = wanted && label_values(labels, "helios.nt4.connected").first() != Some(&"true");
+    slow.robot_missing = wanted && (link_down || label_values(labels, "helios.nt4.connected").first() != Some(&"true"));
     slow.robot_enabled = label_values(labels, "helios.robot.enabled").first() == Some(&"true");
     slow.lux = label_values(labels, "helios.camera.lux").first().and_then(|lux| lux.parse().ok());
     let engines = view.workloads.values().filter(|workload| workload.runtime_type.as_str() == ENGINE_RUNTIME);

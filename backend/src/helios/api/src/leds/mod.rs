@@ -18,6 +18,7 @@ pub mod collector;
 pub mod detections;
 pub mod director;
 pub mod frame;
+pub mod link;
 pub mod ring;
 pub mod settings;
 pub mod spots;
