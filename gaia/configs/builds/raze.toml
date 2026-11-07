@@ -145,7 +145,7 @@ rev = "7ef0aa183ab9ce66e4a69cdf603735daf4771287"
 # DmaHeap::allocate_importable, IPC gap fixes on protocol 1, the 0660 lemnos:lemnos socket.
 # Board-tested with Atlas fa0cac3 (all six lemnosd clients connect). backend/Cargo.lock's
 # lemnos-ipc moves in the joint Daedalus/Styx/Lemnos lock bump (protocol 1 unchanged).
-# Lemnos 70a6d6e (2026-11-07, backend/Cargo.lock's pin): kernel-modules/lemnos (lemnos.ko,
+# Lemnos cda0894 (2026-11-07, backend/Cargo.lock's pin): kernel-modules/lemnos (lemnos.ko,
 # lemnos-module.toml), 0-alloc lemnosd loops, inotify watches, lemnos-orion's timed fan hold
 # (`for_ms`). Earlier, Lemnos 80d5d1e (2026-11-06, the joint round): lemnosd's GPU lease (`lemnos-ctl gpu run`),
 # the 0-alloc steady state, read ids (FEATURE_READ_ID) and each light's current owner after
@@ -154,7 +154,7 @@ rev = "7ef0aa183ab9ce66e4a69cdf603735daf4771287"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "70a6d6e433774c1a4c5fa92f759c8327ec5ba06e"
+rev = "cda0894c01e991763c26f40c49bb50305f6c39f5"
 
 # Orion dev 1996c47 (protocol 1, the backend/Cargo.toml pin; PEER_AUTO_TRUST is off or private-link). Earlier, 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
