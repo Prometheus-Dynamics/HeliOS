@@ -180,6 +180,9 @@ impl Worker {
                         if let Err(error) = &result {
                             debug!(action = kind, error = %error, "raw action failed");
                         }
+                        // The status shows what the action did before its caller hears back, so
+                        // a status read after the reply never shows a released claim.
+                        self.flush();
                         let _ = reply.send(result);
                     }
                     Err(true) => return self.shutdown(),
