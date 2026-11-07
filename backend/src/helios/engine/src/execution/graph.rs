@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use daedalus::{
     data::model::Value,
-    engine::{DEFAULT_FRAME_OVERHEAD_WINDOW, Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
+    engine::{Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
     planner::{GraphDocument, HostInputPolicy, RefreshPolicy},
     runtime::{BackpressureStrategy, HostBridgeManager, RuntimeEdgeExplanation, handler_registry::HandlerRegistry, plugins::PluginRegistry},
 };
@@ -207,6 +207,10 @@ fn host_alias(document: &GraphDocument) -> String {
 
 /// Ticks per recorded frame-overhead sample (`HostGraph::set_frame_overhead_sampling`).
 const FRAME_OVERHEAD_SAMPLE_EVERY: u32 = 16;
+/// Recorded ticks the frame-overhead window keeps. With one tick in 16 recorded, 128 cover 68 s
+/// at 30 fps (17 s at 120 fps), plenty for its p50/p99. Daedalus's default of 512 spans 4.5
+/// minutes here and costs 1.5 MiB per graph (3 KiB a record), 384 KiB at 128.
+const FRAME_OVERHEAD_WINDOW: usize = 128;
 
 /// Whether a node of the graph asks for the GPU: a `backend` setting of `gpu` (Eidos's
 /// `eidos:compute_backend`, e.g. dense.map's plane sweep). The user chooses per node; the engine
@@ -232,7 +236,7 @@ fn daedalus_engine_config(settings: GraphSettings, gpu: bool) -> DaedalusEngineC
     let gpu = if gpu { GpuBackend::Device } else { GpuBackend::Cpu };
     let mut engine_config = DaedalusEngineConfig { gpu, ..DaedalusEngineConfig::default() }.with_metrics_level(settings.metrics_level);
     if settings.metrics_level != MetricsLevel::Off {
-        engine_config = engine_config.with_frame_overhead(DEFAULT_FRAME_OVERHEAD_WINDOW);
+        engine_config = engine_config.with_frame_overhead(FRAME_OVERHEAD_WINDOW);
     }
     engine_config.planner.enable_gpu = false;
     engine_config.runtime.mode = RuntimeMode::Serial;
