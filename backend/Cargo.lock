@@ -705,7 +705,6 @@ dependencies = [
  "daedalus-transport",
  "paste",
  "serde",
- "tracing",
 ]
 
 [[package]]
@@ -726,7 +725,6 @@ dependencies = [
  "serde_path_to_error",
  "spin",
  "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]

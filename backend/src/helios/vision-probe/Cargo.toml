@@ -16,7 +16,7 @@ test = false
 path = "src/main.rs"
 
 [dependencies]
-daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"] }
+daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics", "threads"] }
 helios-layout = { path = "../layout" }
 styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders", "daedalus"] }
 serde_json = { workspace = true }
