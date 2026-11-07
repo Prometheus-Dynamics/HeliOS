@@ -154,7 +154,7 @@ rev = "9994e09c300178cc7a1d2f09053b376c58681526"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "8f88a6b51c43b0737c07eea3a8fe53439295113c"
+rev = "ad72aecf594c24c1c5fc9604a8261c4325addf19"
 
 # Orion dev 1996c47 (protocol 1, the backend/Cargo.toml pin; PEER_AUTO_TRUST is off or private-link). Earlier, 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
@@ -170,7 +170,7 @@ rev = "8f88a6b51c43b0737c07eea3a8fe53439295113c"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "9b3dd3199cf8a3abddc56c9f983ed881267e763e"
+rev = "3b5f693c758db51bf5c5bbf1782199656b8ed94b"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]
