@@ -399,6 +399,42 @@ fn eidos_plugin_library_installs_through_the_rust_abi() {
     plugins.registry().check_document(&document).expect("requires are installed");
 }
 
+/// `HELIOS_ENGINE_PLUGIN_INSTALL=stable`: the same-build Eidos plugin installs through Daedalus's
+/// stable path. The probe reports how far the AprilTag graph gets there (install, compile, a
+/// frame); the stored graphs move onto this path once it carries them whole.
+#[test]
+fn eidos_plugin_library_installs_through_the_stable_path_on_request() {
+    let mut loaded = crate::plugins::load_plugins_as(&[eidos_plugin_path()], crate::plugins::PluginInstall::Stable).expect("load the Eidos plugin library");
+    let eidos = loaded.libraries.iter().find(|library| library.metadata().plugin_name.as_deref() == Some("eidos")).expect("eidos plugin loaded");
+    assert_eq!(eidos.install_path(), daedalus::dylib::InstallPath::Stable);
+    loaded.registry.install_plugin(&EngineTestPlugin::new()).expect("install test plugin");
+    let mut metadata = loaded.builtins.clone();
+    metadata.extend(loaded.libraries.iter().map(|library| library.metadata().clone()));
+    metadata.push(LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None });
+    let plugins = TestPlugins { loaded, metadata };
+    let document = daedalus::planner::GraphDocument::from_json(APRILTAG_GRAPH_DOCUMENT).expect("document");
+    plugins.registry().check_document(&document).expect("requires are installed");
+    if std::env::var_os("HELIOS_STABLE_PROBE").is_none() {
+        return;
+    }
+    let mut apriltag = workload("workload.apriltag", APRILTAG_GRAPH_DOCUMENT.into(), Vec::new());
+    apriltag.plugin_requirements = vec![PluginRequirement { plugin_name: "eidos".into(), version: None }];
+    let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &apriltag, &["frame".to_string()], GraphSettings { metrics_level: MetricsLevel::Detailed });
+    let graph = match compiled {
+        Ok(graph) => graph,
+        Err(error) => panic!("stable path: the AprilTag graph does not compile: {error}"),
+    };
+    let (sender, receiver) = test_camera();
+    let mut driver = WorkloadDriver::start(apriltag, graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
+        .expect("start driver");
+    sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 586, 1)).expect("send frame");
+    wait_for_within(Duration::from_secs(10), "the frame to be processed", || driver.stats().ticks_processed == 1 || driver.stats().ticks_failed > 0);
+    let (session, artifacts) = driver.snapshot();
+    eprintln!("stable path session: {:?} {:?}", session.status, session.message);
+    let detections = artifacts.iter().find(|artifact| artifact.kind == "host_output:detections").and_then(|artifact| artifact.message.clone());
+    eprintln!("detections: {detections:?}");
+}
+
 #[test]
 fn graph_documents_are_eidos_templates() {
     let plugins = TestPlugins::load();

@@ -14,7 +14,7 @@ use crate::{
     config::EngineConfig,
     execution::{ExecutionPlugins, GraphSettings, ResidentExecutionSet},
     model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, now_ms},
-    plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins},
+    plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins_as},
     provider::{EnginePublishError, OrionEnginePublisher},
     workloads::{WorkloadDecodeError, decode_assigned_workload},
 };
@@ -259,7 +259,7 @@ impl EngineApp {
             warn!("no Daedalus plugins discovered in configured plugin dirs");
         }
 
-        let mut load_result = load_plugins(&plugin_paths)?;
+        let mut load_result = load_plugins_as(&plugin_paths, self.config.plugin_install)?;
         log_loaded_plugins(&load_result);
         match crate::plugins::catalog::write_catalog(&load_result.registry, &self.config.catalog_path) {
             Ok(path) => load_result.catalog_path = Some(path),

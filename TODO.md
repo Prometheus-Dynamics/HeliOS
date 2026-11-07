@@ -31,7 +31,10 @@ hold up the leap.
       paths until it is updated. It came back by itself after a SystemCore power-cycle, and after a
       Raze-only reboot (updates back about 38 s later, slot update included). The latency entry
       now runs from the sensor timestamp, not the tick (2f811b63). Written, untested on board: a
-      pose with a tag in view. Blocked by: a tag in front of a camera (none on the bench).
+      pose with a tag in view. Raze #1 now faces a 36h11 tag (id 16, about 360 px across, sharp),
+      but the Eidos detector reports no detection and no rejected candidate on it at pyramid level
+      1 or 0 (2026-11-06; a 5 s recording of the graph's own frames shows the tag clearly, sent to
+      Eidos). Blocked by: Eidos detecting that tag.
 - [x] **Robot time.** Done (Orion 1996c47, d363bdb9, dev.928 on Raze #1): `capture_time_us` is on
       the NT server's clock and is not published before the first clock sample. Over 370 s (six RTT
       sawtooth cycles, 11,104 values) against the WPILib server on the SystemCore, arrival less
@@ -43,7 +46,7 @@ hold up the leap.
       Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
       self-calibration (fd343ffc). On dev.926 Raze #1's map pipeline runs and sits in its window at
       0 of 30 views. Written, untested on board: self-calibration converging from it on the Raze.
-      Blocked by: someone moving the camera around tags; the bench has no tag in view.
+      Blocked by: the same Eidos miss on Raze #1's tag 16 (no tag, no views), then moving the camera.
 - [x] **SystemCore coexistence.** Done on dev.926 next to the WPILib robot and Limelight's services:
       installs, runs, uninstalls and reinstalls with no failed units, and the robot stays active.
       HeliOS is on :5880, WPILib on :5810 and Limelight on 5800-5837. Removing the package leaves only
@@ -100,7 +103,15 @@ library (Gaia's A/B: +26% per tick across a boundary). HeliOS's processes stay s
 - [ ] **Plugins on Daedalus's stable path.** helios-engine loads Eidos as a cdylib through the
       Daedalus stable plugin path, not the Rust-ABI path; the shared form only where a plugin is
       built outside the image. Done when: the Raze image runs the stored graphs on it with the
-      per-tick cost unchanged on the CM5.
+      per-tick cost unchanged on the CM5. Started: `HELIOS_ENGINE_PLUGIN_INSTALL=stable` forces the
+      stable path for the same-build plugin. On Daedalus ce45a6a the AprilTag graph installs and
+      compiles, then its first tick fails: the frame payload carries no foreign handle, so it
+      crosses as a descriptor Eidos cannot turn back into a `FrameLease` (probe:
+      `HELIOS_STABLE_PROBE=1`, test `eidos_plugin_library_installs_through_the_stable_path_on_request`).
+      Fix, per Daedalus: Styx's `frame_payload` builds the payload with
+      `Payload::providing::<FrameLease, FrameInterface>` (Daedalus f759792; asked of Styx), and
+      the Eidos plugin's registry gets Styx's `daedalus:frame` to `FrameLease` adapter (Styx
+      025f346). HeliOS needs only the joint bump; then measure the ~15-node graph per node.
 - [ ] **Thin clients.** Each big library lives in one process, and the others reach it through a
       thin client.
 - [ ] **Drop direct Eidos use from `helios-api`.** Follows from thin clients: helios-api asks the

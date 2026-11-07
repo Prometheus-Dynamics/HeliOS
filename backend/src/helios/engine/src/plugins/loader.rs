@@ -39,25 +39,59 @@ pub struct PluginLoadResult {
     pub catalog_path: Option<PathBuf>,
 }
 
+/// How plugin libraries install (`HELIOS_ENGINE_PLUGIN_INSTALL`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PluginInstall {
+    /// Daedalus's choice: the Rust ABI for a plugin from the engine's own build, the stable path
+    /// for one from another toolchain.
+    #[default]
+    Auto,
+    /// The stable path for every plugin, also one from the engine's own build (Daedalus's
+    /// `install_into_as`), to measure what the stable path costs a real graph.
+    Stable,
+}
+
+/// `auto` or `stable` (case-insensitive).
+pub fn parse_plugin_install(value: &str) -> Option<PluginInstall> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" | "" => Some(PluginInstall::Auto),
+        "stable" => Some(PluginInstall::Stable),
+        _ => None,
+    }
+}
+
 pub fn load_plugins(paths: &[PathBuf]) -> Result<PluginLoadResult, PluginLoadError> {
+    load_plugins_as(paths, PluginInstall::Auto)
+}
+
+pub fn load_plugins_as(paths: &[PathBuf], install: PluginInstall) -> Result<PluginLoadResult, PluginLoadError> {
     // Host bridges are per workload: each compiled graph gets its own `HostBridgeManager`.
     let mut registry = PluginRegistry::new();
     // Styx frames first: every plugin taking a `FrameLease` relies on its type key.
     registry.install(&StyxFramesPlugin::new())?;
     let builtins = install_builtin_plugins(&mut registry)?;
-    let libraries = paths.iter().map(|path| load_plugin_library(path, &mut registry)).collect::<Result<Vec<_>, _>>()?;
+    let libraries = paths.iter().map(|path| load_plugin_library(path, &mut registry, install)).collect::<Result<Vec<_>, _>>()?;
 
     Ok(PluginLoadResult { builtins, libraries, registry, catalog_path: None })
 }
 
-fn load_plugin_library(path: &Path, registry: &mut PluginRegistry) -> Result<LoadedPluginLibrary, PluginLoadError> {
+fn load_plugin_library(path: &Path, registry: &mut PluginRegistry, install: PluginInstall) -> Result<LoadedPluginLibrary, PluginLoadError> {
     #[allow(unsafe_code)]
     let library = unsafe { PluginLibrary::load(path) }.map_err(|source| PluginLoadError::Library { path: path.to_path_buf(), source: Box::new(source) })?;
     // Plugins from the engine's own cargo build install through the Rust ABI, with their Rust
     // types (`FrameLease`, the plugin's hand-off types). A plugin from another toolchain falls
     // back to Daedalus's stable path, which carries schema nodes and `Value`s but no Rust types.
-    let install_path = library.install_into(registry).map_err(|source| PluginLoadError::Library { path: path.to_path_buf(), source: Box::new(source) })?;
-    if install_path != InstallPath::RustAbi {
+    let error = |source| PluginLoadError::Library { path: path.to_path_buf(), source: Box::new(source) };
+    let install_path = match install {
+        PluginInstall::Auto => library.install_into(registry).map_err(error)?,
+        PluginInstall::Stable => {
+            library.install_into_as(registry, InstallPath::Stable).map_err(error)?;
+            InstallPath::Stable
+        }
+    };
+    if install == PluginInstall::Stable {
+        tracing::info!(path = %path.display(), "plugin installed through the stable path (HELIOS_ENGINE_PLUGIN_INSTALL=stable)");
+    } else if install_path != InstallPath::RustAbi {
         tracing::warn!(path = %path.display(), ?install_path, reason = ?library.rust_abi().err(), "plugin was not built with this engine; frame and other Rust-typed ports will not work through the stable path");
     }
 

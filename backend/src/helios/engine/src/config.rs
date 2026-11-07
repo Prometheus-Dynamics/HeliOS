@@ -34,6 +34,8 @@ pub struct EngineConfig {
     /// published as each session's `metrics` artifact. Any level above `Off` also records
     /// Daedalus's frame-path overhead (`FrameOverheadReport`) into that artifact.
     pub metrics_level: MetricsLevel,
+    /// How plugin libraries install (`HELIOS_ENGINE_PLUGIN_INSTALL`, `auto` or `stable`).
+    pub plugin_install: crate::plugins::PluginInstall,
 }
 
 impl Default for EngineConfig {
@@ -61,6 +63,7 @@ impl EngineConfig {
             orion_ipc_stream_socket_path: layout.orion_stream_socket(),
             publish_interval_ms: DEFAULT_PUBLISH_INTERVAL_MS,
             metrics_level: MetricsLevel::Off,
+            plugin_install: crate::plugins::PluginInstall::Auto,
         }
     }
 
@@ -117,6 +120,13 @@ impl EngineConfig {
             match parse_metrics_level(value) {
                 Some(level) => config.metrics_level = level,
                 None => tracing::warn!(value = %value, "unknown HELIOS_ENGINE_METRICS_LEVEL; metrics stay off"),
+            }
+        }
+
+        if let Some(value) = env.get("HELIOS_ENGINE_PLUGIN_INSTALL") {
+            match crate::plugins::parse_plugin_install(value) {
+                Some(install) => config.plugin_install = install,
+                None => tracing::warn!(value = %value, "unknown HELIOS_ENGINE_PLUGIN_INSTALL; plugins install as Daedalus chooses"),
             }
         }
 
@@ -179,7 +189,10 @@ mod tests {
     fn config_defaults_metrics_off_and_reads_the_legacy_interval() {
         let config = EngineConfig::from_env_iter([("HELIOS_ENGINE_EXECUTION_INTERVAL_MS", "40")]).expect("config");
         assert_eq!(config.metrics_level, MetricsLevel::Off);
+        assert_eq!(config.plugin_install, crate::plugins::PluginInstall::Auto);
         assert_eq!(config.publish_interval_ms, 40);
+        let stable = EngineConfig::from_env_iter([("HELIOS_ENGINE_PLUGIN_INSTALL", "Stable")]).expect("config");
+        assert_eq!(stable.plugin_install, crate::plugins::PluginInstall::Stable);
         assert_eq!(parse_metrics_level("bogus"), None);
     }
 
