@@ -15,8 +15,8 @@ use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
-use super::link;
 use super::detections::{Detections, multi_tag_valid, parse_detections, pick_calibration, tag_observations};
+use super::link;
 use super::settings::LedSettings;
 use super::states::{CALIBRATION_VIEWS, Calibration, Facts};
 use crate::SharedState;
@@ -70,11 +70,12 @@ async fn collect(state: SharedState, facts: watch::Sender<Facts>, settings: watc
     let mut subscription: Option<broadcast::Receiver<ApiEvent>> = None;
     let mut fast = Fast::default();
     let mut slow = Slow::default();
+    let mut last_server: Option<String> = None;
     let mut tick: u64 = 0;
     loop {
         ticker.tick().await;
         if tick.is_multiple_of(SLOW_EVERY) {
-            slow = sample_slow(&state).await;
+            slow = sample_slow(&state, &mut last_server).await;
         }
         tick += 1;
         let now = now_ms();
@@ -144,12 +145,27 @@ fn absorb(fast: &mut Fast, event: &ApiEvent, now: u64) {
     }
 }
 
-async fn sample_slow(state: &SharedState) -> Slow {
+/// The robot code server the ring waits for: the resolved one (the user's, or the robot
+/// controller's), else the last one resolved. The controller's server comes from its link (the USB
+/// peer, its DHCP lease), so it vanishes exactly when the link drops; forgetting it then would turn
+/// "robot code lost" into "no robot wanted". Publishing switched off forgets it.
+fn wanted_server(resolved: Option<String>, nt4_enabled: bool, last: &mut Option<String>) -> Option<String> {
+    if !nt4_enabled {
+        *last = None;
+        return None;
+    }
+    if resolved.is_some() {
+        last.clone_from(&resolved);
+    }
+    last.clone()
+}
+
+async fn sample_slow(state: &SharedState, last_server: &mut Option<String>) -> Slow {
     let mut slow = Slow::default();
     let nt4 = state.store.nt4_settings().await.unwrap_or_default();
     let controller = state.store.controller_facts().await.unwrap_or_default();
-    // Robot code's server is known: the user's, or the robot controller's.
-    let server = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value;
+    let resolved = helios_robot::resolve(&nt4, controller.as_ref()).nt4_server.value;
+    let server = wanted_server(resolved, nt4.enabled, last_server);
     let wanted = server.is_some();
     // The link under the server's route is down (the USB gadget's host gone, no carrier): robot
     // code is not connected, whatever the TCP session still says.
@@ -249,5 +265,19 @@ mod tests {
         assert!(booting.starting && !booting.searching);
         let late = build(&Slow::default(), &Fast::default(), &settings(), STARTING_MS + 1, 0);
         assert!(!late.starting, "after the start-up window, with no engine, it is idle");
+    }
+
+    #[test]
+    fn a_robot_whose_link_dropped_stays_wanted() {
+        let mut last = None;
+        assert_eq!(wanted_server(None, true, &mut last), None, "no robot known yet: none wanted");
+        assert_eq!(wanted_server(Some("172.31.209.221".into()), true, &mut last).as_deref(), Some("172.31.209.221"));
+        // The link drops: the controller's facts (its lease) are gone, the robot is still wanted.
+        assert_eq!(wanted_server(None, true, &mut last).as_deref(), Some("172.31.209.221"));
+        // Another controller later: that one.
+        assert_eq!(wanted_server(Some("10.63.90.2".into()), true, &mut last).as_deref(), Some("10.63.90.2"));
+        // Publishing switched off: nothing wanted, and the old server is forgotten.
+        assert_eq!(wanted_server(None, false, &mut last), None);
+        assert_eq!(wanted_server(None, true, &mut last), None);
     }
 }
