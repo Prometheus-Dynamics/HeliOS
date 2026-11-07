@@ -90,7 +90,7 @@ Options:
   -h, --help            Show this help
 
 Env vars (optional):
-  RUSTFLAGS             Passed through to build scripts
+  RUSTFLAGS             Added to the target's config rustflags (as CARGO_TARGET_<TRIPLE>_RUSTFLAGS)
   HELIOS_DEVICE          Board address or host name (same as --device)
   BINARY_REVISION        Explicit revision string for binary activation
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
@@ -332,7 +332,10 @@ docker_run_cargo_build() {
   fi
 
   if [[ -n "${RUSTFLAGS// }" ]]; then
-    docker_args+=(-e "RUSTFLAGS=$RUSTFLAGS")
+    # Plain RUSTFLAGS would replace backend/.cargo/config.toml's target rustflags
+    # (ffmpeg cfgs, chacha20_force_neon); the per-target variable adds to them.
+    local target_env="CARGO_TARGET_$(tr '[:lower:]-' '[:upper:]_' <<<"$TARGET_TRIPLE")_RUSTFLAGS"
+    docker_args+=(-e "$target_env=$RUSTFLAGS")
   fi
 
   local cargo_prefix="cargo"
