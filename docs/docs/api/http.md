@@ -5,7 +5,6 @@ description: The HeliOS application API served by helios-api, for the HeliOS UI 
 
 <!--
   Hand-written. The source of truth is backend/src/helios/api (routes/mod.rs lists every route).
-  docs/scripts/generate-api-docs.mjs leaves this page alone while no OpenAPI input exists.
 -->
 
 `helios-api` is the application API of a HeliOS device. The HeliOS UI and Atlas Hardware

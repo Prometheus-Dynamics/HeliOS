@@ -239,7 +239,6 @@ const sidebars: SidebarsConfig = {
         'api/http',
         'api/websockets',
         'api/networktables',
-        'api/sdk',
       ],
     },
     {
@@ -248,7 +247,6 @@ const sidebars: SidebarsConfig = {
       items: [
         'reference/hardware',
         'reference/api',
-        'reference/sdk',
       ],
     },
   ],
