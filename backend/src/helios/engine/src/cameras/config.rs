@@ -29,10 +29,18 @@ pub struct CameraHostConfig {
     /// unit's `CPUAffinity=1 2 3` leaves core 0 on a CM5), so capture, ISP and 3A never share a
     /// core with a graph; every CPU when the engine may use them all.
     pub cpus: CameraCpus,
+    /// Clients each camera's capture has room for beyond those connected when it starts
+    /// (`HELIOS_CAMERA_SPARE_CLIENTS`). A client that finds no room restarts the capture to
+    /// join; each spare costs a set of capture buffers. See [`DEFAULT_SPARE_CLIENTS`].
+    pub spare_clients: usize,
     /// Styx's capture knobs (queue depth, buffers, accelerators). Each unset value keeps Styx's
     /// default.
     pub tuning: CameraTuning,
 }
+
+/// HeliOS's clients beyond the pipeline that starts a camera: the preview, and a restarted
+/// pipeline's new graph, which joins before the old one leaves.
+pub const DEFAULT_SPARE_CLIENTS: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CameraCpus {
@@ -95,6 +103,7 @@ impl CameraHostConfig {
             stream_dir: layout.ipc_dir().join("streams"),
             idle_pause_ms: 2_000,
             sensor_raw: false,
+            spare_clients: DEFAULT_SPARE_CLIENTS,
             cpus: CameraCpus::default(),
             tuning: CameraTuning::default(),
         }
@@ -117,6 +126,9 @@ impl CameraHostConfig {
         if let Some(value) = env.get("HELIOS_CAMERA_SENSOR_RAW") {
             config.sensor_raw = flag(value);
         }
+        if let Some(value) = env.get("HELIOS_CAMERA_SPARE_CLIENTS") {
+            config.spare_clients = value.trim().parse().map_err(|error| anyhow!("HELIOS_CAMERA_SPARE_CLIENTS={value}: {error}"))?;
+        }
         if let Some(value) = env.get("HELIOS_CAMERA_CPUS") {
             config.cpus = parse_cpus(value)?;
         }
@@ -136,7 +148,8 @@ impl CameraHostConfig {
             capture: self.capture_config(),
             cpus: self.resolve_cpus(allowed, online),
             rescan_ms: 1_000,
-            cameras: Vec::new(),
+            spare_clients: Some(self.spare_clients),
+            ..Default::default()
         }
     }
 
@@ -256,6 +269,7 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.stream_dir, PathBuf::from("/tmp/helios-ipc/streams"));
         assert_eq!(config.idle_pause_ms, 2_000);
+        assert_eq!(config.daemon_config(&[], &[]).spare_clients, Some(DEFAULT_SPARE_CLIENTS));
         assert!(!config.sensor_raw);
         assert_eq!(config.cpus, CameraCpus::OffTheEngine);
         assert_eq!(config.tuning, CameraTuning::default());
@@ -269,8 +283,10 @@ mod tests {
             ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
             ("HELIOS_CAMERA_SENSOR_RAW", "1"),
             ("HELIOS_CAMERA_CPUS", "0, 1"),
+            ("HELIOS_CAMERA_SPARE_CLIENTS", "3"),
         ])
         .expect("config");
+        assert_eq!(config.spare_clients, 3);
         assert!(!config.enabled);
         assert_eq!(config.stream_dir, PathBuf::from("/run/cams"));
         assert_eq!(config.idle_pause_ms, 3_000);

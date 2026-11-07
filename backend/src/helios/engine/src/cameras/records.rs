@@ -135,6 +135,8 @@ mod tests {
             name: device.identity.display.clone(),
             product: device.identity.product.clone(),
             keys: device.identity.keys.clone(),
+            backend: None,
+            node: None,
             socket: PathBuf::from(socket),
             transport: styx_camerad::TRANSPORT,
         }

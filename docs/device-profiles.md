@@ -129,6 +129,7 @@ none captures as Styx does, and the Raze sets none today.
 | `HELIOS_CAMERA_QUEUE_DEPTH` | `capture_queue_depth`: frames the capture queues | 1 or more | 2 |
 | `HELIOS_CAMERA_RAW_BUFFERS` | `native_raw_buffers`: the receiver's raw buffers on the software-ISP path (one raw frame each); no effect on the PiSP, whose front end keeps its own 6 (plus 4 for sensor raw) | 2 or more | 4 |
 | `HELIOS_CAMERA_OUTPUT_BUFFERS` | `native_output_buffers`: buffers per native ISP output | 2 or more | 6 |
+| `HELIOS_CAMERA_SPARE_CLIENTS` | Clients each capture has room for beyond those connected when it starts; a client that finds no room restarts the capture to join. Each spare is one more set of output buffers (~1.3 MB on the Raze at 1280x800 with pyramid levels) | 0 or more | HeliOS sets 2 (Styx: 1): the preview and a restarted pipeline's new graph, which joins before the old one leaves (with 1, a restart while the preview is open restarts the capture and loses ~4 frames) |
 | `HELIOS_CAMERA_ACCEL_ISP` | `accelerators.isp`: the native ISP (PiSP, Rockchip ISP) against the software ISP | `auto`, `off`, `required` | `auto` |
 | `HELIOS_CAMERA_ACCEL_SCALER` | `accelerators.scaler`: scaling to the requested size in hardware against the CPU | `auto`, `off`, `required` | `auto` |
 | `HELIOS_CAMERA_ACCEL_ENCODER` | `accelerators.encoder`: hardware encoders (V4L2 M2M, VA-API) against software ones | `auto`, `off`, `required` | `auto` |
