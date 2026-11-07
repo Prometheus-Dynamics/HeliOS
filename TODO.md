@@ -81,6 +81,11 @@ hold up the leap.
       at 17-18 MiB PSS after it. The Daedalus telemetry is recycled every tick (086d6658, on the
       `lemnos-80d5d1e` branch). Left: the engine's heap and a re-measured tags-only figure, both
       after the leap's link changes, which move these numbers anyway. Blocked by: nothing.
+- [x] **Sensor raw only while recording.** Done (99ea403e, c4477915): camera services no longer
+      force sensor raw on; a raw recording's client turns it on. Checked on Raze #2 with dev.961
+      (dev-image): 6 raw-sized buffers idle, 20 while a raw recording runs (187 frames, 0 dropped,
+      about 1.1 MB per frame), 6 again after it stops; the pipeline kept 30 fps, 0 reconnects. A
+      same-request redeploy is make-before-break, so Styx's shrink-on-leave replan restarts nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
       or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches. Partly
       done: `/v1/ota/*` is gone (Atlas dev calls none of it; the identity already named
