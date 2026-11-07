@@ -121,7 +121,7 @@ imports = [
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "7ef0aa183ab9ce66e4a69cdf603735daf4771287"
+rev = "9994e09c300178cc7a1d2f09053b376c58681526"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
@@ -154,7 +154,7 @@ rev = "7ef0aa183ab9ce66e4a69cdf603735daf4771287"
 id = "lemnos"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Lemnos.git"
-rev = "60b4bb98fec8fbc9f949fdbf7798c1d27ef9fe83"
+rev = "8f88a6b51c43b0737c07eea3a8fe53439295113c"
 
 # Orion dev 1996c47 (protocol 1, the backend/Cargo.toml pin; PEER_AUTO_TRUST is off or private-link). Earlier, 0703507 (Gaia config v3 packaging layers; code as 6a70758: one malloc arena with 64 KiB trim thresholds in its unit: 13.6 -> 8.4 MiB PSS on the CM5; lazy watcher snapshots; 9ad7991: the safe-mode unit is never enabled; earlier a380034: safe mode and its metric, robot-link peer trust in open mode, watches that resume after node restarts, retraction of a removed provider's observed records; ). Earlier, Orion protocol 5 (live-streams 414834b: the orion user at fixed uid 901; f8d767ac: push sessions, streams with history and backfill,
 # open read and USB auto-enroll; the same commit as the PhotonVision Raze images' orion-node).
@@ -170,7 +170,7 @@ rev = "60b4bb98fec8fbc9f949fdbf7798c1d27ef9fe83"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "40f72025be65b21a55586e8fffc9eb6482b4df95"
+rev = "9b3dd3199cf8a3abddc56c9f983ed881267e763e"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]
