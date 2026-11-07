@@ -207,9 +207,14 @@ default = "helios"
 # No log_buf_len: the kernel's default ring (128 KiB of text) holds a whole boot (~45 KB on a
 # Raze), and log_buf_len=8M cost 36 MB of RAM (8 MB of text + 28 MB of printk metadata). The
 # journal keeps the kernel's lines past the ring.
+# erofs.lzma_streams=1: one MicroLZMA decompressor instead of one per CPU. Each holds a 4 MB
+# dictionary (the 1 MiB pclusters), so 4 streams pinned 16 MB of vmalloc; one is 4 MB. A/B on
+# Raze #1 (2026-11-07): -12.3 MB VmallocUsed, boot 8.24 s vs 8.32 s, vision 120 fps at the same
+# engine IPC (0.797). Keep numa=fake from the firmware: numa=fake=1 saves 6 MB of BPF JIT pack
+# but costs the engine 38% more cycles (IPC 0.80 -> 0.58, 117 fps), the bank interleave lost.
 [inputs.slot_cmdline]
 kind = "string"
-default = "console=serial0,115200 console=tty1 rootwait printk.devkmsg=on"
+default = "console=serial0,115200 console=tty1 rootwait printk.devkmsg=on erofs.lzma_streams=1"
 
 # The cargo profile of the backend binaries: "release" (fat LTO, what ships and what timings
 # are measured on) or "dev-image" (thin LTO, faster relinks for quick device iterations).
