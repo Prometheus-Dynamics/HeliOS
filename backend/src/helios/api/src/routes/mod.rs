@@ -158,6 +158,7 @@ pub fn router(state: SharedState) -> Router {
 /// Writes every 5xx answer to the journal: the method, the route (its pattern when one matched),
 /// the status and the error the answer carries (`ApiError`), so a failure can be read from the log.
 async fn log_server_errors(request: Request, next: Next) -> Response {
+    crate::server::REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let method = request.method().clone();
     let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
     let response = next.run(request).await;

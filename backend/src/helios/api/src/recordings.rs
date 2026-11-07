@@ -99,7 +99,7 @@ fn pipeline_attachments(view: &StateView, camera: &str) -> Vec<Attachment> {
         .into_iter()
         .filter_map(|id| {
             let workload = view.workloads.values().find(|w| w.runtime_type.as_str() == pipelines::ENGINE_RUNTIME && pipelines::pipeline_id(w.workload_id.as_str()) == id)?;
-            let graph = pipelines::pipeline_dto(view, workload).graph?;
+            let graph = pipelines::pipeline_dto(view, workload).graph?.value().ok()?;
             attachment(&format!("{ATTACHMENT_PIPELINE_PREFIX}{id}"), &graph)
         })
         .collect()

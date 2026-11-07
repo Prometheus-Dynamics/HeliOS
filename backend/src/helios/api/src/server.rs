@@ -4,7 +4,11 @@
 //! within `GRACE`, so a client that never lets go cannot hold a stop (an upgrade waits on it, and
 //! systemd would SIGKILL it).
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use tokio::net::TcpListener;
 
@@ -16,10 +20,39 @@ pub const GRACE: Duration = Duration::from_secs(2);
 /// asked to stop. Its threads end with the process.
 pub const BLOCKING_GRACE: Duration = Duration::from_secs(2);
 
+/// Requests the router has taken (the outermost layer counts them), for `release_after_requests`.
+pub static REQUESTS: AtomicU64 = AtomicU64::new(0);
+/// How often the heap is given back after requests.
+pub const RELEASE_EVERY: Duration = Duration::from_secs(5);
+
+/// Every `RELEASE_EVERY` in which requests were answered, gives the heap's free pages back:
+/// a burst of requests (a UI opening, several viewers at once) leaves its freed buffers spread
+/// over the heap, where glibc keeps them (it only returns the top), so without this the burst's
+/// peak stays the process's size.
+async fn release_after_requests(stop: tokio_util::sync::CancellationToken) {
+    let mut seen = REQUESTS.load(Ordering::Relaxed);
+    let mut quiet_once = false;
+    loop {
+        tokio::select! {
+            () = stop.cancelled() => return,
+            () = tokio::time::sleep(RELEASE_EVERY) => {}
+        }
+        // Once more on the first quiet tick after them: a stream (events, a preview) frees its
+        // buffers when it ends, after the request that opened it.
+        let now = REQUESTS.load(Ordering::Relaxed);
+        if now != seen || quiet_once {
+            quiet_once = now != seen;
+            seen = now;
+            let _ = tokio::task::spawn_blocking(crate::host::release_heap).await;
+        }
+    }
+}
+
 /// Serves `state`'s router on `listener` until `state.shutdown` is cancelled, then returns once
 /// the connections have finished or `GRACE` has passed.
 pub async fn serve(listener: TcpListener, state: SharedState) -> std::io::Result<()> {
     let stop = state.shutdown.clone();
+    let _release = tokio::spawn(release_after_requests(stop.clone()));
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     let server = axum::serve(listener, app).with_graceful_shutdown(stop.clone().cancelled_owned());
     tokio::select! {

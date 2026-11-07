@@ -330,17 +330,19 @@ impl StateView {
         view
     }
 
-    /// `text`, the inline graph of workload `id`, parsed once for this view: every request that
-    /// shows the pipeline shares the tree (each one parsed ~100 KB of graph before).
-    pub fn graph(&self, id: &str, text: &str) -> Result<Arc<serde_json::Value>, serde_json::Error> {
+    /// `text`, the inline graph of workload `id`, read once for this view: every request that
+    /// shows the pipeline shares it (each one parsed ~100 KB of graph before), and the view keeps
+    /// the text as it came and an outline of its nodes, not the whole tree.
+    pub fn graph(&self, id: &str, text: &str) -> Result<Arc<Graph>, serde_json::Error> {
         let mut graphs = self.graphs.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hash = text_hash(text);
         if let Some((held, graph)) = graphs.get(id)
-            && held.as_str() == text
+            && *held == hash
         {
             return Ok(graph.clone());
         }
-        let graph = Arc::new(serde_json::from_str::<serde_json::Value>(text)?);
-        graphs.insert(id.to_string(), (text.to_string(), graph.clone()));
+        let graph = Arc::new(Graph::read(text)?);
+        graphs.insert(id.to_string(), (hash, graph.clone()));
         Ok(graph)
     }
 
@@ -349,9 +351,101 @@ impl StateView {
     }
 }
 
-/// The parsed graphs of a view. A copy of a view starts without them.
+/// The graphs of a view, by workload, with a hash of the text each was read from. A copy of a
+/// view starts without them.
 #[derive(Debug, Default)]
-struct Graphs(std::sync::Mutex<BTreeMap<String, (String, Arc<serde_json::Value>)>>);
+struct Graphs(std::sync::Mutex<BTreeMap<String, (u64, Arc<Graph>)>>);
+
+fn text_hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// A pipeline's graph document as the API shows it: the JSON text as stored (served verbatim,
+/// never re-encoded) and an outline with only what the API reads from it, each top-level node's
+/// `id` and its scalar `const_inputs` (a dictionary, a search setting, a detector limit), in the
+/// document's own shape (`{"graph": {"nodes": [..]}}`). Constants holding arrays, such as the
+/// field layout a multi-tag pose node carries (most of an AprilTag graph), stay in the text only.
+#[derive(Debug)]
+pub struct Graph {
+    raw: Box<serde_json::value::RawValue>,
+    outline: serde_json::Value,
+}
+
+impl Graph {
+    pub fn read(text: &str) -> Result<Self, serde_json::Error> {
+        #[derive(serde::Deserialize)]
+        struct Document {
+            #[serde(default)]
+            graph: Option<Nodes>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Nodes {
+            #[serde(default)]
+            nodes: Option<Vec<Node>>,
+        }
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Node {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            id: Option<serde_json::Value>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            const_inputs: Option<serde_json::Value>,
+        }
+        /// A constant's value the API can read: a scalar, or an object of scalars (a dictionary).
+        fn scalar(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Array(_) => false,
+                serde_json::Value::Object(fields) => fields.values().all(|field| !field.is_array() && !field.is_object()),
+                _ => true,
+            }
+        }
+        let raw = serde_json::value::RawValue::from_string(text.to_owned())?;
+        // `raw` is JSON; a document without `graph.nodes` (or with another shape) has no outline.
+        let outline = match serde_json::from_str::<Document>(raw.get()) {
+            Ok(Document { graph: Some(Nodes { nodes: Some(mut nodes) }) }) => {
+                for node in &mut nodes {
+                    if let Some(serde_json::Value::Array(entries)) = &mut node.const_inputs {
+                        // Entries are `[name, {type, value}]`.
+                        entries.retain(|entry| entry.get(1).and_then(|constant| constant.get("value")).is_none_or(scalar));
+                        entries.shrink_to_fit();
+                    }
+                }
+                serde_json::json!({ "graph": { "nodes": nodes } })
+            }
+            _ => serde_json::Value::Object(Default::default()),
+        };
+        Ok(Self { raw, outline })
+    }
+
+    /// What the API reads: `{"graph": {"nodes": [{id, const_inputs}, ..]}}`.
+    pub fn outline(&self) -> &serde_json::Value {
+        &self.outline
+    }
+
+    /// The document as stored.
+    pub fn text(&self) -> &str {
+        self.raw.get()
+    }
+
+    /// The whole document as a tree, for code that edits it (parsed on each call).
+    pub fn value(&self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::from_str(self.raw.get())
+    }
+}
+
+impl PartialEq for Graph {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw.get() == other.raw.get()
+    }
+}
+
+impl serde::Serialize for Graph {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.raw.serialize(serializer)
+    }
+}
 
 impl Clone for Graphs {
     fn clone(&self) -> Self {
@@ -442,6 +536,20 @@ mod tests {
         // The subscription ending: views are read again until it is back.
         latest.following = false;
         assert!(latest.current().is_none());
+    }
+
+    #[test]
+    fn a_graph_is_served_as_stored_and_outlined_by_its_nodes() {
+        let text = r#"{"format":"daedalus.graph","schema_version":1,"graph":{"nodes":[{"id":"eidos:detectors.apriltag","op":"x","metadata":{"summary":"big"},"const_inputs":[["dictionary",{"type":"String","value":"tag36h11"}]]},{"id":"sink"}],"edges":[[0,1]]}}"#;
+        let graph = Graph::read(text).expect("json");
+        assert_eq!(serde_json::to_string(&graph).expect("serialize"), text);
+        assert_eq!(
+            graph.outline(),
+            &serde_json::json!({"graph": {"nodes": [{"id": "eidos:detectors.apriltag", "const_inputs": [["dictionary", {"type": "String", "value": "tag36h11"}]]}, {"id": "sink"}]}})
+        );
+        assert_eq!(graph.value().expect("tree")["graph"]["edges"], serde_json::json!([[0, 1]]));
+        assert_eq!(Graph::read(r#"{"format":"x"}"#).expect("json").outline(), &serde_json::json!({}));
+        assert!(Graph::read("{not json").is_err());
     }
 
     #[test]

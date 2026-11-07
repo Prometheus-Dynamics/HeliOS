@@ -490,7 +490,7 @@ pub struct Pipeline {
     pub enabled: bool,
     /// Orion's observed state: pending, assigned, starting, running, stopped, completed, failed.
     pub state: String,
-    pub graph: Option<std::sync::Arc<serde_json::Value>>,
+    pub graph: Option<std::sync::Arc<crate::orion::Graph>>,
     pub graph_error: Option<String>,
     pub bindings: BTreeMap<String, Binding>,
     pub plugins: Vec<String>,
@@ -727,9 +727,10 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         message: state_field(record, "message"),
         observed_at_ms: record.state.as_ref().map(|s| s.observed_at_ms).unwrap_or_default(),
     });
-    let (search_mode, full_search_every) = graph.as_deref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
-    let tuning = graph.as_deref().and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
-    let dictionary = graph.as_deref().and_then(dictionary_of);
+    let outline = graph.as_deref().map(crate::orion::Graph::outline);
+    let (search_mode, full_search_every) = outline.and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
+    let tuning = outline.and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
+    let dictionary = outline.and_then(dictionary_of);
     let outputs = outputs_of(view, &workload_id);
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
@@ -1275,7 +1276,11 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
             PipelineSpec {
                 map: None,
                 name: pipeline.name,
-                graph: std::sync::Arc::unwrap_or_clone(pipeline.graph.ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?),
+                graph: pipeline
+                    .graph
+                    .ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?
+                    .value()
+                    .map_err(|error| ApiError::internal(format!("pipeline {id}: {error}")))?,
                 bindings: pipeline.bindings,
                 enabled: pipeline.enabled,
                 search_mode: None,
@@ -1531,7 +1536,7 @@ mod tests {
         assert_eq!(dto.revision, Some(3));
         assert_eq!(dto.bindings, spec.bindings);
         assert_eq!(dto.plugins, vec!["eidos".to_string()]);
-        let graph = dto.graph.expect("graph");
+        let graph = dto.graph.expect("graph").value().expect("json");
         assert_eq!(graph["format"], "daedalus.graph");
         assert_eq!(graph["graph"]["nodes"].as_array().map(Vec::len), Some(2));
         assert_eq!(pipelines_using(&view, "camera.front"), vec!["tags-front".to_string()]);
