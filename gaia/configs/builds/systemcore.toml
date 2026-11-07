@@ -1,5 +1,5 @@
 config = 3
-gaia_version = ">=2.0.1-dev"
+gaia_version = ">=2.0.4-dev"
 build_name = "helios-systemcore"
 version = "2026.2.0-dev.${project.commit_count}+${project.commit_short}"
 description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine (which serves the cameras) and its Eidos plugin, helios-diagnostics, orion-node, lemnosd, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
