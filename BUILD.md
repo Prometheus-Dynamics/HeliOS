@@ -43,14 +43,13 @@ builds from `gaia/docker/aarch64/Dockerfile.aarch64-rpi4` when missing) and Bun
 The only target is `raze` (`gaia/configs/builds/raze.toml`). It exposes a
 `profile` input: `base-os` or `full`.
 
-Before running Gaia, the script builds the UI (`cd ui && bun install
---frozen-lockfile && bun run build`) when `ui/build` is missing or older than
-its inputs (`FORCE_UI_BUILD=1` forces a rebuild).
+Gaia builds the UI itself (artifact `helios-ui`,
+`gaia/configs/payloads/ui-build.toml`: `bun install --frozen-lockfile && bun
+run build` in `ui/`, needs `bun`) and reuses it while `ui/` is unchanged.
 
-Direct Gaia invocation, from the repo root (build the UI first for `full`):
+Direct Gaia invocation, from the repo root:
 
 ```bash
-(cd ui && bun install --frozen-lockfile && bun run build)
 gaia validate gaia/configs/builds/raze.toml --set input.profile=full
 gaia plan gaia/configs/builds/raze.toml --set input.profile=full
 gaia run gaia/configs/builds/raze.toml --set input.profile=full

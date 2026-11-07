@@ -30,9 +30,6 @@ Output:   gaia/output/helios-<profile>-<target>/images/ (e.g. helios-full-raze)
 Raze device support comes from the Atlas device package (devices/raze), fetched
 at the rev pinned in $BUILDS_DIR/raze.toml. To use a local Atlas checkout:
   tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
-
-Env:
-  FORCE_UI_BUILD=1  Rebuild the UI (ui/build) even if its inputs are unchanged
 EOF
 }
 
@@ -42,26 +39,6 @@ if ! command -v gaia >/dev/null 2>&1; then
   echo "  cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --branch main gaia" >&2
   exit 1
 fi
-
-# The full profile stages ui/build (served by helios-api) as-is; rebuild it first
-# when it is missing or older than any of its inputs.
-ensure_ui_build() {
-  command -v bun >/dev/null 2>&1 || { echo "error: bun is required to build the UI (ui/)" >&2; exit 1; }
-  local stamp=ui/build/index.html
-  if [[ "${FORCE_UI_BUILD:-0}" != 1 && -f "$stamp" ]] &&
-    [[ -z "$(find ui/src ui/static ui/package.json ui/bun.lock ui/vite.config.ts ui/tsconfig.json -newer "$stamp" -print -quit 2>/dev/null)" ]]; then
-    return
-  fi
-  (cd ui && bun install --frozen-lockfile && bun run build)
-}
-
-# What the image ships of the UI: ui/build without mock/ (the offline demo's replay frames,
-# ~12 MB of JPEGs a device never serves). Staged from gaia/build/ui (gaia/configs/payloads/ui.toml).
-stage_ui_build() {
-  rm -rf gaia/build/ui
-  mkdir -p gaia/build/ui
-  (cd ui/build && tar --exclude=./mock -cf - .) | (cd gaia/build/ui && tar -xf -)
-}
 
 # --machine qemu: the simulated board's scene and camera spec, built for the host here (Gaia has no
 # build-time command step). gaia/build/qemu-sim/{scene.glb,sim-cameras} are staged by the qemu layer.
@@ -91,8 +68,6 @@ case "${1:-}" in
     usage
     ;;
   "")
-    ensure_ui_build
-    stage_ui_build
     exec gaia tui --builds-dir "$BUILDS_DIR"
     ;;
   *)
@@ -104,10 +79,6 @@ case "${1:-}" in
     if [[ $# -gt 0 && "$1" != -* ]]; then
       profile="$1"
       shift
-    fi
-    if [[ "$profile" == "full" ]]; then
-      ensure_ui_build
-      stage_ui_build
     fi
     args=()
     # --machine NAME (or --set input.machine=NAME) selects the machine; anything else goes to gaia as before.

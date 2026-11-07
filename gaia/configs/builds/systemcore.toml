@@ -10,7 +10,7 @@ target = "systemcore"
 # are in docs/devices/systemcore.md. Lemnos's lemnosd joins with the SystemCore board definition
 # (Lemnos packaging/boards/systemcore.toml): every device it lists is host-owned, so lemnosd reads
 # them through the host's interfaces and drives nothing.
-imports = ["../workspace/base.toml"]
+imports = ["../workspace/base.toml", "../payloads/ui-build.toml"]
 
 # The cargo profile of the backend binaries, as in raze.toml.
 [inputs.cargo_profile]
@@ -223,10 +223,10 @@ src = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
 dest = "usr/local/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
 mode = "0755"
 
-# The UI's static build (tools/build-os.sh writes gaia/build/ui, without the offline demo's frames).
+# The UI's static build (artifact helios-ui, payloads/ui-build.toml: without the offline demo's frames).
 [[image.assembly.files]]
 tree = "pkg-root"
-src_dir = "gaia/build/ui"
+src_dir = "${outputs.dir}/artifacts/helios-ui"
 dest = "usr/local/share/helios/ui/"
 
 [[image.assembly.files]]

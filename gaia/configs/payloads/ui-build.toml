@@ -1,0 +1,21 @@
+config = 3
+description = "The HeliOS UI's static build (ui/, SvelteKit with adapter-static, bun), as Gaia artifact helios-ui: imported by ui.toml (the Raze image) and builds/systemcore.toml (the ipk)."
+
+# Gaia builds ui/ itself (a command artifact) and reuses the build while ui/'s inputs are unchanged.
+# The image gets build/ without mock/ (the offline demo's replay frames, ~12 MB a device never serves).
+[[sources]]
+id = "ui-workspace"
+kind = "path"
+path = "ui"
+identity_ignore = ["build", "node_modules", ".svelte-kit"]
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "helios-ui"
+kind = "command"
+source = "ui-workspace"
+command = ["sh", "-c", "bun install --frozen-lockfile && bun run build"]
+collect = "build"
+collect_exclude = ["mock"]
+output_path = "${outputs.dir}/artifacts/helios-ui"

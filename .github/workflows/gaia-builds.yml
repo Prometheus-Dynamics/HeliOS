@@ -50,13 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # raze.toml stages gaia/build/ui (tools/build-os.sh builds it). Validation only
-      # checks that it exists; the image jobs build the real UI.
-      - name: Placeholder UI build
-        run: mkdir -p gaia/build/ui && echo '<!doctype html>' > gaia/build/ui/index.html
-
       - name: Validate raze.toml
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@2701492c4804758809248f288012a29953501a18
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
         with:
           config: gaia/configs/builds/raze.toml
           command: validate
@@ -65,7 +60,7 @@ jobs:
 
       - name: Validate systemcore.toml
         if: hashFiles('gaia/configs/builds/systemcore.toml') != ''
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@2701492c4804758809248f288012a29953501a18
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
         with:
           config: gaia/configs/builds/systemcore.toml
           command: validate
@@ -115,8 +110,13 @@ jobs:
           rustup toolchain install          # rust-toolchain.toml: 1.99.0
           rustup target add aarch64-unknown-linux-gnu
 
+      # Gaia builds the UI (artifact helios-ui) with bun.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - name: Build the SystemCore artifacts
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@2701492c4804758809248f288012a29953501a18
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
         with:
           config: gaia/configs/builds/systemcore.toml
           # dev-image: thin LTO, the faster link; this job checks that it builds.
@@ -157,7 +157,6 @@ jobs:
         env:
           CI: "true"
         run: |
-          # build-os.sh builds and stages the UI, and passes slot inputs only to builds that declare them.
           tools/build-os.sh systemcore \
             --set input.cargo_profile=${{ inputs.cargo_profile }} \
             --export "$RUNNER_TEMP/export/systemcore"

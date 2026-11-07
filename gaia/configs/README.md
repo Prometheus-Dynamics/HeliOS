@@ -152,8 +152,8 @@ source. HeliOS overrides them in later layers:
 
 ## The UI and the API: one port
 
-helios-api serves the UI's static build (`ui/build`, staged to
-`/usr/share/helios/ui` by `payloads/ui.toml`) and the API on `0.0.0.0:5800`,
+helios-api serves the UI's static build (artifact `helios-ui`, built by Gaia
+from `ui/` and installed to `/usr/share/helios/ui` by `payloads/ui.toml`) and the API on `0.0.0.0:5800`,
 the port the device identity's `manage_url` names
 (`http://<hostname>.local:5800/`). There is no separate web server.
 

@@ -1,20 +1,16 @@
 config = 3
-description = "UI payload layer: the HeliOS UI's static build (ui/, SvelteKit with adapter-static, built with bun by tools/build-os.sh), served by helios-api on :5800 next to the API."
+description = "UI payload layer: the HeliOS UI's static build (ui/, SvelteKit with adapter-static, built with bun by Gaia), served by helios-api on :5800 next to the API."
 
-[stage]
+imports = ["./ui-build.toml"]
 
-# tools/build-os.sh builds ui/ when it changed and copies ui/build to gaia/build/ui without
-# mock/ (the offline demo's replay frames, ~12 MB a device never serves).
-[[stage.files]]
-id = "ui-static-build"
-src = "gaia/build/ui"
+[[install]]
+id = "install-helios-ui"
+artifact = "helios-ui"
 dest = "/usr/share/helios/ui"
-origin = "static-asset"
+replace = true
 
 [image]
 kind = "buildroot"
 
 [image.feed]
-stage_files = [
-  "ui-static-build",
-]
+install_entries = ["install-helios-ui"]
