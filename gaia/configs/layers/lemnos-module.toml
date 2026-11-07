@@ -1,0 +1,7 @@
+config = 3
+description = "Lemnos's one kernel module, lemnos.ko (kernel-modules/lemnos of the locked Lemnos), built against the Raze kernel. It binds only where a device's driver_override names one of its drivers, so stock V4L2 stays the fallback. kernel-modules/lemnos-sensor-bridge is not shipped."
+target = "aarch64-linux"
+
+[[image.rootfs.out_of_tree_modules]]
+name = "lemnos"
+path = "${source.lemnos.path}/kernel-modules/lemnos"
