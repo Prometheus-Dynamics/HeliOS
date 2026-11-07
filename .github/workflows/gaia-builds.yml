@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Validate raze.toml
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@dac0d5953074983fdc7431d24e2ab6cbab1ec123
         with:
           config: gaia/configs/builds/raze.toml
           command: validate
@@ -60,7 +60,7 @@ jobs:
 
       - name: Validate systemcore.toml
         if: hashFiles('gaia/configs/builds/systemcore.toml') != ''
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@dac0d5953074983fdc7431d24e2ab6cbab1ec123
         with:
           config: gaia/configs/builds/systemcore.toml
           command: validate
@@ -116,7 +116,7 @@ jobs:
           bun-version: 1.4.2
 
       - name: Build the SystemCore artifacts
-        uses: Prometheus-Dynamics/Gaia-Image-Builder@9575134045e93018be4187a8aea4981f16193bd5
+        uses: Prometheus-Dynamics/Gaia-Image-Builder@dac0d5953074983fdc7431d24e2ab6cbab1ec123
         with:
           config: gaia/configs/builds/systemcore.toml
           # dev-image: thin LTO, the faster link; this job checks that it builds.
