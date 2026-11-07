@@ -53,6 +53,9 @@ pub struct RecorderSettings {
     /// lz4 chunk compression (the default), else uncompressed chunks.
     pub compression: bool,
     /// Encoded bytes waiting for the disk before frames and host messages are dropped and counted.
+    /// Every byte of it is heap while the disk is slower than the camera (raw frames at 30 fps are
+    /// ~60 MB/s, more than an SD card writes), so it is small by default (8 MiB, four raw frames):
+    /// a slow disk drops frames, counted, instead of taking the board's memory.
     pub queue_bytes: usize,
     /// Sample period of `/helios/imu`, `/helios/mag` and `/helios/power` (lemnosd subscriptions).
     pub imu_period_ms: u32,
@@ -93,7 +96,7 @@ impl RecorderSettings {
             max_fps: Some(30.0),
             frames: RecordFrames::Raw,
             compression: true,
-            queue_bytes: 64 * (MIB as usize),
+            queue_bytes: 8 * (MIB as usize),
             imu_period_ms: 20,
             mag_period_ms: 100,
             power_period_ms: 100,
@@ -156,7 +159,7 @@ mod tests {
         assert_eq!((settings.capture_last_seconds, settings.capture_last_cameras.len()), (10, 0));
         assert_eq!((settings.nt_control, settings.auto_record), (true, false));
         assert!(settings.compression);
-        assert!(settings.queue_bytes >= 64 * MIB as usize);
+        assert_eq!(settings.queue_bytes, 8 * MIB as usize);
         assert_eq!(settings.reserve_bytes, 2 * GIB);
         assert_eq!((settings.max_total_bytes, settings.guest_storage), (None, false));
     }

@@ -17,9 +17,10 @@ use crate::{error::RecorderError, settings::RecordFrames};
 
 /// How long opening the camera service's connection may take.
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
-/// Frames the camera service may queue for the recorder while the disk is busy (the recorder's own
-/// queue is `RecorderSettings::queue_bytes`).
-pub const CLIENT_QUEUE: usize = 8;
+/// Frames the camera service may queue for the recorder. Each one holds a camera buffer, and the
+/// recorder copies a frame into its own queue (`RecorderSettings::queue_bytes`) as soon as it has
+/// it, so two cover a late wakeup.
+pub const CLIENT_QUEUE: usize = 2;
 
 /// The frames a recording asks the camera service for, every frame (the recorder subsamples them
 /// to `max_fps`). Raw is the sensor's 16-bit Bayer, a companion of the processed capture (no

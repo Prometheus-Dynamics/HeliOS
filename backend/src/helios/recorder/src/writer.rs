@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// Bytes a clip may queue ahead of the disk (see [`PartWriter::wait_for_room`]).
-const CLIP_QUEUE_BYTES: u64 = 32 << 20;
+const CLIP_QUEUE_BYTES: u64 = 8 << 20;
 /// Clock samples on `/styx/clock` every second: frame clock to boot time, for offline alignment.
 const CLOCK_PERIOD: Duration = Duration::from_secs(1);
 
