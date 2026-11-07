@@ -129,6 +129,10 @@ pub struct ExecutionWorkload {
     /// Save requests so far (`map.save`). Each new value asks the running graph to save its map
     /// once (see `execution::map_io`); it does not restart the graph, so it is not compiled.
     pub map_save: u64,
+    /// Restart requests so far (`restart`). A new value rebuilds the graph like any compiled
+    /// change: the new graph connects to the camera while the old one still runs, so a restart
+    /// costs a frame or so instead of a stop and a start.
+    pub restart: u64,
 }
 
 /// A saved map a graph starts from (`docs/map-format.md` in Eidos): the map's id and the file on

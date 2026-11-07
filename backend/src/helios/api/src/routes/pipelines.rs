@@ -58,6 +58,8 @@ const HOST_OUTPUT_PREFIX: &str = "host_output:";
 const MAP_ID_KEY: &str = "map.id";
 const MAP_PATH_KEY: &str = "map.path";
 const MAP_SAVE_KEY: &str = "map.save";
+/// The workload config key of a pipeline's restart requests (see `restart`).
+const RESTART_KEY: &str = "restart";
 
 /// What a graph input takes: a resource (a camera's frames, by default) or another pipeline's
 /// host output (`source: "pipeline"`, see `pipeline_bindings`). Camera options apply to a camera.
@@ -938,8 +940,11 @@ async fn apply_spec(state: &SharedState, view: &StateView, id: &str, spec: &Pipe
     let document = validate_spec(spec, view, &state.config.node_id, layout.as_ref())?;
     let inputs = camera_inputs_for(&state.store, view, spec.bindings.iter()).await?;
     let (artifact, mut workload) = records_for(id, spec, &document, revision, &state.config.node_id, &inputs, layout.as_ref().map(|l| l.id.as_str()))?;
-    let saves = find_workload(view, id).map_or(0, map_saves);
+    let current = find_workload(view, id);
+    let saves = current.map_or(0, map_saves);
     write_map(&mut workload, map.as_deref().map(|map| (map, state.maps.file_path(map))), saves);
+    // A deploy keeps the restart count: going back to an older count would itself be a change.
+    set_restarts(&mut workload, current.map_or(0, restarts));
     state.orion.apply(vec![DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)]).await
 }
 
@@ -977,6 +982,18 @@ pub fn map_saves(workload: &WorkloadRecord) -> u64 {
 pub fn set_map_saves(record: &mut WorkloadRecord, saves: u64) {
     if let Some(config) = record.config.as_mut() {
         config.payload.insert(MAP_SAVE_KEY.into(), TypedConfigValue::Int(saves as i64));
+    }
+}
+
+/// The restart requests a pipeline's workload has had (`restart`).
+pub fn restarts(workload: &WorkloadRecord) -> u64 {
+    config_u64(workload, RESTART_KEY).unwrap_or(0)
+}
+
+/// Sets a pipeline's restart requests (`restart`) in its workload.
+pub fn set_restarts(record: &mut WorkloadRecord, restarts: u64) {
+    if let Some(config) = record.config.as_mut() {
+        config.payload.insert(RESTART_KEY.into(), TypedConfigValue::Int(restarts as i64));
     }
 }
 
@@ -1221,12 +1238,30 @@ pub async fn stop(State(state): State<SharedState>, Path(id): Path<String>) -> A
     set_desired(&state, &id, DesiredState::Stopped).await.map(Json)
 }
 
-/// Stop, then start again. Orion has no restart verb; the engine sees the workload leave and
-/// come back.
+/// Start the pipeline's graph again. A running pipeline gets a new `restart` count, which the
+/// engine rebuilds make-before-break: the new graph joins the camera before the old one leaves,
+/// so a restart costs about a frame (a stop and a start lost ~600 ms). A stopped one is started.
 pub async fn restart(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Pipeline>> {
-    set_desired(&state, &id, DesiredState::Stopped).await?;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    set_desired(&state, &id, DesiredState::Running).await.map(Json)
+    check_id(&id)?;
+    {
+        // Writes the whole workload record from this view: one pipeline writer at a time (see `deploy`).
+        let _writing = state.deploys.lock().await;
+        let view = state.orion.view().await?;
+        let mut workload = find_workload(&view, &id).cloned().ok_or_else(|| ApiError::not_found(format!("no pipeline {id}")))?;
+        bump_restart(&mut workload);
+        state.orion.apply(vec![DesiredStateMutation::PutWorkload(workload)]).await?;
+    }
+    fetch(&state, &id).await.map(Json)
+}
+
+/// A restart of `workload`: running, with one more restart request.
+fn bump_restart(workload: &mut WorkloadRecord) {
+    if workload.config.is_none() {
+        workload.config = Some(WorkloadConfig::new(ENGINE_CONFIG_SCHEMA));
+    }
+    let next = restarts(workload) + 1;
+    set_restarts(workload, next);
+    workload.desired_state = DesiredState::Running;
 }
 
 /// Back to the revision before the newest. Orion is written first and the history trimmed after,
@@ -1824,6 +1859,20 @@ mod tests {
             };
             validate_spec(&spec, &view_with_camera(), "node-local", None).unwrap_or_else(|error| panic!("{id} deploys: {error:?}"));
         }
+    }
+
+    #[test]
+    fn a_restart_bumps_the_count_and_runs_the_pipeline() {
+        let mut workload = WorkloadRecord::builder("workload.helios.pipeline.front", "helios.engine", "artifact.front").desired_state(DesiredState::Stopped).build();
+        assert_eq!(restarts(&workload), 0);
+        bump_restart(&mut workload);
+        assert_eq!((restarts(&workload), workload.desired_state), (1, DesiredState::Running), "a stopped pipeline starts");
+        bump_restart(&mut workload);
+        assert_eq!(restarts(&workload), 2, "each restart is a new count, so the engine rebuilds the graph");
+        // A deploy writes a new record and carries the count over (as `apply_spec` does).
+        let mut redeployed = WorkloadRecord::builder("workload.helios.pipeline.front", "helios.engine", "artifact.front").config(WorkloadConfig::new(ENGINE_CONFIG_SCHEMA)).build();
+        set_restarts(&mut redeployed, restarts(&workload));
+        assert_eq!(restarts(&redeployed), 2);
     }
 
     #[test]

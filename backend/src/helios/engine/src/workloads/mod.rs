@@ -25,6 +25,10 @@ struct EngineWorkloadConfig {
     /// The saved map the graph starts from, and the save requests (the API's pipeline `map`).
     #[serde(default)]
     map: MapConfig,
+    /// Restart requests so far (the API's pipeline restart). Each new value rebuilds the graph,
+    /// make-before-break, so the camera keeps streaming.
+    #[serde(default)]
+    restart: Option<u64>,
 }
 
 /// `map.*`: the saved map the graph's `map` input takes when it starts (`id` and `path` together),
@@ -182,6 +186,7 @@ pub fn decode_assigned_workload(record: &WorkloadRecord, node_id: &str) -> Resul
         nice: decoded.nice,
         map,
         map_save: decoded.map.save.unwrap_or(0),
+        restart: decoded.restart.unwrap_or(0),
     })
 }
 
@@ -451,6 +456,25 @@ mod tests {
         assert_eq!(context.get("mount.pitch_rad"), Some(&ContextValue::Number(-0.25)));
         let shape = decoded.compiled_shape();
         assert_eq!(shape.bindings[0].context.keys().collect::<Vec<_>>(), ["camera", "mount"], "values are pushed, only the groups count");
+    }
+
+    #[test]
+    fn a_restart_request_is_decoded_and_recompiles() {
+        let record = |restart: Option<i64>| {
+            let mut config = WorkloadConfig::new("schema.exec");
+            if let Some(restart) = restart {
+                config = config.field("restart", TypedConfigValue::Int(restart));
+            }
+            WorkloadRecord::builder(WorkloadId::new("workload.restart"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.restart"))
+                .desired_state(DesiredState::Running)
+                .assigned_to(NODE_ID)
+                .config(config)
+                .build()
+        };
+        let none = decode_assigned_workload(&record(None), NODE_ID).expect("decode");
+        let once = decode_assigned_workload(&record(Some(1)), NODE_ID).expect("decode");
+        assert_eq!((none.restart, once.restart), (0, 1));
+        assert_ne!(none.compiled_shape(), once.compiled_shape(), "a new restart count rebuilds the graph");
     }
 
     #[test]

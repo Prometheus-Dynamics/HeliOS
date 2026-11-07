@@ -399,7 +399,7 @@ artifact `artifact.pipeline.<id>` that carries the name and revision as labels.
 | `PUT` | `/v1/pipelines/{id}` | Create or replace from a pipeline spec (a new revision) |
 | `DELETE` | `/v1/pipelines/{id}` | Remove the workload, its artifact and its history |
 | `POST` | `/v1/pipelines/{id}/start` · `/stop` | Desired state Running or Stopped |
-| `POST` | `/v1/pipelines/{id}/restart` | Stop, then start. Orion has no restart verb |
+| `POST` | `/v1/pipelines/{id}/restart` | Starts the graph again: a new `restart` count in the workload, which the engine rebuilds make-before-break (the new graph joins the camera before the old one leaves), so a running pipeline loses about a frame. A stopped pipeline is started. A deploy keeps the count |
 | `POST` | `/v1/pipelines/{id}/rollback` | Redeploy the previous revision (409 when there is none) |
 | `GET` | `/v1/pipelines/{id}/revisions` | `[{revision, saved_at_ms, name}]`, newest first |
 | `PUT` | `/v1/pipelines/{id}/bindings/{input}` | Rebind one input (a binding object; makes a new revision) |

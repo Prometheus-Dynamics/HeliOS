@@ -270,6 +270,7 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
         nice: None,
         map: None,
         map_save: 0,
+        restart: 0,
     }
 }
 
@@ -1095,6 +1096,18 @@ fn a_same_request_redeploy_does_not_restart_the_capture() {
     assert!(replaced.artifacts.iter().any(|artifact| artifact.kind == "execution.plan" && artifact.message.as_deref().is_some_and(|plan| plan.contains("pass_renamed"))), "the new graph runs");
     wait_for("the old driver's client to leave", || service.stats().clients == 2);
     assert_eq!(service.stats().restarts, restarts, "the capture restarted on a same-request redeploy");
+
+    // A restart request (the same graph, a new `restart` count) rebuilds the graph the same way:
+    // a new driver, whose frame count starts again, and still no capture restart.
+    let frames = |snapshot: &ExecutionSnapshot| artifact_json(&snapshot.artifacts, "execution.telemetry")["frames_received"].as_u64().unwrap_or(0);
+    let before = sync_until(&mut resident, &execution, &second, Some(&state), "a few frames on the second graph", |snapshot| frames(snapshot) >= 20);
+    let mut third = second.clone();
+    third[0].restart = 1;
+    assert_ne!(third[0].compiled_shape(), second[0].compiled_shape(), "a restart request is a compiled change");
+    let rebuilt = sync_until(&mut resident, &execution, &third, Some(&state), "the restarted graph running", |snapshot| running(snapshot) && frames(snapshot) < frames(&before));
+    assert!(frames(&rebuilt) < frames(&before), "the restart built a new driver");
+    wait_for("the old driver's client to leave after the restart", || service.stats().clients == 2);
+    assert_eq!(service.stats().restarts, restarts, "the capture restarted on a pipeline restart");
     reading.store(false, std::sync::atomic::Ordering::Relaxed);
     reader.join().expect("the other client's reader");
 }
