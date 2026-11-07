@@ -139,8 +139,8 @@ impl EngineApp {
         };
         let mut current_workloads = loop {
             match subscription.next_event().await {
-                Ok(LocalExecutorEvent::Bootstrap(workloads)) => break workloads,
-                Ok(LocalExecutorEvent::WorkloadsChanged { workloads, .. }) => break workloads,
+                Ok(LocalExecutorEvent::Bootstrap(workloads)) => break Workloads::decode(workloads, &self.config.node_id),
+                Ok(LocalExecutorEvent::WorkloadsChanged { workloads, .. }) => break Workloads::decode(workloads, &self.config.node_id),
                 Err(error) => self.wait_for_orion(error).await?,
             }
         };
@@ -193,7 +193,7 @@ impl EngineApp {
         info!(
             node_id = %self.config.node_id,
             plugin_count = plugins.builtins.len() + plugins.libraries.len(),
-            assigned_workload_count = current_workloads.len(),
+            assigned_workload_count = current_workloads.records.len(),
             engine_socket = %self.config.engine_socket_path.display(),
             "helios-engine started"
         );
@@ -214,15 +214,16 @@ impl EngineApp {
                             .values()
                             .cloned()
                             .collect::<Vec<_>>();
-                        let decoded = decode_execution_workloads(&snapshot_workloads, &self.config.node_id, now_ms());
-                        let workloads_changed = workload_records_changed(&current_workloads, &snapshot_workloads);
+                        let workloads_changed = workload_records_changed(&current_workloads.records, &snapshot_workloads);
+                        if workloads_changed {
+                            current_workloads = Workloads::decode(snapshot_workloads, &self.config.node_id);
+                        }
                         let should_publish = workloads_changed
                             || relevant_binding_state_changed(
                                 current_state_snapshot.as_ref(),
                                 &snapshot,
-                                &decoded.runnable,
+                                &current_workloads.decoded.runnable,
                             );
-                        current_workloads = snapshot_workloads;
                         current_state_snapshot = Some(snapshot);
                         if should_publish {
                             self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
@@ -250,7 +251,7 @@ impl EngineApp {
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::WorkloadsChanged(workloads)) => {
-                            current_workloads = workloads;
+                            current_workloads = Workloads::decode(workloads, &self.config.node_id);
                             self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                         }
                         Some(RuntimeEvent::StateSnapshotUpdated(snapshot)) => {
@@ -261,13 +262,15 @@ impl EngineApp {
                                 .values()
                                 .cloned()
                                 .collect::<Vec<_>>();
-                            let workloads_changed = workload_records_changed(&current_workloads, &snapshot_workloads);
+                            let workloads_changed = workload_records_changed(&current_workloads.records, &snapshot_workloads);
+                            if workloads_changed {
+                                current_workloads = Workloads::decode(snapshot_workloads, &self.config.node_id);
+                            }
                             let should_publish = workloads_changed || relevant_binding_state_changed(
                                 current_state_snapshot.as_ref(),
                                 &snapshot,
-                                &decode_execution_workloads(&snapshot_workloads, &self.config.node_id, now_ms()).runnable,
+                                &current_workloads.decoded.runnable,
                             );
-                            current_workloads = snapshot_workloads;
                             current_state_snapshot = Some(*snapshot);
                             if should_publish {
                                 self.publish_snapshot_resilient(&plugins, execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
@@ -305,11 +308,11 @@ impl EngineApp {
         &self,
         plugins: &PluginLoadResult,
         execution_sessions: &mut ResidentExecutionSet,
-        workloads: &[WorkloadRecord],
+        workloads: &Workloads,
         state_snapshot: Option<&StateSnapshot>,
     ) -> Result<(), EngineRuntimeError> {
         let observed_at_ms = now_ms();
-        let decoded = decode_execution_workloads(workloads, &self.config.node_id, observed_at_ms);
+        let decoded = workloads.decoded_at(observed_at_ms);
         let fetched_snapshot;
         let state_snapshot = match state_snapshot {
             Some(snapshot) => Some(snapshot),
@@ -332,7 +335,7 @@ impl EngineApp {
             sessions: execution.sessions,
             artifacts: execution.artifacts,
         };
-        self.publisher.publish_snapshot(&snapshot, workloads).await?;
+        self.publisher.publish_snapshot(&snapshot, &workloads.records).await?;
         Ok(())
     }
 
@@ -355,7 +358,7 @@ impl EngineApp {
         &self,
         plugins: &PluginLoadResult,
         execution_sessions: &mut ResidentExecutionSet,
-        workloads: &[WorkloadRecord],
+        workloads: &Workloads,
         state_snapshot: Option<&StateSnapshot>,
     ) -> Result<(), EngineRuntimeError> {
         match self.publish_current_snapshot(plugins, execution_sessions, workloads, state_snapshot).await {
@@ -410,10 +413,34 @@ async fn watch_state_snapshots(mut subscription: ControlPlaneEventStream, event_
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct DecodedExecutionWorkloads {
     runnable: Vec<ExecutionWorkload>,
     decode_failures: Vec<ExecutionSessionState>,
+}
+
+/// The node's workload records and what they decode to, decoded once when they change: each
+/// publish (four a second) reuses them instead of decoding every record, and the inline graphs
+/// (often 100 KB+) are shared, not copied.
+struct Workloads {
+    records: Vec<WorkloadRecord>,
+    decoded: DecodedExecutionWorkloads,
+}
+
+impl Workloads {
+    fn decode(records: Vec<WorkloadRecord>, node_id: &str) -> Self {
+        let decoded = decode_execution_workloads(&records, node_id, now_ms());
+        Self { records, decoded }
+    }
+
+    /// The decoded workloads for a publish at `observed_at_ms` (cheap: the graphs are shared).
+    fn decoded_at(&self, observed_at_ms: u64) -> DecodedExecutionWorkloads {
+        let mut decoded = self.decoded.clone();
+        for failure in &mut decoded.decode_failures {
+            failure.observed_at_ms = observed_at_ms;
+        }
+        decoded
+    }
 }
 
 fn decode_execution_workloads(workloads: &[WorkloadRecord], node_id: &str, observed_at_ms: u64) -> DecodedExecutionWorkloads {

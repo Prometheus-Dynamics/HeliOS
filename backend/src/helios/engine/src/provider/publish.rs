@@ -143,7 +143,7 @@ fn session_resources<'a>(executor_id: &'a str, provider_id: &'a str, sessions: &
             // runs, so it is not copied into every publication.
             GraphRef::InlineSpec(value) => {
                 state = state
-                    .field("graph.digest", orion::control_plane::TypedConfigValue::String(graph_digest(value)))
+                    .field("graph.digest", orion::control_plane::TypedConfigValue::String(value.digest().to_string()))
                     .field("graph.bytes", orion::control_plane::TypedConfigValue::UInt(value.len() as u64))
             }
         }

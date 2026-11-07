@@ -263,7 +263,7 @@ fn workload(id: &str, graph_json: String, bindings: Vec<ExecutionBinding>) -> Ex
         workload_id: id.into(),
         artifact_id: format!("artifact.{id}"),
         assigned_node_id: "node-local".into(),
-        graph_ref: GraphRef::InlineSpec(graph_json),
+        graph_ref: GraphRef::InlineSpec(graph_json.into()),
         bindings,
         plugin_requirements: Vec::new(),
         cpu: None,

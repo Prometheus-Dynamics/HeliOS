@@ -30,6 +30,7 @@ use orion::{
 use tokio::sync::Notify;
 
 pub use bindings::STYX_FRAMES_ENDPOINT_SCHEME;
+pub(crate) use bindings::graph_takes_sliced_frames as takes_sliced_frames;
 pub use graph::GraphSettings;
 
 use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, LoadedPlugin};
@@ -167,7 +168,7 @@ impl ResidentExecutionSet {
             return Err(ExecutionError::Plan(format!("the pipeline inputs of {id} need a camera binding: the camera's frames pace the graph")));
         }
         if let GraphRef::InlineSpec(graph) = &workload.graph_ref
-            && bindings::graph_takes_sliced_frames(graph)
+            && graph.takes_sliced_frames()
         {
             resolved.frames.iter_mut().for_each(|spec| spec.sliced = true);
         }

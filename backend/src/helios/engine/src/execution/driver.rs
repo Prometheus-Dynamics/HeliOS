@@ -162,7 +162,7 @@ impl WorkloadDriver {
     /// graph) when there are any, otherwise from the bound resources.
     pub(super) fn start(
         workload: ExecutionWorkload,
-        graph: CompiledWorkloadGraph,
+        mut graph: CompiledWorkloadGraph,
         frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>,
         outputs_ready: Arc<Notify>,
         sinks: impl Into<OutputSinks>,
@@ -213,7 +213,8 @@ impl WorkloadDriver {
         }
         let stop = graph.host_graph.stop_handle();
         let serializers = graph.host_graph.value_serializers().clone();
-        let plan_message = graph.plan.to_string();
+        // Published as text: the plan's JSON tree is not kept for the graph's lifetime.
+        let plan_message = std::mem::take(&mut graph.plan).to_string();
         let input_ports = graph.input_ports.clone();
         let planning_ms = graph.planning_ms;
         // Made here, before the thread runs, so a stop at any point makes it readable.

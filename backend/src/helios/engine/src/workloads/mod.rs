@@ -210,8 +210,8 @@ fn decode_graph_ref(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> 
         GraphKind::Inline => decoded
             .graph
             .inline
-            .clone()
-            .map(GraphRef::InlineSpec)
+            .as_deref()
+            .map(|json| GraphRef::InlineSpec(json.into()))
             .ok_or_else(|| WorkloadDecodeError::MissingField { workload_id: record.workload_id.as_str().to_string(), field: "graph.inline".into() }),
     }
 }

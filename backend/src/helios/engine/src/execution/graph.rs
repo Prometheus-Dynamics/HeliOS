@@ -11,7 +11,6 @@ use daedalus::{
 
 use super::ExecutionError;
 use crate::model::{ExecutionWorkload, GraphRef, LoadedPlugin};
-use crate::provider::publish::graph_digest;
 
 pub(crate) type ResidentHostGraph = HostGraph<HandlerRegistry>;
 
@@ -80,7 +79,7 @@ pub(crate) fn compile_workload_graph(
     let refreshed = match &workload.graph_ref {
         GraphRef::InlineSpec(source) if report.changed() => {
             let document_json = document.to_json().map_err(|error| ExecutionError::GraphDocument(error.to_string()))?;
-            Some(RefreshedGraph { from_digest: graph_digest(source), document: document_json })
+            Some(RefreshedGraph { from_digest: source.digest().to_string(), document: document_json })
         }
         _ => None,
     };

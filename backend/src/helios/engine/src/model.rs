@@ -26,7 +26,62 @@ pub struct LoadedPlugin {
 pub enum GraphRef {
     ArtifactId(String),
     ResourceId(String),
-    InlineSpec(String),
+    InlineSpec(InlineGraph),
+}
+
+/// A workload's inline graph (often 100 KB+ of JSON): shared, not copied, by every clone of the
+/// workload, with its digest and what the engine looks up in it computed once when decoded.
+#[derive(Debug, Clone)]
+pub struct InlineGraph {
+    json: std::sync::Arc<str>,
+    digest: std::sync::Arc<str>,
+    sliced_frames: bool,
+}
+
+impl InlineGraph {
+    pub fn new(json: impl Into<std::sync::Arc<str>>) -> Self {
+        let json = json.into();
+        let digest = crate::provider::publish::graph_digest(&json).into();
+        let sliced_frames = crate::execution::takes_sliced_frames(&json);
+        Self { json, digest, sliced_frames }
+    }
+
+    /// The graph's digest (`fnv1a64:<hex>`), as published in `graph.digest`.
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    /// Whether a node of the graph takes sliced frames.
+    pub fn takes_sliced_frames(&self) -> bool {
+        self.sliced_frames
+    }
+}
+
+impl std::ops::Deref for InlineGraph {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.json
+    }
+}
+
+impl PartialEq for InlineGraph {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.json, &other.json) || (self.digest == other.digest && self.json == other.json)
+    }
+}
+
+impl Eq for InlineGraph {}
+
+impl From<String> for InlineGraph {
+    fn from(json: String) -> Self {
+        Self::new(json)
+    }
+}
+
+impl From<&str> for InlineGraph {
+    fn from(json: &str) -> Self {
+        Self::new(json)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -237,4 +292,22 @@ pub struct EngineSnapshot {
 /// Unix time in milliseconds (0 before the epoch): the timestamps the engine records and publishes.
 pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
+
+#[cfg(test)]
+mod inline_graph_tests {
+    use super::*;
+
+    #[test]
+    fn an_inline_graph_is_shared_by_clones_and_keeps_its_digest() {
+        let json = r#"{"format":"daedalus.graph","graph":{"nodes":[{"id":"eidos:aruco.detect"}]}}"#;
+        let graph = InlineGraph::from(json);
+        let copy = graph.clone();
+        assert!(std::sync::Arc::ptr_eq(&graph.json, &copy.json), "a clone shares the JSON");
+        assert_eq!(graph.digest(), crate::provider::publish::graph_digest(json), "the published digest");
+        assert_eq!(&*graph, json);
+        assert_eq!(graph, InlineGraph::from(json.to_string()), "equal by content");
+        assert_ne!(graph, InlineGraph::from("{}"));
+        assert_eq!(graph.takes_sliced_frames(), crate::execution::takes_sliced_frames(json));
+    }
 }

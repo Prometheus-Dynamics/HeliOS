@@ -197,7 +197,8 @@ pub(crate) struct GraphMetrics {
     last_window: Option<(MetricsTotals, Duration)>,
     total: MetricsTotals,
     /// Daedalus's latest `FrameOverheadReport`, as JSON.
-    frame_overhead: Option<serde_json::Value>,
+    /// As JSON text: a fraction of the memory of its `Value` tree, kept between reports.
+    frame_overhead: Option<Box<serde_json::value::RawValue>>,
 }
 
 impl GraphMetrics {
@@ -233,7 +234,7 @@ impl GraphMetrics {
 
     /// Keep Daedalus's frame-path overhead report (`HostGraph::frame_overhead`) for the artifact.
     pub(super) fn set_frame_overhead(&mut self, report: &FrameOverheadReport) {
-        self.frame_overhead = serde_json::to_value(report).ok();
+        self.frame_overhead = serde_json::value::to_raw_value(report).ok();
     }
 
     /// The `metrics` artifact: the last complete window (or the current one before the first
