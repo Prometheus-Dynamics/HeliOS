@@ -146,6 +146,19 @@ toolchain = "systemcore"
 profile = "service"
 output_path = "${outputs.dir}/artifacts/lemnosd"
 
+# lemnos-orion, Lemnos's Orion bridge (lemnosd's `orion` feature, Lemnos docs/orion.md): the
+# board's devices as `lemnos.device` resources, as on Raze, in place of helios-peripherals' copies.
+[[artifacts]]
+id = "lemnos-orion"
+kind = "rust"
+package = "lemnosd"
+source = "lemnos"
+toolchain = "systemcore"
+profile = "service"
+features = ["orion"]
+target_name = "lemnos-orion"
+output_path = "${outputs.dir}/artifacts/lemnos-orion"
+
 # orion-node's appliance build (Orion packaging/gaia/orion-node.toml): IPC control plane, peer
 # sync, mDNS discovery, sd_notify and the watchdog.
 [[artifacts]]
@@ -206,6 +219,12 @@ mode = "0755"
 tree = "pkg-root"
 src = "${outputs.dir}/artifacts/lemnosd"
 dest = "usr/local/bin/lemnosd"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${outputs.dir}/artifacts/lemnos-orion"
+dest = "usr/local/bin/lemnos-orion"
 mode = "0755"
 
 # The SystemCore board definition, from the pinned Lemnos checkout (host-owned devices only).
@@ -269,6 +288,11 @@ dest = "etc/systemd/system/helios-lemnosd.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
+src = "${assets}/systemcore/systemd/helios-lemnos-orion.service"
+dest = "etc/systemd/system/helios-lemnos-orion.service"
+
+[[image.assembly.files]]
+tree = "pkg-root"
 src = "${assets}/systemcore/systemd/helios-peripherals.service"
 dest = "etc/systemd/system/helios-peripherals.service"
 
@@ -316,7 +340,7 @@ X-Auto-Start = "true"
 X-Icon-Path = "/usr/local/share/helios/helios.png"
 
 [image.assembly.packages.scripts]
-services = ["helios-robot.service", "helios-orion.service", "helios-lemnosd.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
+services = ["helios-robot.service", "helios-orion.service", "helios-lemnosd.service", "helios-lemnos-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
 conffiles = ["/usr/local/etc/helios/startup.toml", "/usr/local/etc/helios/orion-node.env"]
 
 # Every ELF against the SDK's sysroot: glibc symbol versions, 16 KiB segments, libraries present.

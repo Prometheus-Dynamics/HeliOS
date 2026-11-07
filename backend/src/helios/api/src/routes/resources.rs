@@ -90,7 +90,9 @@ pub fn resource_dto(record: &ResourceRecord, view: &StateView) -> ResourceDto {
             observed_at_ms: state.map(|s| s.observed_at_ms).unwrap_or_default(),
         }),
         state: state.and_then(|s| s.config.as_ref()).map(|config| config.payload.iter().map(|(k, v)| (k.clone(), config_value_json(v))).collect()),
-        labels: labels.into_iter().filter_map(|(k, v)| k.strip_prefix("helios.label.").map(|k| (k.to_string(), v))).collect(),
+        // HeliOS's own labels without their prefix, and a lemnos-orion device's `lemnos.*` labels
+        // as they are (its class, model, board, units and control ranges).
+        labels: labels.into_iter().filter_map(|(k, v)| match k.strip_prefix("helios.label.") { Some(k) => Some((k.to_string(), v)), None => k.starts_with("lemnos.").then_some((k, v)) }).collect(),
         id,
     }
 }
@@ -139,6 +141,15 @@ pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec
             if let Some(entries) = readings.remove(&dto.id) {
                 dto.state.get_or_insert_with(BTreeMap::new).extend(entries);
             }
+            if r.resource_type.as_str() == LEMNOS_DEVICE_TYPE && is_lemnos_fan(r) {
+                let active = state.fan_overrides.active(&dto.id);
+                let entries = dto.state.get_or_insert_with(BTreeMap::new);
+                entries.insert("fan.override.active".into(), serde_json::Value::Bool(active.is_some()));
+                if let Some(active) = active {
+                    entries.insert("fan.override.until_ms".into(), active.until_ms.into());
+                    entries.insert("fan.override.duty".into(), active.duty.into());
+                }
+            }
             dto
         })
         .collect();
@@ -164,9 +175,10 @@ async fn lemnos_readings(state: &SharedState) -> ApiResult<BTreeMap<String, BTre
 /// A peripheral action: `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}`.
 /// Kinds and arguments are helios-peripherals' resource actions through lemnosd:
 ///
-/// - on lemnosd devices: `fan.override` (`pwm` 0-255 or `duty` 0-1, `duration_ms`
-///   1000-600000; the fan goes back to the kernel governor when it ends) and `fan.release`
-///   (the bridge's `lemnos.<board>.<device>` resources take their own actions);
+/// - on a fan of Lemnos's Orion bridge (`lemnos.<board>.<device>`, `lemnos.class=fan`):
+///   `fan.override` (`pwm` 0-255 or `duty` 0-1, `duration_ms` 1000-600000; the fan goes back to
+///   the kernel governor when it ends) and `fan.release`, timed here (`fan_override`) over the
+///   bridge's `set` and `release`;
 /// - on the raw-access resource (`lemnos.raw`, also `/v1/peripherals/io`): `gpio.claim`,
 ///   `gpio.configure`, `gpio.get`, `gpio.set`, `gpio.release`, `pwm.claim`, `pwm.configure`,
 ///   `pwm.release`, `i2c.transfer`, `spi.transfer` and `raw.renew` (docs/docs/api/http.md, "Raw
@@ -272,6 +284,14 @@ async fn run_action(state: &SharedState, id: String, request: ActionRequest) -> 
     let args = action_args(&request)?;
     let view = state.orion.view().await?;
     let resource = view.resources.get(&id).ok_or_else(|| ApiError::not_found(format!("no resource {id}")))?;
+    // A fan of Lemnos's bridge: its timed override is kept here (`fan_override`).
+    if resource.resource_type.as_str() == LEMNOS_DEVICE_TYPE && crate::fan_override::is_fan_action(&request.kind) {
+        if !is_lemnos_fan(resource) {
+            return Err(ApiError::bad_request(format!("{id} is not a fan")));
+        }
+        let result = crate::fan_override::run(&state.fan_overrides, state.orion.clone(), &id, &request.kind, &request.arg).await?;
+        return Ok(respond(id, &result));
+    }
     if !resource.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX) {
         return Err(ApiError::bad_request(format!("{id} is not a helios-peripherals resource")));
     }
@@ -298,6 +318,18 @@ pub async fn perform_action<C: ActionCall>(caller: &C, action: OrionActionReques
     Ok((status, Json(ActionResponse { action_id, resource, done, result: Some(action_result_dto(&result)) })))
 }
 
+/// The HTTP answer for an action `result` on `resource`.
+fn respond(resource: String, result: &OrionActionResult) -> (StatusCode, Json<ActionResponse>) {
+    let done = result.state.is_terminal();
+    let status = if done { StatusCode::OK } else { StatusCode::ACCEPTED };
+    (status, Json(ActionResponse { action_id: result.action_id.clone(), resource, done, result: Some(action_result_dto(result)) }))
+}
+
+/// A `lemnos.device` of class `fan`.
+fn is_lemnos_fan(resource: &ResourceRecord) -> bool {
+    label_map(&resource.labels).get("lemnos.class").map(String::as_str) == Some(crate::fan_override::FAN_CLASS)
+}
+
 /// An Orion result as the API reports an action: `applied` (succeeded), `failed` (failed,
 /// rejected, timed out or cancelled, with the reason), or `running`. `data` is the `value` output, or the
 /// whole output when there are other entries.
@@ -319,7 +351,7 @@ fn action_result_dto(result: &OrionActionResult) -> ActionResult {
 
 // --- raw GPIO, PWM, I2C and SPI ------------------------------------------------
 
-/// One of helios-peripherals' raw claims (a lease on a GPIO line or PWM channel).
+/// One of helios-api's raw claims (a lease on a GPIO line or PWM channel, `lemnos_raw`).
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct ClaimDto {
     pub id: String,
@@ -417,10 +449,7 @@ pub fn claims_digest(view: &StateView) -> BTreeMap<String, serde_json::Value> {
 // --- not yet backed ------------------------------------------------------------
 
 pub async fn fan() -> ApiError {
-    ApiError::not_available(
-        "fan control is not available",
-        "helios-peripherals publishing the hwmon fan (Lemnos fan.read, and the timed fan.override / fan.release that always returns to the kernel thermal governor) as an Orion resource with fan actions",
-    )
+    ApiError::not_available("fan control is not available here", "the fan's Lemnos resource: POST /v1/peripherals/lemnos.<board>.fan/actions with fan.override or fan.release")
 }
 
 pub async fn leds() -> ApiError {

@@ -3,11 +3,11 @@ import { formatReading, isLinkChannel, LEMNOS_DEVICE_TYPE, lemnosDevices, status
 import type { Resource } from "../src/lib/api/types";
 
 const resource = (over: Partial<Resource>): Resource => ({
-  id: "lemnos_device_node-local_cpu-thermal",
+  id: "lemnos.raze.cpu-thermal",
   type: LEMNOS_DEVICE_TYPE,
   name: "cpu-thermal",
   kind: null,
-  provider: "provider.peripherals.node-local",
+  provider: "lemnos",
   health: "healthy",
   availability: "available",
   ownership: "shared_read",
@@ -15,22 +15,22 @@ const resource = (over: Partial<Resource>): Resource => ({
   leased_by: [],
   workload: null,
   capabilities: [],
-  labels: { "lemnos.device_id": "cpu-thermal", "lemnos.class": "temperature", "lemnos.status": "available" },
+  labels: { "lemnos.board": "raze", "lemnos.class": "temperature" },
   endpoints: [],
   action_result: null,
-  state: { temperature: 57.85 },
+  state: { temperature: 57.85, status: "available", reason: "", read_us: 1200 },
   ...over,
 });
 
 describe("lemnosd devices on the Hardware pane", () => {
-  test("maps each lemnosd device resource to its id, class, status and readings", () => {
+  test("maps each bridge resource to its device id, class, status and readings", () => {
     const devices = lemnosDevices([
       resource({}),
       resource({
-        id: "lemnos_device_node-local_can-s0",
+        id: "lemnos.raze.can-s0",
         name: "CAN s0",
-        labels: { "lemnos.device_id": "can-s0", "lemnos.class": "other", "lemnos.status": "available", "lemnos.model": "can" },
-        state: { carrier: 1 },
+        labels: { "lemnos.board": "raze", "lemnos.class": "other", "lemnos.model": "can" },
+        state: { carrier: 1, status: "available", reason: "" },
       }),
     ]);
     expect(devices).toEqual([
@@ -39,33 +39,40 @@ describe("lemnosd devices on the Hardware pane", () => {
     ]);
   });
 
-  test("ignores resources of other types, including lemnos.raw and the Orion bridge's lemnos.device", () => {
+  test("ignores resources of other types", () => {
     const devices = lemnosDevices([
-      resource({ type: "helios.fan", id: "helios_fan_node-local_fan", labels: {} }),
       resource({ type: "lemnos.raw", id: "lemnos_raw_node-local_io", labels: {} }),
-      resource({ type: "lemnos.device", id: "lemnos.raze.usb-a-power", labels: {} }),
+      resource({ type: "camera.device", id: "capture_device_node-local_video0", labels: {} }),
     ]);
     expect(devices).toEqual([]);
   });
 
-  test("keeps only numeric readings, and the status and reason labels", () => {
+  test("keeps only channel readings, and the status and reason entries", () => {
     const [device] = lemnosDevices([
       resource({
-        labels: { "lemnos.device_id": "imu", "lemnos.class": "imu", "lemnos.status": "degraded", "lemnos.reason": "read: timed out" },
-        state: { "acceleration.x": 0.02, "lemnos.note": "text", bad: Number.NaN, "read_us": 12 },
+        id: "lemnos.raze.imu",
+        labels: { "lemnos.board": "raze", "lemnos.class": "imu" },
+        state: {
+          "acceleration.x": 0.02,
+          "lemnos.note": "text",
+          bad: Number.NaN,
+          read_us: 12,
+          "control.duty": 0.5,
+          "fan.override.active": false,
+          status: "degraded",
+          reason: "read: timed out",
+        },
       }),
     ]);
+    expect(device.id).toBe("imu");
     expect(device.status).toBe("degraded");
     expect(device.reason).toBe("read: timed out");
-    expect(device.readings).toEqual([
-      { channel: "acceleration.x", value: 0.02 },
-      { channel: "read_us", value: 12 },
-    ]);
+    expect(device.readings).toEqual([{ channel: "acceleration.x", value: 0.02 }]);
   });
 
   test("a device with no state yet has no readings and falls back to the availability", () => {
     const [device] = lemnosDevices([resource({ labels: {}, availability: "unavailable", state: null })]);
-    expect(device).toEqual({ id: "lemnos_device_node-local_cpu-thermal", name: "cpu-thermal", cls: "", status: "unavailable", reason: "", readings: [] });
+    expect(device).toEqual({ id: "raze.cpu-thermal", name: "cpu-thermal", cls: "", status: "unavailable", reason: "", readings: [] });
   });
 });
 

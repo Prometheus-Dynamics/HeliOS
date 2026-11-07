@@ -93,6 +93,12 @@ async fn run() -> anyhow::Result<()> {
     stop.listen();
     // The node's state, one shared view kept current for every request (`Orion::view`).
     let _state = state.orion.follow_state();
+    // A fan override from before a restart ends on time (or now, when its time has passed).
+    {
+        let events = state.events.clone();
+        state.fan_overrides.on_change(Box::new(move |resource, active| events.publish("peripheral", helios_api::fan_override::peripheral_event(resource, active))));
+    }
+    state.fan_overrides.resume(state.orion.clone());
     let _watcher = events::spawn_state_watcher(state.clone());
     // The board's node id changed from `node-local`: its state and pipelines follow it, once (`migration.rs`).
     let _node_id_migration = helios_api::migration::spawn(state.clone());

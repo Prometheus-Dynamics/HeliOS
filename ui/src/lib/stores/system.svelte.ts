@@ -91,11 +91,12 @@ export interface DeviceHw {
 function livePeripherals(resources: W.Resource[]) {
   const state = (id: string) => (resources.find((r) => r.id === id)?.state ?? null) as Record<string, unknown> | null;
   const num = (s: Record<string, unknown> | null, key: string) => (s && typeof s[key] === "number" ? (s[key] as number) : undefined);
-  // The lemnosd devices are matched by their own type: their ids end like the Orion bridge's.
-  const byKind = (suffix: string) => resources.find((r) => r.type !== LEMNOS_DEVICE_TYPE && r.id.endsWith(suffix))?.id ?? "";
-  const fanState = state(byKind(".fan"));
-  const fanResource = resources.find((r) => r.type === "helios.fan")?.id;
-  const overridden = Boolean(fanResource && state(fanResource)?.["fan.override.active"]);
+  // Lemnos's Orion bridge resources (`lemnos.<board>.<device>`), by their device id.
+  const byKind = (suffix: string) => resources.find((r) => r.type === LEMNOS_DEVICE_TYPE && r.id.endsWith(suffix))?.id ?? "";
+  // The fan takes helios-api's timed override on its own resource.
+  const fanResource = resources.find((r) => r.type === LEMNOS_DEVICE_TYPE && r.labels["lemnos.class"] === "fan")?.id;
+  const fanState = fanResource ? state(fanResource) : null;
+  const overridden = Boolean(fanState?.["fan.override.active"]);
   const fan: FanState | null = fanState
     ? { mode: overridden ? "manual" : "auto", duty: num(fanState, "duty") ?? 0, rpm: Math.round(num(fanState, "speed") ?? 0), curve: [] }
     : null;
@@ -111,7 +112,7 @@ function livePeripherals(resources: W.Resource[]) {
   const power = state(byKind(".power"));
   const rails = power ? [{ rail: "Board input", volts: num(power, "bus_voltage") ?? 0, amps: Math.abs(num(power, "current") ?? 0) }] : [];
   const switches = resources
-    .filter((r) => r.type !== LEMNOS_DEVICE_TYPE && /usb-[a-z]-power$/.test(r.id))
+    .filter((r) => r.type === LEMNOS_DEVICE_TYPE && /usb-[a-z]-power$/.test(r.id))
     .map((r) => ({ id: r.id, name: `USB-${r.id.match(/usb-([a-z])-power$/)![1].toUpperCase()} power`, on: (r.state as Record<string, unknown> | null)?.["power.on"] === 1 }));
   return { fan, leds, imu, power: rails, switches, fanResource, lemnos: lemnosDevices(resources) };
 }

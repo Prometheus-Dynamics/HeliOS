@@ -612,7 +612,7 @@ Recordings and image folders served as cameras. A player's camera resource is bo
 |---|---|---|
 | `GET` | `/v1/resources?type=` | Every Orion resource (`camera.device`, `lemnos.device`, `lemnos.raw`, `execution.session`, ...) |
 | `GET` | `/v1/resources/{id}` | One resource, including its latest `action_result` |
-| `GET` | `/v1/peripherals` | The resources helios-peripherals publishes |
+| `GET` | `/v1/peripherals` | The board's `lemnos.device` resources with their state, and the raw-access and camera resources |
 | `POST` | `/v1/peripherals/{id}/actions` | `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}` (below) |
 | `GET` | `/v1/peripherals/io` | Raw GPIO/PWM/I2C/SPI access: `{resource, available, claims: [...]}` (below) |
 | `POST` | `/v1/peripherals/io/actions` | A raw action on this node's `lemnos.raw` resource, e.g. `{"kind": "gpio.claim", "arg": {"line": "aux", "direction": "output"}}` |
@@ -621,23 +621,25 @@ Recordings and image folders served as cameras. A player's camera resource is bo
 The board's devices come from lemnosd's own Orion bridge (Lemnos `docs/orion.md`): one
 `lemnos.device` resource per device, `lemnos.<board>.<device>`, with its status and readings as
 status entries, which `GET /v1/peripherals` merges into the resource's `state` (`status`, `reason`,
-`read_us`, one `F64` per channel, `control.<name>`). helios-peripherals publishes the fan override
-(`helios.fan`, `helios_fan_<node>_<device>`: the override and its state), one `lemnos.raw` resource
-for raw access (`lemnos_raw_<node>_io`) and the cameras. Action kinds, on the fan:
+`read_us`, one `F64` per channel, `control.<name>`) and its labels as they are (`lemnos.class`,
+`lemnos.model`, `lemnos.board`, `lemnos.unit.*`, `lemnos.control.*`). helios-peripherals publishes
+one `lemnos.raw` resource for raw access (`lemnos_raw_<node>_io`) and the cameras. Action kinds, on
+the fan (the `lemnos.device` whose `lemnos.class` is `fan`, e.g. `lemnos.raze.fan`):
 
 - `fan.override` (`pwm` 0 to 255 or `duty` 0 to 1, `duration_ms` 1000 to 600000, default 60000):
-  the only write to the fan, which is otherwise left to the kernel's thermal governor. When the
-  override ends (its time, `fan.release`, helios-peripherals stopping) the fan is released back
-  to the governor. lemnosd ties the write to helios-peripherals' connection, so a crash, a
-  `kill -9` or a lemnosd restart hands the fan back too; nothing is kept on disk.
+  helios-api sets the bridge's `duty` control and releases it when the time is up, so the fan is
+  otherwise left to the kernel's thermal governor. The override is kept in the state directory
+  (`fan-overrides.json`) and timed again after a helios-api restart; one whose time passed while
+  helios-api was down is released at once. Its state is on the fan as `fan.override.active`,
+  `fan.override.duty` and `fan.override.until_ms`, and each start and end is a `peripheral` event.
 - `fan.release`: end an override now.
 
-Other devices' controls are the bridge's `lemnos.<board>.<device>` actions (`set`, `restore`,
-`release`, `read`), not HeliOS's.
+Other actions on a `lemnos.device` (`set`, `restore`, `release`, `read`, ...) go to the bridge as
+they are.
 
-The API sends an action to the resource's provider (helios-peripherals) as an Orion request/response
+The API sends an action to the resource's provider (lemnos-orion, or helios-peripherals for raw access) as an Orion request/response
 action (`ActionCaller`, Orion `docs/actions.md`): one control-plane stream shared by all requests, so
-concurrent actions run at once and none waits for another's answer. helios-peripherals answers each
+concurrent actions run at once and none waits for another's answer. The provider answers each
 action by its id, and the API waits up to 5 s for the final result. The answer is 200
 `{action_id, resource, done: true, result: {action_kind, status, data, error, observed_at_ms}}`, or
 202 with `done: false` and the latest result (`status` `running`) when the wait runs out; the action

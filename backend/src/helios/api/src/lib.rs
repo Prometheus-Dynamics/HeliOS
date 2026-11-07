@@ -21,6 +21,7 @@ pub mod dense_chunks;
 pub mod device_settings;
 pub mod error;
 pub mod events;
+pub mod fan_override;
 pub mod field_layouts;
 pub mod host;
 pub mod host_facts;
@@ -106,6 +107,8 @@ pub struct AppState {
     pub self_calibration_notes: self_calibration::Notes,
     /// Cancelled when the service is asked to stop: the long-lived streams end (`server`).
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// The timed fan overrides on Lemnos's fan devices (`fan_override`).
+    pub fan_overrides: Arc<fan_override::FanOverrides>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -119,6 +122,7 @@ impl AppState {
             live_streams: live_streams::LiveStreams::new(config.live_streams.clone(), orion_link.clone()),
             self_calibration_notes: self_calibration::Notes::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
+            fan_overrides: Arc::new(fan_override::FanOverrides::load(config.state_dir.join("fan-overrides.json"))),
             orion: orion_link,
             peer_client: peers::client(),
             tunnels: peers::TunnelLimits::default(),

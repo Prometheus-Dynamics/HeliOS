@@ -1,0 +1,42 @@
+# Lemnos's Orion bridge on SystemCore (Lemnos docs/orion.md): lemnosd's devices as `lemnos.device`
+# Orion resources, with their readings and statuses, as on Raze. Every SystemCore device is
+# host-owned, so they are read-only here. It replaces helios-peripherals' own copies of them.
+[Unit]
+Description=Lemnos devices as Orion resources (SystemCore)
+Documentation=https://github.com/Prometheus-Dynamics/Lemnos/blob/dev/docs/orion.md
+After=helios-orion.service helios-lemnosd.service
+Wants=helios-orion.service helios-lemnosd.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Slice=vision.slice
+# The node id and IPC sockets orion-node uses.
+EnvironmentFile=/usr/local/etc/helios/orion-node.env
+Environment=LEMNOSD_SOCKET=/run/lemnos/lemnosd.sock
+Environment=LEMNOSD_BOARD=/usr/local/share/lemnos/boards/systemcore.toml
+Environment=LEMNOS_ORION_RATE_HZ=2
+ExecStart=/usr/local/bin/lemnos-orion
+Restart=always
+RestartSec=1s
+TimeoutStopSec=10s
+# Root, like the other HeliOS services here: orion-node allows same-user-or-group-or-root and
+# lemnosd's socket is for the root-run HeliOS services (a guest adds no host users).
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

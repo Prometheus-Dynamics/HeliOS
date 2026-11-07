@@ -90,3 +90,5 @@ helios-calibration-wire = { path = "../calibration-wire" }
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", default-features = false, features = ["util"] }
+# Paused time for timer tests (`fan_override`).
+tokio = { workspace = true, features = ["test-util"] }

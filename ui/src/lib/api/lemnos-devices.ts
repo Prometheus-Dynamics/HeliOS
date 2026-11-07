@@ -1,12 +1,18 @@
-// lemnosd's devices as the Hardware pane shows them: one read-only resource per device, published
-// by helios-peripherals (`helios.lemnos_device`). The device's readings are its state: one number
-// per channel (a thermal zone's `temperature` in °C, a CAN link's `carrier`). A device here has no
-// writes; a fan is written through its own resource (`helios.fan`).
+// lemnosd's devices as the Hardware pane shows them: one resource per device, published by Lemnos's
+// Orion bridge (`lemnos.device`, `lemnos.<board>.<device>`; Lemnos docs/orion.md). Its readings
+// are its state: one number per channel (a thermal zone's `temperature` in °C, a CAN link's
+// `carrier`), next to its `status`, `reason`, `read_us` and `control.<name>` values. A fan takes
+// helios-api's timed `fan.override` / `fan.release` on its own resource.
 
 import type { Resource } from "./types";
 
-/** The resource type helios-peripherals gives each lemnosd device. */
-export const LEMNOS_DEVICE_TYPE = "helios.lemnos_device";
+/** The resource type of Lemnos's Orion bridge: one per lemnosd device. */
+export const LEMNOS_DEVICE_TYPE = "lemnos.device";
+
+/** State entries of a bridge resource that are not channel readings. */
+function isReading(key: string): boolean {
+  return key !== "read_us" && !key.startsWith("control.") && !key.startsWith("fan.override.");
+}
 
 export interface LemnosDevice {
   /** lemnosd's device id (`cpu-thermal`, `can-s0`). */
@@ -27,14 +33,16 @@ export function lemnosDevices(resources: Resource[]): LemnosDevice[] {
     .map((r) => {
       const state = r.state ?? {};
       const readings = Object.entries(state)
-        .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+        .filter((entry): entry is [string, number] => isReading(entry[0]) && typeof entry[1] === "number" && Number.isFinite(entry[1]))
         .map(([channel, value]) => ({ channel, value }));
+      const board = r.labels["lemnos.board"];
+      const prefix = board ? `lemnos.${board}.` : "lemnos.";
       return {
-        id: r.labels["lemnos.device_id"] ?? r.id,
+        id: r.id.startsWith(prefix) ? r.id.slice(prefix.length) : r.id,
         name: r.name,
         cls: r.labels["lemnos.class"] ?? "",
-        status: r.labels["lemnos.status"] ?? r.availability,
-        reason: r.labels["lemnos.reason"] ?? "",
+        status: typeof state.status === "string" ? state.status : r.availability,
+        reason: typeof state.reason === "string" ? state.reason : "",
         readings,
       };
     });
