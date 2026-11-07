@@ -194,7 +194,7 @@ impl EngineApp {
             node_id = %self.config.node_id,
             plugin_count = plugins.builtins.len() + plugins.libraries.len(),
             assigned_workload_count = current_workloads.records.len(),
-            engine_socket = %self.config.engine_socket_path.display(),
+            live_socket = %self.config.live_socket_path.display(),
             "helios-engine started"
         );
 
@@ -327,7 +327,7 @@ impl EngineApp {
         execution.sessions.extend(decoded.decode_failures);
         let snapshot = EngineSnapshot {
             node_id: self.config.node_id.clone(),
-            engine_socket_path: self.config.engine_socket_path.clone(),
+            live_socket_path: self.config.live_socket_path.clone(),
             catalog_path: plugins.catalog_path.clone(),
             nt4: self.nt4_status.lock().unwrap_or_else(|poison| poison.into_inner()).as_ref().map(|status| status.lock().unwrap_or_else(|poison| poison.into_inner()).clone()),
             plugin_dirs: self.config.plugin_dirs.clone(),

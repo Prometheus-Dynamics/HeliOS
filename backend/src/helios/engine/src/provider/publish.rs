@@ -91,7 +91,7 @@ impl OrionEnginePublisher {
             .label(format!("helios.display_name=Helios Engine {}", snapshot.node_id))
             .label(format!("helios.engine.plugin_count={}", snapshot.loaded_plugins.len()))
             .label(format!("helios.engine.assigned_workloads={}", snapshot.assigned_workloads.len()))
-            .endpoint(format!("unix://{}", snapshot.engine_socket_path.display()));
+            .endpoint(format!("unix://{}", snapshot.live_socket_path.display()));
         if let Some(nt4) = &snapshot.nt4 {
             builder = builder.label(format!("helios.nt4.connected={}", nt4.connected));
             if let Some(server) = &nt4.server {

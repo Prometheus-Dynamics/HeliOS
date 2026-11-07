@@ -158,7 +158,6 @@ export STYX_SIM_CAMERAS
 NODE_ID="node-local"
 ORION_SOCKET="$RUN/orion/control.sock"
 ORION_STREAM_SOCKET="$RUN/orion/control-stream.sock"
-ENGINE_SOCKET="$RUN/engine/engine.sock"
 ENGINE_LIVE_SOCKET="$RUN/engine/engine-live.sock"
 LEMNOSD_SOCKET="$RUN/lemnos/lemnosd.sock"   # absent with SIM_LEMNOS=0: the services run without it
 PIDS=()
@@ -238,7 +237,6 @@ start helios-engine \
   HELIOS_NODE_ID="$NODE_ID" \
   HELIOS_CAMERA_STREAM_DIR="$RUN/ipc/streams" \
   STYX_SIM_CAMERAS="$STYX_SIM_CAMERAS" \
-  ENGINE_SOCKET="$ENGINE_SOCKET" \
   ENGINE_JOURNAL_PATH="$RUN/logs/engine.journal.log" \
   HELIOS_ENGINE_LIVE_SOCKET="$ENGINE_LIVE_SOCKET" \
   HELIOS_ENGINE_CATALOG_PATH="$RUN/state/catalog.json" \
@@ -254,8 +252,6 @@ start helios-engine \
   ORION_NODE_IPC_STREAM_SOCKET="$ORION_STREAM_SOCKET" \
   RUST_LOG="$SIM_RUST_LOG" \
   "$SIM_BIN_DIR/helios-engine"
-# The engine advertises ENGINE_SOCKET in its Orion record; nothing binds it (no socket unit since
-# 2026-11-06: the engine serves only its live socket).
 wait_for_file "$ENGINE_LIVE_SOCKET" helios-engine
 
 start helios-api \

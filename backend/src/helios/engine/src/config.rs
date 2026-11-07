@@ -10,7 +10,6 @@ const DEFAULT_PUBLISH_INTERVAL_MS: u64 = 250;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineConfig {
     pub node_id: String,
-    pub engine_socket_path: PathBuf,
     pub journal_path: Option<PathBuf>,
     /// Where the node catalog (every node the loaded plugins declare) is written at startup, for
     /// helios-api's `/v1/catalog`; its path is on the `engine.runtime` resource.
@@ -56,7 +55,6 @@ impl EngineConfig {
         let catalog_path = layout.catalog_file();
         Self {
             node_id: DEFAULT_NODE_ID.to_string(),
-            engine_socket_path: layout.engine_socket(),
             journal_path: None,
             plan_dir: plan_dir_for(&catalog_path, layout),
             catalog_path,
@@ -90,9 +88,6 @@ impl EngineConfig {
 
         if let Some(value) = env.get("HELIOS_NODE_ID").or_else(|| env.get("ORION_NODE_ID")) {
             config.node_id = value.clone();
-        }
-        if let Some(value) = env.get("ENGINE_SOCKET").or_else(|| env.get("HELIOS_ENGINE_SOCKET")) {
-            config.engine_socket_path = PathBuf::from(value);
         }
         if let Some(value) = env.get("ENGINE_JOURNAL_PATH") {
             config.journal_path = Some(PathBuf::from(value));
@@ -177,7 +172,6 @@ mod tests {
     fn config_reads_plugin_dirs_and_orion_paths() {
         let config = EngineConfig::from_env_iter([
             ("HELIOS_NODE_ID", "node-a"),
-            ("ENGINE_SOCKET", "/tmp/engine.sock"),
             ("ENGINE_JOURNAL_PATH", "/tmp/engine.log"),
             ("HELIOS_DAEDALUS_PLUGIN_DIRS", "/tmp/plugins-a:/tmp/plugins-b"),
             ("ORION_NODE_IPC_SOCKET", "/tmp/orion/control.sock"),
@@ -188,7 +182,6 @@ mod tests {
         .expect("config");
 
         assert_eq!(config.node_id, "node-a");
-        assert_eq!(config.engine_socket_path, PathBuf::from("/tmp/engine.sock"));
         assert_eq!(config.journal_path, Some(PathBuf::from("/tmp/engine.log")));
         assert_eq!(config.plugin_dirs, vec![PathBuf::from("/tmp/plugins-a"), PathBuf::from("/tmp/plugins-b")]);
         assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/tmp/orion/control.sock"));
@@ -212,7 +205,6 @@ mod tests {
     fn the_image_paths_are_the_layout_defaults() {
         let config = EngineConfig::from_env_iter(std::iter::empty::<(String, String)>()).expect("config");
         assert_eq!(config, EngineConfig::default());
-        assert_eq!(config.engine_socket_path, PathBuf::from("/run/helios/engine.sock"));
         assert_eq!(config.catalog_path, PathBuf::from("/var/lib/helios/state/catalog.json"));
         assert_eq!(config.plan_dir, PathBuf::from("/var/lib/helios/state/plans"));
         assert_eq!(config.nt4_settings_path, PathBuf::from("/var/lib/helios/api/nt4.json"));
@@ -227,7 +219,7 @@ mod tests {
         assert_eq!(config.catalog_path, PathBuf::from("/usr/local/var/lib/helios/state/catalog.json"));
         assert_eq!(config.plan_dir, PathBuf::from("/usr/local/var/lib/helios/state/plans"));
         assert_eq!(config.plugin_dirs[0], PathBuf::from("/usr/local/lib/helios/plugins/daedalus"));
-        assert_eq!(config.engine_socket_path, PathBuf::from("/run/helios/engine.sock"));
+        assert_eq!(config.live_socket_path, PathBuf::from("/run/helios/engine-live.sock"));
     }
 
     #[test]

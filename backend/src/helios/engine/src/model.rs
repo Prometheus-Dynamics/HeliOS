@@ -278,7 +278,8 @@ pub struct ExecutionArtifactRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineSnapshot {
     pub node_id: String,
-    pub engine_socket_path: PathBuf,
+    /// The socket the engine serves: its live outputs (`engine-live.sock`).
+    pub live_socket_path: PathBuf,
     pub catalog_path: Option<PathBuf>,
     /// The NetworkTables connection, once the publisher runs.
     pub nt4: Option<crate::nt4::Nt4Status>,

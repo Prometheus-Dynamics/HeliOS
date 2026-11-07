@@ -17,7 +17,7 @@
 //!    guest and no prefix selects the image.
 //! 4. `HELIOS_*_DIR` keys override single roots.
 //!
-//! Services keep their own, narrower overrides (`HELIOS_API_STATE_DIR`, `ENGINE_SOCKET`, ...).
+//! Services keep their own, narrower overrides (`HELIOS_API_STATE_DIR`, `HELIOS_ENGINE_LIVE_SOCKET`, ...).
 //! Those are read after the layout and win over it.
 
 use std::{
@@ -302,11 +302,6 @@ impl Layout {
 
     // --- Sockets and runtime directories ---------------------------------------------------
 
-    /// helios-engine's control socket.
-    pub fn engine_socket(&self) -> PathBuf {
-        self.run_dir.join("engine.sock")
-    }
-
     /// helios-engine's live outputs (every tick, newline-delimited JSON).
     pub fn engine_live_socket(&self) -> PathBuf {
         self.run_dir.join("engine-live.sock")
@@ -571,7 +566,6 @@ mod tests {
         assert_eq!(layout.persistent_machine_id_file(), PathBuf::from("/data/identity/machine-id"));
         assert_eq!(layout.ssh_host_key_dir(), PathBuf::from("/data/ssh"));
         assert_eq!(layout.run_dir(), Path::new("/run/helios"));
-        assert_eq!(layout.engine_socket(), PathBuf::from("/run/helios/engine.sock"));
         assert_eq!(layout.engine_live_socket(), PathBuf::from("/run/helios/engine-live.sock"));
         assert_eq!(layout.streams_dir(), PathBuf::from("/run/helios/streams"));
         assert_eq!(layout.orion_socket(), PathBuf::from("/run/orion/control.sock"));
@@ -612,7 +606,6 @@ mod tests {
         assert_eq!(layout.image_helpers(), Vec::<PathBuf>::new());
         // Host facts and runtime sockets are the same on every profile.
         assert_eq!(layout.os_release_file(), PathBuf::from("/etc/os-release"));
-        assert_eq!(layout.engine_socket(), PathBuf::from("/run/helios/engine.sock"));
         assert_eq!(layout.orion_socket(), PathBuf::from("/run/orion/control.sock"));
         assert_eq!(layout.lemnos_socket(), PathBuf::from("/run/lemnos/lemnosd.sock"));
     }

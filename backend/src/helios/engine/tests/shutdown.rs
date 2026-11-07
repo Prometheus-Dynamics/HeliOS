@@ -15,7 +15,7 @@ fn sigterm_stops_helios_engine_within_the_deadline() {
     command
         .env("RUST_LOG", "helios_engine=info,helios_shutdown=info")
         .env("HELIOS_NODE_ID", "node-stop-test")
-        .env("ENGINE_SOCKET", dir.path().join("engine.sock"))
+        .env("HELIOS_ENGINE_LIVE_SOCKET", dir.path().join("engine-live.sock"))
         .env("ENGINE_JOURNAL_PATH", dir.path().join("engine.log"))
         .env("HELIOS_ENGINE_LIVE_SOCKET", dir.path().join("live.sock"))
         .env("HELIOS_ENGINE_CATALOG_PATH", dir.path().join("catalog.json"))
