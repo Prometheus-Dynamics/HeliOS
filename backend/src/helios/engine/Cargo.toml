@@ -73,6 +73,8 @@ eidos-daedalus = { workspace = true, features = ["dylib", "simd", "neon", "gpu"]
 eidos-daedalus = { workspace = true, features = ["dylib", "simd", "x86", "gpu"] }
 
 [dev-dependencies]
+# The tests build Eidos known tag poses from layouts (`FieldLayout::known_tags`).
+helios-field = { path = "../field", features = ["eidos"] }
 tempfile = { workspace = true }
 # Playback e2e: the test writes a recording (StreamRecorder) and replays it as a camera.
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus", "replay-mcap", "replay-mcap-lz4"] }

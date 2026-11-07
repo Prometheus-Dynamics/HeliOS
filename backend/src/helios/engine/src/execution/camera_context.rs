@@ -261,7 +261,7 @@ pub(crate) fn extrinsics_value(context: &BTreeMap<String, ContextValue>) -> Resu
     if let Some(unknown) = context.keys().filter_map(|key| key.strip_prefix(MOUNT_PREFIX)).find(|key| !["x_m", "y_m", "z_m", "roll_rad", "pitch_rad", "yaw_rad"].contains(key)) {
         return Err(format!("unknown context field mount.{unknown}"));
     }
-    let rig_from_camera = Pose::from_se3(&mount.extrinsics().rig_from_camera);
+    let rig_from_camera = Pose::from_rigid(&mount.rig_from_camera());
     Ok(Some(serde_json::json!({ "rig_from_camera": rig_from_camera })))
 }
 

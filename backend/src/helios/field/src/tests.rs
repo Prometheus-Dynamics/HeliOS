@@ -1,6 +1,6 @@
 use eidos_calibration::{
-    CalibrationStatus, CameraCalibration, CameraIntrinsics, DistortionCoefficients, LensModel, MultiTagPose, MultiTagPoseConfig, MultiTagPoseSolver, Point3, TagCorners, project_camera_point_checked,
-    rotation_angle_between, se3_inverse, transform_point,
+    CalibrationStatus, CameraCalibration, CameraIntrinsics, DistortionCoefficients, LensModel, MultiTagPose, MultiTagPoseConfig, MultiTagPoseSolver, Point3, RotationMatrix3, TagCorners, Translation3,
+    project_camera_point_checked, rotation_angle_between, se3_compose, se3_inverse, transform_point,
 };
 
 use super::*;
@@ -30,8 +30,8 @@ fn unit(a: [f64; 3]) -> [f64; 3] {
     scale(a, 1.0 / n)
 }
 
-fn column(r: &RotationMatrix3, j: usize) -> [f64; 3] {
-    [r.m[0][j], r.m[1][j], r.m[2][j]]
+fn column(r: &Mat3, j: usize) -> [f64; 3] {
+    [r[0][j], r[1][j], r[2][j]]
 }
 
 fn translation(t: &Se3Transform) -> [f64; 3] {
@@ -71,9 +71,9 @@ fn pinhole() -> CameraCalibration {
 fn observe(tag: &FieldTag, field_from_camera: &Se3Transform, calibration: &CameraCalibration) -> Option<TagCorners> {
     let field_from_tag = tag.field_from_tag.to_se3();
     let centre = translation(&field_from_tag);
-    let face = column(&field_from_tag.rotation, 0);
-    let up = column(&field_from_tag.rotation, 2);
-    let side_axis = column(&field_from_tag.rotation, 1);
+    let face = column(&field_from_tag.rotation.m, 0);
+    let up = column(&field_from_tag.rotation.m, 2);
+    let side_axis = column(&field_from_tag.rotation.m, 1);
     let half = tag.side_m / 2.0;
     // The camera must be in front of the face to see it.
     if (0..3).map(|i| (translation(field_from_camera)[i] - centre[i]) * face[i]).sum::<f64>() <= 0.0 {
@@ -115,7 +115,7 @@ fn the_tag_rotation_maps_the_documented_axes() {
     assert_eq!(column(&r, 0), v(0.0, 1.0, 0.0));
     assert_eq!(column(&r, 1), v(0.0, 0.0, -1.0));
     assert_eq!(column(&r, 2), v(-1.0, 0.0, 0.0));
-    let q = Pose::from_se3(&Se3Transform { rotation: r, translation: Translation3 { x: 0.0, y: 0.0, z: 0.0 } }).rotation;
+    let q = Pose::from_rigid(&Rigid { rotation: r, translation: Vec3::default() }).rotation;
     for (got, want) in [q.w, q.x, q.y, q.z].into_iter().zip([0.5, -0.5, -0.5, 0.5]) {
         assert!((got - want).abs() < 1e-12, "{q:?}");
     }
@@ -131,7 +131,7 @@ fn synthetic_round_trip_recovers_the_camera_and_the_robot() {
     for (robot_x, robot_y, robot_yaw_deg) in [(13.4, 4.1, 0.0), (12.9, 4.6, -8.0), (13.8, 3.6, 8.0)] {
         let (s, c) = f64::to_radians(robot_yaw_deg).sin_cos();
         let field_from_robot = Se3Transform { rotation: RotationMatrix3 { m: [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]] }, translation: Translation3 { x: robot_x, y: robot_y, z: 0.0 } };
-        let field_from_camera = compose(field_from_robot, mount.extrinsics().rig_from_camera);
+        let field_from_camera = se3_compose(field_from_robot, mount.extrinsics().rig_from_camera);
         let observations = layout.tags.iter().filter_map(|tag| observe(tag, &field_from_camera, &calibration)).collect::<Vec<_>>();
         assert!(observations.len() >= 2, "the camera sees red-wall tags from ({robot_x}, {robot_y}): {observations:?}");
         let pose = solve(&layout, &observations, &calibration, Some(&mount.extrinsics()));
@@ -264,7 +264,7 @@ fn mount_angles_follow_wpilib() {
     assert!(distance(column(&left.robot_from_camera_flu().rotation, 0), v(0.0, 1.0, 0.0)) < 1e-12);
     // The optical axis (optical +Z) of an unrotated mount is the robot's forward.
     let ahead = CameraMount { x_m: 0.3, ..CameraMount::default() }.extrinsics();
-    assert!(distance(column(&ahead.rig_from_camera.rotation, 2), v(1.0, 0.0, 0.0)) < 1e-12);
+    assert!(distance(column(&ahead.rig_from_camera.rotation.m, 2), v(1.0, 0.0, 0.0)) < 1e-12);
     assert!(distance(translation(&ahead.rig_from_camera), v(0.3, 0.0, 0.0)) < 1e-12);
 }
 
@@ -273,14 +273,14 @@ fn placement_turns_a_tag_about_its_own_centre() {
     // A tag 16 m down the field: its placement error stays a centimetre where it is, with no
     // translation from turning about the field origin.
     let far = Se3Transform { rotation: RotationMatrix3 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }, translation: Translation3 { x: 16.0, y: 0.0, z: 0.0 } };
-    let covariance = placement_covariance(&far, 0.01, 0.0);
+    let covariance = placement_covariance(&Rigid::from(far), 0.01, 0.0);
     for axis in 3..6 {
         assert!((covariance[axis][axis] - 1e-4).abs() < 1e-12, "{covariance:?}");
     }
     // Rotation only: in the reference frame, turning about the tag's centre is a turn about the
     // origin plus the translation v = t x w that undoes the lever arm, so v is fully correlated
     // with w (for t along x, v_y = -16 w_z).
-    let turned = placement_covariance(&far, 0.0, 0.01);
+    let turned = placement_covariance(&Rigid::from(far), 0.0, 0.01);
     assert!((turned[2][2] - 1e-4).abs() < 1e-12);
     assert!((turned[4][4] - 16.0 * 16.0 * 1e-4).abs() < 1e-9, "{turned:?}");
     assert!((turned[4][2] + 16.0 * 1e-4).abs() < 1e-12, "{turned:?}");
@@ -288,4 +288,12 @@ fn placement_turns_a_tag_about_its_own_centre() {
     let layout = FieldLayout::frc_2026_andymark();
     assert!(layout.known_tags().tags.iter().all(|tag| tag.placement.is_some()));
     assert_eq!(layout.known_tags_value()[0]["placement_covariance"].as_array().map(Vec::len), Some(36));
+}
+
+#[test]
+fn the_mount_without_eidos_is_eidos_s_extrinsics() {
+    let mount = CameraMount { x_m: 0.3, y_m: -0.12, z_m: 0.55, roll_rad: 0.05, pitch_rad: 0.4, yaw_rad: 2.9 };
+    let ours = mount.rig_from_camera();
+    let theirs = Rigid::from(mount.extrinsics().rig_from_camera);
+    assert_eq!(ours, theirs, "the same formulas, the same numbers");
 }

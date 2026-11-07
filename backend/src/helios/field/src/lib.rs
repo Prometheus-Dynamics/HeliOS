@@ -67,11 +67,17 @@
 
 use std::collections::BTreeSet;
 
-pub use eidos_calibration::{CameraExtrinsics, KnownTag, KnownTagPoses, Se3Transform};
-use eidos_calibration::{Quaternion, RotationMatrix3, Translation3, quaternion_from_rotation_matrix, rotation_matrix_from_quaternion, se3_compose};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
+#[cfg(feature = "eidos")]
+mod eidos;
+#[cfg(feature = "eidos")]
+pub use eidos::*;
+mod math;
+pub use math::{Mat3, Rigid, compose};
+use math::{matmul, quaternion_from_rotation, rotation_from_quaternion};
+
+#[cfg(all(test, feature = "eidos"))]
 mod tests;
 
 /// The FRC AprilTag edge length (the black square, 6.5 in), metres. WPILib JSON layouts have no
@@ -140,20 +146,15 @@ pub struct Pose {
 }
 
 impl Pose {
-    pub fn to_se3(&self) -> Se3Transform {
-        let q = self.rotation;
-        Se3Transform {
-            rotation: rotation_matrix_from_quaternion(Quaternion { w: q.w, x: q.x, y: q.y, z: q.z }),
-            translation: Translation3 { x: self.translation.x, y: self.translation.y, z: self.translation.z },
-        }
+    pub fn to_rigid(&self) -> Rigid {
+        Rigid { rotation: rotation_from_quaternion(self.rotation), translation: self.translation }
     }
 
     /// The pose of `transform`, with the quaternion's `w >= 0`.
-    pub fn from_se3(transform: &Se3Transform) -> Self {
-        let q = quaternion_from_rotation_matrix(transform.rotation);
+    pub fn from_rigid(transform: &Rigid) -> Self {
+        let q = quaternion_from_rotation(&transform.rotation);
         let sign = if q.w < 0.0 { -1.0 } else { 1.0 };
-        let t = transform.translation;
-        Self { translation: Vec3 { x: t.x, y: t.y, z: t.z }, rotation: Quat { w: sign * q.w, x: sign * q.x, y: sign * q.y, z: sign * q.z } }
+        Self { translation: transform.translation, rotation: Quat { w: sign * q.w, x: sign * q.x, y: sign * q.y, z: sign * q.z } }
     }
 
     fn is_finite(&self) -> bool {
@@ -174,15 +175,15 @@ pub struct FieldTag {
 
 impl FieldTag {
     /// The tag in the field in Eidos's tag frame (it faces its `-Z`, `+Y` down).
-    pub fn field_from_eidos_tag(&self) -> Se3Transform {
-        let mut transform = self.field_from_tag.to_se3();
+    pub fn field_from_eidos_tag(&self) -> Rigid {
+        let mut transform = self.field_from_tag.to_rigid();
         transform.rotation = matmul(&transform.rotation, &wpilib_tag_from_eidos_tag());
         transform
     }
 
     /// The direction the tag's printed face looks, in the field (WPILib's tag `+X`).
     pub fn normal(&self) -> Vec3 {
-        let r = self.field_from_tag.to_se3().rotation.m;
+        let r = self.field_from_tag.to_rigid().rotation;
         Vec3 { x: r[0][0], y: r[1][0], z: r[2][0] }
     }
 }
@@ -197,18 +198,8 @@ pub struct FieldLayout {
 
 /// Eidos's tag frame in WPILib's tag frame: the columns are Eidos's `+X` (`+Y_wpilib`), `+Y`
 /// (`-Z_wpilib`) and `+Z` (`-X_wpilib`). See the crate docs.
-pub fn wpilib_tag_from_eidos_tag() -> RotationMatrix3 {
-    RotationMatrix3 { m: [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]] }
-}
-
-fn matmul(a: &RotationMatrix3, b: &RotationMatrix3) -> RotationMatrix3 {
-    let mut m = [[0.0; 3]; 3];
-    for (i, row) in m.iter_mut().enumerate() {
-        for (j, cell) in row.iter_mut().enumerate() {
-            *cell = (0..3).map(|k| a.m[i][k] * b.m[k][j]).sum();
-        }
-    }
-    RotationMatrix3 { m }
+pub fn wpilib_tag_from_eidos_tag() -> Mat3 {
+    [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]
 }
 
 fn normalized(q: Quat) -> Option<Quat> {
@@ -329,12 +320,12 @@ impl FieldLayout {
                 if t.len() != 16 {
                     return Err(LayoutError::Invalid(format!("tag {}: transform has {} values, not 16", fiducial.id, t.len())));
                 }
-                let rotation = RotationMatrix3 { m: [[t[0], t[1], t[2]], [t[4], t[5], t[6]], [t[8], t[9], t[10]]] };
+                let rotation = [[t[0], t[1], t[2]], [t[4], t[5], t[6]], [t[8], t[9], t[10]]];
                 if !is_rotation(&rotation) {
                     return Err(LayoutError::Invalid(format!("tag {}: transform's rotation is not a rotation", fiducial.id)));
                 }
-                let field_from_tag = Se3Transform { rotation, translation: Translation3 { x: t[3] + length_m / 2.0, y: t[7] + width_m / 2.0, z: t[11] } };
-                Ok(FieldTag { id: fiducial.id, side_m: fiducial.size / 1000.0, field_from_tag: Pose::from_se3(&field_from_tag) })
+                let field_from_tag = Rigid { rotation, translation: Vec3 { x: t[3] + length_m / 2.0, y: t[7] + width_m / 2.0, z: t[11] } };
+                Ok(FieldTag { id: fiducial.id, side_m: fiducial.size / 1000.0, field_from_tag: Pose::from_rigid(&field_from_tag) })
             })
             .collect::<Result<Vec<_>, LayoutError>>()?;
         let layout = Self { length_m, width_m, tags };
@@ -374,21 +365,9 @@ impl FieldLayout {
         self.tags.iter().find(|tag| tag.id == id)
     }
 
-    /// The tags as Eidos known tag poses, reference frame = the field, each with the field's
-    /// placement error ([`FIELD_PLACEMENT_SIGMA_M`], [`FIELD_PLACEMENT_SIGMA_RAD`]).
-    pub fn known_tags(&self) -> KnownTagPoses {
-        KnownTagPoses::new(
-            self.tags
-                .iter()
-                .map(|tag| {
-                    let reference_from_tag = tag.field_from_eidos_tag();
-                    KnownTag { id: tag.id, side: tag.side_m, reference_from_tag, placement: Some(placement_covariance(&reference_from_tag, FIELD_PLACEMENT_SIGMA_M, FIELD_PLACEMENT_SIGMA_RAD)) }
-                })
-                .collect(),
-        )
-    }
-
-    /// [`Self::known_tags`] as the value of an `eidos:known_tag_poses` graph constant: a list of
+    /// The tags as the value of an `eidos:known_tag_poses` graph constant, reference frame = the
+    /// field, each with the field's placement error ([`FIELD_PLACEMENT_SIGMA_M`],
+    /// [`FIELD_PLACEMENT_SIGMA_RAD`]): a list of
     /// `{id, side, reference_from_tag: {translation: {x, y, z}, rotation: {w, x, y, z}}}`.
     pub fn known_tags_value(&self) -> serde_json::Value {
         let tags = self
@@ -396,7 +375,7 @@ impl FieldLayout {
             .iter()
             .map(|tag| {
                 let field_from_tag = tag.field_from_eidos_tag();
-                let pose = Pose::from_se3(&field_from_tag);
+                let pose = Pose::from_rigid(&field_from_tag);
                 let placement: Vec<f64> = placement_covariance(&field_from_tag, FIELD_PLACEMENT_SIGMA_M, FIELD_PLACEMENT_SIGMA_RAD).iter().flatten().copied().collect();
                 serde_json::json!({ "id": tag.id, "side": tag.side_m, "reference_from_tag": pose, "placement_covariance": placement })
             })
@@ -417,8 +396,8 @@ pub const FIELD_PLACEMENT_SIGMA_RAD: f64 = 0.5 * std::f64::consts::PI / 180.0;
 /// A diagonal covariance in the reference frame would turn the tag about the field's origin (a
 /// half degree is 14 cm at 16 m). The local error maps to the reference frame by the adjoint
 /// `A = [[R, 0], [[t]x R, R]]`: `Σ = A Σ_local Aᵀ`.
-pub fn placement_covariance(reference_from_tag: &Se3Transform, sigma_m: f64, sigma_rad: f64) -> [[f64; 6]; 6] {
-    let r = &reference_from_tag.rotation.m;
+pub fn placement_covariance(reference_from_tag: &Rigid, sigma_m: f64, sigma_rad: f64) -> [[f64; 6]; 6] {
+    let r = &reference_from_tag.rotation;
     let t = &reference_from_tag.translation;
     let cross = [[0.0, -t.z, t.y], [t.z, 0.0, -t.x], [-t.y, t.x, 0.0]];
     let mut adjoint = [[0.0_f64; 6]; 6];
@@ -439,8 +418,7 @@ pub fn placement_covariance(reference_from_tag: &Se3Transform, sigma_m: f64, sig
     covariance
 }
 
-fn is_rotation(r: &RotationMatrix3) -> bool {
-    let m = &r.m;
+fn is_rotation(m: &Mat3) -> bool {
     let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     let orthonormal = (0..3).all(|i| (0..3).all(|j| ((0..3).map(|k| m[k][i] * m[k][j]).sum::<f64>() - f64::from(u8::from(i == j))).abs() < 1e-6));
     orthonormal && (det - 1.0).abs() < 1e-6
@@ -462,20 +440,21 @@ pub struct CameraMount {
 
 impl CameraMount {
     /// The camera's forward-left-up frame in the robot frame.
-    pub fn robot_from_camera_flu(&self) -> Se3Transform {
+    pub fn robot_from_camera_flu(&self) -> Rigid {
         let (sr, cr) = self.roll_rad.sin_cos();
         let (sp, cp) = self.pitch_rad.sin_cos();
         let (sy, cy) = self.yaw_rad.sin_cos();
-        let rx = RotationMatrix3 { m: [[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]] };
-        let ry = RotationMatrix3 { m: [[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]] };
-        let rz = RotationMatrix3 { m: [[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]] };
-        Se3Transform { rotation: matmul(&rz, &matmul(&ry, &rx)), translation: Translation3 { x: self.x_m, y: self.y_m, z: self.z_m } }
+        let rx = [[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]];
+        let ry = [[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]];
+        let rz = [[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]];
+        Rigid { rotation: matmul(&rz, &matmul(&ry, &rx)), translation: Vec3 { x: self.x_m, y: self.y_m, z: self.z_m } }
     }
 
-    /// Eidos extrinsics: the camera's optical frame on the robot (`rig_from_camera`), so the
-    /// multi-tag pose's `reference_from_rig` is the robot in the field.
-    pub fn extrinsics(&self) -> CameraExtrinsics {
-        CameraExtrinsics::from_flu_pose(self.robot_from_camera_flu())
+    /// The camera's optical frame (`+X` right, `+Y` down, `+Z` forward) on the robot: Eidos's
+    /// `rig_from_camera` extrinsics, so the multi-tag pose's `reference_from_rig` is the robot in
+    /// the field (Eidos's `CameraExtrinsics::from_flu_pose`).
+    pub fn rig_from_camera(&self) -> Rigid {
+        compose(self.robot_from_camera_flu(), Rigid { rotation: FLU_FROM_OPTICAL, translation: Vec3::default() })
     }
 
     /// No mount: the robot frame is the camera's own forward-left-up frame.
@@ -484,7 +463,6 @@ impl CameraMount {
     }
 }
 
-/// `a * b` for rigid transforms (Eidos's `se3_compose`).
-pub fn compose(a: Se3Transform, b: Se3Transform) -> Se3Transform {
-    se3_compose(a, b)
-}
+/// A camera's optical frame in its own forward-left-up frame: optical `x` is `-y`, `y` is `-z`,
+/// `z` is `x` (Eidos's `flu_from_optical`).
+pub const FLU_FROM_OPTICAL: Mat3 = [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]];

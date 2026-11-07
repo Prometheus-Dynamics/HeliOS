@@ -159,7 +159,7 @@ pub struct MountJson {
 pub fn rig_from_camera(mount: Option<&MountJson>) -> (Pose, &'static str) {
     let flu = mount.copied().unwrap_or(MountJson { x: 0.0, y: 0.0, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 0.0 });
     let camera = CameraMount { x_m: flu.x, y_m: flu.y, z_m: flu.z, roll_rad: flu.roll.to_radians(), pitch_rad: flu.pitch.to_radians(), yaw_rad: flu.yaw.to_radians() };
-    let pose = Pose::from_se3(&camera.extrinsics().rig_from_camera);
+    let pose = Pose::from_rigid(&camera.rig_from_camera());
     (pose, if mount.is_some() { "calibrated" } else { "unknown" })
 }
 

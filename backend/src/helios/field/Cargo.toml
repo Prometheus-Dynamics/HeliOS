@@ -3,7 +3,7 @@ name = "helios-field"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "FRC field layouts (WPILib AprilTag JSON, Limelight .fmap) as Eidos known tag poses, and the robot-frame camera mount as Eidos extrinsics"
+description = "FRC field layouts (WPILib AprilTag JSON, Limelight .fmap) as Eidos known tag poses, and the robot-frame camera mount as Eidos extrinsics; Eidos types only with the eidos feature"
 
 [lib]
 name = "helios_field"
@@ -19,5 +19,11 @@ serde = { workspace = true, features = ["derive"] }
 # (without it the last digit of a tag position depends on feature unification).
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror = { workspace = true }
-# Eidos's pose types and solver (no Daedalus): KnownTagPoses, CameraExtrinsics, Se3Transform.
-eidos-calibration = { workspace = true }
+# Eidos's pose types (feature `eidos`): KnownTagPoses, CameraExtrinsics, Se3Transform. Without
+# it the crate has its own rigid-transform math and no Eidos (helios-api).
+eidos-calibration = { workspace = true, optional = true }
+
+[features]
+# The layout and mount as Eidos types (`FieldLayout::known_tags`, `CameraMount::extrinsics`,
+# `Pose::{to,from}_se3`); the layout tests solve with Eidos, so they run with it.
+eidos = ["dep:eidos-calibration"]
