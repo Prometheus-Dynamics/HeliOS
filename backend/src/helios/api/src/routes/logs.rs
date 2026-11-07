@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     convert::Infallible,
+    path::Path,
     process::Stdio,
     sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
@@ -14,13 +15,14 @@ use axum::{
     http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
 };
-use futures_util::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt, stream::BoxStream};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::broadcast,
 };
 
+use super::log_feed::{self, Feed, Filter};
 use crate::{
     SharedState, capabilities,
     error::{ApiError, ApiResult},
@@ -83,34 +85,68 @@ fn scoped(state: &SharedState, params: &LogParams) -> ApiResult<LogQuery> {
 
 /// Live tail as Server-Sent Events (`event: log`), starting with the last `lines` lines.
 ///
-/// Viewers with the same filters share one `journalctl -f` (about 8 MB each on the CM5): it
-/// runs while anyone follows and stops with the last one. Each viewer first gets its backlog
-/// from a one-shot read.
+/// Every viewer reads one in-process feed (`log_feed`: journald's syslog forward and the kernel's
+/// lines), filtered for it. Where that feed can't run, viewers with the same filters share one
+/// `journalctl -f` (about 8 MB each on the CM5) instead. Either runs while anyone follows and stops
+/// with the last one. Each viewer first gets its backlog from a one-shot read.
 pub async fn stream(State(state): State<SharedState>, Query(params): Query<LogParams>) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let mut query = scoped(&state, &params)?;
     if params.lines.is_none() {
         query.lines = 50;
     }
-    let follower = state.log_followers.follow(&query)?;
-    let receiver = follower.subscribe();
+    let live = state.log_followers.follow(&query).await?;
     let backlog = host::journal(&query).await.unwrap_or_default();
     let backlog = futures_util::stream::iter(backlog.into_iter().map(|log| Ok(Event::default().event("log").data(serde_json::to_string(&log).unwrap_or_default()))));
-    let live = futures_util::stream::unfold((receiver, follower), |(mut receiver, follower)| async move {
-        loop {
-            match receiver.recv().await {
-                Ok(data) => return Some((Ok(Event::default().event("log").data(data.as_ref())), (receiver, follower))),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
-            }
+    let live: BoxStream<'static, Result<Event, Infallible>> = match live {
+        Live::Feed(feed, filter) => {
+            let receiver = feed.subscribe();
+            futures_util::stream::unfold((receiver, feed, filter), |(mut receiver, feed, filter)| async move {
+                loop {
+                    match receiver.recv().await {
+                        Ok(entry) if filter.matches(&entry) => return Some((Ok(Event::default().event("log").data(entry.json.as_ref())), (receiver, feed, filter))),
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    }
+                }
+            })
+            .boxed()
         }
-    });
+        Live::Journalctl(follower) => {
+            let receiver = follower.subscribe();
+            futures_util::stream::unfold((receiver, follower), |(mut receiver, follower)| async move {
+                loop {
+                    match receiver.recv().await {
+                        Ok(data) => return Some((Ok(Event::default().event("log").data(data.as_ref())), (receiver, follower))),
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    }
+                }
+            })
+            .boxed()
+        }
+    };
     Ok(Sse::new(backlog.chain(live).take_until(state.shutdown.clone().cancelled_owned())).keep_alive(KeepAlive::default()))
 }
 
-/// One `journalctl -f` per distinct filter, shared by everyone following with it.
+/// What a viewer follows: the shared feed with its filter, or a `journalctl -f`.
+pub enum Live {
+    Feed(Arc<Feed>, Filter),
+    Journalctl(Arc<Follower>),
+}
+
+/// The in-process feed while anyone follows (else one `journalctl -f` per distinct filter, shared
+/// by everyone following with it).
 #[derive(Default)]
 pub struct LogFollowers {
+    feed: tokio::sync::Mutex<FeedState>,
     running: Mutex<HashMap<Vec<String>, Weak<Follower>>>,
+}
+
+#[derive(Default)]
+struct FeedState {
+    feed: Weak<Feed>,
+    /// Whether journald forwards to the feed, once a probe found out (for the API's life).
+    forwards: Option<bool>,
 }
 
 pub struct Follower {
@@ -132,7 +168,37 @@ impl Drop for Follower {
 }
 
 impl LogFollowers {
-    fn follow(&self, query: &LogQuery) -> ApiResult<Arc<Follower>> {
+    async fn follow(&self, query: &LogQuery) -> ApiResult<Live> {
+        let filter = Filter { unit: query.unit.clone(), max_priority: query.max_priority };
+        if let Some(feed) = self.feed(Path::new(log_feed::SYSLOG_SOCKET), true).await {
+            return Ok(Live::Feed(feed, filter));
+        }
+        self.journalctl(query).map(Live::Journalctl)
+    }
+
+    /// The running feed, or a new one bound at `socket`; `None` where it can't run.
+    async fn feed(&self, socket: &Path, kmsg: bool) -> Option<Arc<Feed>> {
+        let mut state = self.feed.lock().await;
+        if let Some(feed) = state.feed.upgrade() {
+            return Some(feed);
+        }
+        if state.forwards == Some(false) {
+            return None;
+        }
+        let feed = Arc::new(Feed::bind(socket, kmsg)?);
+        if state.forwards.is_none() {
+            let forwards = feed.probe(&format!("probe {:016x}", rand_token())).await;
+            state.forwards = Some(forwards);
+            if !forwards {
+                tracing::info!(target: "helios_logs", "journald does not forward to {}; live logs use journalctl -f", socket.display());
+                return None;
+            }
+        }
+        state.feed = Arc::downgrade(&feed);
+        Some(feed)
+    }
+
+    fn journalctl(&self, query: &LogQuery) -> ApiResult<Arc<Follower>> {
         let live = LogQuery { lines: 0, since_ms: None, ..query.clone() };
         let args = host::journal_args(&live, true);
         let mut running = self.running.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -165,10 +231,16 @@ impl LogFollowers {
         Ok(follower)
     }
 
-    /// Followers running now (for tests and diagnostics).
+    /// `journalctl -f` followers running now (for tests and diagnostics).
     pub fn running(&self) -> usize {
         self.running.lock().unwrap_or_else(|poison| poison.into_inner()).values().filter(|follower| follower.strong_count() > 0).count()
     }
+}
+
+/// A token that tells this probe's line from an earlier API's.
+fn rand_token() -> u64 {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or_default();
+    nanos ^ (u64::from(std::process::id()) << 32)
 }
 
 /// The largest body `POST /v1/logs/client` takes (the UI sends at most ten reports, each clipped).
@@ -332,13 +404,34 @@ mod tests {
     async fn viewers_with_the_same_filters_share_one_follower() {
         let followers = LogFollowers::default();
         let query = LogParams::default().to_query().expect("query");
-        let Ok(first) = followers.follow(&query) else { return }; // no journalctl here
-        let second = followers.follow(&query).expect("follow");
+        let Ok(first) = followers.journalctl(&query) else { return }; // no journalctl here
+        let second = followers.journalctl(&query).expect("follow");
         assert!(Arc::ptr_eq(&first, &second));
-        let warnings = followers.follow(&LogParams { level: Some("warn".into()), ..LogParams::default() }.to_query().expect("query")).expect("follow");
+        let warnings = followers.journalctl(&LogParams { level: Some("warn".into()), ..LogParams::default() }.to_query().expect("query")).expect("follow");
         assert_eq!(followers.running(), 2);
         drop((first, second, warnings));
         assert_eq!(followers.running(), 0);
+    }
+
+    #[tokio::test]
+    async fn viewers_share_one_feed_while_journald_forwards_and_fall_back_when_it_does_not() {
+        let dir = std::env::temp_dir().join(format!("helios-log-followers-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let socket = dir.join("syslog");
+        let followers = LogFollowers::default();
+        // Nothing forwards to a test socket: the probe fails once, and the feed is not tried again.
+        assert!(followers.feed(&socket, false).await.is_none());
+        assert!(!socket.exists());
+        assert_eq!(followers.feed.lock().await.forwards, Some(false));
+        assert!(followers.feed(&socket, false).await.is_none());
+        // Once forwarding is known, viewers share one feed until the last one leaves.
+        followers.feed.lock().await.forwards = Some(true);
+        let first = followers.feed(&socket, false).await.expect("feed");
+        let second = followers.feed(&socket, false).await.expect("feed");
+        assert!(Arc::ptr_eq(&first, &second));
+        drop((first, second));
+        assert!(!socket.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

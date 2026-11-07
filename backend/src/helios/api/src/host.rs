@@ -263,7 +263,7 @@ pub fn parse_pid_stat(text: &str) -> Option<(String, String, u64, i64, u64, u64)
     Some((name, state, utime + stime, nice, threads, start))
 }
 
-fn unit_of(pid: u32) -> Option<String> {
+pub(crate) fn unit_of(pid: u32) -> Option<String> {
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     cgroup.lines().filter_map(|line| line.rsplit('/').next()).find(|segment| segment.ends_with(".service")).map(str::to_string)
 }

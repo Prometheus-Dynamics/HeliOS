@@ -5,6 +5,7 @@ pub mod cameras;
 pub mod device_documents;
 pub mod field_layouts;
 pub mod leds;
+pub mod log_feed;
 pub mod logs;
 pub mod maps;
 pub mod nt4;
