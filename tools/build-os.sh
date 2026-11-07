@@ -109,9 +109,6 @@ case "${1:-}" in
       ensure_ui_build
       stage_ui_build
     fi
-    # The slot id carries this checkout's commit (input defaults can't use project tokens; the
-    # version takes it from Gaia's ${project.commit_short}).
-    commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
     args=()
     # --machine NAME (or --set input.machine=NAME) selects the machine; anything else goes to gaia as before.
     machine=board
@@ -132,13 +129,10 @@ case "${1:-}" in
       board|qemu) ;;
       *) echo "error: machine must be board or qemu, not $machine" >&2; exit 1 ;;
     esac
-    # Image builds (profile and slot inputs); a package build such as systemcore has neither.
+    # Image builds have a profile input; a package build such as systemcore has none. The slot's
+    # version and commit are the build file's own defaults (project tokens).
     if grep -q '^\[inputs.profile\]' "$build_file"; then
-      # Slot ids sort by slot.json's version and allow no "+": the version without its build
-      # metadata (`2026.2.0-dev.<count>`), the commit in its own field.
-      slot_version=$(grep -m1 '^version = ' "$build_file" | sed -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)-dev.*/\1/')
-      args+=(--set "input.profile=$profile" --set "input.slot_version=${slot_version}-dev.$(git rev-list --count HEAD)"
-        --set "input.slot_commit=${commit:0:8}" --set "input.slot_source=$commit")
+      args+=(--set "input.profile=$profile")
     fi
     if [[ "$machine" == qemu ]]; then
       [[ "$profile" == full ]] || { echo "error: --machine qemu needs the full profile" >&2; exit 1; }

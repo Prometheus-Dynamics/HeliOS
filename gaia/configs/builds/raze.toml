@@ -1,5 +1,5 @@
 config = 3
-gaia_version = ">=2.0.2-dev"
+gaia_version = ">=2.0.3-dev"
 build_name = "helios-${input.profile}-raze"
 version = "2026.2.0-dev.${project.commit_count}+${project.commit_short}"
 description = "HeliOS image for the Raze (CM5 + OV9782). Use the profile input to switch between base OS and full appliance builds."
@@ -177,9 +177,11 @@ rev = "40f72025be65b21a55586e8fffc9eb6482b4df95"
 kind = "string"
 default = "helios"
 
+# Slot ids sort by slot.json's version and allow no "+": `version` without its build metadata
+# (keep the release part in step with `version` above), the commit in its own field.
 [inputs.slot_version]
 kind = "string"
-default = "2026.2.0"
+default = "2026.2.0-dev.${project.commit_count}"
 
 [inputs.slot_variant]
 kind = "string"
@@ -190,15 +192,15 @@ default = "styx"
 kind = "string"
 default = "HeliOS"
 
-# The HeliOS commit: tools/build-os.sh passes it (--set input.slot_commit / slot_source),
-# since project tokens don't resolve in input defaults.
+# The HeliOS commit (Gaia >= 2.0.3 resolves project tokens in input defaults). slot_source ends
+# in "-dirty" for a build from a dirty tree; slot_commit never does.
 [inputs.slot_commit]
 kind = "string"
-default = "00000000"
+default = "${project.commit_short}"
 
 [inputs.slot_source]
 kind = "string"
-default = "unknown"
+default = "${project.commit}"
 
 [inputs.slot_data_dir]
 kind = "string"
