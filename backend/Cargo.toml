@@ -164,6 +164,8 @@ orion-client = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branc
 # NetworkTables 4 (robot code): pipeline outputs from helios-engine. Same Orion commit.
 orion-nt4 = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "dev" }
 styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
+# Styx's camera daemon as a library: helios-engine serves the cameras with it. Same Styx commit.
+styx-camerad = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false }
 eidos-calibration = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false, features = ["std"] }
 eidos-core = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "dev", default-features = false }

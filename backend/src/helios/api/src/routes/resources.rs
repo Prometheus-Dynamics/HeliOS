@@ -23,7 +23,9 @@ use crate::{
 
 use super::check_id;
 
-const PERIPHERALS_PROVIDER_PREFIX: &str = "provider.peripherals.";
+/// The providers whose resources are peripherals: the engine's cameras (`provider.cameras.*`)
+/// and, until it is gone from every node, helios-peripherals (`provider.peripherals.*`).
+const PERIPHERAL_PROVIDER_PREFIXES: [&str; 2] = ["provider.cameras.", "provider.peripherals."];
 /// The action's own budget, counted from when the node accepts it (Orion's `deadline_ms`).
 const ACTION_DEADLINE_MS: u64 = 10_000;
 static ACTION_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -123,7 +125,7 @@ pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -
     view.resources.get(&id).map(|r| Json(resource_dto(r, &view))).ok_or_else(|| ApiError::not_found(format!("no resource {id}")))
 }
 
-/// The peripheral resources: helios-peripherals' (the fan override, raw access, cameras) and
+/// The peripheral resources: the cameras the engine serves and
 /// lemnosd's devices from the Lemnos bridge (`lemnos.device`), whose readings and statuses are
 /// their status entries (`state`).
 pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec<ResourceDto>>> {
@@ -132,7 +134,7 @@ pub async fn peripherals(State(state): State<SharedState>) -> ApiResult<Json<Vec
     let resources = view
         .resources
         .values()
-        .filter(|r| r.provider_id.as_str().starts_with(PERIPHERALS_PROVIDER_PREFIX) || r.resource_type.as_str() == LEMNOS_DEVICE_TYPE)
+        .filter(|r| PERIPHERAL_PROVIDER_PREFIXES.iter().any(|prefix| r.provider_id.as_str().starts_with(prefix)) || r.resource_type.as_str() == LEMNOS_DEVICE_TYPE)
         .map(|r| {
             let mut dto = resource_dto(r, &view);
             if let Some(entries) = readings.remove(&dto.id) {

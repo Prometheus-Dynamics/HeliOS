@@ -64,6 +64,19 @@ impl EngineApp {
         let shutdown = Shutdown::new("helios-engine");
         shutdown.listen();
         let stop = shutdown.token();
+        // The cameras start first, before the plugins load and Orion answers, and outlive every
+        // deploy: graphs come and go, the camera services stay.
+        let cameras = if self.config.cameras.enabled {
+            match crate::cameras::CameraHost::start(self.config.cameras.clone(), self.config.node_id.clone(), self.node_runtime.clone()) {
+                Ok(host) => Some(host),
+                Err(error) => {
+                    warn!(error = %error, "the camera thread did not start; no cameras are served");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         // Owned here, not by `run`, so the graphs are stopped below whether `run` ends or is cut short.
         let mut sessions: Option<ResidentExecutionSet> = None;
         let result = tokio::select! {
@@ -73,6 +86,10 @@ impl EngineApp {
         if let Some(sessions) = sessions.take() {
             // Dropping the set stops each graph and joins its thread.
             shutdown.stage("graph threads", STAGE_TIMEOUT, move || drop(sessions));
+        }
+        if let Some(cameras) = cameras {
+            // After the graphs, their clients: stopping a service joins its capture threads.
+            shutdown.stage("camera services", STAGE_TIMEOUT, move || cameras.stop());
         }
         shutdown.finish();
         result

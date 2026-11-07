@@ -1770,6 +1770,7 @@ dependencies = [
  "serde",
  "serde_json",
  "styx",
+ "styx-camerad",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -4117,6 +4118,16 @@ dependencies = [
  "toml",
 ]
 
+[[package]]
+name = "styx-camerad"
+version = "2.0.1-dev"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#00f2c1e92622563df7e0b00f4735807d1233dd0f"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "styx",
+]
 [[package]]
 name = "styx-capture"
 version = "2.0.1-dev"

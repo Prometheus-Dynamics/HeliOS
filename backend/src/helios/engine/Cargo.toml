@@ -18,6 +18,9 @@ test = false
 [features]
 default = ["plugins"]
 plugins = []
+# Simulated cameras (Styx's `sim`): the x86 sim (`tools/sim/up.sh`) serves them next to, or
+# instead of, real ones, selected by STYX_SIM_CAMERAS. Off on the board.
+sim = ["styx/sim"]
 
 [lints]
 workspace = true
@@ -50,8 +53,12 @@ eidos-detectors = { workspace = true }
 # `dylib-plugins` (plugin libraries) and `metrics` (per-node/per-edge telemetry,
 # off unless `HELIOS_ENGINE_METRICS_LEVEL` turns it on).
 daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"] }
-# `facade` provides `styx::ipc::FrameClient`; no capture backends are needed.
-styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
+# `facade` provides `styx::ipc::FrameClient`; the capture backends serve the cameras
+# (`cameras/`): native CSI sensors, V4L2 (with Rust raw decoders and libjpeg-turbo for USB
+# cameras), device hotplug, and Styx's logs through `tracing`.
+styx = { workspace = true, default-features = false, features = ["facade", "daedalus", "native", "v4l2", "raw-decoders", "hotplug", "tracing"] }
+# One camera service per attached camera, started and stopped as cameras come and go (`cameras/`).
+styx-camerad = { workspace = true, default-features = false, features = ["native", "v4l2", "turbojpeg"] }
 # `poll(2)`: a graph thread waits on its cameras and its graph's inbound fd in one call.
 nix = { workspace = true, features = ["poll"] }
 # `sched_setaffinity(2)`: a graph thread is pinned to its workload's CPU core (`execution::affinity`).

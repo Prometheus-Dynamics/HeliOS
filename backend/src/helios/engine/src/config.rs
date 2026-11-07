@@ -36,6 +36,8 @@ pub struct EngineConfig {
     pub metrics_level: MetricsLevel,
     /// How plugin libraries install (`HELIOS_ENGINE_PLUGIN_INSTALL`, `auto` or `stable`).
     pub plugin_install: crate::plugins::PluginInstall,
+    /// The cameras the engine serves (`cameras`, `HELIOS_CAMERA_*`).
+    pub cameras: crate::cameras::CameraHostConfig,
 }
 
 impl Default for EngineConfig {
@@ -64,6 +66,7 @@ impl EngineConfig {
             publish_interval_ms: DEFAULT_PUBLISH_INTERVAL_MS,
             metrics_level: MetricsLevel::Off,
             plugin_install: crate::plugins::PluginInstall::Auto,
+            cameras: crate::cameras::CameraHostConfig::from_layout(layout),
         }
     }
 
@@ -130,6 +133,7 @@ impl EngineConfig {
             }
         }
 
+        config.cameras = crate::cameras::CameraHostConfig::from_env(&env, &layout)?;
         Ok(config)
     }
 }
