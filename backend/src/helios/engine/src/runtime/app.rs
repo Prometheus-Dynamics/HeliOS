@@ -558,4 +558,17 @@ mod tests {
         assert!(!publish_lost_orion(&EngineRuntimeError::Publish(EnginePublishError::Client(refused))));
         assert!(is_retryable_no_message(&EngineRuntimeError::Client(ClientError::NoMessageAvailable)));
     }
+
+    #[test]
+    fn a_workload_carrying_a_newer_apis_field_is_runnable() {
+        use orion::control_plane::{DesiredState, TypedConfigValue, WorkloadConfig};
+        let record = WorkloadRecord::builder("workload.newer-app", crate::model::EngineExecutionRuntime::runtime_type(), "artifact.newer")
+            .desired_state(DesiredState::Running)
+            .assigned_to("node-a")
+            .config(WorkloadConfig::new("schema.exec").field("restart", TypedConfigValue::Int(1)).field("added_later", TypedConfigValue::Bool(true)))
+            .build();
+        let decoded = decode_execution_workloads(&[record], "node-a", 0);
+        assert!(decoded.decode_failures.is_empty(), "{:?}", decoded.decode_failures);
+        assert_eq!(decoded.runnable.len(), 1);
+    }
 }

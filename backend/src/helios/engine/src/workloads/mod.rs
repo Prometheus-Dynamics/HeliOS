@@ -1,6 +1,11 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    sync::Mutex,
+};
 
-use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, deserialize_config};
+use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, config_json_value, deserialize_config};
 use serde::Deserialize;
 
 use crate::model::{
@@ -8,7 +13,6 @@ use crate::model::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct EngineWorkloadConfig {
     #[serde(default)]
     graph: GraphConfig,
@@ -34,7 +38,6 @@ struct EngineWorkloadConfig {
 /// `map.*`: the saved map the graph's `map` input takes when it starts (`id` and `path` together),
 /// and `save`, the count of save requests (each new value asks the graph for a save).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct MapConfig {
     #[serde(default)]
     id: Option<String>,
@@ -45,7 +48,6 @@ struct MapConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct GraphConfig {
     #[serde(default)]
     kind: GraphKind,
@@ -67,7 +69,6 @@ enum GraphKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct BindingConfig {
     /// A resource's id (a camera, or a resource whose state is fed as JSON). Absent for a pipeline
     /// input (`pipeline` and `port` set instead).
@@ -127,7 +128,6 @@ impl ContextConfig {
 impl Eq for ContextConfig {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct PluginConfig {
     name: String,
     #[serde(default)]
@@ -305,8 +305,31 @@ fn decode_plugin_requirements(decoded: &EngineWorkloadConfig) -> Vec<PluginRequi
     decoded.plugin.iter().filter(|plugin| !plugin.name.is_empty()).map(|plugin| PluginRequirement { plugin_name: plugin.name.clone(), version: plugin.version.clone() }).collect()
 }
 
+/// Decodes the config, ignoring fields this engine does not know (an API newer than the engine,
+/// say after a slot rollback): the pipeline still starts, and the ignored fields are logged once
+/// per config revision. A known field with a bad value still fails.
 fn deserialize_engine_config(record: &WorkloadRecord, config: &orion::control_plane::WorkloadConfig) -> Result<EngineWorkloadConfig, WorkloadDecodeError> {
-    deserialize_config(&config.payload).map_err(|error| map_config_decode_error(record, error))
+    let mut ignored = Vec::new();
+    let decoded = config_json_value(&config.payload).ok().and_then(|value| serde_ignored::deserialize(value, |path| ignored.push(path.to_string())).ok());
+    let Some(decoded) = decoded else {
+        // Orion's decoder names the failing field.
+        return deserialize_config(&config.payload).map_err(|error| map_config_decode_error(record, error));
+    };
+    if !ignored.is_empty() && first_sight(record.workload_id.as_str(), &config.payload) {
+        tracing::warn!(workload_id = %record.workload_id.as_str(), fields = %ignored.join(", "), "ignoring unknown workload config fields (written by a newer API?)");
+    }
+    Ok(decoded)
+}
+
+/// Whether this config revision of `workload_id` is new since the last call (one warning per
+/// revision, not per re-decode: every workload change re-decodes them all).
+fn first_sight(workload_id: &str, payload: &BTreeMap<String, orion::control_plane::TypedConfigValue>) -> bool {
+    static SEEN: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{payload:?}").hash(&mut hasher);
+    let revision = hasher.finish();
+    let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    seen.get_or_insert_with(HashMap::new).insert(workload_id.to_string(), revision) != Some(revision)
 }
 
 fn map_config_decode_error(record: &WorkloadRecord, error: ConfigDecodeError) -> WorkloadDecodeError {
@@ -498,18 +521,44 @@ mod tests {
     }
 
     #[test]
-    fn decode_assigned_workload_rejects_unknown_fields() {
-        let record = WorkloadRecord::builder(WorkloadId::new("workload.strict"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.strict"))
+    fn a_newer_apis_fields_are_ignored_and_the_pipeline_still_starts() {
+        // Written by a newer API (then the slot rolled back): fields this engine does not know, at
+        // the top level and inside known groups.
+        let record = WorkloadRecord::builder(WorkloadId::new("workload.newer"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.newer"))
             .desired_state(DesiredState::Running)
             .assigned_to(NODE_ID)
-            .config(WorkloadConfig::new("schema.exec").field("plugin.0.name", TypedConfigValue::String("cv".into())).field("plugin.0.extra", TypedConfigValue::String("bad".into())))
+            .bind_resource("camera.front", NODE_ID)
+            .config(
+                WorkloadConfig::new("schema.exec")
+                    .field("plugin.0.name", TypedConfigValue::String("cv".into()))
+                    .field("plugin.0.extra", TypedConfigValue::String("newer".into()))
+                    .field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into()))
+                    .field("binding.frame.fps", TypedConfigValue::Int(120))
+                    .field("binding.frame.hdr", TypedConfigValue::Bool(true))
+                    .field("future_knob", TypedConfigValue::Int(3))
+                    .field("restart", TypedConfigValue::Int(2)),
+            )
             .build();
 
-        let error = decode_assigned_workload(&record, NODE_ID).expect_err("unknown fields should fail");
-        assert!(matches!(
-            error,
-            WorkloadDecodeError::InvalidField { ref field, ref message, .. }
-                if field == "plugin[0].extra" && message.contains("unknown field")
-        ));
+        let decoded = decode_assigned_workload(&record, NODE_ID).expect("a newer API's fields do not stop the pipeline");
+        assert_eq!(decoded.plugin_requirements[0].plugin_name, "cv");
+        assert_eq!(decoded.bindings[0].frame_request.fps, Some(120));
+        assert_eq!(decoded.restart, 2);
+
+        // Logged once per revision: the same config again is quiet, a changed one logs again.
+        let payload = &record.config.as_ref().unwrap().payload;
+        assert!(!first_sight("workload.newer", payload));
+        let mut changed = payload.clone();
+        changed.insert("future_knob".into(), TypedConfigValue::Int(4));
+        assert!(first_sight("workload.newer", &changed));
+        assert!(!first_sight("workload.newer", &changed));
+
+        // A known field with a bad value still fails, naming it.
+        let bad = WorkloadRecord::builder(WorkloadId::new("workload.bad"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.bad"))
+            .desired_state(DesiredState::Running)
+            .assigned_to(NODE_ID)
+            .config(WorkloadConfig::new("schema.exec").field("future_knob", TypedConfigValue::Int(1)).field("cpu", TypedConfigValue::String("two".into())))
+            .build();
+        assert!(matches!(decode_assigned_workload(&bad, NODE_ID), Err(WorkloadDecodeError::InvalidField { ref field, .. }) if field == "cpu"));
     }
 }

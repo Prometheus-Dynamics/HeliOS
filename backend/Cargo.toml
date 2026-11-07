@@ -44,6 +44,7 @@ once_cell = "1.21.4"
 rkyv = { version = "0.8.18", features = ["uuid-1", "little_endian", "pointer_width_64"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_bytes = "0.11.19"
+serde_ignored = "0.1.14"
 serde_json = "1.0.151"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
