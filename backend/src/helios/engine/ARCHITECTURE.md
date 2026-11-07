@@ -62,8 +62,10 @@ session state, artifacts, and telemetry back into Orion.
 - Daedalus plugins are dynamic libraries discovered in the plugin directories
   (`HELIOS_DAEDALUS_PLUGIN_DIRS`) and installed after Styx's
   `StyxFramesPlugin`, which owns the `styx:framelease` frame type. The vision
-  plugin is Eidos's (`libhelios_eidos_plugin.so`, from
-  `../eidos-plugin`); HeliOS ships no vision nodes. Plugins with Rust-typed
+  plugin is Eidos's, built into the engine (feature `static-eidos`, a built-in
+  next to `helios.builtin.utility`; a library of the same plugin id is then
+  skipped). `HELIOS_ENGINE_BUILTIN_EIDOS=0` loads it from its library instead
+  (`libhelios_eidos_plugin.so`, from `../eidos-plugin`); HeliOS ships no vision nodes. Plugins with Rust-typed
   ports (frames, Eidos's hand-off types) must come from the same cargo build
   as the engine (`cargo build -p helios-engine -p helios-eidos-plugin`) so
   they install through Daedalus's Rust-ABI path; the loader warns when a

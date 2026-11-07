@@ -65,19 +65,32 @@ pub fn load_plugins(paths: &[PathBuf]) -> Result<PluginLoadResult, PluginLoadErr
 }
 
 pub fn load_plugins_as(paths: &[PathBuf], install: PluginInstall) -> Result<PluginLoadResult, PluginLoadError> {
+    load_plugins_with(paths, install, true)
+}
+
+/// As [`load_plugins_as`]; `builtin_eidos: false` takes Eidos from its library even in an engine
+/// that has it built in (`HELIOS_ENGINE_BUILTIN_EIDOS=0`: the library form, for an A/B or a
+/// newer plugin build).
+pub fn load_plugins_with(paths: &[PathBuf], install: PluginInstall, builtin_eidos: bool) -> Result<PluginLoadResult, PluginLoadError> {
     // Host bridges are per workload: each compiled graph gets its own `HostBridgeManager`.
     let mut registry = PluginRegistry::new();
     // Styx frames first: every plugin taking a `FrameLease` relies on its type key.
     registry.install(&StyxFramesPlugin::new())?;
-    let builtins = install_builtin_plugins(&mut registry)?;
-    let libraries = paths.iter().map(|path| load_plugin_library(path, &mut registry, install)).collect::<Result<Vec<_>, _>>()?;
+    let builtins = install_builtin_plugins(&mut registry, builtin_eidos)?;
+    let libraries = paths.iter().filter_map(|path| load_plugin_library(path, &mut registry, install).transpose()).collect::<Result<Vec<_>, _>>()?;
 
     Ok(PluginLoadResult { builtins, libraries, registry, catalog_path: None })
 }
 
-fn load_plugin_library(path: &Path, registry: &mut PluginRegistry, install: PluginInstall) -> Result<LoadedPluginLibrary, PluginLoadError> {
+/// Loads and installs one library; `None` for a plugin the engine already has built in.
+fn load_plugin_library(path: &Path, registry: &mut PluginRegistry, install: PluginInstall) -> Result<Option<LoadedPluginLibrary>, PluginLoadError> {
     #[allow(unsafe_code)]
     let library = unsafe { PluginLibrary::load(path) }.map_err(|source| PluginLoadError::Library { path: path.to_path_buf(), source: Box::new(source) })?;
+    let id = library.schema().plugin.name.clone();
+    if registry.installed_plugin_version(&id).is_some() {
+        tracing::info!(path = %path.display(), plugin = %id, "plugin library skipped: built into this engine");
+        return Ok(None);
+    }
     // Plugins from the engine's own cargo build install through the Rust ABI, with their Rust
     // types (`FrameLease`, the plugin's hand-off types). A plugin from another toolchain falls
     // back to Daedalus's stable path, which carries schema nodes and `Value`s but no Rust types.
@@ -106,5 +119,5 @@ fn load_plugin_library(path: &Path, registry: &mut PluginRegistry, install: Plug
         daedalus_version: info.daedalus_version.as_str().map(ToOwned::to_owned),
     };
 
-    Ok(LoadedPluginLibrary { metadata, install_path, _library: library })
+    Ok(Some(LoadedPluginLibrary { metadata, install_path, _library: library }))
 }

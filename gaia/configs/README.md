@@ -179,9 +179,8 @@ the port the device identity's `manage_url` names
 - `os/`, `network/`, `hardware/`, `identity/`, `ops/`, `storage/`,
   `runtime-config/` – layer fragments imported by `layers/` and the target.
 - `payloads/` – what gets built and installed: the HeliOS services and tools
-  from the backend workspace (built in the `helios-cross` Docker image), the
-  Eidos Daedalus plugin (`helios-eidos-plugin`, in
-  `/usr/lib/helios/plugins/daedalus`), and the UI build.
+  from the backend workspace (built in the `helios-cross` Docker image; Eidos's
+  Daedalus plugin is built into helios-engine), and the UI build.
 - `runtime-services/` – systemd units, sockets and service assets for those payloads.
 
 Non-TOML inputs (HeliOS's Buildroot external tree with its own packages,

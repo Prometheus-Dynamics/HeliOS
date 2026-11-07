@@ -14,7 +14,7 @@ use crate::{
     config::EngineConfig,
     execution::{ExecutionPlugins, GraphSettings, ResidentExecutionSet},
     model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef, now_ms},
-    plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins_as},
+    plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins_with},
     provider::{EnginePublishError, OrionEnginePublisher},
     workloads::{WorkloadDecodeError, decode_assigned_workload},
 };
@@ -291,11 +291,12 @@ impl EngineApp {
 
     async fn bootstrap(&self) -> Result<PluginLoadResult, EngineRuntimeError> {
         let plugin_paths = discover_plugin_libraries(&self.config.plugin_dirs);
-        if plugin_paths.is_empty() {
+        let builtin_eidos = self.config.builtin_eidos && cfg!(feature = "static-eidos");
+        if plugin_paths.is_empty() && !builtin_eidos {
             warn!("no Daedalus plugins discovered in configured plugin dirs");
         }
 
-        let mut load_result = load_plugins_as(&plugin_paths, self.config.plugin_install)?;
+        let mut load_result = load_plugins_with(&plugin_paths, self.config.plugin_install, self.config.builtin_eidos)?;
         log_loaded_plugins(&load_result);
         match crate::plugins::catalog::write_catalog(&load_result.registry, &self.config.catalog_path) {
             Ok(path) => load_result.catalog_path = Some(path),

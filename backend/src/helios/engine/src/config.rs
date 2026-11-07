@@ -36,6 +36,9 @@ pub struct EngineConfig {
     pub metrics_level: MetricsLevel,
     /// How plugin libraries install (`HELIOS_ENGINE_PLUGIN_INSTALL`, `auto` or `stable`).
     pub plugin_install: crate::plugins::PluginInstall,
+    /// Eidos's plugin from the engine itself (feature `static-eidos`), not its library
+    /// (`HELIOS_ENGINE_BUILTIN_EIDOS`, default on; `0` loads `libhelios_eidos_plugin.so`).
+    pub builtin_eidos: bool,
     /// The cameras the engine serves (`cameras`, `HELIOS_CAMERA_*`).
     pub cameras: crate::cameras::CameraHostConfig,
 }
@@ -66,6 +69,7 @@ impl EngineConfig {
             publish_interval_ms: DEFAULT_PUBLISH_INTERVAL_MS,
             metrics_level: MetricsLevel::Off,
             plugin_install: crate::plugins::PluginInstall::Auto,
+            builtin_eidos: true,
             cameras: crate::cameras::CameraHostConfig::from_layout(layout),
         }
     }
@@ -131,6 +135,10 @@ impl EngineConfig {
                 Some(install) => config.plugin_install = install,
                 None => tracing::warn!(value = %value, "unknown HELIOS_ENGINE_PLUGIN_INSTALL; plugins install as Daedalus chooses"),
             }
+        }
+
+        if let Some(value) = env.get("HELIOS_ENGINE_BUILTIN_EIDOS") {
+            config.builtin_eidos = !matches!(value.trim(), "0" | "false" | "off" | "no");
         }
 
         config.cameras = crate::cameras::CameraHostConfig::from_env(&env, &layout)?;

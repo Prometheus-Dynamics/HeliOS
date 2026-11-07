@@ -389,12 +389,24 @@ fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, inpu
     (driver, sender)
 }
 
+#[cfg(feature = "static-eidos")]
+#[test]
+fn a_built_in_eidos_skips_its_library() {
+    let plugins = TestPlugins::load();
+    assert!(plugins.loaded.libraries.is_empty(), "the library is not loaded next to the built-in plugin");
+    assert!(plugins.loaded.builtins.iter().any(|plugin| plugin.plugin_name.as_deref() == Some("eidos") && plugin.path == std::path::Path::new("<builtin>/eidos")));
+    let document = daedalus::planner::GraphDocument::from_json(APRILTAG_GRAPH_DOCUMENT).expect("document");
+    plugins.registry().check_document(&document).expect("requires are installed");
+}
+
 #[test]
 fn eidos_plugin_library_installs_through_the_rust_abi() {
-    let plugins = TestPlugins::load();
-    let eidos = plugins.loaded.libraries.iter().find(|library| library.metadata().plugin_name.as_deref() == Some("eidos")).expect("eidos plugin loaded");
+    // The library form (`HELIOS_ENGINE_BUILTIN_EIDOS=0`, or an engine built without `static-eidos`).
+    let loaded = crate::plugins::load_plugins_with(&[eidos_plugin_path()], crate::plugins::PluginInstall::Auto, false).expect("load the Eidos plugin library");
+    let eidos = loaded.libraries.iter().find(|library| library.metadata().plugin_name.as_deref() == Some("eidos")).expect("eidos plugin loaded");
     assert!(eidos.metadata().path.ends_with(eidos_plugin_path().file_name().expect("file name")));
     assert_eq!(eidos.install_path(), daedalus::dylib::InstallPath::RustAbi);
+    let plugins = TestPlugins::load();
     // The AprilTag document's `requires` names it, and it provides every node.
     let document = daedalus::planner::GraphDocument::from_json(APRILTAG_GRAPH_DOCUMENT).expect("document");
     plugins.registry().check_document(&document).expect("requires are installed");
@@ -405,7 +417,7 @@ fn eidos_plugin_library_installs_through_the_rust_abi() {
 /// frame); the stored graphs move onto this path once it carries them whole.
 #[test]
 fn eidos_plugin_library_installs_through_the_stable_path_on_request() {
-    let mut loaded = crate::plugins::load_plugins_as(&[eidos_plugin_path()], crate::plugins::PluginInstall::Stable).expect("load the Eidos plugin library");
+    let mut loaded = crate::plugins::load_plugins_with(&[eidos_plugin_path()], crate::plugins::PluginInstall::Stable, false).expect("load the Eidos plugin library");
     let eidos = loaded.libraries.iter().find(|library| library.metadata().plugin_name.as_deref() == Some("eidos")).expect("eidos plugin loaded");
     assert_eq!(eidos.install_path(), daedalus::dylib::InstallPath::Stable);
     loaded.registry.install_plugin(&EngineTestPlugin::new()).expect("install test plugin");

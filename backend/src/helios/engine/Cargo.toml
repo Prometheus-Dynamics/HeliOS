@@ -16,8 +16,13 @@ path = "src/main.rs"
 test = false
 
 [features]
-default = ["plugins"]
+default = ["plugins", "static-eidos"]
 plugins = []
+# Eidos's Daedalus plugin linked into the engine and installed as a built-in (no
+# libhelios_eidos_plugin.so, so no second Daedalus runtime, std and serde in a library, and
+# fat LTO across the boundary). A `libhelios_eidos_plugin.so` in a plugin directory is then
+# skipped; the library form stays for engines built without this feature.
+static-eidos = []
 # Simulated cameras (Styx's `sim`): the x86 sim (`tools/sim/up.sh`) serves them next to, or
 # instead of, real ones, selected by STYX_SIM_CAMERAS. Off on the board.
 sim = ["styx/sim"]

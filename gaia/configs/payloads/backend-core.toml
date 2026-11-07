@@ -97,41 +97,10 @@ image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
-# The vision nodes as a Daedalus dynamic plugin: Eidos's own plugin
-# (eidos_daedalus::EidosPlugin), exported by the one-line leaf cdylib
-# helios-eidos-plugin, which helios-engine loads from
-# /usr/lib/helios/plugins/daedalus at startup.
-#
-# The engine installs it on the Rust-ABI path only when both were built with
-# the same Daedalus build fingerprint and the same Rust types behind the
-# boundary type keys (styx:framelease). Gaia builds artifacts with different
-# feature flags in separate cargo invocations, so check the engine log for the
-# install path after a build (see TODO.md).
-[[artifacts]]
-id = "helios-eidos-plugin"
-kind = "rust"
-package = "helios-eidos-plugin"
-source = "backend-workspace"
-# One cargo invocation for every backend package (Gaia build group), so shared
-# crates resolve the same features in the engine and its plugins.
-build_group = "helios-backend"
-# Eidos is private: cargo resolves its locked commit from the host-fetched eidos source.
-cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
-target = "aarch64-unknown-linux-gnu"
-profile = "${input.cargo_profile}"
-target_name = "libhelios_eidos_plugin.so"
-install_name = "libhelios_eidos_plugin.so"
-install_class = "library"
-install_dest_hint = "/usr/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
-output_path = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
-
-[artifacts.execution]
-backend = "docker"
-
-[artifacts.execution.docker]
-image = "helios-cross"
-dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
-context = "gaia/docker"
+# Eidos's Daedalus plugin (eidos_daedalus::EidosPlugin) is built into helios-engine (its
+# `static-eidos` feature): no libhelios_eidos_plugin.so, so no second Daedalus runtime, std and
+# serde in a library (2 MB of text, 3.5 MB of engine PSS on a Raze). HELIOS_ENGINE_BUILTIN_EIDOS=0
+# loads a library from /usr/lib/helios/plugins/daedalus instead.
 
 [[install]]
 id = "install-helios-api"
@@ -160,15 +129,6 @@ mode = 493
 owner = "root"
 group = "root"
 
-[[install]]
-id = "install-helios-eidos-plugin"
-artifact = "helios-eidos-plugin"
-dest = "/usr/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
-replace = true
-mode = 420
-owner = "root"
-group = "root"
-
 [image]
 kind = "buildroot"
 
@@ -177,5 +137,4 @@ install_entries = [
   "install-helios-api",
   "install-helios-engine",
   "install-helios-diagnostics",
-  "install-helios-eidos-plugin",
 ]

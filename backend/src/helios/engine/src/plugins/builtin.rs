@@ -56,8 +56,25 @@ fn summary_json(input_value: f64, output_value: f64) -> Result<String, NodeError
 
 declare_plugin!(HeliosBuiltinUtilityPlugin, "helios.builtin.utility", [resource_action_numeric, resource_label_numeric, double_f64, summary_json]);
 
-pub fn install_builtin_plugins(registry: &mut PluginRegistry) -> Result<Vec<LoadedPlugin>, PluginError> {
+/// The engine's own plugins; with `builtin_eidos` (and the `static-eidos` feature) also Eidos's,
+/// linked in, so no `libhelios_eidos_plugin.so` is loaded.
+pub fn install_builtin_plugins(registry: &mut PluginRegistry, builtin_eidos: bool) -> Result<Vec<LoadedPlugin>, PluginError> {
     let plugin = HeliosBuiltinUtilityPlugin::new();
     registry.install_plugin(&plugin)?;
-    Ok(vec![LoadedPlugin { path: PathBuf::from("<builtin>/helios-utility"), plugin_name: Some("helios.builtin.utility".into()), plugin_version: None, daedalus_version: None }])
+    #[allow(unused_mut)]
+    let mut builtins = vec![LoadedPlugin { path: PathBuf::from("<builtin>/helios-utility"), plugin_name: Some("helios.builtin.utility".into()), plugin_version: None, daedalus_version: None }];
+    #[cfg(feature = "static-eidos")]
+    if builtin_eidos {
+        let eidos = eidos_daedalus::EidosPlugin::new();
+        registry.install(&eidos)?;
+        builtins.push(LoadedPlugin {
+            path: PathBuf::from("<builtin>/eidos"),
+            plugin_name: Some(daedalus::runtime::plugins::Plugin::id(&eidos).into()),
+            plugin_version: registry.installed_plugin_version(daedalus::runtime::plugins::Plugin::id(&eidos)).flatten().map(ToOwned::to_owned),
+            daedalus_version: None,
+        });
+    }
+    #[cfg(not(feature = "static-eidos"))]
+    let _ = builtin_eidos;
+    Ok(builtins)
 }

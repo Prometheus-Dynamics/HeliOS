@@ -110,20 +110,6 @@ toolchain = "systemcore"
 profile = "${input.cargo_profile}"
 output_path = "${outputs.dir}/artifacts/helios-diagnostics"
 
-# The Eidos Daedalus plugin, in the engine's build group so both share one Daedalus build
-# fingerprint (the Rust-ABI plugin path needs it).
-[[artifacts]]
-id = "helios-eidos-plugin"
-kind = "rust"
-package = "helios-eidos-plugin"
-source = "backend-workspace"
-build_group = "helios-backend"
-cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
-toolchain = "systemcore"
-profile = "${input.cargo_profile}"
-target_name = "libhelios_eidos_plugin.so"
-output_path = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
-
 # lemnosd, Lemnos's hardware service, built with the SystemCore toolchain (its `service` profile is
 # the one Lemnos ships). It reads the host-owned devices of the SystemCore board definition.
 [[artifacts]]
@@ -217,13 +203,6 @@ src = "${source.lemnos}/packaging/boards/systemcore.toml"
 dest = "usr/local/share/lemnos/boards/systemcore.toml"
 mode = "0644"
 
-[[image.assembly.files]]
-tree = "pkg-root"
-src = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
-dest = "usr/local/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
-mode = "0755"
-
-# The UI's static build (artifact helios-ui, payloads/ui-build.toml: without the offline demo's frames).
 [[image.assembly.files]]
 tree = "pkg-root"
 src_dir = "${outputs.dir}/artifacts/helios-ui"
