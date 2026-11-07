@@ -33,6 +33,9 @@ rustflags = [
     "--cfg", "feature=\"ffmpeg_7_0\"",
     "--cfg", "feature=\"ffmpeg_7_1\"",
     "--cfg", "feature=\"ffmpeg_8_0\"",
+    # Orion link channel: use the NEON ChaCha20 path (16 vs 37 us per 4 KiB on A76).
+    # A dependency cannot set this cfg for its dependents.
+    "--cfg", "chacha20_force_neon",
 ]
 
 [target.x86_64-unknown-linux-gnu]
