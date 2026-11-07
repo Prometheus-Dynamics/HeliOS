@@ -35,8 +35,8 @@ edition = "2024"
 # Core
 anyhow = "1.0.104"
 async-trait = "0.1.92"
-chrono = { version = "0.4.45", features = ["serde"] }
-clap = { version = "4.6.7", features = ["derive", "env"] }
+chrono = { version = "0.4.45", default-features = false, features = ["now", "serde"] }
+clap = { version = "4.6.7", default-features = false, features = ["std", "help", "usage", "error-context", "derive", "env"] }
 derive_more = { version = "2.1.1", features = ["from", "display", "error"] }
 futures = "0.3.34"
 futures-util = "0.3.34"
@@ -110,7 +110,7 @@ memmap2 = "0.9.11"
 smallvec = "1.16.2"
 
 # Web and API
-axum = { version = "0.8.9", features = ["http1"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path"] }
 utoipa = { version = "6.0.0", features = ["actix_extras", "macros", "uuid", "chrono"] }
 
 # Build and dynamic libraries
