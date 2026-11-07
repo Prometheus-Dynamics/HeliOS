@@ -91,6 +91,8 @@ async fn run() -> anyhow::Result<()> {
     // SIGTERM or SIGINT cancels `state.shutdown`, which the server watches (`server::serve`).
     let stop = helios_shutdown::Shutdown::with_token("helios-api", state.shutdown.clone());
     stop.listen();
+    // The node's state, one shared view kept current for every request (`Orion::view`).
+    let _state = state.orion.follow_state();
     let _watcher = events::spawn_state_watcher(state.clone());
     // The board's node id changed from `node-local`: its state and pipelines follow it, once (`migration.rs`).
     let _node_id_migration = helios_api::migration::spawn(state.clone());

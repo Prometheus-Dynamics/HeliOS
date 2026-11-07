@@ -178,7 +178,7 @@ async fn lemnos_classes(state: &SharedState) -> ApiResult<BTreeSet<String>> {
     if state.config.test_lemnos_classes.is_some() {
         return Ok(lemnos_classes_at(&state.config, None));
     }
-    Ok(lemnos_classes_in(&state.orion.view().await?))
+    Ok(lemnos_classes_in(&*state.orion.view().await?))
 }
 
 /// The facts of this process: its layout's board, the host's os-release, and the lemnosd devices

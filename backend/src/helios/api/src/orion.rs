@@ -21,6 +21,9 @@ const CLIENT_NAME: &str = "helios-api";
 const EVENTS_CLIENT_NAME: &str = "helios-api-events";
 const ACTIONS_CLIENT_NAME: &str = "helios-api-actions";
 const LIVE_STREAMS_CLIENT_NAME: &str = "helios-api-live";
+const STATE_CLIENT_NAME: &str = "helios-api-state";
+/// How long the state follower waits before it subscribes again after its stream ended.
+const FOLLOW_RETRY: Duration = Duration::from_secs(1);
 
 /// Anything that runs an Orion action and waits for its result: [`Orion`] in the server, a fake in
 /// the tests of the action routes.
@@ -35,11 +38,98 @@ pub struct Orion {
     /// One control-plane stream for every action, shared by all callers (concurrent calls do not
     /// wait for each other); connected on first use and again after it drops.
     actions: Arc<Mutex<Option<ActionCaller>>>,
+    /// The newest state, shared by every request ([`Orion::view`]).
+    views: Arc<Views>,
+}
+
+/// The node's state as one shared [`StateView`]. [`Orion::follow_state`] keeps it current from
+/// Orion's state subscription, so a request takes it without asking Orion or copying anything: a
+/// snapshot read per request was the API's whole heap (twenty UI polls at once decoded twenty
+/// copies of the node's state; glibc kept the high-water mark, 23-34 MB a boot).
+#[derive(Debug, Default)]
+struct Views {
+    latest: std::sync::Mutex<Latest>,
+    /// One snapshot read at a time: requests that find the view stale share it.
+    fetch: Mutex<()>,
+}
+
+#[derive(Debug, Default)]
+struct Latest {
+    view: Option<Arc<StateView>>,
+    /// The follower's subscription is live: views it delivers are current.
+    following: bool,
+    /// Changes this process made to the state (mutations, actions), and how many of them the
+    /// newest read view has: while it lacks one, the next request reads a view.
+    changes: u64,
+    read_changes: u64,
+    /// Bumped by each view stored.
+    generation: u64,
+}
+
+impl Latest {
+    fn current(&self) -> Option<Arc<StateView>> {
+        self.view.clone().filter(|_| self.following && self.read_changes == self.changes)
+    }
+
+    /// Keep `view` unless a newer desired revision is already held (a subscription snapshot that
+    /// was on its way while a read got a newer one).
+    fn store(&mut self, view: Arc<StateView>) {
+        if self.view.as_ref().is_some_and(|held| held.desired_revision > view.desired_revision) {
+            return;
+        }
+        self.view = Some(view);
+        self.generation += 1;
+    }
+}
+
+impl Views {
+    fn latest(&self) -> std::sync::MutexGuard<'_, Latest> {
+        self.latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 impl Orion {
     pub fn new(socket: PathBuf, stream_socket: PathBuf) -> Self {
-        Self { socket, stream_socket, actions: Arc::new(Mutex::new(None)) }
+        Self { socket, stream_socket, actions: Arc::new(Mutex::new(None)), views: Arc::default() }
+    }
+
+    /// Follow the node's state (desired and observed) for [`Orion::view`] until the task is
+    /// dropped: one subscription, a new view per change. Without it each view is read from Orion.
+    pub fn follow_state(&self) -> tokio::task::JoinHandle<()> {
+        let orion = self.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = orion.follow_once().await {
+                    tracing::debug!(error = %error, "Orion state subscription ended; subscribing again");
+                }
+                orion.views.latest().following = false;
+                tokio::time::sleep(FOLLOW_RETRY).await;
+            }
+        })
+    }
+
+    async fn follow_once(&self) -> Result<(), String> {
+        let mut events = ControlPlaneEventStream::connect_at(&self.stream_socket, STATE_CLIENT_NAME).await.map_err(|error| error.to_string())?;
+        events.subscribe_state_and_observed(Revision::ZERO).await.map_err(|error| error.to_string())?;
+        loop {
+            let batch = events.next_events().await.map_err(|error| error.to_string())?;
+            // Only the newest snapshot of a batch is decoded.
+            let Some(snapshot) = batch.into_iter().rev().find_map(|event| match event.event {
+                orion::control_plane::ClientEventKind::StateSnapshot(snapshot) => Some(snapshot),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let view = Arc::new(StateView::from_snapshot(*snapshot));
+            let mut latest = self.views.latest();
+            latest.store(view);
+            latest.following = true;
+        }
+    }
+
+    /// The state changed here (a mutation or an action): the next view is read, not followed.
+    fn changed(&self) {
+        self.views.latest().changes += 1;
     }
 
     /// Runs `request` and waits up to `timeout` for its final result (Orion `ActionCaller`): the
@@ -56,7 +146,9 @@ impl Orion {
                 }
             }
         };
-        match caller.call(request, timeout).await {
+        let result = caller.call(request, timeout).await;
+        self.changed();
+        match result {
             Ok(result) => Ok(result),
             Err(error) => {
                 // The stream is gone (orion-node restarted, or it gave up the call): connect again next time.
@@ -87,8 +179,32 @@ impl Orion {
         self.client()?.fetch_state_snapshot().await.map_err(|error| unreachable(&self.socket, error))
     }
 
-    pub async fn view(&self) -> ApiResult<StateView> {
-        Ok(StateView::from_snapshot(self.snapshot().await?))
+    /// The node's state: the followed view while it is current, else one read (concurrent
+    /// requests share a read that started after they asked).
+    pub async fn view(&self) -> ApiResult<Arc<StateView>> {
+        let asked = {
+            let latest = self.views.latest();
+            if let Some(view) = latest.current() {
+                return Ok(view);
+            }
+            latest.generation
+        };
+        let _fetch = self.views.fetch.lock().await;
+        let changes = {
+            let latest = self.views.latest();
+            if latest.generation > asked
+                && latest.read_changes == latest.changes
+                && let Some(view) = &latest.view
+            {
+                return Ok(view.clone());
+            }
+            latest.changes
+        };
+        let view = Arc::new(StateView::from_snapshot(self.snapshot().await?));
+        let mut latest = self.views.latest();
+        latest.read_changes = latest.read_changes.max(changes);
+        latest.store(view.clone());
+        Ok(view)
     }
 
     /// An event stream on the node's stream socket, subscribed to desired and observed state
@@ -129,9 +245,16 @@ impl Orion {
     pub async fn apply(&self, mutations: Vec<DesiredStateMutation>) -> ApiResult<()> {
         let client = self.client()?;
         let mut last_error = None;
+        // The held view's revision first; a rejection (another writer moved it) reads it.
+        let mut revision = self.views.latest().current().map(|view| Revision::new(view.desired_revision));
         for _ in 0..2 {
-            let revision = client.fetch_state_snapshot().await.map_err(|error| unreachable(&self.socket, error))?.state.desired.revision;
-            match client.apply_mutations(MutationBatch { base_revision: revision, mutations: mutations.clone(), stamps: Vec::new() }).await {
+            let base_revision = match revision.take() {
+                Some(revision) => revision,
+                None => client.fetch_state_snapshot().await.map_err(|error| unreachable(&self.socket, error))?.state.desired.revision,
+            };
+            let applied = client.apply_mutations(MutationBatch { base_revision, mutations: mutations.clone(), stamps: Vec::new() }).await;
+            self.changed();
+            match applied {
                 Ok(()) => return Ok(()),
                 Err(ClientError::Rejected(reason)) => last_error = Some(reason),
                 Err(error) => return Err(unreachable(&self.socket, error)),
@@ -159,6 +282,8 @@ fn unreachable(socket: &std::path::Path, error: ClientError) -> ApiError {
 #[derive(Debug, Clone, Default)]
 pub struct StateView {
     pub desired_revision: u64,
+    /// Inline pipeline graphs parsed from this view, by workload id ([`StateView::graph`]).
+    graphs: Graphs,
     pub nodes: BTreeMap<String, NodeRecord>,
     pub artifacts: BTreeMap<String, ArtifactRecord>,
     pub workloads: BTreeMap<String, WorkloadRecord>,
@@ -205,8 +330,32 @@ impl StateView {
         view
     }
 
+    /// `text`, the inline graph of workload `id`, parsed once for this view: every request that
+    /// shows the pipeline shares the tree (each one parsed ~100 KB of graph before).
+    pub fn graph(&self, id: &str, text: &str) -> Result<Arc<serde_json::Value>, serde_json::Error> {
+        let mut graphs = self.graphs.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((held, graph)) = graphs.get(id)
+            && held.as_str() == text
+        {
+            return Ok(graph.clone());
+        }
+        let graph = Arc::new(serde_json::from_str::<serde_json::Value>(text)?);
+        graphs.insert(id.to_string(), (text.to_string(), graph.clone()));
+        Ok(graph)
+    }
+
     pub fn workload_observed(&self, id: &str) -> Option<WorkloadObservedState> {
         self.workloads.get(id).map(|workload| workload.observed_state)
+    }
+}
+
+/// The parsed graphs of a view. A copy of a view starts without them.
+#[derive(Debug, Default)]
+struct Graphs(std::sync::Mutex<BTreeMap<String, (String, Arc<serde_json::Value>)>>);
+
+impl Clone for Graphs {
+    fn clone(&self) -> Self {
+        Self::default()
     }
 }
 
@@ -267,5 +416,43 @@ mod tests {
         let labels = vec!["helios.display_name=Front cam".to_string(), "helios.plugin.loaded=eidos".to_string(), "helios.plugin.loaded=styx=x".to_string()];
         assert_eq!(label_map(&labels).get("helios.display_name").map(String::as_str), Some("Front cam"));
         assert_eq!(label_values(&labels, "helios.plugin.loaded"), vec!["eidos", "styx=x"]);
+    }
+
+    fn view_at(revision: u64) -> Arc<StateView> {
+        Arc::new(StateView { desired_revision: revision, ..StateView::default() })
+    }
+
+    #[test]
+    fn a_followed_view_is_shared_until_this_process_changes_the_state() {
+        let mut latest = Latest::default();
+        latest.store(view_at(4));
+        assert!(latest.current().is_none(), "nothing is current before the subscription is live");
+        latest.following = true;
+        let shared = latest.current().expect("followed");
+        assert!(Arc::ptr_eq(&shared, &latest.current().expect("followed")), "requests share one view");
+
+        // A change made here: the followed view may not have it yet, so it is read again.
+        latest.changes += 1;
+        assert!(latest.current().is_none());
+        latest.store(view_at(5));
+        assert!(latest.current().is_none(), "a followed view does not stand in for a read");
+        latest.read_changes = latest.changes;
+        assert_eq!(latest.current().map(|view| view.desired_revision), Some(5));
+
+        // The subscription ending: views are read again until it is back.
+        latest.following = false;
+        assert!(latest.current().is_none());
+    }
+
+    #[test]
+    fn an_older_snapshot_does_not_replace_a_newer_view() {
+        let mut latest = Latest { following: true, ..Latest::default() };
+        latest.store(view_at(7));
+        let generation = latest.generation;
+        latest.store(view_at(6));
+        assert_eq!(latest.current().map(|view| view.desired_revision), Some(7));
+        assert_eq!(latest.generation, generation);
+        latest.store(view_at(7));
+        assert_eq!(latest.generation, generation + 1, "the same revision with new observed state is kept");
     }
 }

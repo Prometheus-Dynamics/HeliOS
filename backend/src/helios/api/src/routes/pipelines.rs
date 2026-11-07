@@ -490,7 +490,7 @@ pub struct Pipeline {
     pub enabled: bool,
     /// Orion's observed state: pending, assigned, starting, running, stopped, completed, failed.
     pub state: String,
-    pub graph: Option<serde_json::Value>,
+    pub graph: Option<std::sync::Arc<serde_json::Value>>,
     pub graph_error: Option<String>,
     pub bindings: BTreeMap<String, Binding>,
     pub plugins: Vec<String>,
@@ -709,9 +709,9 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
     let workload_id = workload.workload_id.to_string();
     let artifact = view.artifacts.get(workload.artifact_id.as_str());
     let labels = artifact.map(|a| label_map(&a.labels)).unwrap_or_default();
-    let inline = config_string(workload, "graph.inline");
-    let (graph, graph_error) = match &inline {
-        Some(text) => match serde_json::from_str::<serde_json::Value>(text) {
+    let inline = workload.config.as_ref().and_then(|c| c.payload.get("graph.inline")).and_then(|v| v.as_str());
+    let (graph, graph_error) = match inline {
+        Some(text) => match view.graph(&workload_id, text) {
             Ok(value) => (Some(value), None),
             Err(error) => (None, Some(format!("graph.inline is not JSON: {error}"))),
         },
@@ -727,9 +727,9 @@ pub fn pipeline_dto(view: &StateView, workload: &WorkloadRecord) -> Pipeline {
         message: state_field(record, "message"),
         observed_at_ms: record.state.as_ref().map(|s| s.observed_at_ms).unwrap_or_default(),
     });
-    let (search_mode, full_search_every) = graph.as_ref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
-    let tuning = graph.as_ref().and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
-    let dictionary = graph.as_ref().and_then(dictionary_of);
+    let (search_mode, full_search_every) = graph.as_deref().and_then(search_mode_of).map_or((None, None), |(mode, every)| (Some(mode), every));
+    let tuning = graph.as_deref().and_then(search_tuning_of).filter(|_| search_mode == Some(SearchMode::Tracked));
+    let dictionary = graph.as_deref().and_then(dictionary_of);
     let outputs = outputs_of(view, &workload_id);
     let telemetry = workload_resources(view, &workload_id, ARTIFACT_TYPE)
         .find(|record| label_map(&record.labels).get("helios.artifact.kind").map(String::as_str) == Some(TELEMETRY_KIND))
@@ -1275,7 +1275,7 @@ pub async fn bind_input(State(state): State<SharedState>, Path((id, input)): Pat
             PipelineSpec {
                 map: None,
                 name: pipeline.name,
-                graph: pipeline.graph.ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?,
+                graph: std::sync::Arc::unwrap_or_clone(pipeline.graph.ok_or_else(|| ApiError::conflict(format!("pipeline {id} has no inline graph to keep")))?),
                 bindings: pipeline.bindings,
                 enabled: pipeline.enabled,
                 search_mode: None,
@@ -2081,7 +2081,8 @@ fn template_family(id: &str) -> ApiResult<&'static str> {
 
 /// `GET /v1/pipelines/templates`: the graphs helios-engine ships, ready to deploy with a camera
 /// binding on `camera_input`.
-pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
+/// The templates as built into this binary.
+pub fn template_list() -> ApiResult<Vec<Template>> {
     let mut out = Vec::new();
     for (id, json) in crate::startup::GRAPHS {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
@@ -2106,5 +2107,20 @@ pub async fn templates() -> ApiResult<Json<Vec<Template>>> {
             graph,
         });
     }
-    Ok(Json(out))
+    Ok(out)
+}
+
+/// `GET /v1/pipelines/templates`. The templates are constants of the binary, so their JSON is
+/// built once and every request is sent the same bytes (each one parsed and wrote 377 KB of
+/// templates, about 1.5 MB of heap a request, held by glibc after a burst).
+pub async fn templates() -> ApiResult<axum::response::Response> {
+    static BODY: std::sync::OnceLock<Result<axum::body::Bytes, String>> = std::sync::OnceLock::new();
+    let body = BODY.get_or_init(|| {
+        let list = template_list().map_err(|error| error.message)?;
+        serde_json::to_vec(&list).map(axum::body::Bytes::from).map_err(|error| error.to_string())
+    });
+    match body {
+        Ok(bytes) => Ok(axum::response::IntoResponse::into_response(([(axum::http::header::CONTENT_TYPE, "application/json")], bytes.clone()))),
+        Err(message) => Err(ApiError::internal(message.clone())),
+    }
 }

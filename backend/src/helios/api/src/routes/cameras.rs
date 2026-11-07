@@ -343,7 +343,7 @@ pub async fn get_status(State(state): State<SharedState>, Path(id): Path<String>
     Ok(Json(chain_of(&state, &view, &camera, &record).await))
 }
 
-pub(crate) async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView, orion::control_plane::ResourceRecord)> {
+pub(crate) async fn find(state: &SharedState, id: &str) -> ApiResult<(std::sync::Arc<StateView>, orion::control_plane::ResourceRecord)> {
     check_id(id)?;
     let view = state.orion.view().await?;
     let record = camera_records(&view).find(|r| r.resource_id.as_str() == id).cloned().ok_or_else(|| ApiError::not_found(format!("no camera {id}")))?;

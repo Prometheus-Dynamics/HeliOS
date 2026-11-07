@@ -236,7 +236,7 @@ pub struct PipelineFacts<'a> {
 impl<'a> PipelineFacts<'a> {
     /// The facts of a pipeline's DTO.
     pub fn of(pipeline: &'a Pipeline) -> Self {
-        let graph = pipeline.graph.as_ref();
+        let graph = pipeline.graph.as_deref();
         let node = |id: &str| graph_node(graph, id);
         let detector = DETECTOR_NODES.iter().find_map(|id| node(id));
         Self {

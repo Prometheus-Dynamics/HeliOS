@@ -212,7 +212,7 @@ pub async fn device(State(state): State<SharedState>) -> Json<Device> {
         Ok(view) => view.nodes.get(&state.config.node_id).and_then(|node| node.clock.as_ref()).map(clock_json),
         Err(_) => None,
     };
-    let capabilities = capabilities::now(&state.config, view.as_ref().ok());
+    let capabilities = capabilities::now(&state.config, view.as_deref().ok());
     Json(Device {
         node_id: state.config.node_id.clone(),
         hostname: hostname(),
