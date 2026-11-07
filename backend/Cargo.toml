@@ -195,14 +195,19 @@ codegen-units = 16
 # levels matter under fat LTO: each crate's own (Eidos at "z" made the ArUco
 # graph 4x slower) and the final artifact's (the engine and probe run the
 # graph; the Eidos plugin library links the stages).
+# A package override does not inherit the profile's `strip`: without it here the engine and the
+# plugin shipped their symbol tables (7.4 + 4.1 MB of the image).
 [profile.release.package.helios-eidos-plugin]
 opt-level = 3
+strip = "symbols"
 
 [profile.release.package.helios-engine]
 opt-level = 3
+strip = "symbols"
 
 [profile.release.package.helios-vision-probe]
 opt-level = 3
+strip = "symbols"
 
 # Eidos (per-frame CV) is built for speed too, except the catalog-only crates no HeliOS
 # template runs per frame (filter, color, geometry, motion, draw): "s" (Eidos's measurement:
