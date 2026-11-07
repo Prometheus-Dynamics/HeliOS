@@ -209,6 +209,8 @@ For when the user calls the release; not work to start before that.
 - NPU and AI models (Coral, RKNN, the K230 KPU): HeliOS uses the NPU once Coral and AI-model
   support return. Built on the layers below, not as per-vendor paths (see "AI accelerators").
 - Field test day on a robot behind a SystemCore: robot access is unlikely before the release.
+- Role-based UI: not doing it (user, 2026-11-06, already decided). The UI stays organised by job
+  (Set up, Run, Tune, Device), and every job is open to everyone.
 
 ## After the release: dependency layers (planned 2026-11-02)
 

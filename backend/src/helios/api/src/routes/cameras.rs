@@ -89,7 +89,14 @@ pub struct DropsByCause {
 
 impl From<&styx::metrics::Drops> for DropsByCause {
     fn from(drops: &styx::metrics::Drops) -> Self {
-        Self { sensor_sequence_gaps: drops.sensor_sequence_gaps, queue_overflow: drops.queue_overflow, corrupted: drops.corrupted, isp_skipped: drops.isp_skipped, raw_skipped: drops.raw_skipped, unread: drops.unread }
+        Self {
+            sensor_sequence_gaps: drops.sensor_sequence_gaps,
+            queue_overflow: drops.queue_overflow,
+            corrupted: drops.corrupted,
+            isp_skipped: drops.isp_skipped,
+            raw_skipped: drops.raw_skipped,
+            unread: drops.unread,
+        }
     }
 }
 
@@ -624,7 +631,7 @@ pub async fn delete_calibration(State(state): State<SharedState>, Path(id): Path
 pub async fn capture_calibration(State(state): State<SharedState>, Path(id): Path<String>, Json(request): Json<CaptureRequest>) -> ApiResult<Json<CaptureResult>> {
     let (_, record) = find(&state, &id).await?;
     let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
-    Ok(Json(state.calibrations.capture(&id, &socket, request).await?))
+    Ok(Json(state.calibrations.capture(&state.orion, &state.config.node_id, &id, &socket, request).await?))
 }
 
 /// `POST /v1/cameras/{id}/calibration/solve`: intrinsics fitted to the views captured; returned,
@@ -632,7 +639,7 @@ pub async fn capture_calibration(State(state): State<SharedState>, Path(id): Pat
 pub async fn solve_calibration(State(state): State<SharedState>, Path(id): Path<String>, body: Option<Json<SolveRequest>>) -> ApiResult<Json<SolveResult>> {
     check_id(&id)?;
     let orientation = camera_context::Orientation::from_settings(&state.store.camera_settings(&id).await?);
-    Ok(Json(state.calibrations.solve(&id, body.map(|Json(request)| request).unwrap_or_default(), orientation).await?))
+    Ok(Json(state.calibrations.solve(&state.orion, &state.config.node_id, &id, body.map(|Json(request)| request).unwrap_or_default(), orientation).await?))
 }
 
 /// `DELETE /v1/cameras/{id}/calibration/views`: forget the views captured.

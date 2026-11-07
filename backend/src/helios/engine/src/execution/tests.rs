@@ -425,8 +425,15 @@ fn eidos_plugin_library_installs_through_the_stable_path_on_request() {
         Err(error) => panic!("stable path: the AprilTag graph does not compile: {error}"),
     };
     let (sender, receiver) = test_camera();
-    let mut driver = WorkloadDriver::start(apriltag, graph, vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)], Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default())
-        .expect("start driver");
+    let mut driver = WorkloadDriver::start(
+        apriltag,
+        graph,
+        vec![(frame_spec("frame"), Box::new(receiver) as Box<dyn FrameSource>)],
+        Arc::new(Notify::new()),
+        crate::nt4::Nt4Sink::default(),
+        PipelineBus::default(),
+    )
+    .expect("start driver");
     sender.send(marker_scene(ArucoDictionaryKind::AprilTag36h11, 586, 1)).expect("send frame");
     wait_for_within(Duration::from_secs(10), "the frame to be processed", || driver.stats().ticks_processed == 1 || driver.stats().ticks_failed > 0);
     let (session, artifacts) = driver.snapshot();

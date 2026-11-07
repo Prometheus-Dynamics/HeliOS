@@ -83,12 +83,9 @@ mcap = { version = "0.25", default-features = false, features = ["lz4"] }
 lemnos-ipc = { workspace = true }
 
 helios-diagnostics = { path = "../diagnostics" }
-# Calibration on the device (`calibration_capture.rs`): ChArUco board detection and the
-# intrinsics solve.
-eidos-detectors = { workspace = true }
-eidos-aruco = { workspace = true }
-eidos-calibration = { workspace = true }
-eidos-core = { workspace = true, features = ["std"] }
+# Calibration on the device (`calibration_capture.rs`): helios-engine finds the board and fits
+# the lens; this is what the two send each other. The API has no Eidos of its own.
+helios-calibration-wire = { path = "../calibration-wire" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

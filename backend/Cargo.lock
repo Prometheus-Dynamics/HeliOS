@@ -1671,13 +1671,10 @@ dependencies = [
  "clap",
  "daedalus-data",
  "daedalus-planner",
- "eidos-aruco",
- "eidos-calibration",
- "eidos-core",
- "eidos-detectors",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",
+ "helios-calibration-wire",
  "helios-diagnostics",
  "helios-field",
  "helios-layout",
@@ -1713,6 +1710,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-calibration-wire"
+version = "1.0.1-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-diagnostics"
 version = "1.0.1-dev"
 dependencies = [
@@ -1744,7 +1749,11 @@ dependencies = [
  "anyhow",
  "daedalus-rs",
  "eidos-aruco",
+ "eidos-calibration",
+ "eidos-core",
  "eidos-daedalus",
+ "eidos-detectors",
+ "helios-calibration-wire",
  "helios-eidos-plugin",
  "helios-field",
  "helios-layout",

@@ -1,6 +1,6 @@
 use helios_shutdown::{STAGE_TIMEOUT, Shutdown};
 use orion::{
-    client::{ClientError, ControlPlaneEventStream, LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalServiceRetryPolicy},
+    client::{ClientError, ControlPlaneEventStream, LocalExecutorEvent, LocalExecutorService, LocalNodeRuntime, LocalProviderService, LocalServiceRetryPolicy},
     control_plane::{ClientEventKind, StateSnapshot, WorkloadRecord},
     transport::ipc::IpcTransportError,
 };
@@ -95,6 +95,22 @@ impl EngineApp {
                 }
             }
         }
+
+        // Actions on the engine's resources: the camera calibration helios-api asks for
+        // (`calibration.rs`). The watch reconnects by itself once it is open.
+        let action_service = LocalProviderService::new(self.node_runtime.clone(), format!("{}-actions", self.publisher.provider_client_name()), self.publisher.provider_identity_record())
+            .with_retry_policy(LocalServiceRetryPolicy::fixed_delay(ORION_IPC_RETRY_DELAY));
+        let _actions = tokio::spawn(async move {
+            loop {
+                match action_service.watch_action_requests().await {
+                    Ok(actions) => return crate::calibration::serve(actions).await,
+                    Err(error) => {
+                        warn!(error = %error, "the engine's action watch did not open; retrying");
+                        sleep(ORION_IPC_RETRY_DELAY).await;
+                    }
+                }
+            }
+        });
 
         let service = LocalExecutorService::new(self.node_runtime.clone(), format!("{}-watch", self.publisher.executor_client_name()), self.publisher.executor_identity_record())
             .with_retry_policy(LocalServiceRetryPolicy::fixed_delay(ORION_IPC_RETRY_DELAY));

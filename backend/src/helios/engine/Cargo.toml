@@ -39,6 +39,13 @@ notify = { workspace = true }
 orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
 # Pipeline outputs on NetworkTables for robot code (`nt4.rs`).
 orion-nt4 = { workspace = true }
+# Camera calibration for helios-api (`calibration.rs`): the ChArUco board and the lens fit, so
+# the API has no Eidos of its own.
+helios-calibration-wire = { path = "../calibration-wire" }
+eidos-aruco = { workspace = true }
+eidos-calibration = { workspace = true }
+eidos-core = { workspace = true, features = ["std"] }
+eidos-detectors = { workspace = true }
 # `engine` (serial executor, no worker pool: graphs run on their driver thread),
 # `dylib-plugins` (plugin libraries) and `metrics` (per-node/per-edge telemetry,
 # off unless `HELIOS_ENGINE_METRICS_LEVEL` turns it on).
@@ -69,8 +76,6 @@ eidos-daedalus = { workspace = true, features = ["dylib", "simd", "x86", "gpu"] 
 tempfile = { workspace = true }
 # Playback e2e: the test writes a recording (StreamRecorder) and replays it as a camera.
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus", "replay-mcap", "replay-mcap-lz4"] }
-# Marker bit patterns for synthetic test scenes.
-eidos-aruco = { workspace = true }
 # Built by `cargo test` before the engine's tests, in the same build, so the tests can load
 # `libhelios_eidos_plugin.so` through the engine's plugin loader.
 helios-eidos-plugin = { path = "../eidos-plugin" }

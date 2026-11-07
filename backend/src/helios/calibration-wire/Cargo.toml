@@ -1,0 +1,15 @@
+[package]
+name = "helios-calibration-wire"
+version.workspace = true
+edition.workspace = true
+description = "What helios-api and helios-engine send each other for a camera calibration: plain data, no Eidos"
+publish = false
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -12,6 +12,7 @@ exclude = [
 members = [
     "src/libs/lib-schema-migration",
     "src/helios/api",
+    "src/helios/calibration-wire",
     "src/helios/layout",
     "src/helios/maps",
     "src/helios/engine",

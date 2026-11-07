@@ -110,13 +110,7 @@ impl CameraPreviews {
     pub async fn facts(&self, id: &str) -> Option<PreviewFacts> {
         let previews = self.previews.lock().await;
         let metrics = previews.get(id)?.preview.metrics();
-        Some(PreviewFacts {
-            viewers: metrics.subscribers,
-            frames_in: metrics.frames_in,
-            frames_published: metrics.encoded,
-            errors: metrics.errors,
-            last_error: metrics.last_error,
-        })
+        Some(PreviewFacts { viewers: metrics.subscribers, frames_in: metrics.frames_in, frames_published: metrics.encoded, errors: metrics.errors, last_error: metrics.last_error })
     }
 
     /// Forget previews of cameras that are gone (`keep`: the cameras there are now).
