@@ -8,12 +8,19 @@ user decides when the alpha is cut. The board checks under "Next: a HeliOS image
 (live metrics, camera preview, the plugin graph and poll loop on the CM5, raw I/O, peripherals,
 camera controls, two cameras, `orionctl`) are alpha items too.
 
-- [ ] **Pin round and Raze deploy.** Why: Raze #1 must run current dependencies, so the fixes below
-      are proven on the board. Done on Raze #1 and the SystemCore (2026-11-03): trial slot dev.921
-      on the Raze and the .ipk dev.922 on the SystemCore, both on Orion protocol 1 with
+Cleared 2026-11-06 for the leap (user: clear every repo's TODOs, then make the jump). An item
+marked **written, untested on board** has its code in; only a board run is left, and it does not
+hold up the leap.
+
+- [x] **Pin round and Raze deploy.** Done on Raze #1 and the SystemCore (2026-11-03): trial slot
+      dev.921 on the Raze and the .ipk dev.922 on the SystemCore, both on Orion protocol 1 with
       `ORION_NODE_PEER_AUTO_TRUST` at `private-link`, cameras running, stale state set aside and the
-      default pipeline restored. Left: the real capture allocations, the stale-graph refresh, the
-      dense map pane by real clicks, and deploying the `.img.xz` through Atlas. Blocked by: nothing.
+      default pipeline restored. The capture allocations are measured and documented
+      (docs/device-profiles.md: 8 MB of sensor raw per camera, the CMA pool per board), the
+      stale-graph refresh is in (9ac1a79f), and Atlas installs an uploaded `.img.xz` (a530de48).
+      Written, untested on board: the dense map pane by real clicks, and an `.img.xz` deploy
+      through Atlas end to end. The next pin round is the coordinator's joint lock (Daedalus,
+      Styx, Lemnos 80d5d1e on branch `lemnos-80d5d1e`, Atlas, Orion).
 - [ ] **NT4 end to end.** Why: robot code reads HeliOS through NetworkTables. Done when: a WPILib
       client on the SystemCore reads pose and targets from the Raze, timestamps are in robot time,
       and it reconnects after a SystemCore and a Raze restart. Done: a real WPILib robot program
@@ -22,26 +29,29 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       SystemCore and reads Raze #1, Raze #2 and the SystemCore itself. Each board publishes under
       `<prefix>/<board>/<pipeline>` (ca13ec0e), so they no longer collide; Raze #2 keeps the old
       paths until it is updated. It came back by itself after a SystemCore power-cycle, and after a
-      Raze-only reboot (updates back about 38 s later, slot update included). Left: a pose with a
-      tag in view. Blocked by: a tag in front of a camera (none on the bench).
+      Raze-only reboot (updates back about 38 s later, slot update included). The latency entry
+      now runs from the sensor timestamp, not the tick (2f811b63). Written, untested on board: a
+      pose with a tag in view. Blocked by: a tag in front of a camera (none on the bench).
 - [x] **Robot time.** Done (Orion 1996c47, d363bdb9, dev.928 on Raze #1): `capture_time_us` is on
       the NT server's clock and is not published before the first clock sample. Over 370 s (six RTT
       sawtooth cycles, 11,104 values) against the WPILib server on the SystemCore, arrival less
       stamp and latency was 486 µs median, -0.47 to +5.9 ms at the extremes (it was -9.5 ms with
-      Orion f557669). In docs/docs/api/networktables.md. Not covered: the time from sensor exposure
-      to the graph.
+      Orion f557669). In docs/docs/api/networktables.md. The time from the sensor timestamp to the
+      tick's end is now published (`capture_latency_ms` in the engine stats, NT4 latency; 2f811b63),
+      written, untested on board.
 - [ ] **Lens priors (mechanism only).** Why: fisheye OV9782 calibration starts from a sane model.
       Partly done: uncalibrated cameras carry the board's lens prior from camera.toml for Eidos's
       self-calibration (fd343ffc). On dev.926 Raze #1's map pipeline runs and sits in its window at
-      0 of 30 views. Left: show self-calibration converging from it on the Raze. Blocked by: someone
-      moving the camera around tags; the bench has no tag in view.
+      0 of 30 views. Written, untested on board: self-calibration converging from it on the Raze.
+      Blocked by: someone moving the camera around tags; the bench has no tag in view.
 - [x] **SystemCore coexistence.** Done on dev.926 next to the WPILib robot and Limelight's services:
       installs, runs, uninstalls and reinstalls with no failed units, and the robot stays active.
       HeliOS is on :5880, WPILib on :5810 and Limelight on 5800-5837. Removing the package leaves only
       its data, `/usr/local/var/lib/helios` (16 MB) and the log directory, so a reinstall brought the
       pipeline back. Limelight's `visionserver1` holds a USB camera it finds first (here the C922):
-      HeliOS's status says "In use by visionserver1", though `frame_flow` in `/v1/cameras` still
-      reads `flowing` (a small fix, open).
+      HeliOS's status says "In use by visionserver1", and `frame_flow` in `/v1/cameras` now reads
+      `blocked` (or `unknown` when nothing is known), not `flowing`; `/v1/cameras` also carries the
+      preview's own counters (edd26ac8).
 - [ ] **Atlas on the SystemCore.** Why: flashing and updating boards behind a robot controller
       without SSH. Partly done: Atlas's agent installs itself on the SystemCore from its own .ipk
       (Atlas 456e4cc, 04d7931). Left: flash the second Raze (e5226d57) through it, and step 2 (the
@@ -65,25 +75,38 @@ camera controls, two cameras, `orionctl`) are alpha items too.
       on Raze #1, pretty-printed) for its revision number. Fixed in 324371a6. On the CM5 (Raze #1,
       2026-11-06), a refused 94 KB PUT now peaks at +4.7 MB RSS instead of +25.1, and the history
       is 3.4 MB once written compact. An accepted deploy peaks at +7.8 MB, and helios-api settles
-      at 17-18 MiB PSS after it. The engine's heap is the remaining target; the tags-only figure
-      has not been re-measured. Blocked by: nothing.
+      at 17-18 MiB PSS after it. The Daedalus telemetry is recycled every tick (086d6658, on the
+      `lemnos-80d5d1e` branch). Left: the engine's heap and a re-measured tags-only figure, both
+      after the leap's link changes, which move these numbers anyway. Blocked by: nothing.
 - [ ] **API dedup pass.** Why: the freeze rule for every repo. Done when: no duplicate routes, types
       or aliases remain in helios-api/engine/peripherals, and docs/docs/api/http.md matches. Partly
       done: `/v1/ota/*` is gone (Atlas dev calls none of it; the identity already named
-      `/v1/update/*`), and with it axum's multipart. No route is registered twice. Left: types and
-      aliases, and the engine and peripherals. Blocked by: nothing.
+      `/v1/update/*`), and with it axum's multipart. No route is registered twice. The dead API
+      codegen, its SDK pages and the promised `/openapi.json` are gone (63489a8e). Left: types and
+      aliases in the engine and peripherals; done with the leap, whose client wrappers define those
+      types once. Blocked by: nothing.
 
-## Decided, starts when the user says
+## The leap (GO 2026-11-06)
 
-The user decided these on 2026-11-03. Nothing here starts until the user starts it, step by step.
+Decided by the user on 2026-11-03; started on 2026-11-06 ("the leap was supposed to be happening").
+Every dependency clears its TODOs, then does its part. Static fat LTO stays the default build; the
+shared form exists for consumers built outside the image, and per-frame hot loops stay inside one
+library (Gaia's A/B: +26% per tick across a boundary). HeliOS's processes stay separate.
 
+- [ ] **Consume the dependencies' static wrappers.** As each dependency lands its core, surface and
+      Rust client wrapper, HeliOS moves onto the wrapper in the joint lock (Daedalus, Styx, Lemnos,
+      Atlas, Orion together). The direct `orion-client` dependency goes when Orion's facade
+      re-exports `ActionCaller` (3ffcf1f).
+- [ ] **Plugins on Daedalus's stable path.** helios-engine loads Eidos as a cdylib through the
+      Daedalus stable plugin path, not the Rust-ABI path; the shared form only where a plugin is
+      built outside the image. Done when: the Raze image runs the stored graphs on it with the
+      per-tick cost unchanged on the CM5.
 - [ ] **Thin clients.** Each big library lives in one process, and the others reach it through a
       thin client.
 - [ ] **Drop direct Eidos use from `helios-api`.** Follows from thin clients: helios-api asks the
       process that holds Eidos.
-- [ ] **Static and shared build forms.** Every dependency becomes a core, a small versioned surface
-      and a client wrapper, and the stack builds in both forms. Gaia's LTO test only informs how the
-      shared form gets built.
+- [ ] **Gaia surface config.** Once HeliOS has a surface of its own (something built outside the
+      image links against it), declare it to Gaia's surface tooling.
 - [ ] **Move onto the Lemnos module path.** One kernel module in Lemnos, with the drivers in Rust in
       userspace. HeliOS moves onto it once it exists; the stock V4L2 path stays as the fallback.
 
@@ -173,8 +196,8 @@ For when the user calls the release; not work to start before that.
 
 ## After the release: dependency layers (planned 2026-11-02)
 
-Slated, not started, and each needs the user's go. The Lemnos kernel module and the static and
-shared forms under "Decided, starts when the user says" change how these land. Why: as the
+Part of the leap (GO 2026-11-06); each dependency does its own items. The Lemnos kernel module and
+the static and shared forms under "The leap" change how these land. Why: as the
 dependencies grow they reach into each other's areas (three USB stacks, two hotplug watchers, two
 DMA buffer allocators); every building block needs one owner so the stack stays modular and a new
 device or feature has one obvious home.
@@ -205,7 +228,7 @@ never copies; no product names below HeliOS.
 - Styx, the producer, owns frame buffers and their lifetime.
 Zero-copy fd hand-off, with no transfer at all, is the default.
 
-Items (each: owner, done when; each needs the user's go before it starts):
+Items (each: owner, done when):
 - [ ] **Architecture doc.** HeliOS writes docs/architecture.md from the table above, and each
       dependency's README states its scope (is / is not). Each dependency's agent first checks the
       overlap list against its own code.
@@ -243,6 +266,8 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 
 - [x] Build the HeliOS Raze image (`./tools/build-os.sh raze`): images build and run on the Raze. Kept for the record: First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
 - [ ] A/B and read-only root on hardware: first boot (data.ext4 grows to the eMMC, `/data` binds, machine-id and SSH host keys persist across a reboot and an update, hostname `helios-<serial8>`, `manage_url` `http://helios-<serial8>.local:5800/`), the UI on :5800, an update from the UI and from Atlas (stage, trial reboot, update-health confirms; a broken image rolls back), `rootfs.erofs` size vs. the 512 MiB slot, boot time with an LZMA root, journald after the machine-id bind (restarted once per boot), nothing writing to `/` (`journalctl -b | grep -i 'read-only'`).
+Board checks below are written, untested on board; none holds up the leap.
+
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (the per-board serial-hash-v1 address on `usbbr0`, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `board/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
 - [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
 - [ ] Check `orionctl` from a root shell is admitted (`ORION_NODE_LOCAL_AUTH=same-user-or-group-or-root`; `orionctl` from Orion's `packaging/gaia/orionctl.toml`). Orion's unit itself is checked: on Raze #1 under HeliOS's load, `Type=notify`, watchdog on, 0 restarts in 7 days (Orion TODO, 2026-10-31).
@@ -255,8 +280,9 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [x] The device package's A/B layout and update writer (p1 autoboot, p2/p3 boot, p5/p6 root, p7 data), the same as the PhotonVision image; read-only EROFS root; `update-health` and `pre-reboot` hooks. The squashfs A/B storage, initramfs, helios-provision, helios-ota-confirm, helios-updater and `50-helios.preset` are gone.
 - [x] Stage the new `ui/` (served by helios-api on :5800, the port in `manage_url`); lighttpd and the old `frontend/` are no longer in the image.
 - [x] Remove the old `frontend/` tree and the pre-v1 device test tools (`run-device-template*.sh`, `run-device-isolated-runtime.sh`, which called `/v1/templates` and `helios-node`). The xtask frontend TypeScript codegen and its CI check went with them; `ui/` is the only UI.
-- [ ] Machine ID: systemd generates a transient one before /data mounts, so helios-data-setup binds the kept one and restarts journald each boot. If that proves noisy, ask Atlas for a package-level answer (e.g. an early generator).
-- [ ] Generate `/etc/helios/version` and `build-id` from the build version instead of the static copies in `gaia/assets/identity` (`os-release` already is, 78638b74).
+- [x] Machine ID: closed. systemd generates a transient one before /data mounts, so helios-data-setup binds the kept one and restarts journald once per boot; it has not proven noisy, so no package-level change is needed.
+- [ ] Root compression: EROFS lz4 against microlzma on the Raze (image size against boot time and first-start time of the services), at the current LZMA settings. Board measurement, written, untested on board.
+- [x] `/etc/helios/version`, `build-id` and the clock floor (`/etc/helios/build.date`, Gaia's `${build.date}`) come from the build (8f851d45); the static copies are gone.
 
 ## Backend
 
@@ -272,8 +298,10 @@ helios-api on :5800), and the SystemCore guest package installs from one .ipk.
 - [ ] Measure the Eidos plugin graph on the CM5: `helios-vision-probe --metrics detailed --frame-overhead 512` (Daedalus's `FrameOverheadReport`; the engine publishes the same report in a session's `metrics` artifact with `HELIOS_ENGINE_METRICS_LEVEL` set). Check the `plan` artifact's `copying_edges`/`crossing_edges` stay empty. Status: bare Eidos measures CM5 p99 0.98–1.01 ms per frame full search, and with tracked search (the templates' default, a full search every 8th frame (k0g6), Eidos 3546efbf9, one thread) 0.40–0.41 ms mean, p99 about 1.0 ms; still to measure through the HeliOS plugin and engine, now with the pose and multi-tag pose tails.
 - [x] Engine on Daedalus held inputs and batches: context inputs are held (declared in the document before planning with `GraphDocument::set_host_input_policy`), resource-driven graphs get one batch per change, a secondary camera's frame is batched with the primary frame.
 - [x] Engine: one blocking `poll(2)` loop per graph thread over its cameras' Styx `FrameClient` fds and Daedalus's `inbound_fd()` (`tick_ready()` when it is readable); cameras are reconnecting `request_nonblocking` clients, so a missing camera (primary or secondary) never blocks the thread; `stop()` ends the loop through the inbound fd. No async runtime, no feeder thread.
+- [ ] Engine: staged vs fused tracked template. The fused `tracked_detect` gets sliced frames and the staged group does not; switch the stored templates to the staged group only if an end-to-end A/B on the CM5 (`capture_latency_ms`, 2f811b63) shows no loss. Written, untested on board.
+- [ ] Engine: wait vs compute in the UI's pipeline timing. Blocked by: Eidos reporting a node's wait apart from its compute.
 - [ ] Engine: measure on the CM5 that the poll loop keeps the old per-frame latency and CPU (`helios-vision-probe` drives from a capture thread; the engine's `telemetry` artifact has `last_tick_ms`, input push to tick end).
-- [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
+- [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings. Moves into the leap's client wrappers, whose types are the typed values.
 - [x] Peripherals on lemnosd: no in-process Lemnos runtime; helios-peripherals publishes no per-device resources since round 7 (lemnosd's Orion bridge does, `lemnos.<board>.<device>`, and helios-api reads its status entries in `GET /v1/peripherals`); HeliOS publishes the fan override and `lemnos.raw`, offline while lemnosd is disconnected; `control.set` for other devices' controls; the unit runs in the `lemnos` group after `lemnosd.service`. Tests run against `lemnosd::mock::MockLemnosd` (Lemnos cca50f7). The fan-override marker in `HELIOS_IPC_DIR` is gone: lemnosd undoes HeliOS's writes when its connection closes.
 - [x] Raw GPIO, PWM, I2C and SPI through lemnosd (Lemnos cca50f7): a `lemnos.raw` resource with `gpio.claim|configure|get|set|release`, `pwm.claim|configure|release`, `i2c.transfer`, `spi.transfer`, `raw.renew` (also `GET /v1/peripherals/io`, `POST /v1/peripherals/io/actions`); claims are HeliOS leases (`ttl_ms`, default 30 s, at most 10 min), end with helios-peripherals' lemnosd connection and are claimed again after a lemnosd restart; edges as SSE `gpio` events; board-owned lines and addresses are refused by lemnosd; auth as any other write.
 - [ ] Raw I/O on hardware: claim an unowned RP1 line by chip and offset, an edge on it, an I2C read of an unowned address, the refusal of a board device's line (`usb-a-power`) and of the sensors' addresses, a lease running out, and `systemctl restart lemnosd` with a claim held.
@@ -321,9 +349,9 @@ The plan (written against Daedalus c927136 and Styx 4e8e19c; recheck the APIs ag
   Styx's `styx::multicam::FrameGrouper` over the cameras' `FrameClient`s (its fds go into the
   same `poll(2)`; `GroupPolicy::Strict` or partial, tolerance half a frame period, `deadline_ns`
   for a stalled camera) and pushed as one batch with `styx_core::daedalus::push_group` (plus
-  `FrameGroupInfo` on a `sync` port for spread and offsets); or with Daedalus's
+  `FrameGroupInfo` on a `sync` port for spread and offsets) or with Daedalus's
   `MultiCamera::synchronized` on the graph's host bridge (`poll_timeout()` as the poll timeout,
-  `tick_ready_cameras`). Pick one: they do the same grouping (see Upstream). Per-camera
+  `tick_ready_cameras`). Styx and Daedalus agree: use `MultiCamera::synchronized`. Per-camera
   outputs (detections, poses) can also feed it through domain links instead of raw frames.
 - [ ] API: a pipeline with several camera bindings declares `sync` (`independent` |
   `synchronized`, tolerance); the UI shows the group spread and drops from `FrameGrouper::report()`.
@@ -353,11 +381,11 @@ The plan (written against Daedalus c927136 and Styx 4e8e19c; recheck the APIs ag
 - [ ] Daedalus: a host cannot push a structured value without its Rust type: `HostBridgeHandle::push(port, Value)` (or a JSON value) for a port keyed `eidos:camera_calibration` is refused as `Unkeyed { rust_type: "daedalus_data::model::Value" }` instead of going through the type's registered const coercer, as constants do. helios-engine links `eidos-daedalus` to push Eidos's own `CameraCalibration`/`CameraExtrinsics`, which ties the generic runner to one plugin's types. (Supersedes round 3's "pushed `String` does not convert into an enum port", which the structured camera made moot for HeliOS.)
 - [ ] Eidos: `MultiTagPoseTemplate::known_tags` is a graph constant only; with a `StructuredInput` for it (a held `known_tags` input), a host could switch field layouts without recompiling the graph. HeliOS writes the constant per pipeline on deploy.
 - [x] Orion: request/response resource actions (`ActionRequest.wait_ms`, `ActionCaller`, 4fadba9): helios-api sends raw and fan actions on one stream and helios-peripherals answers each by its id (round 7, replacing the workload, lease and polling path).
-- [ ] Orion: the `orion` facade (`orion::client`) does not re-export `ActionCaller` (it is in `orion-client`, as Orion's docs name it); helios-api depends on `orion-client` directly from the same Orion source and commit.
-- [ ] Lemnos: a client cannot ask who owns a light now; `Event::LedOwner` is only sent on a change, so a newly connected watcher learns nothing until the next change (HeliOS's tests force a change with a test look).
+- [ ] Orion: the `orion` facade (`orion::client`) does not re-export `ActionCaller`; helios-api depends on `orion-client` directly. Orion 3ffcf1f re-exports it; HeliOS drops the direct dependency in the joint lock.
+- [x] Lemnos (80d5d1e): lemnosd sends `Event::LedOwner` right after the welcome; helios-peripherals keeps each light's owner and layer (`lemnos.led_owner`, `lemnos.led_layer`) and its tests no longer force a change (0ecefae3, branch `lemnos-80d5d1e`, lands in the joint lock).
 - [x] Lemnos (cca50f7), the round-4 client gaps: `lemnos-ipc` re-exports the compact-model and raw types (HeliOS dropped `lemnos-device`); `ClientOptions::wait` and a lazy reconnecting first connect (HeliOS's own retry is gone); LED clients get no events unless they ask; control writes end with the writer's connection (HeliOS's fan-override marker is gone); `lemnosd::mock::MockLemnosd` (HeliOS's fake socket is gone); raw GPIO/PWM/I2C/SPI through lemnosd (HeliOS's raw actions are back).
 - [x] Lemnos/Atlas: the `lemnos` user at build time comes from Lemnos's `packaging/buildroot/lemnos-users.table` through the device package (Atlas 42d91e2/934f538, `BR2_RAZE_LEMNOS_USERS_TABLE`); HeliOS's copy and its `BR2_ROOTFS_USERS_TABLES` entry are gone.
-- [ ] Styx/Daedalus: `styx::multicam::FrameGrouper` (+ `push_group`) and Daedalus `MultiCamera::synchronized` both group camera frames by timestamp; say which a host should use (HeliOS's plan prefers the grouper, which owns the `FrameClient` fds).
+- [x] Styx/Daedalus: answered by both: a host feeding a graph uses Daedalus `MultiCamera::synchronized`; the multi-camera plan above follows that.
 - [x] Atlas: the Raze `sensors.toml` is obsolete for HeliOS: HeliOS ships and reads no sensors file; its sensors come from lemnosd's board definition (`/etc/lemnos/board.toml`; the IMU is on the RP1 PIO bus `pio-i2c:sda=8,scl=7` at 200 Hz since Atlas 20cd0c4).
 - [ ] Atlas device package: revision marker for future boards; optional identity fields (`endpoints`, `actions`, `camera_stream`).
 
