@@ -3,8 +3,7 @@
 Description=HeliOS API
 After=network.target helios-orion.service
 Wants=network.target helios-orion.service
-StartLimitIntervalSec=60
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -16,7 +15,9 @@ EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/local/bin/helios-api
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=2
+RestartSec=1
+RestartSteps=4
+RestartMaxDelaySec=8
 TimeoutStopSec=10
 ExecStartPre=/bin/mkdir -p /usr/local/var/lib/helios /usr/local/var/log/helios
 WorkingDirectory=-/usr/local/var/lib/helios

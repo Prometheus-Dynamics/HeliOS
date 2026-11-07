@@ -2,8 +2,7 @@
 Description=Helios API Service
 After=network.target
 Wants=network.target
-StartLimitIntervalSec=60
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -19,7 +18,9 @@ EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-api
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=2
+RestartSec=1
+RestartSteps=4
+RestartMaxDelaySec=8
 TimeoutStopSec=10
 User=root
 Group=root

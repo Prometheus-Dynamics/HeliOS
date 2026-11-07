@@ -2,8 +2,7 @@
 Description=Helios Engine Service
 After=network.target orion-node.service
 Wants=network.target orion-node.service
-StartLimitIntervalSec=60
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -31,7 +30,9 @@ EnvironmentFile=-/etc/default/helios-engine.env
 EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-engine
 Restart=always
-RestartSec=2
+RestartSec=1
+RestartSteps=4
+RestartMaxDelaySec=8
 TimeoutStopSec=10
 User=root
 # Primary group orion: orion-node admits the orion group (ORION_NODE_LOCAL_AUTH in orion-node.env).
