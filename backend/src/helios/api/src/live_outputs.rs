@@ -11,13 +11,17 @@
 //! [`DEFAULT_BUFFER_BYTES`]): the engine writes as fast as it is read, so a chunk can be a whole
 //! read, and a count of chunks would let one stalled reader hold up to ~64 MiB. The buffer is let
 //! go once nobody is left.
+//!
+//! Readers may name the ports they read ([`LiveRelay::subscribe_ports`]); the relay tells the
+//! engine the union (`{"ports": [...] | null}`), so the engine serializes only those: the
+//! self-calibration watching two pose ports no longer turns every output of every frame into JSON.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -77,12 +81,26 @@ pub struct LiveRelay {
     published: watch::Sender<u64>,
     clients: AtomicUsize,
     wanted: Notify,
+    /// Each reader's ports (`None`: all), by reader.
+    interests: Mutex<BTreeMap<u64, Option<BTreeSet<String>>>>,
+    /// The readers' union, as the engine request line.
+    request: watch::Sender<String>,
+    next_id: AtomicU64,
 }
 
 impl LiveRelay {
     /// `budget`: bytes kept for slow readers (the newest chunk is always kept, whatever its size).
     pub fn new(budget: usize) -> Arc<Self> {
-        Arc::new(Self { ring: Mutex::default(), budget, published: watch::channel(0).0, clients: AtomicUsize::new(0), wanted: Notify::new() })
+        Arc::new(Self {
+            ring: Mutex::default(),
+            budget,
+            published: watch::channel(0).0,
+            clients: AtomicUsize::new(0),
+            wanted: Notify::new(),
+            interests: Mutex::default(),
+            request: watch::channel(request_line(None)).0,
+            next_id: AtomicU64::new(0),
+        })
     }
 
     fn ring(&self) -> std::sync::MutexGuard<'_, Ring> {
@@ -90,12 +108,41 @@ impl LiveRelay {
         self.ring.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// A reader of every port.
     pub(crate) fn subscribe(self: &Arc<Self>) -> LiveReceiver {
+        self.subscribe_to(None)
+    }
+
+    /// A reader of only `ports` (it may still see other ports' lines, read for other readers).
+    pub(crate) fn subscribe_ports(self: &Arc<Self>, ports: &[&str]) -> LiveReceiver {
+        self.subscribe_to(Some(ports.iter().map(|port| (*port).to_string()).collect()))
+    }
+
+    fn subscribe_to(self: &Arc<Self>, ports: Option<BTreeSet<String>>) -> LiveReceiver {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.set_interest(id, Some(ports));
         self.clients.fetch_add(1, Ordering::AcqRel);
         let changes = self.published.subscribe();
         let next = self.ring().end();
         self.wanted.notify_one();
-        LiveReceiver { relay: Arc::clone(self), next, changes }
+        LiveReceiver { relay: Arc::clone(self), id, next, changes }
+    }
+
+    /// Sets (`Some`) or drops (`None`) a reader's ports and updates the engine request.
+    fn set_interest(&self, id: u64, ports: Option<Option<BTreeSet<String>>>) {
+        let mut interests = self.interests.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match ports {
+            Some(ports) => interests.insert(id, ports),
+            None => interests.remove(&id),
+        };
+        let union = interests.values().try_fold(BTreeSet::new(), |mut union, ports| {
+            union.extend(ports.as_ref()?.iter().cloned());
+            Some(union)
+        });
+        self.request.send_if_modified(|line| {
+            let next = request_line(union.as_ref());
+            (*line != next).then(|| *line = next).is_some()
+        });
     }
 
     fn clients(&self) -> usize {
@@ -135,6 +182,7 @@ impl LiveRelay {
 /// than the relay keeps, [`RecvError::Lagged`] and then the newest chunk.
 pub struct LiveReceiver {
     relay: Arc<LiveRelay>,
+    id: u64,
     next: u64,
     changes: watch::Receiver<u64>,
 }
@@ -168,6 +216,7 @@ impl LiveReceiver {
 
 impl Drop for LiveReceiver {
     fn drop(&mut self) {
+        self.relay.set_interest(self.id, None);
         if self.relay.clients.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.relay.release();
         }
@@ -191,6 +240,12 @@ pub fn spawn(relay: Arc<LiveRelay>, socket: PathBuf) -> tokio::task::JoinHandle<
 
 /// Fan out what the engine sends, in chunks of whole lines, until it closes or nobody is left.
 async fn follow(relay: &LiveRelay, mut stream: UnixStream) {
+    // The ports to serialize, now and whenever the readers change.
+    let mut request = relay.request.subscribe();
+    let line = request.borrow_and_update().clone();
+    if stream.write_all(line.as_bytes()).await.is_err() {
+        return;
+    }
     let mut buffer = Vec::with_capacity(LINE_BUFFER_BYTES);
     let mut chunk = vec![0_u8; 64 * 1024];
     // Inside a line too long to keep: dropped up to its newline.
@@ -223,6 +278,12 @@ async fn follow(relay: &LiveRelay, mut stream: UnixStream) {
                     }
                 }
             },
+            Ok(()) = request.changed() => {
+                let line = request.borrow_and_update().clone();
+                if stream.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+            },
             // Disconnecting with nobody left stops the engine serializing for no one.
             _ = idle.tick() => if relay.clients() == 0 {
                 let _ = stream.shutdown().await;
@@ -233,6 +294,11 @@ async fn follow(relay: &LiveRelay, mut stream: UnixStream) {
     if relay.clients() == 0 {
         relay.release();
     }
+}
+
+/// The engine request for `ports` (`None`: every port), one line.
+fn request_line(ports: Option<&BTreeSet<String>>) -> String {
+    format!("{}\n", serde_json::json!({ "ports": ports }))
 }
 
 /// What a client asks for: only these pipelines and/or ports (all when absent), comma-separated, and
@@ -277,7 +343,8 @@ struct LineHead {
 /// text messages of newline-delimited JSON (`{"pipeline", "port", "observed_at_ms",
 /// "frame_ts_ns", "value"}` per line).
 pub async fn live_ws(State(state): State<SharedState>, Query(filter): Query<LiveFilter>, upgrade: WebSocketUpgrade) -> Response {
-    let rx = state.live.subscribe();
+    let ports = LiveFilter::parts(&filter.ports);
+    let rx = if ports.is_empty() { state.live.subscribe() } else { state.live.subscribe_ports(&ports.iter().map(String::as_str).collect::<Vec<_>>()) };
     let shutdown = state.shutdown.clone();
     upgrade.on_upgrade(move |socket| relay_to(socket, rx, filter, shutdown))
 }
@@ -312,6 +379,22 @@ async fn relay_to(mut socket: WebSocket, mut rx: LiveReceiver, filter: LiveFilte
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_engine_is_asked_for_the_readers_ports_only() {
+        let relay = LiveRelay::new(1 << 20);
+        let request = || relay.request.borrow().clone();
+        let pose = relay.subscribe_ports(&["pose", "map_pose"]);
+        assert_eq!(request(), "{\"ports\":[\"map_pose\",\"pose\"]}\n");
+        let dense = relay.subscribe_ports(&["dense_status"]);
+        assert_eq!(request(), "{\"ports\":[\"dense_status\",\"map_pose\",\"pose\"]}\n");
+        let viewer = relay.subscribe();
+        assert_eq!(request(), "{\"ports\":null}\n", "a reader of everything widens it to every port");
+        drop(viewer);
+        drop(pose);
+        assert_eq!(request(), "{\"ports\":[\"dense_status\"]}\n");
+        drop(dense);
+    }
 
     #[test]
     fn an_exclusion_drops_the_ports_named() {

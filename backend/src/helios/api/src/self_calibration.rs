@@ -231,7 +231,7 @@ pub fn spawn(state: SharedState) -> tokio::task::JoinHandle<()> {
                     }
                     match (mappers.is_empty(), lines.is_some()) {
                         (true, _) => lines = None,
-                        (false, false) => lines = Some(state.live.subscribe()),
+                        (false, false) => lines = Some(state.live.subscribe_ports(&POSE_PORTS)),
                         (false, true) => {}
                     }
                 }

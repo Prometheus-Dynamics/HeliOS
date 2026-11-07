@@ -123,7 +123,7 @@ pub async fn save_pipeline(state: &SharedState, id: &str, name: Option<String>) 
     let pipeline = id.to_string();
 
     // Subscribed before the first request: the map cannot come before the listener is there.
-    let mut lines = state.live.subscribe();
+    let mut lines = state.live.subscribe_ports(&[SAVED_MAP_PORT]);
     let deadline = Instant::now() + SAVE_WAIT;
     loop {
         request_save(state, id).await?;

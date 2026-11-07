@@ -37,6 +37,9 @@ const POLL: Duration = Duration::from_secs(2);
 pub const CHUNK_BYTES_RANGE: std::ops::RangeInclusive<usize> = (1 << 20)..=(256 << 20);
 
 /// Whether a live line is one of the dense mapper's chunk outputs (the cheap test before a parse).
+/// The dense mapper's ports: the only ones read from the relay.
+const DENSE_PORTS: [&str; 3] = ["dense_mesh_chunk", "dense_transforms", "dense_status"];
+
 fn wanted_line(line: &str) -> bool {
     line.contains("\"dense_mesh_chunk\"") || line.contains("\"dense_transforms\"") || line.contains("\"dense_status\"")
 }
@@ -325,7 +328,7 @@ pub fn spawn(state: SharedState) -> tokio::task::JoinHandle<()> {
                     Err(_) => receiver.is_some(),
                 };
                 if wanted && receiver.is_none() {
-                    receiver = Some(state.live.subscribe());
+                    receiver = Some(state.live.subscribe_ports(&DENSE_PORTS));
                 } else if !wanted && receiver.take().is_some() {
                     state.dense.clear();
                 }
