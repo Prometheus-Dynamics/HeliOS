@@ -7,10 +7,12 @@ description: Draft design of HeliOS session recordings — raw sensor frames, pe
 in Styx 2af5836 (writer queue, lz4, host channels, per-frame 3A, zero-copy `sensor_raw`). What is
 built, and where:
 
-- Raw by default: `RecordFrames::Raw` (`frames: "raw"`, or `"luma"`), at `max_fps` (30). The camera
-  services keep sensor raw on for every capture (`HELIOS_CAMERA_SENSOR_RAW`, default on: four more
-  2 MB front-end buffers, 8 MB per camera at 1280x800), so a recording joins without a capture restart. Spare low-priority clients
-  are 4 (`HELIOS_CAMERA_SPARE_CLIENTS`): preview, calibration, a recording and its ring.
+- Raw by default: `RecordFrames::Raw` (`frames: "raw"`, or `"luma"`), at `max_fps` (30). A raw
+  recording's client has normal priority, so the camera service turns sensor raw on while it is
+  connected (four more 2 MB front-end buffers, 8 MB per camera at 1280x800) at one capture restart
+  when it starts and one when it ends; `HELIOS_CAMERA_SENSOR_RAW=1` keeps raw on all the time
+  instead. A luma recording stays a low-priority client. Spare low-priority clients are 4
+  (`HELIOS_CAMERA_SPARE_CLIENTS`): preview, calibration, a recording and its ring.
 - Capture last: a ring per camera in `capture_last_cameras` (`capture_last_seconds`, 10 by default),
   compressed in RAM and sized from `MemAvailable` (a quarter at most). `POST /v1/recordings/capture-last`.
 - NetworkTables (helios-api, `recording_nt.rs`): `<base>/record`, `<base>/capture_last` and

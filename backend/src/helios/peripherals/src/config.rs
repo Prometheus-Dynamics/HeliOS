@@ -31,8 +31,11 @@ pub struct PeripheralConfig {
     pub lease_ttl_ms: u64,
     pub camera_idle_pause_ms: u64,
     /// The camera services carry the sensor's raw frames (16-bit Bayer, zero copy) as a companion
-    /// of every processed frame, so a raw consumer (a recording) joins without restarting the
-    /// capture. Costs four more front-end buffers per camera (about 8 MB at 1280x800).
+    /// of every processed frame all the time (`HELIOS_CAMERA_SENSOR_RAW`). Off by default: Styx's
+    /// planner turns raw on while a raw consumer (a raw recording or capture-last ring) is
+    /// connected, at the cost of one capture restart when it joins and one when it leaves. On,
+    /// a raw consumer joins without a restart, but every camera keeps four more front-end buffers
+    /// (about 8 MB at 1280x800) whether or not anything records.
     pub camera_sensor_raw: bool,
     /// Low-priority clients a camera capture is sized for beyond those connected when it starts:
     /// the preview, a calibration capture, a recording and its capture-last ring. Each costs one
@@ -117,7 +120,7 @@ impl PeripheralConfig {
             lemnosd_startup_wait_ms: 5_000,
             lease_ttl_ms: 5_000,
             camera_idle_pause_ms: 2_000,
-            camera_sensor_raw: true,
+            camera_sensor_raw: false,
             camera_spare_clients: 4,
             camera_tuning: CameraTuning::default(),
         }
@@ -253,9 +256,11 @@ mod tests {
     }
 
     #[test]
-    fn camera_raw_is_on_and_four_spare_clients_by_default() {
+    fn camera_raw_is_off_and_four_spare_clients_by_default() {
         let config = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals")]).expect("config");
-        assert!(config.camera_sensor_raw);
+        assert!(!config.camera_sensor_raw);
+        let on = PeripheralConfig::from_env_iter([(DEFAULT_IPC_DIR_ENV, "/tmp/helios-peripherals"), ("HELIOS_CAMERA_SENSOR_RAW", "1")]).expect("config");
+        assert!(on.camera_sensor_raw);
         assert_eq!(config.camera_spare_clients, 4);
     }
 

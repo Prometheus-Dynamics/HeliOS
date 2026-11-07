@@ -18,7 +18,7 @@ use crate::{
     capture::{self, ClipRequest},
     catalog,
     error::RecorderError,
-    frames::{self, FrameSource},
+    frames::FrameSource,
     host::HostSender,
     info::RecordingInfo,
     lemnos::LemnosSource,
@@ -96,7 +96,7 @@ impl Recorder {
         };
         let session = naming::unused_session_stem(&dir, &stem);
         let claim = catalog::Claim::new(&session);
-        let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
+        let source = FrameSource::open(&request.frames_socket, settings.frames)?;
         let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
         let format = format!("{} {}x{}", delivered.format, delivered.size.0, delivered.size.1);
         let header = writer::header_for(&request.camera_id, delivered.format, delivered.size, delivered.fps)?;
@@ -243,7 +243,7 @@ impl Recorder {
 fn start_ring(request: &RingRequest) -> Result<RingHandle, RecorderError> {
     let settings = &request.settings;
     settings.validate().map_err(RecorderError::Settings)?;
-    let source = FrameSource::open(&request.frames_socket, &frames::request(settings.frames))?;
+    let source = FrameSource::open(&request.frames_socket, settings.frames)?;
     let delivered = source.delivered().ok_or_else(|| RecorderError::Camera("the camera service did not say what frames it delivers".into()))?;
     let frame_bytes = u64::from(delivered.size.0) * u64::from(delivered.size.1) * capture::bytes_per_pixel(delivered.format);
     let fps = settings.max_fps.or(delivered.fps.map(f64::from)).unwrap_or(30.0);

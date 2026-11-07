@@ -187,11 +187,11 @@ mod tests {
     }
 
     #[test]
-    fn sensor_raw_is_part_of_every_camera_capture_by_default() {
+    fn sensor_raw_is_left_to_the_planner_by_default() {
         let config = PeripheralConfig::default();
-        assert!(camera_capture_config(&config).backends.native.sensor_raw);
-        let off = PeripheralConfig { camera_sensor_raw: false, ..PeripheralConfig::default() };
-        assert!(!camera_capture_config(&off).backends.native.sensor_raw);
+        assert!(!camera_capture_config(&config).backends.native.sensor_raw);
+        let on = PeripheralConfig { camera_sensor_raw: true, ..PeripheralConfig::default() };
+        assert!(camera_capture_config(&on).backends.native.sensor_raw);
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(styx.accelerators.encoder, styx::planner::Hardware::Auto);
         assert_eq!(styx.accelerators.pyramid, styx::planner::Hardware::Auto);
         // The rest of the capture is unchanged.
-        assert!(styx.backends.native.sensor_raw);
+        assert!(!styx.backends.native.sensor_raw);
         assert_eq!(styx.backends.native.slice_line, Some(CAMERA_SLICE_LINE));
     }
 

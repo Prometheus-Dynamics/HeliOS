@@ -1,6 +1,9 @@
-//! The camera's frames for a recording: a low-priority client of the camera service on its
-//! frames socket, so it never restarts or re-plans the capture the pipelines use. What it asks
-//! for is the recording's `frames` setting: the sensor's raw frames (the default) or luma.
+//! The camera's frames for a recording: a client of the camera service on its frames socket. What
+//! it asks for is the recording's `frames` setting: the sensor's raw frames (the default) or luma.
+//! Luma is a low-priority client, so it never restarts or re-plans the capture the pipelines use.
+//! Raw is a normal client: the camera service carries raw frames only while a raw consumer is
+//! connected, so the capture restarts once when a raw recording (or ring) starts and once when
+//! it ends, and keeps no raw buffers the rest of the time.
 
 use std::{cell::RefCell, path::Path, time::Duration};
 
@@ -20,7 +23,7 @@ pub const CLIENT_QUEUE: usize = 8;
 
 /// The frames a recording asks the camera service for, every frame (the recorder subsamples them
 /// to `max_fps`). Raw is the sensor's 16-bit Bayer, a companion of the processed capture (no
-/// copy); the camera service keeps it on, so asking for it never restarts the capture.
+/// copy), which the camera service turns on for this client.
 pub fn request(frames: RecordFrames) -> FrameRequest {
     match frames {
         RecordFrames::Raw => Frames::sensor_raw().every_frame(CLIENT_QUEUE),
@@ -37,12 +40,17 @@ pub struct FrameSource {
 }
 
 impl FrameSource {
-    /// Connects to the camera service at `socket` and asks for `request`. Blocks up to
+    /// Connects to the camera service at `socket` and asks for `frames` (raw at normal priority, luma at low priority). Blocks up to
     /// [`OPEN_TIMEOUT`] for the connection, and as long again for a first frame: its format and
     /// size are what the recording's header says (the service's `delivered` names the processed
     /// capture's format for a `sensor_raw` request, not the raw frames').
-    pub fn open(socket: &Path, request: &FrameRequest) -> Result<Self, RecorderError> {
-        let client = FrameClient::options(socket).low_priority().reconnecting().timeout(OPEN_TIMEOUT).request(request).map_err(|error| RecorderError::Camera(error.to_string()))?;
+    pub fn open(socket: &Path, frames: RecordFrames) -> Result<Self, RecorderError> {
+        let request = request(frames);
+        let options = FrameClient::options(socket).reconnecting().timeout(OPEN_TIMEOUT);
+        // A raw client changes the capture (it turns the raw companions on), which only a
+        // normal-priority client may do; anything else rides along at low priority.
+        let options = if frames == RecordFrames::Raw { options } else { options.low_priority() };
+        let client = options.request(&request).map_err(|error| RecorderError::Camera(error.to_string()))?;
         let mut delivered = client.delivered();
         let first = match client.recv(OPEN_TIMEOUT) {
             RecvOutcome::Data(frame) => Some(frame),
