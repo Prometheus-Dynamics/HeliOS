@@ -211,11 +211,12 @@ const FRAME_OVERHEAD_SAMPLE_EVERY: u32 = 16;
 /// minutes here and costs 1.5 MiB per graph (3 KiB a record), 384 KiB at 128.
 const FRAME_OVERHEAD_WINDOW: usize = 128;
 
-/// Whether a node of the graph asks for the GPU: a `backend` setting of `gpu` (Eidos's
-/// `eidos:compute_backend`, e.g. dense.map's plane sweep). The user chooses per node; the engine
+/// Whether a node of the graph may run on the GPU: a `backend` setting of `gpu` or `auto`
+/// (Eidos's `eidos:compute_backend`, e.g. dense.map's plane sweep). `auto` needs the device too:
+/// without one it always takes the CPU and never measures. The user chooses per node; the engine
 /// only opens the device when one does, so a graph without GPU nodes never loads the driver.
 /// Builds without Eidos's GPU backend (riscv64, armv7) never open it.
-fn wants_gpu(document: &GraphDocument) -> bool {
+pub(super) fn wants_gpu(document: &GraphDocument) -> bool {
     if !cfg!(any(target_arch = "aarch64", target_arch = "x86_64")) {
         return false;
     }
@@ -225,7 +226,7 @@ fn wants_gpu(document: &GraphDocument) -> bool {
         .into_iter()
         .flatten()
         .flat_map(|node| node["const_inputs"].as_array().into_iter().flatten())
-        .any(|input| input[0] == "backend" && input[1].to_string().contains("\"gpu\""))
+        .any(|input| input[0] == "backend" && matches!(input[1]["value"]["name"].as_str(), Some("gpu" | "auto")))
 }
 
 /// Serial execution on the workload's own driver thread: no worker pool. The engine's GPU only

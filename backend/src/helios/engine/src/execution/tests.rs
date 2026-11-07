@@ -1280,3 +1280,14 @@ fn multi_tag_pose_runs_without_a_mount() {
     assert_eq!(multi["status"], "calibrated", "{multi}");
     assert_eq!(multi["has_rig"], false, "no mount, no robot pose: {multi}");
 }
+
+#[test]
+fn only_graphs_with_gpu_or_auto_nodes_open_the_gpu() {
+    let parse = |json: &str| daedalus::planner::GraphDocument::from_json(json).expect("document");
+    let expected = cfg!(any(target_arch = "aarch64", target_arch = "x86_64"));
+    assert!(!super::graph::wants_gpu(&parse(APRILTAG_GRAPH_DOCUMENT)), "a CPU-only graph never loads the driver");
+    assert_eq!(super::graph::wants_gpu(&parse(DENSE_MAP_GRAPH_DOCUMENT)), expected, "dense.map under auto measures the GPU");
+    let cpu = DENSE_MAP_GRAPH_DOCUMENT.replace(r#""name":"auto""#, r#""name":"cpu""#);
+    assert_ne!(cpu, DENSE_MAP_GRAPH_DOCUMENT);
+    assert!(!super::graph::wants_gpu(&parse(&cpu)));
+}
