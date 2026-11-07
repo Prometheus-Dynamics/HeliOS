@@ -16,6 +16,7 @@ mod map_io;
 pub(crate) mod outputs;
 mod pipeline_bus;
 mod pipeline_inputs;
+mod pmu;
 mod stats;
 #[cfg(test)]
 mod tests;

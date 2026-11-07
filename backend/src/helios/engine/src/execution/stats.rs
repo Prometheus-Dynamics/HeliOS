@@ -7,10 +7,10 @@ use std::{
 
 use daedalus::{
     engine::MetricsLevel,
-    runtime::{ExecutionTelemetry, FrameOverheadReport, RuntimePlanExplanation},
+    runtime::{CustomMetricValue, ExecutionTelemetry, FrameOverheadReport, RuntimePlanExplanation},
 };
 
-use super::{frame_source::FrameSourceStatus, pipeline_inputs::PipelineInputStats};
+use super::{frame_source::FrameSourceStatus, pipeline_inputs::PipelineInputStats, pmu::Counts};
 
 /// Window over which the frame rate is measured.
 const FPS_WINDOW: Duration = Duration::from_secs(1);
@@ -48,6 +48,8 @@ pub(crate) struct DriverStats {
     pub nice_error: Option<String>,
     /// The state of each pipeline input (other pipelines' outputs), at the latest frame.
     pub pipeline_inputs: Vec<PipelineInputStats>,
+    /// The graph thread's hardware counters over the last second (`None` without a PMU).
+    pub pmu: Option<PmuStats>,
     /// Wall-clock time of the last change, used as the published records' observed time so
     /// unchanged stats do not churn Orion state.
     pub updated_at_ms: u64,
@@ -75,6 +77,55 @@ impl DriverStats {
             "nice": self.nice,
             "nice_error": self.nice_error,
             "pipeline_inputs": self.pipeline_inputs.iter().map(PipelineInputStats::to_json).collect::<Vec<_>>(),
+            "pmu": self.pmu.as_ref().map(PmuStats::to_json),
+        })
+    }
+}
+
+/// The graph thread's work per frame (tick) over a window: what a weaker board needs to know first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PmuStats {
+    pub ipc: f64,
+    pub cycles_per_frame: f64,
+    pub instructions_per_frame: f64,
+    pub cache_misses_per_frame: Option<f64>,
+    pub cache_miss_rate: Option<f64>,
+    /// Lines read from DRAM (L3 refills x 64 B), per frame and per second.
+    pub dram_bytes_per_frame: Option<f64>,
+    pub dram_mb_per_s: Option<f64>,
+    /// The graph thread's cycle rate (million cycles a second): its load on its core.
+    pub mcycles_per_s: f64,
+}
+
+impl PmuStats {
+    pub(super) fn from_window(counts: Counts, frames: u64, seconds: f64) -> Option<PmuStats> {
+        if frames == 0 || seconds <= 0.0 || counts.cycles == 0 {
+            return None;
+        }
+        let frames = frames as f64;
+        let line = 64.0;
+        Some(PmuStats {
+            ipc: round3(counts.instructions as f64 / counts.cycles as f64),
+            cycles_per_frame: (counts.cycles as f64 / frames).round(),
+            instructions_per_frame: (counts.instructions as f64 / frames).round(),
+            cache_misses_per_frame: counts.cache_misses.map(|misses| (misses as f64 / frames).round()),
+            cache_miss_rate: counts.cache_misses.zip(counts.cache_references).filter(|(_, references)| *references > 0).map(|(misses, references)| round3(misses as f64 / references as f64)),
+            dram_bytes_per_frame: counts.l3_refills.map(|refills| (refills as f64 * line / frames).round()),
+            dram_mb_per_s: counts.l3_refills.map(|refills| round2(refills as f64 * line / seconds / 1e6)),
+            mcycles_per_s: round2(counts.cycles as f64 / seconds / 1e6),
+        })
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "ipc": self.ipc,
+            "cycles_per_frame": self.cycles_per_frame,
+            "instructions_per_frame": self.instructions_per_frame,
+            "cache_misses_per_frame": self.cache_misses_per_frame,
+            "cache_miss_rate": self.cache_miss_rate,
+            "dram_bytes_per_frame": self.dram_bytes_per_frame,
+            "dram_mb_per_s": self.dram_mb_per_s,
+            "mcycles_per_s": self.mcycles_per_s,
         })
     }
 }
@@ -129,6 +180,52 @@ struct NodeTotals {
     calls: u64,
     handler: Duration,
     total: Duration,
+    /// Hardware counters (Daedalus `node_perf_counters`), when recorded.
+    pmu: Option<Pmu>,
+    /// Bytes into and out of the node (Daedalus transport metrics, the detailed levels).
+    in_bytes: u64,
+    out_bytes: u64,
+    /// Bytes the runtime copied for the node: materialized inputs and conversions.
+    copied_bytes: u64,
+    /// The node's largest frame scratch (live bytes).
+    scratch_peak_bytes: u64,
+    /// Counters the node reports itself (`Counter` and `Bytes` custom metrics, summed): an
+    /// algorithm's own allocations, bytes moved, cache-line touches.
+    custom: BTreeMap<String, u64>,
+}
+
+/// Hardware counter totals (user space, the thread that ran the work).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Pmu {
+    cycles: u64,
+    instructions: u64,
+    cache_misses: u64,
+    cache_references: u64,
+}
+
+impl Pmu {
+    fn add(&mut self, other: Pmu) {
+        self.cycles += other.cycles;
+        self.instructions += other.instructions;
+        self.cache_misses += other.cache_misses;
+        self.cache_references += other.cache_references;
+    }
+
+    /// Per `count` (a call or a tick), with IPC and the miss rate.
+    fn to_json(self, count: f64) -> serde_json::Value {
+        let ratio = |a: u64, b: u64| (b > 0).then(|| round3(a as f64 / b as f64));
+        serde_json::json!({
+            "cycles": round2(self.cycles as f64 / count),
+            "instructions": round2(self.instructions as f64 / count),
+            "ipc": ratio(self.instructions, self.cycles),
+            "cache_misses": round2(self.cache_misses as f64 / count),
+            "cache_miss_rate": ratio(self.cache_misses, self.cache_references),
+        })
+    }
+}
+
+fn round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
 }
 
 #[derive(Debug, Clone, Default)]
@@ -154,6 +251,27 @@ struct MetricsTotals {
     unattributed: Duration,
     nodes: BTreeMap<usize, NodeTotals>,
     edges: BTreeMap<usize, EdgeTotals>,
+    /// The graph thread's counters (`pmu`), when it has a PMU.
+    thread: Option<Counts>,
+}
+
+impl MetricsTotals {
+    /// The pipeline's hardware counters: the graph thread's, else its nodes' together (`None`
+    /// without counters).
+    fn pmu(&self) -> Option<Pmu> {
+        if let Some(thread) = self.thread {
+            return Some(Pmu { cycles: thread.cycles, instructions: thread.instructions, cache_misses: thread.cache_misses.unwrap_or(0), cache_references: thread.cache_references.unwrap_or(0) });
+        }
+        self.nodes.values().filter_map(|node| node.pmu).reduce(|mut sum, pmu| {
+            sum.add(pmu);
+            sum
+        })
+    }
+
+    /// Bytes the pipeline moved: into its nodes, out of them, and copied for them.
+    fn moved_bytes(&self) -> u64 {
+        self.nodes.values().map(|node| node.in_bytes + node.out_bytes + node.copied_bytes).sum()
+    }
 }
 
 impl MetricsTotals {
@@ -166,6 +284,25 @@ impl MetricsTotals {
             totals.calls += node.calls as u64;
             totals.handler += node.handler_duration;
             totals.total += node.total_duration;
+            if let Some(perf) = &node.perf {
+                let sample = Pmu { cycles: perf.cpu_cycles, instructions: perf.instructions, cache_misses: perf.cache_misses, cache_references: perf.cache_references };
+                totals.pmu.get_or_insert_default().add(sample);
+            }
+            if let Some(transport) = &node.transport {
+                totals.in_bytes += transport.in_bytes;
+                totals.out_bytes += transport.out_bytes;
+            }
+            if let Some(resources) = &node.resources {
+                totals.copied_bytes += resources.materialization.total_bytes + resources.conversion.total_bytes;
+                totals.scratch_peak_bytes = totals.scratch_peak_bytes.max(resources.frame_scratch.peak_live_bytes);
+            }
+            for (name, value) in &node.custom {
+                let count = match value {
+                    CustomMetricValue::Counter(count) | CustomMetricValue::Bytes(count) => *count,
+                    _ => continue,
+                };
+                *totals.custom.entry(name.clone()).or_default() += count;
+            }
         }
         for (index, edge) in &telemetry.edge_metrics {
             let totals = self.edges.entry(*index).or_default();
@@ -232,6 +369,15 @@ impl GraphMetrics {
         }
     }
 
+    /// The graph thread's counters for the time since the last call.
+    pub(super) fn add_thread_counts(&mut self, counts: Counts) {
+        if !self.enabled() {
+            return;
+        }
+        self.window.thread.get_or_insert_default().add(counts);
+        self.total.thread.get_or_insert_default().add(counts);
+    }
+
     /// Keep Daedalus's frame-path overhead report (`HostGraph::frame_overhead`) for the artifact.
     pub(super) fn set_frame_overhead(&mut self, report: &FrameOverheadReport) {
         self.frame_overhead = serde_json::value::to_raw_value(report).ok();
@@ -264,7 +410,7 @@ impl GraphMetrics {
             .map(|(index, node)| {
                 let (label, id) = self.node_names.get(index).cloned().unwrap_or_else(|| (index.to_string(), String::new()));
                 let calls = node.calls.max(1) as f64;
-                serde_json::json!({
+                let mut json = serde_json::json!({
                     "index": index,
                     "label": label,
                     "id": id,
@@ -274,7 +420,25 @@ impl GraphMetrics {
                     "handler_us_per_tick": per_tick(node.handler),
                     // Wall time in the node per tick (the timing level records totals only).
                     "total_us_per_tick": per_tick(node.total),
-                })
+                });
+                // What the levels above timing add, only where recorded (keeps the artifact lean).
+                let extra = json.as_object_mut().expect("an object");
+                if let Some(pmu) = node.pmu {
+                    extra.insert("pmu_per_call".into(), pmu.to_json(calls));
+                }
+                if node.in_bytes + node.out_bytes + node.copied_bytes > 0 {
+                    extra.insert("in_bytes_per_tick".into(), (node.in_bytes as f64 / ticks).round().into());
+                    extra.insert("out_bytes_per_tick".into(), (node.out_bytes as f64 / ticks).round().into());
+                    extra.insert("copied_bytes_per_tick".into(), (node.copied_bytes as f64 / ticks).round().into());
+                }
+                if node.scratch_peak_bytes > 0 {
+                    extra.insert("scratch_peak_bytes".into(), node.scratch_peak_bytes.into());
+                }
+                if !node.custom.is_empty() {
+                    let custom: serde_json::Map<String, serde_json::Value> = node.custom.iter().map(|(name, count)| (name.clone(), round2(*count as f64 / ticks).into())).collect();
+                    extra.insert("custom_per_tick".into(), custom.into());
+                }
+                json
             })
             .collect::<Vec<_>>();
         let edges = totals
@@ -301,12 +465,21 @@ impl GraphMetrics {
                 })
             })
             .collect::<Vec<_>>();
+        let moved = totals.moved_bytes();
+        let seconds = length.map(|length| length.as_secs_f64()).filter(|seconds| *seconds > 0.0);
         serde_json::json!({
-            "seconds": length.map(|length| round2(length.as_secs_f64())),
+            "seconds": seconds.map(round2),
             "ticks": totals.ticks,
             "graph_us_per_tick": per_tick(totals.graph),
             "unattributed_us_per_tick": per_tick(totals.unattributed),
             "graph_us_total": micros(totals.graph),
+            // The pipeline's hardware counters per tick (IPC and cache misses), when recorded.
+            "pmu_per_tick": totals.pmu().map(|pmu| pmu.to_json(ticks)),
+            // Bytes in, out of and copied for the nodes: per tick, and MB/s over the window.
+            "moved_bytes_per_tick": (moved > 0).then(|| (moved as f64 / ticks).round()),
+            "moved_mb_per_s": seconds.filter(|_| moved > 0).map(|seconds| round2(moved as f64 / seconds / 1e6)),
+            // DRAM reads from the graph thread's L3 refills (64-byte lines), when counted.
+            "dram_mb_per_s": totals.thread.and_then(|thread| thread.l3_refills).zip(seconds).map(|(refills, seconds)| round2(refills as f64 * 64.0 / seconds / 1e6)),
             "nodes": nodes,
             "edges": edges,
         })

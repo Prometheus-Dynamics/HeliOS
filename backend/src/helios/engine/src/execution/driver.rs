@@ -64,7 +64,7 @@ use super::{
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
     pipeline_bus::{PipelineBus, next_run_id},
     pipeline_inputs::PipelineFeeds,
-    stats::{DriverStats, FpsWindow, GraphMetrics},
+    stats::{DriverStats, FpsWindow, GraphMetrics, PmuStats},
 };
 use crate::{
     model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, now_ms},
@@ -483,12 +483,52 @@ struct TickRecorder {
     publisher: Publisher,
     /// When to read Daedalus's frame-overhead report next (`None`: not recorded).
     next_overhead: Option<Instant>,
+    /// The graph thread's hardware counters (opened by the first tick, on the graph thread).
+    counters: Counters,
+}
+
+/// The graph thread's PMU group and the last reading (when, the totals, the ticks then).
+#[derive(Default)]
+enum Counters {
+    #[default]
+    Unopened,
+    Missing,
+    Open {
+        counters: super::pmu::ThreadCounters,
+        last: Option<(Instant, super::pmu::Counts, u64)>,
+    },
+}
+
+/// How often the graph thread's counters are read.
+const COUNTERS_INTERVAL: Duration = Duration::from_secs(1);
+
+impl Counters {
+    /// The counters' window when one is due: totals since the last reading, its ticks and length.
+    fn due(&mut self, now: Instant, ticks: u64, pipeline: &str) -> Option<(super::pmu::Counts, u64, f64)> {
+        if matches!(self, Counters::Unopened) {
+            *self = match super::pmu::ThreadCounters::open() {
+                Some(counters) => Counters::Open { counters, last: None },
+                None => {
+                    tracing::info!(%pipeline, "no hardware counters for the graph thread (no PMU, or perf_event_paranoid)");
+                    Counters::Missing
+                }
+            };
+        }
+        let Counters::Open { counters, last } = self else { return None };
+        if last.is_some_and(|(at, _, _)| now.duration_since(at) < COUNTERS_INTERVAL) {
+            return None;
+        }
+        let reading = counters.read()?;
+        let window = last.map(|(at, before, before_ticks)| (reading.since(before), ticks.saturating_sub(before_ticks), now.duration_since(at).as_secs_f64()));
+        *last = Some((now, reading, ticks));
+        window
+    }
 }
 
 impl TickRecorder {
     fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>, nt4: Nt4Output, publisher: Publisher) -> Self {
         let next_overhead = graph.host_graph.frame_overhead_enabled().then(Instant::now);
-        Self { output_ports: graph.output_ports.clone(), host: graph.host_graph.host().clone(), shared, nt4, publisher, next_overhead }
+        Self { output_ports: graph.output_ports.clone(), host: graph.host_graph.host().clone(), shared, nt4, publisher, next_overhead, counters: Counters::default() }
     }
 
     fn record(&mut self, graph: &ResidentHostGraph, result: Result<&ExecutionTelemetry, String>) {
@@ -567,6 +607,10 @@ impl TickRecorder {
             }
             if let Some(report) = frame_overhead {
                 state.metrics.set_frame_overhead(&report);
+            }
+            if let Some((counts, ticks, seconds)) = self.counters.due(now, state.stats.ticks_processed, &self.nt4.pipeline) {
+                state.stats.pmu = PmuStats::from_window(counts, ticks, seconds);
+                state.metrics.add_thread_counts(counts);
             }
             if let Some(outputs) = nt4_outputs {
                 // Robot code compensates for the whole delay since the sensor captured the frame,
