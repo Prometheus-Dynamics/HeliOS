@@ -1,5 +1,5 @@
 config = 3
-description = "Application layer: aarch64 builds of the backend, peripherals and plugins, the UI's static build (served by helios-api), app services, and app runtime package dependencies."
+description = "Application layer: aarch64 builds of the backend and plugins, the UI's static build (served by helios-api), app services, and app runtime package dependencies."
 target = "aarch64-linux"
 
 imports = [
@@ -8,5 +8,4 @@ imports = [
   "../payloads/backend-core.toml",
   "../payloads/full.toml",
   "../runtime-services/backend-core.toml",
-  "../runtime-services/full.toml",
 ]

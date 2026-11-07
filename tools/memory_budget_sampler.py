@@ -19,7 +19,6 @@ from typing import Any
 DEFAULT_PROCESSES = [
     "helios-engine",
     "helios-api",
-    "helios-peripherals",
 ]
 
 
@@ -200,7 +199,7 @@ def main() -> int:
             restart_services(
                 args.ssh,
                 args.password,
-                ["helios-engine", "helios-api", "helios-peripherals"],
+                ["helios-engine", "helios-api"],
             )
             wait_for_http_ok(f"{api_url}/v1/health", args.api_ready_timeout_seconds)
 

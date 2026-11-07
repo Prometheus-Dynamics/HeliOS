@@ -42,7 +42,7 @@ fn meta(id: u32, name: &str, kind: ControlKind, access: Access, min: ControlValu
 }
 
 /// A virtual camera with exposure, gain, AE, sharpness, an enumerated flicker mode and a
-/// read-only temperature, served by a Styx camera service like helios-peripherals serves the
+/// read-only temperature, served by a Styx camera service like helios-engine serves the
 /// OV9782.
 fn camera_service(socket: &Path) -> styx::ipc::CameraServiceHandle {
     use styx::prelude::{ColorSpace, FourCc, Interval, MediaFormat, Mode, Resolution};

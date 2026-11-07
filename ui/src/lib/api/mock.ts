@@ -204,7 +204,6 @@ export const GUEST_NODES: ClusterNode[] = [
     services: [
       { name: "helios-orion", state: "running", memMiB: 9.1, restarts: 0 },
       { name: "helios-engine", state: "running", memMiB: 6.2, restarts: 0 },
-      { name: "helios-peripherals", state: "running", memMiB: 3.8, restarts: 0 },
       { name: "helios-api", state: "running", memMiB: 5.1, restarts: 0 },
     ],
   },

@@ -4,7 +4,7 @@ description: Run the HeliOS services on an x86 PC with simulated cameras, and ch
 ---
 
 The simulator runs the real HeliOS stack on your PC, without a board: `orion-node`,
-`helios-peripherals`, `helios-engine` and `helios-api`, with the UI served by `helios-api` on
+`helios-engine` (with the sim cameras) and `helios-api`, with the UI served by `helios-api` on
 the same port as on the device. Cameras are Styx's simulated sensors behind the real camera
 service, so discovery, pipelines and the preview run unchanged. It is tier 1 of the fast test
 pipeline: function, not timing. Timing is measured on the board.
@@ -24,8 +24,8 @@ No lemnosd, no camera, no kernel modules: the services run without them.
 tools/sim/up.sh
 ```
 
-The first run builds the four services with the dev profile, enables Styx's `sim` feature for
-`helios-peripherals` only, and installs `orion-node` from the Orion commit `backend/Cargo.toml`
+The first run builds the services with the dev profile, enables Styx's `sim` feature for
+`helios-engine` only, and installs `orion-node` from the Orion commit `backend/Cargo.toml`
 pins. It then starts the services in that order, on a temporary runtime directory (sockets,
 state, logs; printed at start), and waits until `GET /v1/health` answers.
 

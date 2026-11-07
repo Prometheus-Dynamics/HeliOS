@@ -53,6 +53,8 @@ pub struct RawStatus {
 }
 
 type Reply = oneshot::Sender<Result<Option<serde_json::Value>, String>>;
+/// The worker thread and the queue of actions to it.
+type WorkerHandle = (Sender<(RawAction, Reply)>, JoinHandle<()>);
 
 /// helios-api's raw-access connection to lemnosd.
 pub struct RawAccess {
@@ -60,7 +62,7 @@ pub struct RawAccess {
     events: Option<Arc<EventHub>>,
     status: Arc<Mutex<RawStatus>>,
     allowed: std::sync::OnceLock<bool>,
-    worker: Mutex<Option<(Sender<(RawAction, Reply)>, JoinHandle<()>)>>,
+    worker: Mutex<Option<WorkerHandle>>,
 }
 
 impl RawAccess {

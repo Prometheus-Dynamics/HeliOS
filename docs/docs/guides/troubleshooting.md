@@ -19,7 +19,7 @@ Use this guide when something "doesn't work" and you need a fast path to root ca
 1. Check these sources first:
    - `helios-engine.service` for stream/pipeline runtime failures.
    - `helios-api.service` for API errors and request failures.
-   - `helios-peripherals.service` for I2C/IMU/peripheral issues.
+   - `lemnosd.service` and `lemnos-orion.service` for I2C/IMU/peripheral issues; `helios-engine.service` for cameras.
    - `Kernel (dmesg)` for device/driver level errors.
 1. Look for tight loops: repeating errors every second usually means a crash-restart or a failing health loop.
 
@@ -81,11 +81,11 @@ Capture-last clips require the per-stream shadow recorder.
 ### IMU Shows Idle / No Samples
 
 1. Confirm the IMU is visible in **OS > Systems > I2C**.
-1. Check **OS > Systems > Logs** for `helios-peripherals.service`.
+1. Check **OS > Systems > Logs** for `helios-engine.service` (it serves the cameras).
 1. In **OS > Systems > IMU**, try:
    - Refresh.
    - Adjust update interval.
-1. If the live stream stalls, it may fall back to polling; persistent failure is almost always a peripherals runtime issue.
+1. If the live stream stalls, it may fall back to polling; persistent failure is almost always a camera service issue (`helios-engine.service`).
 
 ## 6) When You Need To Escalate (Support Or A GitHub Issue)
 
@@ -97,7 +97,6 @@ Include:
 - Logs:
   - `helios-engine.service`
   - `helios-api.service`
-  - `helios-peripherals.service`
   - `dmesg`
 - Screenshots of:
   - Stream settings (backend/mode/decoder/encoder)

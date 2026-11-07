@@ -1,4 +1,4 @@
-//! Cameras: the `camera.device` resources helios-peripherals publishes, with live facts from
+//! Cameras: the `camera.device` resources helios-engine publishes, with live facts from
 //! each camera's Styx camera service (its sources, clients, frame rate, latency and current 3A
 //! exposure/gain), their controls (`camera_controls`) and the robot mount the API stores.
 

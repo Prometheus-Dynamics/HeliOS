@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use helios_layout::{BoardContract, Layout};
 
 /// Service binaries in the layout's bin directory.
-const SERVICE_BINARIES: &[&str] = &["orion-node", "orionctl", "helios-engine", "helios-peripherals", "helios-api"];
+const SERVICE_BINARIES: &[&str] = &["orion-node", "orionctl", "helios-engine", "helios-api"];
 
 /// The owner image's units: Orion, HeliOS's services, and the image's own sshd and governor.
-const IMAGE_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
+const IMAGE_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-api.service", "sshd.service", "helios-set-governor.service"];
 /// A guest's units: HeliOS's own (the host runs its own sshd and governor).
-const GUEST_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
+const GUEST_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-api.service"];
 
 /// Where the image keeps things (see gaia/configs/README.md, "Read-only root"): the root
 /// filesystem is a read-only EROFS slot, `/data` (p7) holds everything kept across updates and

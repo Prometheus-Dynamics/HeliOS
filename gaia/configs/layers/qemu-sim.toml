@@ -1,5 +1,5 @@
 config = 3
-description = "QEMU -M virt variant of the Raze image (input.machine=qemu): the Raze kernel with its qemu fragment (BR2_RAZE_KERNEL_QEMU), helios-peripherals with simulated cameras (Styx, /etc/styx/sim-cameras), lemnosd in sim mode (Lemnos's own sim drop-in and script), and the USB gadget off. Never a board image."
+description = "QEMU -M virt variant of the Raze image (input.machine=qemu): the Raze kernel with its qemu fragment (BR2_RAZE_KERNEL_QEMU), helios-engine serving simulated cameras (Styx, /etc/styx/sim-cameras), lemnosd in sim mode (Lemnos's own sim drop-in and script), and the USB gadget off. Never a board image."
 
 # Feature patches: an artifact with only id + features replaces that artifact's feature list.
 # lemnosd: `sim` only. The Orion bridge is lemnos-orion, its own artifact and build group (lemnos-orion.toml),
@@ -9,7 +9,7 @@ id = "lemnosd"
 features = ["sim"]
 
 [[artifacts]]
-id = "helios-peripherals"
+id = "helios-engine"
 features = ["sim"]
 
 [image]
@@ -26,7 +26,7 @@ stage_files = [
   "qemu-sim-lemnosd-script",
   "qemu-sim-scene",
   "qemu-sim-cameras",
-  "qemu-sim-helios-peripherals-dropin",
+  "qemu-sim-helios-engine-dropin",
   "qemu-usb-gadget-env",
 ]
 
@@ -62,9 +62,9 @@ mode = 420
 origin = "static-asset"
 
 [[stage.files]]
-id = "qemu-sim-helios-peripherals-dropin"
-src = "${assets}/qemu/helios-peripherals-sim.conf"
-dest = "/etc/systemd/system/helios-peripherals.service.d/50-sim.conf"
+id = "qemu-sim-helios-engine-dropin"
+src = "${assets}/qemu/helios-engine-sim.conf"
+dest = "/etc/systemd/system/helios-engine.service.d/50-sim.conf"
 mode = 420
 origin = "static-asset"
 

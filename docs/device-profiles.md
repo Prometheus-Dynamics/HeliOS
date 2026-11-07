@@ -1,7 +1,7 @@
 # Device profiles
 
 HeliOS is one software stack: helios-api, helios-engine, its Daedalus plugins (Eidos),
-helios-peripherals (cameras through Styx), Orion for control, and Lemnos for whatever hardware
+helios-engine (graphs, and the cameras through Styx), Orion for control, and Lemnos for whatever hardware
 a device has. A **device profile** says how that stack is delivered to and lives on one kind of
 device. The software is the same on every profile; only the profile differs.
 
@@ -119,8 +119,8 @@ SystemCore reaches the Raze over the link it already shares.
 
 ## Per-device camera settings
 
-Each device sets its cameras' Styx capture knobs in its environment for helios-peripherals (the
-Raze: `/etc/default/helios-peripherals.env`, read by the unit; SystemCore: the shared
+Each device sets its cameras' Styx capture knobs in its environment for helios-engine (the
+Raze: `/etc/default/helios-engine.env`, read by the unit; SystemCore: the shared
 `/usr/local/etc/helios/local.env`). An unset knob keeps Styx's default, so a device that sets
 none captures as Styx does, and the Raze sets none today.
 
@@ -136,9 +136,9 @@ none captures as Styx does, and the Raze sets none today.
 
 - `auto` is the platform's choice; `off` is the CPU path; `required` fails the capture rather
   than falling back to the CPU.
-- A value that does not parse, or is below its minimum, stops helios-peripherals at start (the
+- A value that does not parse, or is below its minimum, stops helios-engine at start (the
   unit's log names the variable), instead of running with Styx's default.
-- The knobs are read when a camera service starts. Change them, then restart helios-peripherals.
+- The knobs are read when a camera service starts. Change them, then restart helios-engine.
 - Buffers are memory: each raw buffer is one sensor frame (1 MB for RAW8 at 1280x800; the PiSP
   front end writes 16-bit raw, 2 MB), each output buffer one processed frame (1.5 MB for NV12 at
   1280x800).

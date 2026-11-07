@@ -11,9 +11,9 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:5800";
 pub const DEFAULT_NODE_ID: &str = "node-local";
 
 /// systemd units the API reports and may restart, on the owner image.
-pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
+pub const MANAGED_UNITS: &[&str] = &["orion-node.service", "helios-engine.service", "helios-api.service"];
 /// The same units on a guest package: its Orion is `helios-orion.service` (the SystemCore build).
-pub const GUEST_MANAGED_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"];
+pub const GUEST_MANAGED_UNITS: &[&str] = &["helios-orion.service", "helios-engine.service", "helios-api.service"];
 
 #[derive(Debug, Clone)]
 pub struct ApiConfig {

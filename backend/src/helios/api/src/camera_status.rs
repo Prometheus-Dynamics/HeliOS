@@ -329,7 +329,7 @@ pub fn holder_label(name: &str) -> String {
 
 /// The processes holding `device` open, by name. Only processes this user can read are seen (the
 /// API runs as root on a device). HeliOS's own services (`helios-*`, the camera service is in
-/// helios-peripherals) are not holders the chain reports.
+/// helios-engine) are not holders the chain reports.
 pub fn device_holders(device: &Path) -> Vec<String> {
     let Ok(target) = fs::canonicalize(device) else { return Vec::new() };
     let Ok(procs) = fs::read_dir("/proc") else { return Vec::new() };

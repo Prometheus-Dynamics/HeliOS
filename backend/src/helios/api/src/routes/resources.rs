@@ -24,7 +24,7 @@ use crate::{
 use super::check_id;
 
 /// The providers whose resources are peripherals: the engine's cameras (`provider.cameras.*`)
-/// and, until it is gone from every node, helios-peripherals (`provider.peripherals.*`).
+/// and, from a node still on an older image, helios-peripherals' (`provider.peripherals.*`).
 const PERIPHERAL_PROVIDER_PREFIXES: [&str; 2] = ["provider.cameras.", "provider.peripherals."];
 /// The action's own budget, counted from when the node accepts it (Orion's `deadline_ms`).
 const ACTION_DEADLINE_MS: u64 = 10_000;
@@ -172,7 +172,7 @@ async fn lemnos_readings(state: &SharedState) -> ApiResult<BTreeMap<String, BTre
 // --- actions -------------------------------------------------------------------
 
 /// A peripheral action: `{"kind": "fan.override", "arg": {"duty": 0.8, "duration_ms": 60000}}`.
-/// Kinds and arguments are helios-peripherals' resource actions through lemnosd:
+/// Kinds and arguments, carried out here through lemnosd:
 ///
 /// - on a fan of Lemnos's Orion bridge (`lemnos.<board>.<device>`, `lemnos.class=fan`):
 ///   `fan.override` (`pwm` 0-255 or `duty` 0-1, `duration_ms` 1000-600000; the fan goes back to
@@ -183,7 +183,7 @@ async fn lemnos_readings(state: &SharedState) -> ApiResult<BTreeMap<String, BTre
 ///   `pwm.release`, `i2c.transfer`, `spi.transfer` and `raw.renew` (docs/docs/api/http.md, "Raw
 ///   GPIO, PWM, I2C and SPI").
 ///
-/// `arg` is any JSON object; helios-peripherals checks it per kind.
+/// `arg` is any JSON object, checked per kind.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ActionRequest {
@@ -340,9 +340,9 @@ pub async fn fan() -> ApiError {
 }
 
 pub async fn leds() -> ApiError {
-    ApiError::not_available("LED control is not available", "LED resources (the Raze status LEDs) published by helios-peripherals with colour/pattern actions")
+    ApiError::not_available("LED control is not available", "LED resources (the Raze status LEDs) with colour/pattern actions")
 }
 
 pub async fn imu() -> ApiError {
-    ApiError::not_available("IMU readings are not available", "an IMU resource in helios-peripherals (Lemnos IIO driver) publishing orientation and accepting rate/filter configuration")
+    ApiError::not_available("IMU readings are not available", "an IMU resource (Lemnos IIO driver) publishing orientation and accepting rate/filter configuration")
 }

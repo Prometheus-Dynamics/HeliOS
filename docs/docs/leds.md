@@ -88,6 +88,5 @@ sends their positions with `look_spots` and `update_inputs`, and lemnosd glides 
 ## Priority on the ring
 
 lemnosd arbitrates the status ring by layer and priority. helios-api's director is an application
-client at priority 160. helios-peripherals' health status sends the built-in `status.*` look at
-priority 20, so it shows only while the API is down (or the director is off), and lemnosd drops
-the director's looks when helios-api stops.
+client at priority 160. lemnosd drops the director's looks when helios-api stops. No HeliOS process holds the low-priority
+`status.*` fallback look since helios-peripherals was removed (it sent it at priority 20).

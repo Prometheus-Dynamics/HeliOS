@@ -36,4 +36,4 @@ These controls apply immediately to the running IMU runtime (`PATCH /v1/device/i
 ## Troubleshooting
 
 - If the IMU shows Idle or no samples, use the I2C tab to confirm the IMU is detected.
-- If telemetry is unavailable, check Logs for `helios-peripherals.service` errors.
+- If telemetry is unavailable, check Logs for `lemnosd.service` and `lemnos-orion.service` errors.

@@ -32,7 +32,7 @@ log() { printf '[ui-e2e] %s\n' "$*"; }
 die() { printf '[ui-e2e] error: %s\n' "$*" >&2; exit 1; }
 
 command -v bun >/dev/null || die "bun not found"
-for bin in "$SIM_BIN_DIR/helios-peripherals" "$SIM_BIN_DIR/helios-engine" "$SIM_BIN_DIR/helios-api" "$SIM_BIN_DIR/helios-sim-scene" "$SIM_BIN_DIR/libhelios_eidos_plugin.so" "$ORION_NODE_BIN" "$LEMNOSD_BIN_DIR/lemnosd" "$LEMNOSD_BIN_DIR/lemnos-orion"; do
+for bin in "$SIM_BIN_DIR/helios-engine" "$SIM_BIN_DIR/helios-api" "$SIM_BIN_DIR/helios-sim-scene" "$SIM_BIN_DIR/libhelios_eidos_plugin.so" "$ORION_NODE_BIN" "$LEMNOSD_BIN_DIR/lemnosd" "$LEMNOSD_BIN_DIR/lemnos-orion"; do
   [[ -e "$bin" ]] || die "missing $bin (set SIM_BIN_DIR, ORION_NODE_BIN or LEMNOSD_BIN_DIR)"
 done
 

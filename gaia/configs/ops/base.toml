@@ -26,12 +26,6 @@ dest = "/etc/systemd/system/helios-engine.service.d/diagnostics.conf"
 origin = "static-asset"
 
 [[stage.files]]
-id = "ops-peripherals-diagnostics-conf"
-src = "${assets}/ops/core/etc/systemd/system/helios-peripherals.service.d/diagnostics.conf"
-dest = "/etc/systemd/system/helios-peripherals.service.d/diagnostics.conf"
-origin = "static-asset"
-
-[[stage.files]]
 id = "ops-set-governor-script"
 src = "${assets}/ops/core/usr/local/bin/set-governor.sh"
 dest = "/opt/set-governor.sh"
@@ -69,7 +63,6 @@ stage_files = [
   "ops-getty-override",
   "ops-api-diagnostics-conf",
   "ops-engine-diagnostics-conf",
-  "ops-peripherals-diagnostics-conf",
   "ops-set-governor-script",
   "ops-login-banner-script",
 ]

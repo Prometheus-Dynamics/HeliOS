@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the HeliOS services on this x86 machine against Styx's simulated cameras and Lemnos's
 # simulated board: orion-node, lemnosd --sim (the Raze board definition over simulated buses) and
-# its Orion bridge lemnos-orion, helios-peripherals (sim cameras from STYX_SIM_CAMERAS),
+# its Orion bridge lemnos-orion, helios-engine (also serving the sim cameras from STYX_SIM_CAMERAS),
 # helios-engine and helios-api, on a temp runtime directory. The UI is served by helios-api on the same port, as on the board.
 #
 # Tier 1 of docs/docs/fast-test-pipeline-plan.md: the first step of the Docker sim (`sim-x86_64`),
@@ -61,10 +61,10 @@ SIM_BIN_DIR="${SIM_BIN_DIR:-$TARGET_ROOT/$PROFILE_DIR}"
 if [[ -z "${SIM_SKIP_BUILD:-}" ]]; then
   command -v cargo >/dev/null || die "cargo not found"
   log "building HeliOS services ($SIM_PROFILE profile, Styx sim feature)"
-  # Board builds never set `sim`: only this script's build enables helios-peripherals/sim.
+  # Board builds never set `sim`: only this script's build enables helios-engine/sim.
   nice -n 10 cargo build --manifest-path "$BACKEND/Cargo.toml" -j "$SIM_JOBS" --profile "$SIM_PROFILE" \
-    -p helios-peripherals -p helios-engine -p helios-api -p helios-eidos-plugin -p helios-sim-scene \
-    --features helios-peripherals/sim
+    -p helios-engine -p helios-api -p helios-eidos-plugin -p helios-sim-scene \
+    --features helios-engine/sim
 fi
 
 # orion-node for x86: the appliance feature set of Gaia's packaging/gaia/orion-node.toml, built
@@ -107,7 +107,7 @@ fi
 SIM_LEMNOS_BOARD="${SIM_LEMNOS_BOARD:-$ROOT/tools/sim/raze-board.toml}"
 SIM_LEMNOS_SCRIPT="${SIM_LEMNOS_SCRIPT:-$ROOT/tools/sim/lemnos-sim.toml}"
 
-for bin in helios-peripherals helios-engine helios-api helios-sim-scene libhelios_eidos_plugin.so; do
+for bin in helios-engine helios-api helios-sim-scene libhelios_eidos_plugin.so; do
   [[ -e "$SIM_BIN_DIR/$bin" ]] || die "missing $SIM_BIN_DIR/$bin (build without SIM_SKIP_BUILD, or set SIM_BIN_DIR)"
 done
 
@@ -234,18 +234,10 @@ if [[ "$SIM_LEMNOS" != 0 ]]; then
     "$LEMNOSD_BIN_DIR/lemnos-orion"
 fi
 
-start helios-peripherals \
-  HELIOS_NODE_ID="$NODE_ID" \
-  HELIOS_IPC_DIR="$RUN/ipc" \
-  HELIOS_PERIPHERAL_STREAM_DIR="$RUN/ipc/streams" \
-  ORION_NODE_IPC_SOCKET="$ORION_SOCKET" \
-  ORION_NODE_IPC_STREAM_SOCKET="$ORION_STREAM_SOCKET" \
-  STYX_SIM_CAMERAS="$STYX_SIM_CAMERAS" \
-  RUST_LOG="$SIM_RUST_LOG" \
-  "$SIM_BIN_DIR/helios-peripherals"
-
 start helios-engine \
   HELIOS_NODE_ID="$NODE_ID" \
+  HELIOS_CAMERA_STREAM_DIR="$RUN/ipc/streams" \
+  STYX_SIM_CAMERAS="$STYX_SIM_CAMERAS" \
   ENGINE_SOCKET="$ENGINE_SOCKET" \
   ENGINE_JOURNAL_PATH="$RUN/logs/engine.journal.log" \
   HELIOS_ENGINE_LIVE_SOCKET="$ENGINE_LIVE_SOCKET" \

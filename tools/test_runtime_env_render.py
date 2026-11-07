@@ -39,7 +39,7 @@ class RuntimeEnvRenderTests(unittest.TestCase):
         rendered = tomllib.loads(self.renderer.render_env_toml(self.source))
         api_env = rendered["sets"]["helios-api"]
         engine_env = rendered["sets"]["helios-engine"]
-        peripherals_env = rendered["sets"]["helios-peripherals"]
+        self.assertNotIn("helios-peripherals", rendered["sets"])
 
         self.assertEqual(api_env["MALLOC_ARENA_MAX"], "1")
         self.assertEqual(api_env["HELIOS_API_THREAD_STACK_BYTES"], "1048576")
@@ -48,12 +48,6 @@ class RuntimeEnvRenderTests(unittest.TestCase):
         self.assertEqual(engine_env["RAYON_NUM_THREADS"], "4")
         self.assertEqual(engine_env["HELIOS_ENGINE_WORKER_THREADS"], "4")
         self.assertEqual(engine_env["HELIOS_ENGINE_BLOCKING_KEEP_ALIVE_MS"], "3000")
-
-        self.assertEqual(peripherals_env["MALLOC_ARENA_MAX"], "2")
-        self.assertEqual(peripherals_env["MALLOC_TRIM_THRESHOLD_"], "131072")
-        self.assertEqual(peripherals_env["HELIOS_PERIPHERALS_WORKER_THREADS"], "1")
-        self.assertNotIn("RUST_MIN_STACK", peripherals_env)
-        self.assertNotIn("HELIOS_PERIPHERALS_THREAD_STACK_BYTES", peripherals_env)
 
 if __name__ == "__main__":
     unittest.main()

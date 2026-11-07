@@ -64,25 +64,6 @@ entries = [
   ["HELIOS_CAPTURE_ACTIVE_STALL_MS", "5000"],
 ]
 
-[[stage.env_sets]]
-id = "runtime-helios-peripherals"
-name = "helios-peripherals"
-entries = [
-  ["HELIOS_PERIPHERALS_MAX_BLOCKING_THREADS", "1"],
-  ["HELIOS_PERIPHERALS_WORKER_THREADS", "1"],
-  ["MALLOC_ARENA_MAX", "2"],
-  ["MALLOC_TRIM_THRESHOLD_", "131072"],
-  ["ORION_NODE_IPC_SOCKET", "/run/orion/control.sock"],
-  ["ORION_NODE_IPC_STREAM_SOCKET", "/run/orion/control-stream.sock"],
-  ["IMU_ANGLE_RANGE", "+-180"],
-  ["IMU_UPDATE_INTERVAL_MS", "20"],
-  ["ICM_GYRO_RANGE_DPS", "2000"],
-  ["ICM_ACCEL_RANGE_G", "16"],
-  ["IMU_FUSION", "madgwick"],
-  ["IMU_FRAME_CORRECTION_WXYZ", "0.004166289,-0.97154006,0.23672845,-0.007224368"],
-  ["IMU_MOUNT_CORRECTION_WXYZ", "0.67425072,0.16264445,0.70176886,0.16264445"],
-]
-
 [image]
 kind = "buildroot"
 
@@ -94,5 +75,4 @@ stage_files = [
 stage_env_sets = [
   "runtime-helios-api",
   "runtime-helios-engine",
-  "runtime-helios-peripherals",
 ]

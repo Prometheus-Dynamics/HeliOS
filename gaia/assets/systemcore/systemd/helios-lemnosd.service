@@ -1,7 +1,7 @@
 # lemnosd on SystemCore: Lemnos's hardware service for the board definition of the unit
 # (/usr/local/share/lemnos/boards/systemcore.toml). Every device it lists is host-owned: Limelight's
 # own services drive the SoC, the CAN buses and the rest, so lemnosd only reads them and never
-# writes, claims or raw-accesses one. helios-peripherals reads it at /run/lemnos/lemnosd.sock.
+# writes, claims or raw-accesses one. helios-api reads it at /run/lemnos/lemnosd.sock.
 [Unit]
 Description=Lemnos hardware service (SystemCore, host-owned devices)
 Documentation=https://github.com/Prometheus-Dynamics/Lemnos/blob/dev/docs/board-definition.md

@@ -922,7 +922,7 @@ mod tests {
         // No list: any member of the lemnos group (lemnosd decides each claim).
         assert_eq!(raw_access_allowed(&board(""), "helios"), Ok(true));
         assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios\"]"), "helios"), Ok(true));
-        assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios*\"]"), "helios-peripherals"), Ok(true));
+        assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios*\"]"), "helios-api"), Ok(true));
         assert_eq!(raw_access_allowed(&board("raw_clients = [\"*\"]"), "helios"), Ok(true));
         assert_eq!(raw_access_allowed(&board("raw_clients = [\"atlas\"]"), "helios"), Ok(false));
         assert_eq!(raw_access_allowed(&board("raw_clients = [\"helios-x\"]"), "helios"), Ok(false), "an exact name, without a `*`");

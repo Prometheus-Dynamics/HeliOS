@@ -1061,7 +1061,7 @@ fn a_same_request_redeploy_does_not_restart_the_capture() {
     let temp = tempfile::tempdir().expect("tempdir");
     let socket = temp.path().join("camera.sock");
     let camera = CaptureRequest::virtual_source(VirtualSourceConfig::new().name("virtual-front").format(FourCc::GREY).resolution(64, 48).fps(60)).into_device();
-    // Sized like helios-peripherals' camera services (`HELIOS_CAMERA_SPARE_CLIENTS`, 4).
+    // Sized like a camera service with four spare clients.
     let service = CameraService::new(camera).spare_clients(4).serve(&socket).expect("serve camera");
     // Another client of the camera with its own request stays connected throughout (as the
     // preview does): without it, the camera with no clients left would only pause.

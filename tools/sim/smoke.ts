@@ -2,7 +2,7 @@
 //
 // Checks, in order, against helios-api at SIM_URL:
 //   1. the API answers;
-//   2. the simulated camera resource appears (helios-peripherals serves it from Styx's sim);
+//   2. the simulated camera resource appears (helios-engine serves it from Styx's sim);
 //   3. an AprilTag pipeline is created from the API's template on that camera;
 //   4. the pipeline ticks, with no failed ticks;
 //   5. GET /v1/live/ws delivers the pipeline's outputs, each with frame_ts_ns;

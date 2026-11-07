@@ -16,7 +16,6 @@ members = [
     "src/helios/layout",
     "src/helios/maps",
     "src/helios/engine",
-    "src/helios/peripherals",
     "src/helios/recorder",
     "src/helios/shutdown",
     "src/helios/robot",
@@ -151,7 +150,7 @@ daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynam
 daedalus-data = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-macros = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev" }
 daedalus-planner = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "dev", default-features = false }
-# lemnosd's client (devices, controls, LED intents, raw GPIO/PWM/I2C/SPI) for helios-peripherals;
+# lemnosd's client (devices, controls, LED intents, raw GPIO/PWM/I2C/SPI) for helios-api's raw access;
 # it re-exports the compact-model and raw-access types it carries. HeliOS runs no in-process
 # Lemnos runtime. `lemnosd` (feature `mock`) is a test dependency only: the real service over mock
 # hardware.

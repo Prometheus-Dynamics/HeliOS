@@ -1,6 +1,6 @@
 # Lemnos's Orion bridge on SystemCore (Lemnos docs/orion.md): lemnosd's devices as `lemnos.device`
 # Orion resources, with their readings and statuses, as on Raze. Every SystemCore device is
-# host-owned, so they are read-only here. It replaces helios-peripherals' own copies of them.
+# host-owned, so they are read-only here. 
 [Unit]
 Description=Lemnos devices as Orion resources (SystemCore)
 Documentation=https://github.com/Prometheus-Dynamics/Lemnos/blob/dev/docs/orion.md

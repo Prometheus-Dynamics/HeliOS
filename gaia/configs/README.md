@@ -49,8 +49,8 @@ Manager (1.5.0), `devices/raze/gaia/device.toml`, imported from the git source
   `BR2_RAZE_LEMNOS_USERS_TABLE`; the read-only root cannot run
   systemd-sysusers, which the image still ships). HeliOS keeps no copy: two
   tables for the same user make mkusers fail.
-  helios-peripherals reaches the hardware only through lemnosd and runs with
-  `SupplementaryGroups=lemnos`;
+  HeliOS reaches the board's hardware only through lemnosd (helios-api's raw
+  access) and its Orion bridge, lemnos-orion;
 - **board-agent**, the Orion device agent (a Gaia artifact built from the
   `atlas` source), with the drop-in `ORION_NODE_LOCAL_AUTH_ALLOW=root`.
   HeliOS sets no allow-list of its own; one that does must list `root` too.
@@ -147,7 +147,7 @@ source. HeliOS overrides them in later layers:
   package adds lemnosd's table on its own);
 - `storage/update.toml` adds the drop-in
   `orion-node.service.d/10-helios-state.conf` (state directory on `/data`);
-- helios-engine and helios-peripherals run with `Group=orion`, which the node
+- helios-engine (which also serves the cameras) runs with `Group=orion`, which the node
   admits.
 
 ## The UI and the API: one port

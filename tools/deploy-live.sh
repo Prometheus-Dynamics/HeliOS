@@ -499,7 +499,6 @@ if [[ "$BUILD" == "1" ]]; then
     bin_specs=(
       "helios-engine:helios-engine"
       "helios-api:helios-api"
-      "helios-peripherals:helios-peripherals"
     )
     spec=""
     for spec in "${bin_specs[@]}"; do
@@ -595,7 +594,7 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   if [[ "$do_binaries" == "1" ]]; then
-    bins=("helios-engine" "helios-api" "helios-peripherals")
+    bins=("helios-engine" "helios-api")
     b=""
     for b in "${bins[@]}"; do
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"

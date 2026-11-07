@@ -4,7 +4,7 @@ Playwright (Chromium only) drives the real UI with clicks and typing, against tw
 
 - **mock**: the UI's simulated robot (`?mock=1`) on the Vite dev server (port 5899, started by the
   Playwright config).
-- **sim**: a running HeliOS sim (`tools/sim/up.sh`: the real orion-node, lemnosd, helios-peripherals
+- **sim**: a running HeliOS sim (`tools/sim/up.sh`: the real orion-node, lemnosd, helios-engine
   with a simulated OV9782, helios-engine and helios-api, which serves this UI). Each UI action is
   checked on the device through `GET /v1/pipelines`, `GET /v1/pipelines/{id}`,
   `GET /v1/cameras/{id}/settings` and `GET /v1/pipelines/templates` (see `device.ts`).

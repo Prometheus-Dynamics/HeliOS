@@ -11,7 +11,7 @@ struct BuildProfileCheck {
     features: &'static str,
 }
 
-const CHECKS: &[BuildProfileCheck] = &[BuildProfileCheck { name: "helios-peripherals lib profile", package: "helios-peripherals", target: "--lib", features: "" }];
+const CHECKS: &[BuildProfileCheck] = &[BuildProfileCheck { name: "helios-engine lib profile (no plugins)", package: "helios-engine", target: "--lib", features: "" }];
 
 pub(crate) fn validate(repo_root: &Path) -> Result<()> {
     let manifest_path = repo_root.join("backend").join("Cargo.toml");

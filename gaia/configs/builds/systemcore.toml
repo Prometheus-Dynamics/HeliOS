@@ -2,7 +2,7 @@ config = 3
 gaia_version = ">=2.0.1-dev"
 build_name = "helios-systemcore"
 version = "2026.2.0-dev.${project.commit_count}+${project.commit_short}"
-description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine and its Eidos plugin, helios-peripherals, helios-diagnostics, orion-node, lemnosd, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
+description = "HeliOS for WPILib SystemCore: the guest profile (docs/device-profiles.md). One ipk with the whole stack (helios-api, helios-engine (which serves the cameras) and its Eidos plugin, helios-diagnostics, orion-node, lemnosd, the UI), built with Limelight's SystemCore SDK and installed under /usr/local by the host's opkg."
 profile = "release"
 target = "systemcore"
 
@@ -124,17 +124,6 @@ profile = "${input.cargo_profile}"
 target_name = "libhelios_eidos_plugin.so"
 output_path = "${outputs.dir}/artifacts/libhelios_eidos_plugin.so"
 
-[[artifacts]]
-id = "helios-peripherals"
-kind = "rust"
-package = "helios-peripherals"
-source = "backend-workspace"
-build_group = "helios-backend"
-cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
-toolchain = "systemcore"
-profile = "${input.cargo_profile}"
-output_path = "${outputs.dir}/artifacts/helios-peripherals"
-
 # lemnosd, Lemnos's hardware service, built with the SystemCore toolchain (its `service` profile is
 # the one Lemnos ships). It reads the host-owned devices of the SystemCore board definition.
 [[artifacts]]
@@ -147,7 +136,7 @@ profile = "service"
 output_path = "${outputs.dir}/artifacts/lemnosd"
 
 # lemnos-orion, Lemnos's Orion bridge (lemnosd's `orion` feature, Lemnos docs/orion.md): the
-# board's devices as `lemnos.device` resources, as on Raze, in place of helios-peripherals' copies.
+# board's devices as `lemnos.device` resources, as on Raze.
 [[artifacts]]
 id = "lemnos-orion"
 kind = "rust"
@@ -201,12 +190,6 @@ mode = "0755"
 tree = "pkg-root"
 src = "${outputs.dir}/artifacts/helios-diagnostics"
 dest = "usr/local/bin/helios-diagnostics"
-mode = "0755"
-
-[[image.assembly.files]]
-tree = "pkg-root"
-src = "${outputs.dir}/artifacts/helios-peripherals"
-dest = "usr/local/bin/helios-peripherals"
 mode = "0755"
 
 [[image.assembly.files]]
@@ -293,11 +276,6 @@ dest = "etc/systemd/system/helios-lemnos-orion.service"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${assets}/systemcore/systemd/helios-peripherals.service"
-dest = "etc/systemd/system/helios-peripherals.service"
-
-[[image.assembly.files]]
-tree = "pkg-root"
 src = "${assets}/systemcore/systemd/helios-api.service"
 dest = "etc/systemd/system/helios-api.service"
 
@@ -340,7 +318,7 @@ X-Auto-Start = "true"
 X-Icon-Path = "/usr/local/share/helios/helios.png"
 
 [image.assembly.packages.scripts]
-services = ["helios-robot.service", "helios-orion.service", "helios-lemnosd.service", "helios-lemnos-orion.service", "helios-engine.service", "helios-peripherals.service", "helios-api.service"]
+services = ["helios-robot.service", "helios-orion.service", "helios-lemnosd.service", "helios-lemnos-orion.service", "helios-engine.service", "helios-api.service"]
 conffiles = ["/usr/local/etc/helios/startup.toml", "/usr/local/etc/helios/orion-node.env"]
 
 # Every ELF against the SDK's sysroot: glibc symbol versions, 16 KiB segments, libraries present.

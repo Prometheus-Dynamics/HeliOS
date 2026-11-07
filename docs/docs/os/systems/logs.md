@@ -12,7 +12,7 @@ Logs are grouped by source type. Common built-in sources include:
 
 - System journal (journald)
 - Kernel (`dmesg`)
-- Helios services (`helios-api.service`, `helios-engine.service`, `helios-peripherals.service`)
+- Helios services (`helios-api.service`, `helios-engine.service`)
 - Optional file sources when present (for example `/var/log/syslog`)
 
 The source picker also shows service status for systemd units (for example `active/running` vs `failed`).
@@ -39,4 +39,4 @@ Use Download to fetch logs as a file from the device (useful for support tickets
 
 - If a camera stream is failing to start or pipelines are unhealthy, start with `helios-engine.service`.
 - If the UI is failing to load data or API calls are erroring, check `helios-api.service`.
-- If I2C/IMU/peripheral inventory is missing, check `helios-peripherals.service` and kernel logs (`dmesg`).
+- If I2C/IMU/peripheral inventory is missing, check `lemnosd.service`, `lemnos-orion.service` and kernel logs (`dmesg`).

@@ -1805,25 +1805,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "helios-peripherals"
-version = "1.0.1-dev"
-dependencies = [
- "anyhow",
- "chrono",
- "helios-layout",
- "helios-shutdown",
- "orion",
- "serde",
- "serde_json",
- "styx",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "helios-recorder"
 version = "1.0.1-dev"
 dependencies = [
@@ -4075,7 +4056,6 @@ source = "git+https://github.com/Prometheus-Dynamics/Styx.git?branch=dev#00f2c1e
 dependencies = [
  "bytes",
  "futures-core",
- "futures-util",
  "gltf",
  "lemnos-drivers-pisp",
  "lemnos-linux",
@@ -4085,7 +4065,6 @@ dependencies = [
  "mcap",
  "parking_lot",
  "png",
- "reqwest",
  "serde",
  "serde_json",
  "smallvec",
@@ -4101,8 +4080,6 @@ dependencies = [
  "styx-uvc",
  "styx-v4l2",
  "thiserror 2.0.21",
- "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -4128,6 +4105,7 @@ dependencies = [
  "serde_json",
  "styx",
 ]
+
 [[package]]
 name = "styx-capture"
 version = "2.0.1-dev"

@@ -496,7 +496,7 @@ pub async fn safe_mode(State(state): State<SharedState>) -> ApiError {
     }
     ApiError::not_available(
         "safe mode is not available on this device",
-        "a safe-mode target in the HeliOS image (stop helios-engine and helios-peripherals, keep orion-node, the updater and the API) plus a boot flag the updater honours",
+        "a safe-mode target in the HeliOS image (stop helios-engine, keep orion-node, the updater and the API) plus a boot flag the updater honours",
     )
 }
 

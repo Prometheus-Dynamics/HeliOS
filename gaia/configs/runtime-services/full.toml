@@ -1,6 +1,0 @@
-config = 3
-description = "Aggregated full runtime-service layer: peripherals runtime wiring. The UI is served by helios-api (no web server)."
-
-imports = [
-  "./peripherals.toml",
-]

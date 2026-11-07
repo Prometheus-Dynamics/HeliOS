@@ -29,19 +29,23 @@ Atlas.
                           ^          ^              ^
               provider    |          | executor     | client
                           |          |              |
-  Lemnos ── helios-peripherals   helios-engine    helios-api ── HTTP (users, Atlas)
-  Styx  ──  (camera service)  ──>  (Daedalus)  ──>   (results, streams)
+  Lemnos ── lemnos-orion    helios-engine          helios-api ── HTTP (users, Atlas)
+  Styx  ──────────>  (camera services ──> Daedalus) ──> (results, streams)
              frames: Styx frame server (dmabuf fds over a Unix socket)
 ```
 
 - **orion-node** holds desired and observed state. It is built IPC-only
   (no HTTP/TCP/QUIC) with a 2-thread runtime. Every HeliOS crate and
   `orion-node` come from the same Orion rev (control protocol v2).
-- **helios-peripherals** owns hardware. It inventories Lemnos devices and
-  Styx cameras and publishes them as Orion resources. For each camera it
-  runs a Styx `CameraService` on a Unix socket; the camera resource
-  advertises that socket as a custom endpoint `styx-frames+unix://<path>`.
-  Peripherals never encodes or copies frames.
+- **Hardware** has one owner per kind. lemnosd owns the board's devices and
+  its Orion bridge, lemnos-orion, publishes them (`lemnos.<board>.<device>`);
+  helios-api sets the fan and claims raw GPIO/PWM/I2C/SPI through them.
+  helios-engine serves the cameras with Styx's `styx-camerad`: one Styx
+  `CameraService` per attached camera on a Unix socket, on the cores the
+  engine's graphs do not use (core 0 on a CM5), published as `camera.device`
+  resources (`provider.cameras.<node>`) whose custom endpoint
+  `styx-frames+unix://<path>` is that socket. A pipeline deploy replaces
+  graphs, never a camera service. Nothing encodes or copies frames.
 - **helios-engine** is the Orion executor for vision workloads. A workload's
   config is a Daedalus `GraphDocument` plus bindings from graph host inputs
   to resources. For a camera binding the engine opens a Styx `FrameClient`
@@ -157,7 +161,6 @@ for vision:
 | Process | Budget (PSS) |
 |---|---:|
 | orion-node | ≤ 20 MiB |
-| helios-peripherals with one camera | ≤ 35 MiB |
 | helios-engine with an ArUco graph | ≤ 25 MiB |
 | helios-api | ≤ 10 MiB |
 
@@ -169,5 +172,5 @@ for vision:
    synthetic frames.
 3. Device probe: a standalone binary that captures from the OV9782 with Styx,
    runs the same graph and reports detections and per-stage timings.
-4. Full stack on the device: orion-node, peripherals and engine, with the
+4. Full stack on the device: orion-node, lemnosd and the engine, with the
    workload assigned through Orion.

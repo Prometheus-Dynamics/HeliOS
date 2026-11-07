@@ -329,15 +329,10 @@ impl Layout {
         self.lemnos_run_dir.join("lemnosd.sock")
     }
 
-    /// The peripherals' IPC directory when `HELIOS_IPC_DIR` does not say (the temp dir, on both
-    /// profiles).
+    /// The IPC directory (the cameras' sockets under `streams`) when `HELIOS_IPC_DIR` does not
+    /// say (the temp dir, on both profiles).
     pub fn ipc_dir(&self) -> PathBuf {
         std::env::temp_dir().join("helios-ipc")
-    }
-
-    /// The peripherals' stream directory in a scratch run (no `HELIOS_IPC_DIR`).
-    pub fn scratch_peripheral_streams_dir(&self) -> PathBuf {
-        std::env::temp_dir().join("helios-peripherals").join("streams")
     }
 
     // --- Shipped software ------------------------------------------------------------------

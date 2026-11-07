@@ -128,7 +128,7 @@ manifests):
   is gone. `--config profile.dev.debug=true` brings it back for a debugger.
 - Binaries without tests have `test = false` and libraries without doc tests
   `doctest = false`, so `cargo test` links no empty test harness of the
-  engine, API, peripherals, diagnostics and probe binaries and runs no
+  engine, API, diagnostics and probe binaries and runs no
   rustdoc pass. clippy still checks those binaries.
 
 Host-only timings (x86-64, 24 threads, shared and loaded host, load average
@@ -148,7 +148,7 @@ the dependencies already downloaded; CPU is user + system):
 | `gaia validate`, full / base-os | 606 s first run (fetching the import sources) / 0.5 s; under 1.5 s CPU | unchanged |
 
 After the round-5 pins (Daedalus 66659f7, Styx 40069d0, Eidos 52d0c9e60, Lemnos cca50f7 with
-`lemnosd`'s mock as a test dependency of helios-peripherals), same host and method (load average
+`lemnosd`'s mock as a test dependency of helios-api), same host and method (load average
 about 45): cold clippy 33 s / 204 s CPU, cold `cargo test --workspace` 73 s / 433 s CPU, 2.3 GB
 target directory. No noticeable change.
 
@@ -163,7 +163,7 @@ spend.
 `tools/build-os.sh raze full --machine qemu` builds the Raze image for QEMU's
 `-M virt` (the Gaia layer `gaia/configs/layers/qemu-sim.toml`): the Raze kernel
 with its qemu fragment, `lemnosd --sim` (Lemnos's sim drop-in and script),
-`helios-peripherals` with simulated cameras (`/etc/styx/sim-cameras`, rendered
+`helios-engine` serving simulated cameras (`/etc/styx/sim-cameras`, rendered
 on the host from `tools/sim`'s default scene), and the USB gadget off. Its slot
 id carries `-styx-qemu` (for example `helios-2026.2.0-dev.N-styx-qemu-<commit>.img.xz`),
 which no board installs. Build it on the host with `CARGO_TARGET_DIR` on fast

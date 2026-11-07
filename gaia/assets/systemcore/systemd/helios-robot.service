@@ -3,7 +3,7 @@
 # "One robot"; the script is robot-env).
 [Unit]
 Description=HeliOS robot settings
-Before=helios-orion.service helios-api.service helios-engine.service helios-peripherals.service
+Before=helios-orion.service helios-api.service helios-engine.service
 
 [Service]
 Type=oneshot
