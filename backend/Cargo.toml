@@ -78,7 +78,9 @@ netlink-packet-route = "0.33.0"
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
 notify = "8.2.0"
 nt_client = { version = "0.5.1", features = ["publish_bypass"] }
-reqwest = { version = "0.13.5", features = ["json", "rustls", "stream"] }
+# Plain HTTP/1 only: the api's peers are boards on the robot's own links (no TLS, no proxy, no
+# HTTP/2), so no rustls/aws-lc, platform verifier or h2 in the binary.
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "stream"] }
 rtnetlink = "0.23.0"
 sha2 = "0.11.0"
 # Device security in helios-api: argon2id password hashes, OS randomness, constant-time compares.

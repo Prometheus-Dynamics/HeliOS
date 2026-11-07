@@ -319,10 +319,10 @@ pub async fn align_cluster(state: &SharedState, team: u32) -> ApiResult<bool> {
 }
 
 /// The HTTP client the gateway talks to peers with (no overall timeout: streams stay open). Peers
-/// are plain HTTP on the robot's own links, so it loads no TLS roots (a SystemCore has no CA
-/// store, and loading the system's roots panicked there) and ignores proxy settings.
+/// are plain HTTP on the robot's own links: the client is built without TLS (no CA store to load;
+/// a SystemCore has none) and ignores proxy settings.
 pub fn client() -> reqwest::Client {
-    reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT).tls_certs_only([]).no_proxy().build().expect("an HTTP client with no TLS roots builds")
+    reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT).no_proxy().build().expect("a plain HTTP client builds")
 }
 
 /// This robot as the gateway sees it now: Orion's discovery and the synced node records, and the
