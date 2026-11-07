@@ -1040,6 +1040,58 @@ fn camera_service_started_after_the_workload_is_picked_up() {
     assert_eq!(telemetry["source_connected"], true, "{telemetry}");
 }
 
+/// A redeploy that changes the graph but not the camera's request is make-before-break: the new
+/// driver's client joins the running capture before the old one leaves, so the camera service's
+/// plan never changes and its capture does not restart. (At Styx 925ae6b a leave does not replan,
+/// so break-before-make passes this too; Styx's shrink-on-leave replan makes it the guard.)
+#[test]
+fn a_same_request_redeploy_does_not_restart_the_capture() {
+    use styx::{
+        capture_api::{CaptureRequest, VirtualSourceConfig},
+        ipc::CameraService,
+    };
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let socket = temp.path().join("camera.sock");
+    let camera = CaptureRequest::virtual_source(VirtualSourceConfig::new().name("virtual-front").format(FourCc::GREY).resolution(64, 48).fps(60)).into_device();
+    // Sized like helios-peripherals' camera services (`HELIOS_CAMERA_SPARE_CLIENTS`, 4).
+    let service = CameraService::new(camera).spare_clients(4).serve(&socket).expect("serve camera");
+    // Another client of the camera with its own request stays connected throughout (as the
+    // preview does): without it, the camera with no clients left would only pause.
+    let other = styx::ipc::FrameClient::options(&socket).timeout(Duration::from_secs(5)).request(&styx::planner::Frames::gray().size(32, 24)).expect("the other client");
+    let reading = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let reader = {
+        let reading = reading.clone();
+        std::thread::spawn(move || {
+            while reading.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = other.recv(Duration::from_millis(50));
+            }
+        })
+    };
+    let plugins = TestPlugins::load();
+    let mut camera_resource = ResourceRecord::builder("camera.node-local.front", "camera.device", "provider.peripherals.node-local").build();
+    camera_resource.endpoints = vec![format!("{STYX_FRAMES_ENDPOINT_SCHEME}://{}", socket.display())];
+    let state = state_with(vec![camera_resource]);
+    let execution = plugins.execution();
+    let mut resident = ResidentExecutionSet::default();
+    let running = |snapshot: &ExecutionSnapshot| snapshot.sessions[0].status == ExecutionSessionStatus::Running;
+
+    let first = [workload("workload.redeploy", passthrough_document(&plugins), vec![binding("camera", "camera.node-local.front")])];
+    sync_until(&mut resident, &execution, &first, Some(&state), "the first graph running", running);
+    let restarts = service.stats().restarts;
+
+    // The same camera binding, another graph (a renamed node): a new compiled shape.
+    let renamed = passthrough_document(&plugins).replace("\"pass\"", "\"pass_renamed\"");
+    assert_ne!(renamed, passthrough_document(&plugins), "the graph changed");
+    let second = [workload("workload.redeploy", renamed, vec![binding("camera", "camera.node-local.front")])];
+    let replaced = sync_until(&mut resident, &execution, &second, Some(&state), "the second graph running", running);
+    assert!(replaced.artifacts.iter().any(|artifact| artifact.kind == "execution.plan" && artifact.message.as_deref().is_some_and(|plan| plan.contains("pass_renamed"))), "the new graph runs");
+    wait_for("the old driver's client to leave", || service.stats().clients == 2);
+    assert_eq!(service.stats().restarts, restarts, "the capture restarted on a same-request redeploy");
+    reading.store(false, std::sync::atomic::Ordering::Relaxed);
+    reader.join().expect("the other client's reader");
+}
+
 fn camera_binding(context: &[(&str, ContextValue)]) -> ExecutionBinding {
     ExecutionBinding { context: context.iter().map(|(field, value)| (field.to_string(), value.clone())).collect(), ..binding("frame", "camera.test") }
 }

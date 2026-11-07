@@ -128,9 +128,8 @@ impl ResidentExecutionSet {
     pub fn sync_workloads(&mut self, plugins: &ExecutionPlugins<'_>, workloads: &[ExecutionWorkload], state_snapshot: Option<&StateSnapshot>, observed_at_ms: u64) -> ExecutionSnapshot {
         let resources = state_snapshot.map(resources_for_execution).unwrap_or_default();
         let workload_by_id = workloads.iter().map(|workload| (workload.workload_id.as_str(), workload)).collect::<BTreeMap<_, _>>();
-        // Numeric camera context (calibration, mount) is pushed into the running graph; any
-        // other change recompiles it.
-        self.drivers.retain(|workload_id, resident| workload_by_id.get(workload_id.as_str()).is_some_and(|workload| resident.workload.compiled_shape() == workload.compiled_shape()));
+        // Workloads that are gone stop now. A changed one is replaced in `sync_workload`.
+        self.drivers.retain(|workload_id, _| workload_by_id.contains_key(workload_id.as_str()));
 
         let mut snapshot = ExecutionSnapshot { sessions: Vec::with_capacity(workloads.len()), artifacts: Vec::new() };
         for workload in workloads {
@@ -165,11 +164,17 @@ impl ResidentExecutionSet {
         {
             resolved.frames.iter_mut().for_each(|spec| spec.sliced = true);
         }
-        // A camera that moved to another socket (or a changed request) restarts the driver.
+        // A camera that moved to another socket (or a changed request) stops the old driver
+        // first: its frames are not what the new graph asks for. Numeric camera context
+        // (calibration, mount) is pushed into the running graph; any other change recompiles it,
+        // make-before-break: the new driver connects its cameras with the same requests while the
+        // old one still runs, so the camera service's plan never changes and the capture does
+        // not restart, however long the compile takes. The old driver stops when it is replaced.
         if self.drivers.get(id).is_some_and(|resident| resident.sources != resolved.frames) {
             self.drivers.remove(id);
         }
-        if !self.drivers.contains_key(id) {
+        let current = self.drivers.get(id).is_some_and(|resident| resident.workload.compiled_shape() == workload.compiled_shape());
+        if !current {
             let frame_inputs = resolved.frames.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
             let mut graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload, &frame_inputs, self.settings)?;
             let refreshed = graph.refreshed.take();
