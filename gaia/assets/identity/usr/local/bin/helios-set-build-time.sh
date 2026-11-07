@@ -1,11 +1,16 @@
 #!/bin/sh
+# Clock floor at boot: a board without an RTC battery starts in 1970 until NTP or the
+# robot's time arrives, so the clock is set to no earlier than the image's build time.
 set -eu
 
-EPOCH_FILE="/etc/helios/build.epoch"
+DATE_FILE="/etc/helios/build.date"
 
-[ -r "$EPOCH_FILE" ] || exit 0
+[ -r "$DATE_FILE" ] || exit 0
 
-EPOCH="$(awk 'NR==1 {print $1}' "$EPOCH_FILE" 2>/dev/null | tr -cd '0-9' || true)"
+# RFC 3339 UTC (2026-11-06T17:30:00Z) as "2026-11-06 17:30:00", which BusyBox and GNU date parse.
+STAMP="$(head -n 1 "$DATE_FILE" | sed -n 's/^\([0-9-]\{10\}\)T\([0-9:]\{8\}\).*$/\1 \2/p')"
+[ -n "${STAMP:-}" ] || exit 0
+EPOCH="$(date -u -d "$STAMP" +%s 2>/dev/null || true)"
 [ -n "${EPOCH:-}" ] || exit 0
 
 current="$(date -u +%s 2>/dev/null || printf '0')"

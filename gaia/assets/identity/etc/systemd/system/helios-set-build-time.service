@@ -4,7 +4,7 @@ DefaultDependencies=no
 Before=time-sync.target
 After=systemd-remount-fs.service local-fs.target
 Wants=time-sync.target
-ConditionPathExists=/etc/helios/build.epoch
+ConditionPathExists=/etc/helios/build.date
 RequiresMountsFor=/var/lib/systemd/timesync
 
 [Service]

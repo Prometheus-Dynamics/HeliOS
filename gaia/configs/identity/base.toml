@@ -32,23 +32,32 @@ IMAGE_VERSION="${build.version}"
 dest = "/etc/os-release"
 origin = "generated"
 
+# The version and build id helios-api reports when os-release lacks them, and the build's
+# time (RFC 3339 UTC, Gaia's ${build.date}), which helios-set-build-time.sh uses as the
+# clock floor at boot. All three come from the build, like os-release.
 [[stage.files]]
 id = "identity-version"
-src = "${assets}/identity/etc/helios/version"
+content = """
+${build.version}
+"""
 dest = "/etc/helios/version"
-origin = "static-asset"
+origin = "generated"
 
 [[stage.files]]
 id = "identity-build-id"
-src = "${assets}/identity/etc/helios/build-id"
+content = """
+${build.version}
+"""
 dest = "/etc/helios/build-id"
-origin = "static-asset"
+origin = "generated"
 
 [[stage.files]]
-id = "identity-build-epoch"
-src = "${assets}/identity/etc/helios/build.epoch"
-dest = "/etc/helios/build.epoch"
-origin = "static-asset"
+id = "identity-build-date"
+content = """
+${build.date}
+"""
+dest = "/etc/helios/build.date"
+origin = "generated"
 
 [[stage.files]]
 id = "identity-defaults"
@@ -141,7 +150,7 @@ stage_files = [
   "identity-os-release",
   "identity-version",
   "identity-build-id",
-  "identity-build-epoch",
+  "identity-build-date",
   "identity-defaults",
   "identity-locale-conf",
   "identity-default-locale",
