@@ -85,6 +85,8 @@ pub struct ResidentExecutionSet {
     bus: PipelineBus,
     /// Where each workload's full plan is written (published as a summary and this path).
     plan_dir: Option<std::path::PathBuf>,
+    /// A driver was dropped during this sync: its graph's memory is free, give it back.
+    retired: bool,
 }
 
 impl Default for ResidentExecutionSet {
@@ -95,7 +97,7 @@ impl Default for ResidentExecutionSet {
 
 impl ResidentExecutionSet {
     pub fn new(settings: GraphSettings) -> Self {
-        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), sinks: driver::OutputSinks::default(), bus: PipelineBus::default(), plan_dir: None }
+        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()), sinks: driver::OutputSinks::default(), bus: PipelineBus::default(), plan_dir: None, retired: false }
     }
 
     /// Publish every workload's outputs to NetworkTables through `sink` (drivers started after).
@@ -129,7 +131,9 @@ impl ResidentExecutionSet {
         let resources = state_snapshot.map(resources_for_execution).unwrap_or_default();
         let workload_by_id = workloads.iter().map(|workload| (workload.workload_id.as_str(), workload)).collect::<BTreeMap<_, _>>();
         // Workloads that are gone stop now. A changed one is replaced in `sync_workload`.
+        let resident = self.drivers.len();
         self.drivers.retain(|workload_id, _| workload_by_id.contains_key(workload_id.as_str()));
+        self.retired |= self.drivers.len() != resident;
 
         let mut snapshot = ExecutionSnapshot { sessions: Vec::with_capacity(workloads.len()), artifacts: Vec::new() };
         for workload in workloads {
@@ -139,10 +143,13 @@ impl ResidentExecutionSet {
                     snapshot.artifacts.extend(artifacts);
                 }
                 Err(error) => {
-                    self.drivers.remove(&workload.workload_id);
+                    self.retired |= self.drivers.remove(&workload.workload_id).is_some();
                     snapshot.sessions.push(failed_session(workload, observed_at_ms, error));
                 }
             }
+        }
+        if std::mem::take(&mut self.retired) {
+            release_heap();
         }
         snapshot
     }
@@ -171,7 +178,7 @@ impl ResidentExecutionSet {
         // old one still runs, so the camera service's plan never changes and the capture does
         // not restart, however long the compile takes. The old driver stops when it is replaced.
         if self.drivers.get(id).is_some_and(|resident| resident.sources != resolved.frames) {
-            self.drivers.remove(id);
+            self.retired |= self.drivers.remove(id).is_some();
         }
         let current = self.drivers.get(id).is_some_and(|resident| resident.workload.compiled_shape() == workload.compiled_shape());
         if !current {
@@ -191,13 +198,25 @@ impl ResidentExecutionSet {
                 }
                 driver.externalize_plan(dir);
             }
-            self.drivers.insert(id.to_string(), driver);
+            self.retired |= self.drivers.insert(id.to_string(), driver).is_some();
         }
         let driver = self.drivers.get_mut(id).expect("driver was just ensured");
         driver.update_camera_context(workload);
         driver.update_map(workload);
         driver.update_context(resolved.resources);
         Ok(driver.snapshot())
+    }
+}
+
+/// Gives the heap's free pages back to the system after a graph is dropped. A graph's buffers and
+/// its plugins' state are freed in the middle of the heap, which glibc otherwise keeps (Raze #1:
+/// 8.2 MB of the engine's 13.9 MB heap stayed free and resident after the pipeline stopped).
+fn release_heap() {
+    // SAFETY: takes no pointers, and glibc's allocator locks itself.
+    #[cfg(target_env = "gnu")]
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::malloc_trim(0);
     }
 }
 
