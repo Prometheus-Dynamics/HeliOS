@@ -40,7 +40,7 @@ pub struct InlineGraph {
 
 impl InlineGraph {
     pub fn new(json: impl Into<std::sync::Arc<str>>) -> Self {
-        let json = json.into();
+        let json = upgraded_graph(json.into());
         let digest = crate::provider::publish::graph_digest(&json).into();
         let sliced_frames = crate::execution::takes_sliced_frames(&json);
         Self { json, digest, sliced_frames }
@@ -55,6 +55,15 @@ impl InlineGraph {
     pub fn takes_sliced_frames(&self) -> bool {
         self.sliced_frames
     }
+}
+
+/// `json` with the former one-node tracked detector of a stored graph replaced by its group.
+fn upgraded_graph(json: std::sync::Arc<str>) -> std::sync::Arc<str> {
+    if !helios_maps::names_fused_detector(&json) {
+        return json;
+    }
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&json) else { return json };
+    if helios_maps::upgrade_fused_detector(&mut value) { value.to_string().into() } else { json }
 }
 
 impl std::ops::Deref for InlineGraph {
@@ -310,5 +319,29 @@ mod inline_graph_tests {
         assert_eq!(graph, InlineGraph::from(json.to_string()), "equal by content");
         assert_ne!(graph, InlineGraph::from("{}"));
         assert_eq!(graph.takes_sliced_frames(), crate::execution::takes_sliced_frames(json));
+    }
+
+    #[test]
+    fn a_stored_fused_detector_graph_is_the_tracked_group_and_takes_sliced_frames() {
+        let template = include_str!("../graphs/apriltag-36h11.graph.json");
+        let graph = InlineGraph::from(template.replace("\"eidos:detectors.apriltag_tracked\"", "\"eidos:detectors.tracked_detect\""));
+        assert!(graph.takes_sliced_frames());
+        let upgraded: serde_json::Value = serde_json::from_str(&graph).expect("json");
+        assert_eq!(upgraded, serde_json::from_str::<serde_json::Value>(template).expect("template"));
+    }
+
+    #[test]
+    fn every_stored_tag_template_takes_sliced_frames_and_only_those() {
+        for template in [
+            include_str!("../graphs/apriltag-36h11.graph.json"),
+            include_str!("../graphs/aruco-4x4_50.graph.json"),
+            include_str!("../graphs/live-map.graph.json"),
+            include_str!("../graphs/dense-map.graph.json"),
+            include_str!("../graphs/apriltag-36h11-map.graph.json"),
+            include_str!("../graphs/apriltag-36h11-map-dense.graph.json"),
+        ] {
+            assert!(InlineGraph::from(template).takes_sliced_frames());
+        }
+        assert!(!InlineGraph::from(include_str!("../graphs/features-track.graph.json")).takes_sliced_frames());
     }
 }

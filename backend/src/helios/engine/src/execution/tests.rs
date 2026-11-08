@@ -182,9 +182,8 @@ impl FrameSource for ChannelFrameSource {
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
     // Eidos's tracked group as one graph node, which the planner expands into its stage nodes
-    // (each stage profiled on its own); not the fused `eidos:detectors.tracked_detect`.
+    // (each stage profiled on its own).
     let mut template = TrackedDetectorTemplate {
-        single_node: false,
         tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
         ..TrackedDetectorTemplate::new(dictionary, 8)
     };
@@ -786,7 +785,6 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
     let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
     assert!(plan_nodes.len() > 4, "tracked group expanded into stages: {plan}");
     assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan" || node["label"] == "eidos:detectors.track_plan"), "{plan}");
-    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "tracked group is stage nodes, not tracked_detect: {plan}");
 }
 
 /// A stored AprilTag `GraphDocument`, run by the Eidos plugin library and driven by GREY frames

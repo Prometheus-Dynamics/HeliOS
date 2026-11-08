@@ -1,7 +1,21 @@
 config = 3
-description = "Lemnos's one kernel module, lemnos.ko (kernel-modules/lemnos of the locked Lemnos), built against the Raze kernel. It binds only where a device's driver_override names one of its drivers, so stock V4L2 stays the fallback. kernel-modules/lemnos-sensor-bridge is not shipped."
+description = "Lemnos's kernel modules from the locked Lemnos, built against the Raze kernel. lemnos.ko (kernel-modules/lemnos) binds only where a device's driver_override names one of its drivers, so stock V4L2 stays the fallback. lemnos-ov9782.ko (kernel-modules/lemnos-ov9782) is the Raze camera's sensor driver, in place of a patched stock ov9282. kernel-modules/lemnos-sensor-bridge is not shipped."
 target = "aarch64-linux"
 
 [[image.rootfs.out_of_tree_modules]]
 name = "lemnos"
 path = "${source.lemnos.path}/kernel-modules/lemnos"
+
+[[image.rootfs.out_of_tree_modules]]
+name = "lemnos-ov9782"
+path = "${source.lemnos.path}/kernel-modules/lemnos-ov9782"
+
+# Fails the image if the camera sensor's driver is not the one that ships.
+[[image.hardware]]
+id = "ov9782-lemnos"
+kind = "camera-sensor"
+modules = ["lemnos-ov9782"]
+compatible = ["ovti,ov9782"]
+overlays = ["ov9782"]
+files = []
+firmware = []

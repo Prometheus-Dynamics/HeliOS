@@ -501,7 +501,7 @@ function liveMapGraph(): GraphDocument {
     requires: [{ id: "styx.frames" }, { id: "eidos" }, { id: "helios" }],
     nodes: [
       node("camera", "styx:camera", 0, 80),
-      node("detector", "eidos:detectors.tracked_detect", 270, 40, { dictionary: "apriltag_36h11" }),
+      node("detector", "eidos:detectors.apriltag_tracked", 270, 40, { dictionary: "apriltag_36h11" }),
       node("mapper", "eidos:mapping.live_map", 540, 40),
       node("stream", "helios:stream", 810, 40, { name: "map" }),
     ],
@@ -526,7 +526,7 @@ export function defaultGraph(templateId: string, table: string): GraphDocument {
   const dense = templateId.endsWith("-dense");
   const nodes = [
     node("camera", "styx:camera", 0, 120),
-    node("detector", "eidos:detectors.tracked_detect", 270, 100, { dictionary: aruco ? "aruco_4x4_50" : "apriltag_36h11" }),
+    node("detector", aruco ? "eidos:detectors.aruco_tracked" : "eidos:detectors.apriltag_tracked", 270, 100, { dictionary: aruco ? "aruco_4x4_50" : "apriltag_36h11" }),
     node("pose", "eidos:aruco.pose", 540, 0),
     ...(aruco ? [] : [node("field", "eidos:aruco.multi_tag_pose", 540, 160)]),
     ...(map ? [node("mapper", "eidos:mapping.live_map", 540, 320)] : []),

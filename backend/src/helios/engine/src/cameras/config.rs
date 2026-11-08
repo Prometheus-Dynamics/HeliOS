@@ -6,8 +6,8 @@ use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
 use anyhow::{Result, anyhow, bail};
 use helios_layout::Layout;
 
-/// Sensor line at which the first slice of a frame is processed (of 800 on the OV9782).
-const CAMERA_SLICE_LINE: u16 = 600;
+/// Point of the mode's rows at which the first slice of a frame is processed (row 600 of 800 on the OV9782).
+const CAMERA_SLICE_AT: styx::capture_api::NativeSliceAt = styx::capture_api::NativeSliceAt::PerMille(750);
 const CAMERA_SOCKET_MODE: u32 = 0o660;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,7 +172,7 @@ impl CameraHostConfig {
     pub fn capture_config(&self) -> styx::capture_api::StyxConfig {
         let tuning = &self.tuning;
         let mut styx = styx::capture_api::StyxConfig::new()
-            .native_slice_line(Some(CAMERA_SLICE_LINE))
+            .native_slice_at(Some(CAMERA_SLICE_AT))
             .native_deliver_slices(true)
             .native_sensor_raw(self.sensor_raw)
             .with_accelerators(accelerators(&tuning.accelerators));
@@ -317,7 +317,7 @@ mod tests {
         let config = parse(&[]).expect("config").capture_config();
         assert_eq!(config.capture.queue_depth, styx_default.capture.queue_depth);
         assert_eq!(config.backends.native.output_buffers, styx_default.backends.native.output_buffers);
-        assert_eq!(config.backends.native.slice_line, Some(CAMERA_SLICE_LINE));
+        assert_eq!(config.backends.native.slice_at, Some(CAMERA_SLICE_AT));
         assert!(!config.backends.native.sensor_raw);
 
         let tuned = parse(&[

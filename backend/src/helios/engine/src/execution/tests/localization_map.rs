@@ -20,7 +20,6 @@ use super::{
 /// wait for a known tag; without one it starts on the first clear tag, the map's reference).
 pub(super) fn map_document(registry: &PluginRegistry, localization: Option<&FieldLayout>, dense: Option<DenseConfig>) -> String {
     let mut template = TrackedDetectorTemplate {
-        single_node: false,
         tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
         camera: CameraInput::GraphInput,
         ..TrackedDetectorTemplate::new(Dictionary::AprilTag36h11, 8)

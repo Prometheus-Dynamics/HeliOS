@@ -52,8 +52,10 @@ impl FrameSourceSpec {
 
 /// Nodes that start on a frame's first rows and wait for the rest themselves. Every Eidos node
 /// waits for a sliced frame to complete before reading it, so a graph with one of these gains
-/// latency and the others stay correct; graphs without one get complete frames.
-const SLICED_FRAME_NODES: &[&str] = &["eidos:detectors.tracked_detect"];
+/// latency and the others stay correct; graphs without one get complete frames. The tracked groups
+/// are the ids of a graph that holds a group as one node; `track_plan` is their first stage, the id
+/// of an expanded graph.
+const SLICED_FRAME_NODES: &[&str] = &["eidos:detectors.apriltag_tracked", "eidos:detectors.aruco_tracked", "eidos:detectors.track_plan"];
 
 /// Whether a workload's graph should get frames at their first slice.
 pub(crate) fn graph_takes_sliced_frames(graph_json: &str) -> bool {
@@ -102,6 +104,16 @@ pub(crate) fn frame_socket_path(endpoints: &[String]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracked_detector_graphs_take_sliced_frames() {
+        for id in SLICED_FRAME_NODES {
+            assert!(graph_takes_sliced_frames(&format!(r#"{{"graph":{{"nodes":[{{"id":"{id}"}}]}}}}"#)), "{id}");
+        }
+        // The full-search groups read a whole frame, and an id only counts as a whole string.
+        assert!(!graph_takes_sliced_frames(r#"{"graph":{"nodes":[{"id":"eidos:detectors.apriltag"}]}}"#));
+        assert!(!graph_takes_sliced_frames(r#"{"graph":{"nodes":[{"id":"eidos:detectors.track_plan_v2"}]}}"#));
+    }
 
     #[test]
     fn frame_socket_path_reads_styx_frames_endpoint_only() {

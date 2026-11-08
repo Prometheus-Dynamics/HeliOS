@@ -113,6 +113,37 @@ pub fn has_live_map(graph: &Value) -> bool {
     graph.pointer("/graph/nodes").and_then(Value::as_array).is_some_and(|nodes| nodes.iter().any(|node| node.get("id").and_then(Value::as_str) == Some(LIVE_MAP_NODE)))
 }
 
+/// Eidos's former one-node tracked detector. Eidos replaced it with the tracked groups, which have
+/// the same ports.
+const FUSED_TRACKED_DETECTOR: &str = "eidos:detectors.tracked_detect";
+
+/// Whether a graph's JSON text names the former one-node tracked detector: the cheap check before
+/// parsing it for [`upgrade_fused_detector`].
+pub fn names_fused_detector(graph_json: &str) -> bool {
+    graph_json.contains("\"eidos:detectors.tracked_detect\"")
+}
+
+/// Replaces the former one-node tracked detector in a stored graph document with the tracked group
+/// of its tag family: AprilTag for an `apriltag_*` dictionary, otherwise ArUco (the node's default
+/// dictionary was ArUco 4x4 50). `false` when the graph does not have the node.
+pub fn upgrade_fused_detector(graph: &mut Value) -> bool {
+    let Some(nodes) = graph.pointer_mut("/graph/nodes").and_then(Value::as_array_mut) else { return false };
+    let mut upgraded = false;
+    for node in nodes.iter_mut().filter(|node| node.get("id").and_then(Value::as_str) == Some(FUSED_TRACKED_DETECTOR)) {
+        let apriltag = node.get("const_inputs").and_then(Value::as_array).into_iter().flatten().any(|entry| {
+            entry.get(0).and_then(Value::as_str) == Some("dictionary")
+                && entry.get(1).and_then(|constant| constant.get("value")).is_some_and(|value| value.get("name").unwrap_or(value).as_str().is_some_and(|name| name.starts_with("apriltag_")))
+        });
+        let group = if apriltag { "eidos:detectors.apriltag_tracked" } else { "eidos:detectors.aruco_tracked" };
+        node["id"] = group.into();
+        if node.get("bundle").and_then(Value::as_str) == Some(FUSED_TRACKED_DETECTOR) {
+            node["bundle"] = group.into();
+        }
+        upgraded = true;
+    }
+    upgraded
+}
+
 /// Adds a saved map's host ports to a live-map graph document (`GraphDocument` JSON): `map` and
 /// `save` become held host outputs (the host pushes them) and `saved_map` a host input, with their
 /// edges to the mapper. Idempotent: a graph that has them is unchanged. `false` when the graph has
@@ -179,6 +210,36 @@ fn push_type(types: &mut Vec<Value>, port: &str, type_json: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fused_detector_becomes_the_tracked_group_of_its_family() {
+        for (constant, group) in [
+            (json!({ "type": "Enum", "value": { "name": "apriltag_36h11" } }), "eidos:detectors.apriltag_tracked"),
+            (json!({ "type": "String", "value": "apriltag_16h5" }), "eidos:detectors.apriltag_tracked"),
+            (json!({ "type": "Enum", "value": { "name": "aruco_5x5_100" } }), "eidos:detectors.aruco_tracked"),
+        ] {
+            let mut graph = json!({ "graph": { "nodes": [
+                { "id": "io.host_bridge" },
+                { "id": "eidos:detectors.tracked_detect", "bundle": "eidos:detectors.tracked_detect", "label": "tags", "const_inputs": [["dictionary", constant], ["full_search_every", { "type": "Int", "value": 4 }]] },
+            ] } });
+            assert!(names_fused_detector(&graph.to_string()));
+            assert!(upgrade_fused_detector(&mut graph));
+            let node = &graph["graph"]["nodes"][1];
+            assert_eq!(node["id"], group);
+            assert_eq!(node["bundle"], group);
+            assert_eq!(node["label"], "tags", "the rest of the node is kept");
+            assert_eq!(node["const_inputs"][1][0], "full_search_every");
+            assert!(!upgrade_fused_detector(&mut graph), "an upgraded graph is unchanged");
+            assert!(!names_fused_detector(&graph.to_string()));
+        }
+    }
+
+    #[test]
+    fn a_fused_detector_without_a_dictionary_is_aruco_as_its_default_was() {
+        let mut graph = json!({ "graph": { "nodes": [{ "id": "eidos:detectors.tracked_detect" }] } });
+        assert!(upgrade_fused_detector(&mut graph));
+        assert_eq!(graph["graph"]["nodes"][0]["id"], "eidos:detectors.aruco_tracked");
+    }
 
     /// A map file's header (and no map after it): `creator` as written.
     fn header(version: u16, flags: u16, created_ns: u64, creator: &[u8]) -> Vec<u8> {

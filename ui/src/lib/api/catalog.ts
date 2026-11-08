@@ -371,23 +371,6 @@ export const CATALOG: NodeType[] = [
     ],
   },
   {
-    id: "eidos:detectors.tracked_detect",
-    plugin: "eidos",
-    category: "Fiducials",
-    title: "AprilTag detector (tracked, one node)",
-    summary: "The tracked AprilTag detector as one node: a full search every few frames, windows around tracked tags in between.",
-    inputs: [{ name: "frame", type: "styx:framelease" }],
-    outputs: [
-      { name: "detections", type: "eidos:detections" },
-      { name: "rejected", type: "eidos:detections" },
-      { name: "refined_corners", type: "eidos:refined_corners" },
-    ],
-    params: [
-      { name: "dictionary", kind: "enum", default: "apriltag_36h11", options: dictionaries.filter((d) => d.startsWith("apriltag")), help: "Tag family. A family other than the tags' own finds nothing." },
-      { name: "full_search_every", kind: "int", default: 8, min: 1, max: 100000, help: "Full search at least every this many frames." },
-    ],
-  },
-  {
     id: "eidos:mapping.live_map",
     plugin: "eidos",
     category: "Motion",

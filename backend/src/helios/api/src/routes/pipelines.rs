@@ -100,6 +100,7 @@ pub struct Binding {
 pub struct PipelineSpec {
     pub name: String,
     /// A versioned Daedalus `GraphDocument`.
+    #[serde(deserialize_with = "upgraded_graph")]
     pub graph: serde_json::Value,
     #[serde(default)]
     pub bindings: BTreeMap<String, Binding>,
@@ -191,15 +192,19 @@ impl Default for SearchTuning {
     }
 }
 
+/// A spec's graph, with the former one-node tracked detector of a stored graph as its group.
+fn upgraded_graph<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<serde_json::Value, D::Error> {
+    let mut graph = serde_json::Value::deserialize(deserializer)?;
+    helios_maps::upgrade_fused_detector(&mut graph);
+    Ok(graph)
+}
+
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
-/// Eidos's fused tracked detector (any family; the tracked groups' ports), which older stored
-/// graphs still name; the templates use the tracked groups.
-const TRACKED_SINGLE_NODE: &str = "eidos:detectors.tracked_detect";
 
-/// A tracked detector: a tracked group or the single node.
+/// A tracked detector: a tracked group.
 fn is_tracked_detector(id: &str) -> bool {
-    id == TRACKED_SINGLE_NODE || DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id)
+    DETECTOR_GROUPS.iter().any(|(_, tracked)| *tracked == id)
 }
 /// Config ports the tracked groups have and the full ones do not (Eidos docs/daedalus.md,
 /// "Tracked detector groups").
@@ -270,14 +275,7 @@ pub fn apply_search_mode(graph: &mut serde_json::Value, mode: SearchMode, tuning
     let mut changed = 0;
     for node in nodes {
         let Some(id) = node.get("id").and_then(|id| id.as_str()) else { continue };
-        // The single node stays one node when tracked; full search is its family's full group.
-        let (full, tracked) = if id == TRACKED_SINGLE_NODE {
-            let apriltag = node_dictionary(node).is_some_and(|name| name.starts_with("apriltag_"));
-            (if apriltag { DETECTOR_GROUPS[1].0 } else { DETECTOR_GROUPS[0].0 }, TRACKED_SINGLE_NODE)
-        } else {
-            let Some((full, tracked)) = DETECTOR_GROUPS.iter().find(|(full, tracked)| *full == id || *tracked == id) else { continue };
-            (*full, *tracked)
-        };
+        let Some(&(full, tracked)) = DETECTOR_GROUPS.iter().find(|(full, tracked)| *full == id || *tracked == id) else { continue };
         changed += 1;
         match mode {
             SearchMode::Full => {
@@ -325,7 +323,7 @@ fn node_dictionary(node: &serde_json::Value) -> Option<String> {
 }
 
 fn is_detector_group(id: &str) -> bool {
-    id == TRACKED_SINGLE_NODE || DETECTOR_GROUPS.iter().any(|(full, tracked)| *full == id || *tracked == id)
+    DETECTOR_GROUPS.iter().any(|(full, tracked)| *full == id || *tracked == id)
 }
 
 /// Set the `dictionary` constant of every Eidos detector group in `graph` to `name`. Returns how
@@ -390,9 +388,11 @@ pub fn effective_graph(spec: &PipelineSpec, view: &StateView) -> ApiResult<serde
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
             return Err(ApiError::unprocessable("dictionary is an Eidos dictionary name such as apriltag_36h11, apriltag_16h5 or aruco_4x4_50"));
         }
-        let groups = graph.get("graph").and_then(|g| g.get("nodes")).and_then(|n| n.as_array()).map_or(0, |nodes| {
-            nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id == TRACKED_SINGLE_NODE || (id.starts_with(family) && is_detector_group(id)))).count()
-        });
+        let groups = graph
+            .get("graph")
+            .and_then(|g| g.get("nodes"))
+            .and_then(|n| n.as_array())
+            .map_or(0, |nodes| nodes.iter().filter(|node| node.get("id").and_then(|id| id.as_str()).is_some_and(|id| id.starts_with(family) && is_detector_group(id))).count());
         if groups == 0 {
             return Err(ApiError::unprocessable(format!("dictionary {name} needs a {family} detector group (tracked or not) in the graph")));
         }
@@ -1477,13 +1477,17 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_spec_naming_the_fused_detector_reads_as_the_tracked_group() {
+        let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("template");
+        let fused: serde_json::Value = serde_json::from_str(&template.to_string().replace("\"eidos:detectors.apriltag_tracked\"", "\"eidos:detectors.tracked_detect\"")).expect("fused");
+        let spec: PipelineSpec = serde_json::from_value(serde_json::json!({ "name": "tags", "graph": fused })).expect("spec");
+        assert_eq!(spec.graph, template);
+    }
+
+    #[test]
     fn the_tracked_group_takes_tuning_dictionary_and_full_search() {
         let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("template");
-        // The template's tracked group, and the fused node older stored graphs name.
-        let fused: serde_json::Value = serde_json::from_str(&template.to_string().replace("\"eidos:detectors.apriltag_tracked\"", &format!("\"{TRACKED_SINGLE_NODE}\""))).expect("fused");
-        for (template, tracked) in [(template, "eidos:detectors.apriltag_tracked"), (fused, TRACKED_SINGLE_NODE)] {
-            tracked_template_takes_tuning_dictionary_and_full_search(template, tracked);
-        }
+        tracked_template_takes_tuning_dictionary_and_full_search(template, "eidos:detectors.apriltag_tracked");
     }
 
     fn tracked_template_takes_tuning_dictionary_and_full_search(template: serde_json::Value, tracked: &str) {

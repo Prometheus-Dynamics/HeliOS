@@ -25,6 +25,9 @@ config_overrides = [
   # host veritysetup, for Gaia's dm-verity step on the dynamic-slot root images (a host tool;
   # nothing lands in the target).
   ["BR2_PACKAGE_HOST_CRYPTSETUP", "y"],
+  # The camera sensor's driver is lemnos-ov9782.ko (layers/lemnos-module.toml), so the kernel's
+  # ov9282.c stays unpatched and does not claim ovti,ov9782.
+  ["BR2_LINUX_KERNEL_EXT_OV9782", "n"],
   # The device package's kernel configuration (its trims, the built-in EROFS
   # the root needs, and the page size). HeliOS adds nothing, so every OS image
   # on a Raze runs the same kernel.
