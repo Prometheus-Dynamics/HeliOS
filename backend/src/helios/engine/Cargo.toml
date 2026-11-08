@@ -26,6 +26,10 @@ static-eidos = []
 # Simulated cameras (Styx's `sim`): the x86 sim (`tools/sim/up.sh`) serves them next to, or
 # instead of, real ones, selected by STYX_SIM_CAMERAS. Off on the board.
 sim = ["styx/sim"]
+# Daedalus's counting allocator as the engine's global allocator, so the frame-overhead report
+# fills `runtime_allocs`/`node_allocs`/`host_allocs` and their bytes. For measurement builds
+# (zero steady-state allocations is a rule); a host-only Daedalus feature, plugins unaffected.
+alloc-probe = ["daedalus/alloc-probe"]
 
 [lints]
 workspace = true

@@ -1,6 +1,11 @@
 use helios_engine::{config::EngineConfig, runtime::EngineApp};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Counts allocations per thread scope for the frame-overhead report (feature `alloc-probe`).
+#[cfg(feature = "alloc-probe")]
+#[global_allocator]
+static ALLOC: daedalus::alloc_probe::CountingAllocator = daedalus::alloc_probe::CountingAllocator::system();
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_target(true).compact().with_ansi(ansi_for_terminal()).finish().with(log_filter()).init();
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
