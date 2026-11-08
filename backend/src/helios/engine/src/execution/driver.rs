@@ -599,6 +599,7 @@ impl TickRecorder {
                 Ok(telemetry) => {
                     state.stats.ticks_processed += 1;
                     state.stats.last_error = None;
+                    state.stats.record_node_failures(telemetry, &self.nt4.pipeline);
                     state.metrics.record(telemetry, now);
                 }
                 Err(error) => {

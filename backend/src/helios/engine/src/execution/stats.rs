@@ -18,6 +18,22 @@ const FPS_WINDOW: Duration = Duration::from_secs(1);
 const FPS_STALE_AFTER: Duration = Duration::from_secs(2);
 /// Graph metrics are reported over windows of at least this length.
 const METRICS_WINDOW: Duration = Duration::from_secs(1);
+/// How many ticks after its last failure a node still counts as failing (a second at 120 fps): a
+/// node that fails every few frames stays reported instead of flickering between frames.
+const NODE_FAILING_TICKS: u64 = 120;
+
+/// A node that failed while the stream kept running: Daedalus contains a node's failure, skips that
+/// node's outputs for the frame, and carries on, so without this the camera would just lose output.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NodeFailureStats {
+    pub node: String,
+    pub code: String,
+    /// The latest failure's message.
+    pub message: String,
+    pub count: u64,
+    /// `ticks_processed` at the latest failure.
+    pub last_tick: u64,
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DriverStats {
@@ -38,6 +54,11 @@ pub(crate) struct DriverStats {
     pub last_error: Option<String>,
     /// The latest failed tick's error, kept after the ticks recover (`last_error` clears).
     pub last_failure: Option<String>,
+    /// Frames on which a failing node's outputs were dropped while the stream ran on.
+    pub frames_skipped: u64,
+    /// Each node that has failed in this run, one entry per node. Empty, and costing nothing, while
+    /// no node fails.
+    pub node_failures: Vec<NodeFailureStats>,
     /// The CPU core the graph thread runs on, when it was pinned (`cpu` in the workload config).
     pub cpu: Option<u32>,
     /// Why the graph thread could not be pinned to its core (`cpu` is then unset).
@@ -56,6 +77,34 @@ pub(crate) struct DriverStats {
 }
 
 impl DriverStats {
+    /// A completed tick's contained node failures. Call after `ticks_processed` counts the tick.
+    pub(super) fn record_node_failures(&mut self, telemetry: &ExecutionTelemetry, pipeline: &str) {
+        self.frames_skipped += telemetry.recovery().skipped_frames;
+        for failure in &telemetry.errors {
+            let tick = self.ticks_processed;
+            match self.node_failures.iter_mut().find(|known| known.node == failure.node_id) {
+                Some(known) => {
+                    // Logged when a node starts failing again, not on every frame it fails.
+                    if tick.saturating_sub(known.last_tick) >= NODE_FAILING_TICKS {
+                        tracing::warn!(pipeline, node = %failure.node_id, code = %failure.code, message = %failure.message, "node failing again; its outputs are skipped");
+                    }
+                    known.count += 1;
+                    known.last_tick = tick;
+                    if known.code != failure.code {
+                        known.code.clone_from(&failure.code);
+                    }
+                    if known.message != failure.message {
+                        known.message.clone_from(&failure.message);
+                    }
+                }
+                None => {
+                    tracing::warn!(pipeline, node = %failure.node_id, code = %failure.code, message = %failure.message, "node failed; its outputs are skipped and the stream continues");
+                    self.node_failures.push(NodeFailureStats { node: failure.node_id.clone(), code: failure.code.clone(), message: failure.message.clone(), count: 1, last_tick: tick });
+                }
+            }
+        }
+    }
+
     pub(super) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "frames_received": self.frames_received,
@@ -72,6 +121,14 @@ impl DriverStats {
             "source_plan": self.source.plan,
             "last_error": self.last_error,
             "last_failure": self.last_failure,
+            "frames_skipped": self.frames_skipped,
+            "node_failures": self.node_failures.iter().map(|failure| serde_json::json!({
+                "node": failure.node,
+                "code": failure.code,
+                "message": failure.message,
+                "count": failure.count,
+                "failing": self.ticks_processed.saturating_sub(failure.last_tick) < NODE_FAILING_TICKS,
+            })).collect::<Vec<_>>(),
             "cpu": self.cpu,
             "cpu_error": self.cpu_error,
             "nice": self.nice,
@@ -483,5 +540,49 @@ impl GraphMetrics {
             "nodes": nodes,
             "edges": edges,
         })
+    }
+}
+
+#[cfg(test)]
+mod node_failure_tests {
+    use daedalus::runtime::executor::NodeFailure;
+
+    use super::*;
+
+    fn failed(node: &str, message: &str) -> ExecutionTelemetry {
+        let mut telemetry = ExecutionTelemetry::default();
+        telemetry.errors.push(NodeFailure { node_idx: 0, node_id: node.into(), code: "handler_failed".into(), message: message.into() });
+        telemetry
+    }
+
+    #[test]
+    fn a_failing_node_is_reported_once_per_node_with_its_latest_message() {
+        let mut stats = DriverStats { ticks_processed: 1, ..DriverStats::default() };
+        stats.record_node_failures(&failed("eidos:dense.map", "first"), "default");
+        stats.ticks_processed = 2;
+        stats.record_node_failures(&failed("eidos:dense.map", "second"), "default");
+        assert_eq!(stats.node_failures.len(), 1);
+        let json = stats.to_json();
+        let entry = &json["node_failures"][0];
+        assert_eq!(entry["node"], "eidos:dense.map");
+        assert_eq!(entry["count"], 2);
+        assert_eq!(entry["message"], "second");
+        assert_eq!(entry["failing"], true);
+    }
+
+    #[test]
+    fn a_node_that_recovered_stays_listed_but_is_no_longer_failing() {
+        let mut stats = DriverStats { ticks_processed: 1, ..DriverStats::default() };
+        stats.record_node_failures(&failed("eidos:dense.map", "first"), "default");
+        stats.ticks_processed = 1 + NODE_FAILING_TICKS;
+        assert_eq!(stats.to_json()["node_failures"][0]["failing"], false);
+    }
+
+    #[test]
+    fn a_clean_tick_records_nothing() {
+        let mut stats = DriverStats { ticks_processed: 1, ..DriverStats::default() };
+        stats.record_node_failures(&ExecutionTelemetry::default(), "default");
+        assert!(stats.node_failures.is_empty());
+        assert_eq!(stats.frames_skipped, 0);
     }
 }

@@ -387,6 +387,9 @@ fn running_stage(p: &PipelineFacts) -> Stage {
     {
         return Stage::new(STAGE.0, STAGE.1, StageState::Blocked, format!("Frames fail: {error}")).hint("Each frame is dropped until this is fixed. The error is in the Logs.");
     }
+    if let Some(stage) = failing_node_stage(STAGE, telemetry) {
+        return stage;
+    }
     if telemetry.and_then(|t| t.get("source_connected")).and_then(|v| v.as_bool()) == Some(false) {
         return Stage::new(STAGE.0, STAGE.1, StageState::Waiting, "Waiting for the camera's frames").hint("The pipeline reconnects to the camera service on its own.");
     }
@@ -396,6 +399,23 @@ fn running_stage(p: &PipelineFacts) -> Stage {
         None => "Running".into(),
     };
     Stage::new(STAGE.0, STAGE.1, StageState::Ok, reason)
+}
+
+/// A node failing while the stream runs on: the frames still arrive, so nothing else would show
+/// that this node's outputs are being lost.
+fn failing_node_stage(stage: (&'static str, &'static str), telemetry: Option<&serde_json::Value>) -> Option<Stage> {
+    let failures = telemetry?.get("node_failures")?.as_array()?;
+    let mut failing = failures.iter().filter(|failure| failure.get("failing").and_then(serde_json::Value::as_bool) == Some(true));
+    let first = failing.next()?;
+    let others = failing.count();
+    let node = first.get("node").and_then(serde_json::Value::as_str).unwrap_or("A node");
+    let message = first.get("message").and_then(serde_json::Value::as_str).unwrap_or("no message");
+    let also = if others > 0 { format!(" ({others} more failing)") } else { String::new() };
+    let skipped = telemetry?.get("frames_skipped").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    Some(
+        Stage::new(stage.0, stage.1, StageState::Blocked, format!("{node} fails: {message}{also}"))
+            .hint(format!("The stream keeps running, without this node's outputs on the frames it fails. Frames skipped so far: {skipped}.")),
+    )
 }
 
 /// The pipelines' own line for the chain: the worst of them, named.
@@ -915,6 +935,26 @@ mod tests {
         let telemetry = json!({ "fps": 0.0, "ticks_failed": 4, "last_error": "frame size changed" });
         let p = PipelineFacts { name: "tags", enabled: true, state: "running", telemetry: Some(&telemetry), ..PipelineFacts::default() };
         assert_eq!(pipeline_stage(&p).reason, "Frames fail: frame size changed");
+    }
+
+    #[test]
+    fn a_node_failing_while_frames_run_is_the_reason() {
+        let telemetry = json!({ "fps": 120.0, "ticks_failed": 0, "frames_skipped": 7, "node_failures": [
+            { "node": "eidos:dense.map", "code": "handler_failed", "message": "out of budget", "count": 7, "failing": true },
+        ] });
+        let p = PipelineFacts { name: "tags", enabled: true, state: "running", telemetry: Some(&telemetry), ..PipelineFacts::default() };
+        let stage = pipeline_stage(&p);
+        assert_eq!(stage.reason, "eidos:dense.map fails: out of budget");
+        assert_eq!(stage.state, StageState::Blocked);
+    }
+
+    #[test]
+    fn a_node_that_recovered_does_not_block_the_stage() {
+        let telemetry = json!({ "fps": 120.0, "ticks_failed": 0, "node_failures": [
+            { "node": "eidos:dense.map", "code": "handler_failed", "message": "out of budget", "count": 7, "failing": false },
+        ] });
+        let p = PipelineFacts { name: "tags", enabled: true, state: "running", telemetry: Some(&telemetry), ..PipelineFacts::default() };
+        assert_eq!(pipeline_stage(&p).reason, "Running at 120 fps");
     }
 
     #[test]
