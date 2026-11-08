@@ -115,13 +115,14 @@ imports = [
 # samples lost at 200 Hz under load on Raze #1, against 80 on dev.931; 0660 lemnos socket),
 # trial-only --boot, every restart path through reboot-locked (holds raze-gpu.lock),
 # gaia_version >=2.0.2 on the layers that need it.
-# Atlas 380c375: no device-package change since fa0cac3 (gateway slot install/remove fixes
-# and UI only); pinned so the image and the host tools name the same Atlas.
+# Atlas bbeb057: e4bbcf7 USB DHCP boot without D-Bus (networkd reloaded only when running,
+# --no-block), 597fd4d reboot-locked inherited-fd self-wait, 304f7eb slot policy (keep N,
+# pins, boot files on demand), f3df13b atlas-ubi on gaia-formats.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "9994e09c300178cc7a1d2f09053b376c58681526"
+rev = "bbeb057f2d3eda8fd6be604a4ef4f867bb196639"
 
 # Lemnos (dev f803975: earlier 49f8dce: board ownership and the SystemCore board, lemnos-ctl in its own crate; earlier b87f76c: the public surface trimmed, RegisterResult and MAX_BURST kept for Styx; so HeliOS builds only against what Lemnos exports; earlier f3c022b: soft spots in looks and live input updates, for HeliOS's LED director; earlier 384b2b1: the lemnos user at fixed uid 900 for the shared /data; 026abcd: lemnos-orion
 # on Orion protocol 5, matching orion-node; before it ce3dda3; earlier 8e59039: subscribe
