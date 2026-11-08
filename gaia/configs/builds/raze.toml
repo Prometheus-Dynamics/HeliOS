@@ -219,6 +219,12 @@ default = "helios"
 kind = "string"
 default = "console=serial0,115200 console=tty1 rootwait printk.devkmsg=on erofs.lzma_streams=1"
 
+# HeliOS's GPU work goes through the V3D Vulkan driver, and vc4 only drives a display the Raze does
+# not have: -2 MB, with the GPU dense map passing on a blacklisted boot (Raze #1, 2026-11-07).
+[inputs.slot_cmdline_os]
+kind = "string"
+default = "module_blacklist=vc4"
+
 # The cargo profile of the backend binaries: "release" (fat LTO, what ships and what timings
 # are measured on) or "dev-image" (thin LTO, faster relinks for quick device iterations).
 [inputs.cargo_profile]
