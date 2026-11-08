@@ -51,6 +51,13 @@ dest = "/etc/systemd/system/orion-node.service.d/20-helios-robot.conf"
 mode = 420
 origin = "static-asset"
 
+[[stage.files]]
+id = "orion-node-time-sync-dropin"
+src = "${assets}/runtime-services/core/systemd/orion-node.service.d/30-helios-time-sync.conf"
+dest = "/etc/systemd/system/orion-node.service.d/30-helios-time-sync.conf"
+mode = 420
+origin = "static-asset"
+
 [[stage.services]]
 id = "helios-robot-service"
 name = "helios-robot.service"
@@ -73,6 +80,7 @@ stage_files = [
   "runtime-api-startup",
   "helios-robot-env",
   "orion-node-robot-dropin",
+  "orion-node-time-sync-dropin",
   "helios-data-owners",
 ]
 stage_services = [
