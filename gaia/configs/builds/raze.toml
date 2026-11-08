@@ -171,7 +171,7 @@ rev = "ad72aecf594c24c1c5fc9604a8261c4325addf19"
 id = "orion"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-rev = "3b5f693c758db51bf5c5bbf1782199656b8ed94b"
+rev = "03af52460868ad96e273470d107b54f7ce8a4e71"
 
 # The slot identity for the slots fragment: helios-<version>-<variant>-<commit>.
 [inputs.slot_family]
