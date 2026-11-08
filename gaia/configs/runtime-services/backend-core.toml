@@ -27,6 +27,14 @@ dest = "/usr/lib/board/data-owners.d/helios.conf"
 mode = 420
 origin = "static-asset"
 
+# The kernel's per-CPU free page lists, capped (the file says why).
+[[stage.files]]
+id = "helios-memory-sysctl"
+src = "${assets}/runtime-services/core/usr/lib/sysctl.d/90-helios-memory.conf"
+dest = "/usr/lib/sysctl.d/90-helios-memory.conf"
+mode = 420
+origin = "static-asset"
+
 [[stage.services]]
 id = "helios-api-service"
 name = "helios-api.service"
@@ -74,6 +82,7 @@ stage_files = [
   "helios-robot-env",
   "orion-node-robot-dropin",
   "helios-data-owners",
+  "helios-memory-sysctl",
 ]
 stage_services = [
   "helios-robot-service",
