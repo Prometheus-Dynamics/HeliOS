@@ -8,6 +8,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 Slice=vision.slice
+# Two tokio workers and two glibc arenas: -0.6 MB (engine) / -0.45 MB (api) PSS on the CM5,
+# no measured cost (the frame path runs on its own threads). Overridable in the env file.
+Environment=TOKIO_WORKER_THREADS=2 MALLOC_ARENA_MAX=2
 EnvironmentFile=/usr/local/etc/helios/helios.env
 EnvironmentFile=-/usr/local/etc/helios/local.env
 EnvironmentFile=-/run/helios/robot.env

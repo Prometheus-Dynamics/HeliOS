@@ -25,6 +25,9 @@ Environment=HELIOS_ENGINE_METRICS_LEVEL=timing
 # Daedalus GPU nodes use Vulkan on the CM5 (Daedalus 39ca4b2 dropped its aarch64 Vulkan-only
 # default; without this wgpu may pick a GL backend).
 Environment=WGPU_BACKEND=vulkan
+# Two tokio workers and two glibc arenas: -0.6 MB (engine) / -0.45 MB (api) PSS on the CM5,
+# no measured cost (the frame path runs on its own threads). Overridable in the env file.
+Environment=TOKIO_WORKER_THREADS=2 MALLOC_ARENA_MAX=2
 EnvironmentFile=-/etc/default/helios-engine.env
 EnvironmentFile=-/run/helios/robot.env
 ExecStart=/usr/bin/helios-engine
