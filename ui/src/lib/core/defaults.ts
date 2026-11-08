@@ -26,9 +26,8 @@ export interface DefaultTemplate {
   capabilities: Capability[];
 }
 
-/** The device's default templates, as `GET /v1/pipelines/templates` describes them (the staged
- * variants are for profiling, not offered). The mock and an older device without capabilities
- * use the same list. */
+/** The device's default templates, as `GET /v1/pipelines/templates` describes them. The mock
+ * and an older device without capabilities use the same list. */
 export const BUILT_IN: DefaultTemplate[] = [
   { id: "apriltag-36h11", title: "AprilTag localization", summary: "Field tags give the robot's position on the field.", capabilities: ["tags", "tag_pose", "field_pose"] },
   { id: "apriltag-36h11-map", title: "Localization and 3D map", summary: "Field position from the tags and a live 3D map, on one detector.", capabilities: ["tags", "tag_pose", "field_pose", "map"] },

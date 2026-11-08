@@ -2066,9 +2066,6 @@ pub struct Template {
     pub id: String,
     /// The detector family (`apriltag` or `aruco`), or `features` for a non-detector template.
     pub family: String,
-    /// `default` (one node that starts on a sliced frame's first rows; the first of its family)
-    /// or `staged` (the node-group, profiled stage by stage).
-    pub variant: String,
     /// The dictionary the graph decodes; a pipeline can change it (`PipelineSpec::dictionary`).
     pub dictionary: Option<String>,
     /// The graph input a camera binds to (its host bridge's frame input).
@@ -2145,7 +2142,6 @@ pub fn template_list() -> ApiResult<Vec<Template>> {
     for (id, json) in crate::startup::GRAPHS {
         let graph: serde_json::Value = serde_json::from_str(json).map_err(|error| ApiError::internal(format!("template {id}: {error}")))?;
         let family = template_family(id)?;
-        let variant = if id.ends_with("-staged") { "staged" } else { "default" };
         let capabilities = template_capabilities(&graph);
         // The feature tracks and the live mapper (`lk_levels` 4) read three half-size levels.
         let pyramid = if capabilities.iter().any(|c| *c == "features" || *c == "map") { 3 } else { 1 };
@@ -2154,7 +2150,6 @@ pub fn template_list() -> ApiResult<Vec<Template>> {
         out.push(Template {
             id: (*id).into(),
             family: family.into(),
-            variant: variant.into(),
             dictionary: dictionary_of(&graph),
             camera_input: "frame".into(),
             pyramid,

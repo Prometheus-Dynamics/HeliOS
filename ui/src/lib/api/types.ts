@@ -488,8 +488,6 @@ export interface PipelineTemplate {
   capabilities?: Capability[];
   title?: string;
   summary?: string;
-  /** `default` (one node, starts on a sliced frame's first rows) or `staged` (the node-group, one node per stage, for profiling). */
-  variant?: "default" | "staged";
   dictionary: string | null;
   camera_input: string;
   /** Half-size pyramid levels its camera binding asks for. */
