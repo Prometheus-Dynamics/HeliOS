@@ -100,7 +100,7 @@ fn dense_map_template_is_the_live_map_with_the_dense_mapper() {
     let graph: serde_json::Value = serde_json::from_str(&document).expect("json");
     let requires = graph["requires"].as_array().expect("requires");
     assert!(requires.iter().any(|requirement| requirement["id"] == "eidos"), "{requires:?}");
-    for node in ["eidos:dense.map", "eidos:mapping.live_map", "eidos:detectors.tracked_detect"] {
+    for node in ["eidos:dense.map", "eidos:mapping.live_map", "eidos:detectors.apriltag_tracked"] {
         assert!(document.contains(node), "{node} in the one pipeline");
     }
 }

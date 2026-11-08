@@ -268,9 +268,9 @@ impl<'a> PipelineFacts<'a> {
 }
 
 const DENSE_NODE: &str = "eidos:dense.map";
-/// The tag detector nodes whose limits the tags stage explains: the tracked group and the
-/// one-shot detectors.
-const DETECTOR_NODES: [&str; 3] = ["eidos:detectors.tracked_detect", "eidos:detectors.apriltag", "eidos:detectors.aruco"];
+/// The tag detector nodes whose limits the tags stage explains: the tracked groups, the tracked
+/// node of older stored graphs and the one-shot detectors.
+const DETECTOR_NODES: [&str; 5] = ["eidos:detectors.apriltag_tracked", "eidos:detectors.aruco_tracked", "eidos:detectors.tracked_detect", "eidos:detectors.apriltag", "eidos:detectors.aruco"];
 const FEATURES_NODE: &str = "eidos:features.track";
 
 /// The node of a graph document whose id is `id`.

@@ -28,14 +28,11 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The golden graphs helios-engine ships (`backend/src/helios/engine/graphs`), by id: the
 /// default pipeline's choices and the templates `GET /v1/pipelines/templates` offers.
-/// The first template of a family is its default: the tracked detector as one node, which
-/// starts on a sliced frame's first rows (the fastest path). The `-staged` ones are the same
-/// detectors as node-groups, each stage a node (per-stage profiling).
+/// Every detector is Eidos's tracked group as one graph node, expanded by the planner into its
+/// stage nodes (each stage profiled on its own).
 pub const GRAPHS: &[(&str, &str)] = &[
     ("apriltag-36h11", include_str!("../../engine/graphs/apriltag-36h11.graph.json")),
     ("aruco-4x4_50", include_str!("../../engine/graphs/aruco-4x4_50.graph.json")),
-    ("apriltag-36h11-staged", include_str!("../../engine/graphs/apriltag-36h11-staged.graph.json")),
-    ("aruco-4x4_50-staged", include_str!("../../engine/graphs/aruco-4x4_50-staged.graph.json")),
     // Eidos's feature tracks (`eidos:features.track`): not a detector, so no dictionary.
     ("features-track", include_str!("../../engine/graphs/features-track.graph.json")),
     // Eidos's live mapper (`eidos:mapping.live_map`) behind the tracked AprilTag detector: the

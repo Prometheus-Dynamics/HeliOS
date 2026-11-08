@@ -69,8 +69,6 @@ mod saved_map;
 const APRILTAG_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11.graph.json");
 const ARUCO_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50.graph.json");
 /// The same detectors as node-groups, each stage a node of its own (per-stage profiling).
-const APRILTAG_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/apriltag-36h11-staged.graph.json");
-const ARUCO_STAGED_GRAPH_DOCUMENT: &str = include_str!("../../graphs/aruco-4x4_50-staged.graph.json");
 /// Eidos's feature tracks (`eidos:features.track`) as one camera frame in, `tracks` out.
 const FEATURE_TRACKS_GRAPH_DOCUMENT: &str = include_str!("../../graphs/features-track.graph.json");
 /// The live map: the tracked detector and Eidos's live mapper (`eidos:mapping.live_map`).
@@ -183,15 +181,10 @@ impl FrameSource for ChannelFrameSource {
 /// field). The camera and the extrinsics are held host inputs (`camera`, `extrinsics`), which the
 /// engine feeds from the camera binding's context.
 fn helios_template(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>) -> String {
-    helios_template_with(registry, dictionary, layout, true)
-}
-
-/// `single_node`: the tracked detector as one node (`eidos:detectors.tracked_detect`), which
-/// starts on a sliced frame's first rows, instead of the node-group whose stages are profiled
-/// one by one.
-fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layout: Option<&FieldLayout>, single_node: bool) -> String {
+    // Eidos's tracked group as one graph node, which the planner expands into its stage nodes
+    // (each stage profiled on its own); not the fused `eidos:detectors.tracked_detect`.
     let mut template = TrackedDetectorTemplate {
-        single_node,
+        single_node: false,
         tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
         ..TrackedDetectorTemplate::new(dictionary, 8)
     };
@@ -201,12 +194,7 @@ fn helios_template_with(registry: &PluginRegistry, dictionary: Dictionary, layou
         layout.map(|layout| MultiTagPoseTemplate { config: MultiTagPoseConfig::default(), known_tags: KnownTagPoses::from_known_tags(&layout.known_tags()), extrinsics: StructuredInput::GraphInput });
     let has_field = template.multi_tag_pose.is_some();
     let mut document = registry.graph_document(tracked_detector_graph(registry, &template).expect("tracked detector graph"));
-    let title = format!(
-        "HeliOS {} tracked detector{} with tag pose{}",
-        dictionary.name(),
-        if single_node { "" } else { " (staged: one node per stage)" },
-        if has_field { " and multi-tag field pose" } else { "" }
-    );
+    let title = format!("HeliOS {} tracked detector with tag pose{}", dictionary.name(), if has_field { " and multi-tag field pose" } else { "" });
     document.metadata.insert("title".into(), title.into());
     stored_form(&document)
 }
@@ -474,12 +462,6 @@ fn graph_documents_are_eidos_templates() {
     for (file, json, stored) in [
         ("graphs/apriltag-36h11.graph.json", helios_template(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark())), APRILTAG_GRAPH_DOCUMENT),
         ("graphs/aruco-4x4_50.graph.json", helios_template(plugins.registry(), Dictionary::Aruco4x4_50, None), ARUCO_GRAPH_DOCUMENT),
-        (
-            "graphs/apriltag-36h11-staged.graph.json",
-            helios_template_with(plugins.registry(), Dictionary::AprilTag36h11, Some(&FieldLayout::frc_2026_andymark()), false),
-            APRILTAG_STAGED_GRAPH_DOCUMENT,
-        ),
-        ("graphs/aruco-4x4_50-staged.graph.json", helios_template_with(plugins.registry(), Dictionary::Aruco4x4_50, None, false), ARUCO_STAGED_GRAPH_DOCUMENT),
         ("graphs/features-track.graph.json", features::feature_tracks_template(plugins.registry()), FEATURE_TRACKS_GRAPH_DOCUMENT),
         ("graphs/live-map.graph.json", live_map::live_map_template(plugins.registry()), LIVE_MAP_GRAPH_DOCUMENT),
         ("graphs/dense-map.graph.json", dense_map::dense_map_document(plugins.registry(), eidos_daedalus::dense::DenseConfig::default()), DENSE_MAP_GRAPH_DOCUMENT),
@@ -795,22 +777,12 @@ fn frame_outputs_are_described_not_copied() {
     assert_eq!(processed["fourcc"], "GREY");
 }
 
-/// The default AprilTag template: Eidos's tracked detector as one node, which the planner keeps
-/// as `eidos:detectors.tracked_detect`.
-#[test]
-fn apriltag_graph_detects_markers_through_the_frame_driver() {
-    let plan = detect_markers_through_the_frame_driver(APRILTAG_GRAPH_DOCUMENT);
-    let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
-    assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.tracked_detect"), "the detector is one node: {plan}");
-    assert!(!plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan"), "no stage nodes: {plan}");
-}
-
-/// The staged AprilTag template: the stored document holds Eidos's tracked group as one node; the
+/// The AprilTag template: the stored document holds Eidos's tracked group as one node; the
 /// planner expands it into its stage nodes (`eidos:detectors.track_plan`, ...), so each stage has
 /// its own telemetry, then the pose and multi-tag pose stages.
 #[test]
-fn staged_apriltag_graph_detects_markers_through_the_frame_driver() {
-    let plan = detect_markers_through_the_frame_driver(APRILTAG_STAGED_GRAPH_DOCUMENT);
+fn apriltag_graph_detects_markers_through_the_frame_driver() {
+    let plan = detect_markers_through_the_frame_driver(APRILTAG_GRAPH_DOCUMENT);
     let plan_nodes = plan["plan"]["nodes"].as_array().expect("plan nodes");
     assert!(plan_nodes.len() > 4, "tracked group expanded into stages: {plan}");
     assert!(plan_nodes.iter().any(|node| node["id"] == "eidos:detectors.track_plan" || node["label"] == "eidos:detectors.track_plan"), "{plan}");

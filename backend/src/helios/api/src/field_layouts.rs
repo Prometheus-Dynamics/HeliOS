@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn a_layout_fills_the_live_map_layout_constant() {
-        let mut graph = serde_json::json!({ "graph": { "nodes": [{ "id": "eidos:detectors.tracked_detect" }, { "id": LIVE_MAP_NODE }] } });
+        let mut graph = serde_json::json!({ "graph": { "nodes": [{ "id": "eidos:detectors.apriltag_tracked" }, { "id": LIVE_MAP_NODE }] } });
         assert!(has_multi_tag_pose(&graph), "a live map takes the layout too");
         assert_eq!(apply_layout(&mut graph, &FieldLayout::frc_2026_andymark()).expect("apply"), 1);
         let consts = graph.pointer("/graph/nodes/1/const_inputs").and_then(|c| c.as_array()).expect("consts");

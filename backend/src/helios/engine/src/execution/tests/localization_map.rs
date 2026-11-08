@@ -20,7 +20,7 @@ use super::{
 /// wait for a known tag; without one it starts on the first clear tag, the map's reference).
 pub(super) fn map_document(registry: &PluginRegistry, localization: Option<&FieldLayout>, dense: Option<DenseConfig>) -> String {
     let mut template = TrackedDetectorTemplate {
-        single_node: true,
+        single_node: false,
         tracking: TrackingOverrides { loss_full_search_after: Some(0), margin_growth_misses: Some(6), ..TrackingOverrides::default() },
         camera: CameraInput::GraphInput,
         ..TrackedDetectorTemplate::new(Dictionary::AprilTag36h11, 8)
@@ -101,7 +101,7 @@ fn localization_map_templates_pose_tags_and_map_in_one_pipeline() {
 fn catalog_carries_parameter_labels_groups_and_expert_flags() {
     let plugins = TestPlugins::load();
     let catalog = crate::plugins::catalog::catalog(plugins.registry());
-    let detector = catalog["nodes"].as_array().expect("nodes").iter().find(|node| node["id"] == "eidos:detectors.tracked_detect").expect("tracked detector in the catalog");
+    let detector = catalog["nodes"].as_array().expect("nodes").iter().find(|node| node["id"] == "eidos:detectors.apriltag_tracked").expect("tracked detector in the catalog");
     let settings: Vec<&serde_json::Value> = detector["inputs"].as_array().expect("inputs").iter().filter(|port| port.get("default").is_some()).collect();
     assert!(settings.iter().any(|port| port["label"].is_string()), "labels: {detector}");
     assert!(settings.iter().any(|port| port["group"].is_string()), "groups: {detector}");

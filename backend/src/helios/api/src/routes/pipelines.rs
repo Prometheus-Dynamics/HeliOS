@@ -193,8 +193,8 @@ impl Default for SearchTuning {
 
 /// Eidos's detector groups: (full search group, tracked group).
 const DETECTOR_GROUPS: [(&str, &str); 2] = [("eidos:detectors.aruco", "eidos:detectors.aruco_tracked"), ("eidos:detectors.apriltag", "eidos:detectors.apriltag_tracked")];
-/// Eidos's tracked detector as one node (any family; it starts on a frame's first rows): the
-/// tracked groups' ports, in the default templates.
+/// Eidos's fused tracked detector (any family; the tracked groups' ports), which older stored
+/// graphs still name; the templates use the tracked groups.
 const TRACKED_SINGLE_NODE: &str = "eidos:detectors.tracked_detect";
 
 /// A tracked detector: a tracked group or the single node.
@@ -1477,8 +1477,16 @@ mod tests {
     }
 
     #[test]
-    fn the_single_tracked_node_takes_tuning_dictionary_and_full_search() {
+    fn the_tracked_group_takes_tuning_dictionary_and_full_search() {
         let template: serde_json::Value = serde_json::from_str(include_str!("../../../engine/graphs/apriltag-36h11.graph.json")).expect("template");
+        // The template's tracked group, and the fused node older stored graphs name.
+        let fused: serde_json::Value = serde_json::from_str(&template.to_string().replace("\"eidos:detectors.apriltag_tracked\"", &format!("\"{TRACKED_SINGLE_NODE}\""))).expect("fused");
+        for (template, tracked) in [(template, "eidos:detectors.apriltag_tracked"), (fused, TRACKED_SINGLE_NODE)] {
+            tracked_template_takes_tuning_dictionary_and_full_search(template, tracked);
+        }
+    }
+
+    fn tracked_template_takes_tuning_dictionary_and_full_search(template: serde_json::Value, tracked: &str) {
         assert_eq!(search_mode_of(&template).map(|(mode, _)| mode), Some(SearchMode::Tracked));
         assert_eq!(dictionary_of(&template).as_deref(), Some("apriltag_36h11"));
         let mut graph = template.clone();
@@ -1487,7 +1495,7 @@ mod tests {
         assert_eq!(search_tuning_of(&graph).map(|t| t.full_search_every), Some(4));
         assert_eq!(apply_dictionary(&mut graph, "apriltag_16h5"), 1);
         assert_eq!(dictionary_of(&graph).as_deref(), Some("apriltag_16h5"));
-        assert!(graph.to_string().contains(TRACKED_SINGLE_NODE));
+        assert!(graph.to_string().contains(&format!("\"{tracked}\"")), "{tracked}");
         // Full search: the family's full group, without the tracking constants.
         assert_eq!(apply_search_mode(&mut graph, SearchMode::Full, &tuning), 1);
         assert_eq!(search_mode_of(&graph).map(|(mode, _)| mode), Some(SearchMode::Full));
@@ -1832,9 +1840,7 @@ mod tests {
             let capabilities = template_capabilities(&graph);
             assert!(!capabilities.is_empty(), "{id} does something");
             assert!(!template_text(id).1.is_empty(), "{id} has a summary");
-            if !id.ends_with("-staged") {
-                assert!(seen.insert(capabilities.clone(), *id).is_none(), "{id} and {:?} do the same: {capabilities:?}", seen.get(&capabilities));
-            }
+            assert!(seen.insert(capabilities.clone(), *id).is_none(), "{id} and {:?} do the same: {capabilities:?}", seen.get(&capabilities));
         }
         let caps = |id: &str| template_capabilities(&serde_json::from_str(crate::startup::GRAPHS.iter().find(|(g, _)| *g == id).expect("graph").1).expect("json"));
         assert_eq!(caps("apriltag-36h11-map"), ["tags", "tag_pose", "field_pose", "map"]);
@@ -2105,9 +2111,7 @@ fn template_capabilities(graph: &serde_json::Value) -> Vec<&'static str> {
 fn template_text(id: &str) -> (&'static str, &'static str) {
     match id {
         "apriltag-36h11" => ("AprilTag localization", "Field tags give the robot's position on the field."),
-        "apriltag-36h11-staged" => ("AprilTag localization (staged)", "The same detector, each stage its own node for profiling."),
         "aruco-4x4_50" => ("ArUco markers", "Small printed markers, for game pieces or practice targets."),
-        "aruco-4x4_50-staged" => ("ArUco markers (staged)", "The same detector, each stage its own node for profiling."),
         "features-track" => ("Feature tracks", "Tracks image features from frame to frame, without tags."),
         "live-map" => ("3D map", "Builds a live 3D map from the tags and the scene, and the camera's pose in it."),
         "dense-map" => ("3D map with depth", "The live 3D map and a dense depth mesh of the surroundings."),
