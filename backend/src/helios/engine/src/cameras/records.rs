@@ -3,8 +3,8 @@
 //!
 //! A camera's resource id is `capture_device_<node>_<local>`, where `<local>` is its device
 //! node's file name (`video0`) or, for a camera without one (a native CSI sensor), `camera-` and a
-//! hash of its stable name. Saved pipelines bind cameras by this id, so it keeps the form
-//! helios-peripherals gave it.
+//! hash of its stable name. Saved pipelines bind cameras by this id, so it keeps the form the
+//! former helios-peripherals service (removed; the engine hosts the cameras now) gave it.
 
 use orion::{
     client::ProviderResource,
@@ -84,7 +84,7 @@ fn local_name(device: &ProbedDevice) -> String {
 }
 
 /// `DefaultHasher` (SipHash-1-3 with zero keys) of the name, low 32 bits: the hash
-/// helios-peripherals used, so ids stay what saved pipelines name.
+/// the former helios-peripherals service used, so ids stay what saved pipelines name.
 fn short_fingerprint(value: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn a_served_camera_keeps_its_peripherals_id_and_advertises_its_socket() {
+    fn a_served_camera_keeps_its_saved_id_and_advertises_its_socket() {
         let camera = v4l2("USB Camera", "/dev/video0");
         let records = camera_records("node1", std::slice::from_ref(&camera), &[endpoint(&camera, "/run/s/dev_video0.sock")], &[]);
         assert_eq!(records.len(), 1);
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn a_sensor_without_a_device_node_is_named_by_the_hash_of_its_name() {
-        // Raze #1's OV9782, as helios-peripherals named it.
+        // Raze #1's OV9782, as the former helios-peripherals service named it.
         let sensor = device("ov9782 (kernel driver i2c 10-0060)", BackendHandle::Native { key: "bridge:/dev/v4l-subdev2".into() }, styx::BackendKind::Native, &["sensor:/dev/v4l-subdev2"]);
         let id = resource_id("raze-37bc", &sensor).expect("id");
         assert_eq!(id.as_str(), "capture_device_raze-37bc_camera-2c206880");
