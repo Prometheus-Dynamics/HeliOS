@@ -101,53 +101,35 @@ The only target is `raze`; the image lands in `gaia/output/helios-full-raze/imag
 
 Run `./tools/build-os.sh` with no arguments for the Gaia TUI. It needs `gaia`, Docker and Bun on your `PATH`. Full setup is documented in `../BUILD.md`.
 
-### Generate API specs from code
+### API reference
 
-To ensure the HTTP and WebSocket specs are always in sync with the server
-implementation, the main app can emit both specifications directly without
-starting the server:
-
-```bash
-cargo run -p helios-api -- apispec --http ./spec/openapi.json --ws ./spec/asyncapi.json
-```
-
-If no paths are provided, both documents are printed to stdout.
+The HTTP, WebSocket and NetworkTables interfaces are documented by hand in
+`docs/docs/api/` (`http.md`, `websockets.md`, `networktables.md`); there is no
+generated spec. helios-api has one subcommand besides serving:
+`helios-api auth status|reset` (device security, see `docs/docs/api/http.md`).
 
 ## Running the backend
 
-When developing locally, prefer `cargo run -p helios-api --profile dev-release` for faster rebuilds and linking. Use `--release` when validating production performance. The first run will create a `.env` file populated with default configuration values if none exists. On the target device the built API binary is started by systemd and listens on multiple ports for HTTP, JSON‑RPC, WebSocket and NetworkTables.
+When developing locally, prefer `cargo run -p helios-api --profile dev-release` for faster rebuilds and linking. Use `--release` when validating production performance. Configuration comes from the environment (`/etc/default/helios-api.env` on the device, read by the systemd unit); paths come from `helios-layout`. On the device systemd starts helios-api (HTTP and WebSocket on :5800) and helios-engine; `tools/sim/up.sh` runs the same services on a PC.
 
-Hardware specific kernel modules can be loaded automatically by setting the `OPTIONAL_KERNEL_MODULES` environment variable. Provide a comma separated list of module names and the server will attempt to `modprobe` each one without failing if a module is missing.
-The Raze's sensors, fan and status light belong to lemnosd, the hardware service the Raze device package ships (board definition `/etc/lemnos/board.toml`). Its Orion bridge, `lemnos-orion`, publishes each lemnosd device as an Orion resource (`lemnos.<board>.<device>`). `helios-api` is the lemnosd client for the fan override, raw GPIO/PWM/I2C/SPI access, recordings' sensor samples and the LEDs (`/run/lemnos/lemnosd.sock`; `HELIOS_LEMNOSD_SOCKET` and `HELIOS_LEMNOSD_BOARD` to override). HeliOS ships and reads no sensors file.
+### First-boot default pipeline
 
-### First-Boot Stream/Pipeline Startup Preset
-
-`helios-api` can seed default pipelines + persisted stream manifests exactly once on a brand-new device.
-
-- Default preset path: `/etc/helios/startup.toml`
-- Legacy fallback path: `/etc/helios/startup.json`
-- Override path: `HELIOS_STARTUP_PRESET_FILE`
-- Marker path (written after apply/skip): `${HELIOS_API_DATA_DIR}/.startup-preset-applied-v1.json`
-- Override marker path: `HELIOS_STARTUP_PRESET_MARKER`
-
-The preset is consumed only when no persisted streams and no stored pipeline graphs exist. The intent is first-boot provisioning without overwriting user state later.
+`/etc/helios/startup.toml` (override: `HELIOS_API_STARTUP_FILE`) holds
+`[default_pipeline]`: the pipeline helios-api creates, with id `default`, on
+the first camera when the board has no pipelines. It names an embedded golden
+graph (`backend/src/helios/engine/graphs/`). A user who deletes the last
+pipeline keeps it deleted (`/var/lib/helios/api/default-pipeline-declined.json`).
+The shipped file documents every field; see also "First-boot default pipeline"
+in `docs/docs/api/http.md`.
 
 ```toml
-[[pipelines]]
-id = "11111111-2222-3333-4444-555555555555"
-name = "Default Vision"
-templateId = "daedalus_aruco_fast"
-
-[[streams]]
-cameraId = "ov9782"
-streamId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-manifest = { ... } # Use the same StreamManifest shape as POST /v1/streams.
+[default_pipeline]
+enabled = true
+name = "AprilTag"
+graph = "apriltag-36h11"
+dictionary = "apriltag_36h11"   # optional
+pyramid = 1                     # optional: Styx half-size levels per frame
 ```
-
-Notes:
-- `pipelines[].graph` (inline Daedalus graph) can be used instead of `templateId`.
-- Stream manifests must reference persisted pipeline IDs (no inline pipeline graphs).
-- A practical workflow is: configure a stream on a known-good device, fetch its manifest, then reuse that manifest in `startup.toml`.
 
 ## Library crates
 
