@@ -2,18 +2,18 @@
 //!
 //! A bound resource whose endpoints include `styx-frames+unix://<socket>` is a camera served by
 //! a Styx `CameraService`: the workload becomes frame-driven. Any other bound resource is fed to
-//! the graph as JSON describing its current state.
+//! the graph as a typed `BoundResource` (`helios:bound_resource`) with its current state.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use orion::{
-    ResourceId,
-    control_plane::{ResourceRecord, config_json_value},
-};
+use orion::{ResourceId, control_plane::ResourceRecord};
 use styx::prelude::{FrameRequest, Frames};
 
 use super::ExecutionError;
-use crate::model::{ExecutionWorkload, FrameRequestOptions};
+use crate::{
+    model::{ExecutionWorkload, FrameRequestOptions},
+    plugins::resource::BoundResource,
+};
 
 /// Endpoint scheme of a Styx camera service socket (`styx-frames+unix:///run/.../camera.sock`).
 pub const STYX_FRAMES_ENDPOINT_SCHEME: &str = "styx-frames+unix";
@@ -60,13 +60,13 @@ pub(crate) fn graph_takes_sliced_frames(graph_json: &str) -> bool {
     SLICED_FRAME_NODES.iter().any(|id| graph_json.contains(&format!("\"{id}\"")))
 }
 
-/// A graph input fed with a resource's state as JSON.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A graph input fed with a resource's state (`helios:bound_resource`).
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResourceInput {
     pub input: String,
     /// Changes whenever the resource record changes.
     pub revision: String,
-    pub payload: String,
+    pub payload: BoundResource,
 }
 
 #[derive(Debug, Default)]
@@ -87,7 +87,7 @@ pub(crate) fn resolve_bindings(workload: &ExecutionWorkload, resources: &BTreeMa
             resolved.frames.push(FrameSourceSpec { input: binding.input.clone(), resource_id: binding.resource_id.clone(), socket_path, request: binding.frame_request.clone(), sliced: false });
             continue;
         }
-        let payload = serde_json::to_string(&resource_binding_payload(resource)).map_err(|error| ExecutionError::Execute(error.to_string()))?;
+        let payload = BoundResource::from(resource);
         let revision = serde_json::to_string(resource).unwrap_or_else(|_| format!("{resource:?}"));
         resolved.resources.push(ResourceInput { input: binding.input.clone(), revision, payload });
     }
@@ -97,44 +97,6 @@ pub(crate) fn resolve_bindings(workload: &ExecutionWorkload, resources: &BTreeMa
 /// The camera service socket named by a `styx-frames+unix://` endpoint, if any.
 pub(crate) fn frame_socket_path(endpoints: &[String]) -> Option<PathBuf> {
     endpoints.iter().find_map(|endpoint| endpoint.strip_prefix(STYX_FRAMES_ENDPOINT_SCHEME).and_then(|rest| rest.strip_prefix("://"))).filter(|path| !path.is_empty()).map(PathBuf::from)
-}
-
-fn resource_binding_payload(resource: &ResourceRecord) -> serde_json::Value {
-    let action_result = resource.state.as_ref().and_then(|state| state.action_result.as_ref()).map(|result| {
-        serde_json::json!({
-            "action_kind": result.action_kind,
-            "status": format!("{:?}", result.status),
-            "data": result
-                .data
-                .as_ref()
-                .and_then(|value| config_json_value(&BTreeMap::from([("value".to_string(), value.clone())])).ok())
-                .and_then(|value| value.get("value").cloned())
-                .unwrap_or(serde_json::Value::Null),
-            "error": result.error,
-        })
-    });
-
-    serde_json::json!({
-        "resource_id": resource.resource_id.as_str(),
-        "resource_type": resource.resource_type.as_str(),
-        "provider_id": resource.provider_id.as_str(),
-        "labels": resource.labels,
-        "endpoints": resource.endpoints,
-        "lease_state": format!("{:?}", resource.lease_state),
-        "state": {
-            "observed_at_ms": resource.state.as_ref().map(|state| state.observed_at_ms),
-            "action_result": action_result,
-            "config": resource.state.as_ref().and_then(|state| state.config.as_ref()).map(resource_config_to_json),
-        },
-    })
-}
-
-fn resource_config_to_json(config: &orion::control_plane::ResourceConfigState) -> serde_json::Value {
-    config_json_value(&config.payload).unwrap_or_else(|error| {
-        serde_json::json!({
-            "decode_error": error.to_string(),
-        })
-    })
 }
 
 #[cfg(test)]

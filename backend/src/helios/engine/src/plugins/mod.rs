@@ -2,6 +2,7 @@ pub mod builtin;
 pub mod catalog;
 pub mod discovery;
 pub mod loader;
+pub mod resource;
 
 pub use builtin::install_builtin_plugins;
 pub use discovery::discover_plugin_libraries;

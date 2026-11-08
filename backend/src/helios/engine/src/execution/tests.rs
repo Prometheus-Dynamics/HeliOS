@@ -41,7 +41,7 @@ use super::{
 };
 use crate::{
     model::{ContextValue, ExecutionBinding, FrameRequestOptions, GraphRef, PluginRequirement},
-    plugins::{PluginLoadResult, load_plugins},
+    plugins::{PluginLoadResult, load_plugins, resource::BoundResource},
     provider::publish::graph_digest,
 };
 
@@ -87,9 +87,10 @@ fn source() -> Result<i64, NodeError> {
     Ok(7)
 }
 
+/// The bound resource it is given, as JSON text for the assertions.
 #[node(id = "test.echo", inputs("inp"), outputs("out"))]
-fn echo(inp: String) -> Result<String, NodeError> {
-    Ok(inp)
+fn echo(inp: &BoundResource) -> Result<String, NodeError> {
+    serde_json::to_string(inp).map_err(|error| NodeError::Handler(error.to_string()))
 }
 
 #[node(id = "test.frame_passthrough", inputs("frame"), outputs("frame"))]
@@ -102,12 +103,23 @@ fn frame_context(frame: FrameLease, context: String) -> Result<String, NodeError
     Ok(serde_json::json!({ "timestamp": frame.meta().timestamp, "context": context }).to_string())
 }
 
+/// A frame with a bound resource as its context (its id stands for its state).
+#[node(id = "test.frame_resource", inputs("frame", "context"), outputs("out"))]
+fn frame_resource(frame: FrameLease, context: &BoundResource) -> Result<String, NodeError> {
+    Ok(serde_json::json!({ "timestamp": frame.meta().timestamp, "context": context.resource_id }).to_string())
+}
+
+/// A bound resource named `id`, standing for one whose state is `id`.
+fn bound(id: &str) -> BoundResource {
+    BoundResource { resource_id: id.into(), ..BoundResource::default() }
+}
+
 #[node(id = "test.frame_pair", inputs("primary", "secondary"), outputs("out"))]
 fn frame_pair(primary: &FrameLease, secondary: Option<&FrameLease>) -> Result<String, NodeError> {
     Ok(serde_json::json!({ "primary": primary.meta().timestamp, "secondary": secondary.map(|frame| frame.meta().timestamp) }).to_string())
 }
 
-declare_plugin!(EngineTestPlugin, "engine.test", [source, echo, frame_passthrough, frame_context, frame_pair]);
+declare_plugin!(EngineTestPlugin, "engine.test", [source, echo, frame_passthrough, frame_context, frame_resource, frame_pair]);
 
 /// Frames handed over in-process, standing in for a camera service socket: a descriptor that is
 /// readable while frames wait, like a Styx `FrameClient`'s.
@@ -660,7 +672,7 @@ fn workload_fails_when_required_plugin_is_missing() {
 #[test]
 fn frame_driver_pushes_context_with_each_frame() {
     let plugins = TestPlugins::load();
-    let fusion = EngineTestPlugin::new().frame_context.clone().alias("fusion");
+    let fusion = EngineTestPlugin::new().frame_resource.clone().alias("fusion");
     let graph = plugins
         .registry()
         .graph_builder()
@@ -675,7 +687,7 @@ fn frame_driver_pushes_context_with_each_frame() {
     let (mut driver, frames) = spawn_channel_driver(&plugins, workload("workload.fusion", document, Vec::new()), "camera", GraphSettings::default());
     let result = |driver: &mut WorkloadDriver| driver.snapshot().1.into_iter().find(|artifact| artifact.kind == "host_output:result").and_then(|artifact| artifact.message).expect("result");
 
-    driver.update_context(vec![ResourceInput { input: "imu".into(), revision: "1".into(), payload: "imu-a".into() }]);
+    driver.update_context(vec![ResourceInput { input: "imu".into(), revision: "1".into(), payload: bound("imu-a") }]);
     frames.send(flat_frame(8, 8, 900)).expect("send frame");
     wait_for("first frame", || driver.stats().ticks_processed == 1);
     assert_eq!(driver.snapshot().0.status, ExecutionSessionStatus::Running);
@@ -683,7 +695,7 @@ fn frame_driver_pushes_context_with_each_frame() {
     assert!(first.contains("imu-a") && first.contains("\"timestamp\":900"), "{first}");
 
     // The context alone does not run a frame-driven graph; the next frame sees the new one.
-    driver.update_context(vec![ResourceInput { input: "imu".into(), revision: "2".into(), payload: "imu-b".into() }]);
+    driver.update_context(vec![ResourceInput { input: "imu".into(), revision: "2".into(), payload: bound("imu-b") }]);
     std::thread::sleep(Duration::from_millis(50));
     assert_eq!(driver.stats().ticks_processed, 1);
     frames.send(flat_frame(8, 8, 901)).expect("send frame");
@@ -1021,7 +1033,7 @@ fn stop_ends_the_poll_loop_promptly() {
     let resources = workload("workload.stop-resources", document, vec![binding("sensor", "gpio_line.node-local.0")]);
     let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &resources, &[], GraphSettings::default()).expect("compile graph");
     let mut driver = WorkloadDriver::start(resources, compiled, Vec::new(), Arc::new(Notify::new()), crate::nt4::Nt4Sink::default(), PipelineBus::default()).expect("start driver");
-    driver.update_context(vec![ResourceInput { input: "sensor".into(), revision: "1".into(), payload: "on".into() }]);
+    driver.update_context(vec![ResourceInput { input: "sensor".into(), revision: "1".into(), payload: bound("on") }]);
     wait_for("the resource tick", || driver.stats().ticks_processed == 1);
     std::thread::sleep(Duration::from_millis(50));
     let stopping = Instant::now();

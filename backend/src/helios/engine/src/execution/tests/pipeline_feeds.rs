@@ -8,20 +8,24 @@ use crate::{execution::pipeline_inputs::FeedState, model::PipelineInputSource};
 
 const MS: u64 = 1_000_000;
 
-/// A graph that feeds the frame and its `context` input to `frame_context`, whose output is the
-/// host's `result`: the producer's context is its `imu`, the consumer's its `upstream`.
+/// A graph that feeds the frame and its `context` input to one node, whose output is the host's
+/// `result`: the producer's context is its bound `imu` resource (`frame_resource`), the
+/// consumer's the producer's `result` text as its `upstream` (`frame_context`).
 fn fusion_document(plugins: &TestPlugins, context_input: &str) -> String {
-    let fusion = EngineTestPlugin::new().frame_context.clone().alias("fusion");
-    let graph = plugins
-        .registry()
-        .graph_builder()
-        .expect("graph builder")
-        .host_bridge("host")
-        .node(&fusion)
-        .connect(&host_port("host", "camera"), &fusion.inputs.frame)
-        .connect(&host_port("host", context_input), &fusion.inputs.context)
-        .connect(&fusion.outputs.out, &host_port("host", "result"))
-        .build();
+    let nodes = EngineTestPlugin::new();
+    let builder = plugins.registry().graph_builder().expect("graph builder").host_bridge("host");
+    macro_rules! fused {
+        ($node:expr) => {{
+            let fusion = $node.clone().alias("fusion");
+            builder
+                .node(&fusion)
+                .connect(&host_port("host", "camera"), &fusion.inputs.frame)
+                .connect(&host_port("host", context_input), &fusion.inputs.context)
+                .connect(&fusion.outputs.out, &host_port("host", "result"))
+                .build()
+        }};
+    }
+    let graph = if context_input == "imu" { fused!(nodes.frame_resource) } else { fused!(nodes.frame_context) };
     plugins.registry().graph_document(graph).to_json().expect("document json")
 }
 
@@ -49,7 +53,7 @@ fn start(plugins: &TestPlugins, bus: &PipelineBus, workload: ExecutionWorkload) 
 /// The producer with its `imu` context set.
 fn start_producer(plugins: &TestPlugins, bus: &PipelineBus, imu: &str) -> (WorkloadDriver, TestCamera) {
     let (mut producer, frames) = start(plugins, bus, producer_workload(plugins));
-    producer.update_context(vec![ResourceInput { input: "imu".into(), revision: imu.into(), payload: imu.into() }]);
+    producer.update_context(vec![ResourceInput { input: "imu".into(), revision: imu.into(), payload: bound(imu) }]);
     (producer, frames)
 }
 

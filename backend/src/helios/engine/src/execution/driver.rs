@@ -264,18 +264,26 @@ impl WorkloadDriver {
         if !changed {
             return;
         }
+        let previous = std::mem::take(&mut self.revisions);
         if self.sources.is_empty() {
-            let batch = inputs.iter().fold(self.host.batch(), |batch, input| batch.push(input.input.clone(), input.payload.clone()));
+            let mut batch = self.host.batch();
+            for input in inputs {
+                self.revisions.insert(input.input.clone(), input.revision);
+                batch = batch.push(input.input, input.payload);
+            }
             lock(&self.shared.state).last_input_at = Some(Instant::now());
             if let Err(rejected) = batch.commit() {
                 self.record_error(format!("resource inputs rejected: {rejected}"));
             }
         } else {
-            for input in inputs.iter().filter(|input| self.revisions.get(&input.input) != Some(&input.revision)) {
-                self.host.push(input.input.clone(), input.payload.clone());
+            for input in inputs {
+                let unchanged = previous.get(&input.input) == Some(&input.revision);
+                self.revisions.insert(input.input.clone(), input.revision);
+                if !unchanged {
+                    self.host.push(input.input, input.payload);
+                }
             }
         }
-        self.revisions = inputs.into_iter().map(|input| (input.input, input.revision)).collect();
     }
 
     /// Push the camera context of `workload`'s frame bindings (calibration, mount) into the

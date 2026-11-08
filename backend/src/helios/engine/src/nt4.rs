@@ -374,16 +374,12 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let host = server.handle();
-        let offer = |multi_tag_pose: serde_json::Value| {
-            let payload = Payload::owned("eidos:aruco.multi_tag_pose", multi_tag_pose.to_string());
-            sink.offer(Nt4Tick {
-                pipeline: "front".into(),
-                outputs: vec![("multi_tag_pose".into(), payload)],
-                serializers: ValueSerializerMap::default(),
-                latency_ms: 4.5,
-                fps: 30.0,
-                map_pose_prefix: false,
-            });
+        // Eidos's own `MultiTagPose` with its value serializer, as a graph output reaches the sink.
+        let serializers = daedalus::runtime::host_bridge::new_value_serializer_map();
+        daedalus::runtime::host_bridge::register_value_serializer_in::<eidos_daedalus::types::MultiTagPose, _>(&serializers, daedalus::data::to_value::ToValue::to_value);
+        let offer = |pose: eidos_calibration::MultiTagPose| {
+            let payload = Payload::owned(eidos_daedalus::types::MULTI_TAG_POSE_TYPE_KEY, eidos_daedalus::types::MultiTagPose { pose, covariance: None });
+            sink.offer(Nt4Tick { pipeline: "front".into(), outputs: vec![("multi_tag_pose".into(), payload)], serializers: serializers.clone(), latency_ms: 4.5, fps: 30.0, map_pose_prefix: false });
         };
         let wait_for = |topic: &'static str, expected: Value| {
             let host = host.clone();
@@ -395,11 +391,25 @@ mod tests {
             }
         };
 
-        let with_rig = serde_json::json!({
-            "status": "calibrated", "valid": true, "inlier_tags": 3, "has_rig": true,
-            "reference_from_camera": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 9.0, "y": 9.0, "z": 9.0}},
-            "reference_from_rig": {"rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}, "translation": {"x": 3.0, "y": 4.0, "z": 0.0}},
-        });
+        let at = |x: f64, y: f64, z: f64| eidos_calibration::Se3Transform {
+            rotation: eidos_calibration::RotationMatrix3 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] },
+            translation: eidos_calibration::Translation3 { x, y, z },
+        };
+        let solve = |status, valid, inlier_tags, rig: Option<eidos_calibration::Se3Transform>| eidos_calibration::MultiTagPose {
+            status,
+            valid,
+            camera_from_reference: at(0.0, 0.0, 0.0),
+            reference_from_camera: at(9.0, 9.0, 9.0),
+            reference_from_rig: rig,
+            rms_px: 0.5,
+            inlier_tags,
+            ambiguity: 0.0,
+            unknown_tags: 0,
+            unsolved_tags: 0,
+            tags: Vec::new(),
+        };
+        use eidos_calibration::CalibrationStatus::{Calibrated, Uncalibrated};
+        let with_rig = solve(Calibrated, true, 3, Some(at(3.0, 4.0, 0.0)));
         offer(with_rig);
         wait_for("/helios/b/front/tag_count", Value::Int(3)).await;
         assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(true)));
@@ -411,10 +421,10 @@ mod tests {
 
         // Invalid, then valid without a rig: no robot pose. Waiting on `tag_count` (sent after
         // `robot_pose_valid` in a tick) means that tick's validity has landed too.
-        offer(serde_json::json!({"status": "uncalibrated", "valid": false, "inlier_tags": 0, "has_rig": true}));
+        offer(solve(Uncalibrated, false, 0, Some(at(3.0, 4.0, 0.0))));
         wait_for("/helios/b/front/tag_count", Value::Int(0)).await;
         assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(false)));
-        offer(serde_json::json!({"status": "calibrated", "valid": true, "inlier_tags": 2, "has_rig": false}));
+        offer(solve(Calibrated, true, 2, None));
         wait_for("/helios/b/front/tag_count", Value::Int(2)).await;
         assert_eq!(host.value("/helios/b/front/robot_pose_valid"), Some(Value::Boolean(false)));
         let _ = std::fs::remove_dir_all(dir);

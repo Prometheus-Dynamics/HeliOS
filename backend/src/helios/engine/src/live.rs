@@ -269,7 +269,25 @@ async fn serve(mut stream: impl AsyncWriteExt + Unpin, mut rx: broadcast::Receiv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daedalus::{
+        DaedalusToValue,
+        data::to_value::ToValue,
+        runtime::host_bridge::{new_value_serializer_map, register_value_serializer_in},
+    };
     use tokio::net::UnixStream;
+
+    /// A typed output value, serialized by its registered `ToValue` like a graph's outputs.
+    #[derive(Clone, Debug, daedalus::DaedalusTypeExpr, DaedalusToValue)]
+    #[daedalus(type_key = "test:count")]
+    struct Count {
+        n: u64,
+    }
+
+    fn count_serializers() -> ValueSerializerMap {
+        let serializers = new_value_serializer_map();
+        register_value_serializer_in::<Count, _>(&serializers, Count::to_value);
+        serializers
+    }
 
     #[test]
     fn lines_carry_json_values_inline_and_text_as_strings() {
@@ -295,12 +313,7 @@ mod tests {
         }
         assert!(sink.active());
         for n in 0..5 {
-            sink.offer(LiveTick {
-                pipeline: "front".into(),
-                outputs: vec![("count".into(), Payload::owned("test:count", format!("{{\"n\":{n}}}")))],
-                serializers: ValueSerializerMap::default(),
-                frame_ts_ns: Some(n),
-            });
+            sink.offer(LiveTick { pipeline: "front".into(), outputs: vec![("count".into(), Payload::owned("test:count", Count { n }))], serializers: count_serializers(), frame_ts_ns: Some(n) });
         }
         let first = tokio::time::timeout(Duration::from_secs(2), reader.next_line()).await.expect("in time").expect("read").expect("a line");
         let json: serde_json::Value = serde_json::from_str(&first).expect("json");
@@ -326,8 +339,8 @@ mod tests {
         assert_eq!(*inner.wanted.read().unwrap(), Ports::Only(BTreeSet::from(["pose".to_string()])));
         let tick = |n: u64| LiveTick {
             pipeline: "front".into(),
-            outputs: vec![("detections".into(), Payload::owned("test:json", "{}".to_string())), ("pose".into(), Payload::owned("test:json", format!("{{\"n\":{n}}}")))],
-            serializers: ValueSerializerMap::default(),
+            outputs: vec![("detections".into(), Payload::owned("test:count", Count { n: 0 })), ("pose".into(), Payload::owned("test:count", Count { n }))],
+            serializers: count_serializers(),
             frame_ts_ns: Some(n),
         };
         sink.offer(tick(1));
