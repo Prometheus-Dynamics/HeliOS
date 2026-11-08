@@ -180,8 +180,9 @@ now and marked untested on board; only its test waits for the board.
       build including Eidos's armv7 NEON). Why: the module tiers. Done when: each module boots a
       HeliOS image and runs a camera pipeline, with per-camera CPU and RAM figures reported to the
       PCB session from the CI dev board. Blocked by: the Gaia BSPs and Styx's rkisp/RGA/MPP for the
-      code; boards only for the test (off-the-shelf dev boards can stand in: ROCK 5C, ROCK 4D,
-      ZERO 3W, Firefly AIO-3562JQ, Luckfox Pico).
+      code; boards only for the test (the dev boards: ROCK 5C (RK3588S),
+      ZERO 3E (RK3566), Luckfox Aura (RV1126B); Cubie A7A/A7S/A7Z and the K230D AI-CAM 72°/140°
+      are their own targets).
 - [x] **CM5 tag speed model.** Eidos's sweep on the Raze (2026-10-30): a frame costs a fixed
       number of cycles (NEON full search 1.83 Mcycles p50, tracked 1.02), so ms ≈ C / (GHz × k).
       Tags alone fit 120 fps on every target (A7 tightest at 60–70%). In Eidos
