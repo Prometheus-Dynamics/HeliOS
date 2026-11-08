@@ -155,9 +155,9 @@ Notes:
 - Capture/codec/graph orchestration relies on external crates: Styx for
   capture/codec and Daedalus for graphs.
 
-The former `lib-cv`, `lib-net`, and concrete CV/AI/NT4 plugin crates have been
-removed. `src/libs/lib-ai` is retained as excluded, source-only reference
-material pending a replacement and is not built, packaged, or used.
+The former `lib-cv`, `lib-net`, `lib-ai` and concrete CV/AI/NT4 plugin crates
+have been removed. AI acceleration comes back through Lemnos's accelerator
+drivers, not a HeliOS library.
 
 ## Application structure
 

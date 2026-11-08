@@ -91,7 +91,7 @@ Capture-last clips require the per-stream shadow recorder.
 
 Include:
 
-- Device model and what hardware is attached (camera(s), IMU, Coral, etc.).
+- Device model and what hardware is attached (camera(s), IMU, etc.).
 - What you expected vs what happened.
 - A short timestamp window.
 - Logs:

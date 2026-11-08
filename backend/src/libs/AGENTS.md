@@ -9,6 +9,5 @@ The active library is:
 Capture/codec/graph orchestration lives in Styx (capture/codec) and Daedalus
 (graph). The old local CV and networking libraries have been removed.
 
-`lib-ai` remains in this directory as explicitly excluded, source-only
-reference material while its replacement architecture is designed. It is not
-part of the Cargo workspace, product runtime, or image.
+`lib-ai` (Coral ioctl, rusb, tract) was removed; AI acceleration comes back
+through Lemnos's accelerator drivers and the accelerator design, not here.

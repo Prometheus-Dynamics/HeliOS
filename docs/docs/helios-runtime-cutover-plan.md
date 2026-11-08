@@ -420,9 +420,8 @@ Daedalus plugin boundary and frame-native Styx types.
 
 ## `lib-ai`
 
-Retained only as excluded source reference material pending a replacement. It
-is not built, tested, packaged, installed, or used by the runtime. The old AI
-plugin has been removed.
+Removed, with its Coral pipeline template and the Coral/TensorFlow Lite
+Buildroot packages. AI comes back through Lemnos's accelerator drivers.
 
 ## `lib-math`
 

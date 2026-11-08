@@ -14,7 +14,7 @@ In the UI:
 
 Peripherals may include:
 
-- USB inventory (and accelerators like Coral).
+- USB inventory.
 - I2C inventory (when exposed by the platform).
 - Fan and lighting (when present).
 - Power and IMU sensors (when present).

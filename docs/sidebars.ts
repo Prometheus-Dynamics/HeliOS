@@ -169,7 +169,6 @@ const sidebars: SidebarsConfig = {
               label: 'Peripherals',
               items: [
                 'os/devices/peripherals/overview',
-                'os/devices/peripherals/coral',
                 'os/devices/peripherals/fan',
                 'os/devices/peripherals/lighting',
                 'os/devices/peripherals/imu',

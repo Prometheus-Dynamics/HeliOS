@@ -21,6 +21,4 @@ config_overrides = [
   ["BR2_PACKAGE_LIBYUV", "n"],
   ["BR2_PACKAGE_X264", "n"],
   ["BR2_PACKAGE_X265", "n"],
-  ["BR2_PACKAGE_CORALTPU", "n"],
-  ["BR2_PACKAGE_TENSORFLOW_LITE", "n"],
 ]

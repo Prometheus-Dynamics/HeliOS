@@ -4,11 +4,6 @@ unsafe_code = "warn"
 
 [workspace]
 resolver = "3"
-exclude = [
-    # Retained source-only reference code. This is not part of the active
-    # workspace, product build, or shipped image.
-    "src/libs/lib-ai",
-]
 members = [
     "src/libs/lib-schema-migration",
     "src/helios/api",
@@ -115,12 +110,6 @@ utoipa = { version = "6.0.0", features = ["actix_extras", "macros", "uuid", "chr
 
 # Build and dynamic libraries
 libloading = "0.9.0"
-
-# ML and inference
-rusb = "0.9.4"
-tract-core = "0.23.8"
-tract-onnx = "0.23.8"
-tract-tflite = "0.23.8"
 
 # Testing and archives
 criterion = { version = "0.8.2", features = ["html_reports"] }
